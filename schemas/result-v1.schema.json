@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "g8s Worker Result Schema v1",
+  "type": "object",
+  "required": [
+    "task_id",
+    "provider",
+    "role",
+    "exit_code",
+    "status",
+    "duration_ms"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["SUCCEEDED", "FAILED", "NEEDS_INFO", "BLOCKED", "CANCELLED"]
+    },
+    "duration_ms": {
+      "type": "integer"
+    },
+    "stdout": {
+      "type": "string"
+    },
+    "stderr": {
+      "type": "string"
+    },
+    "inspected_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mutated_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "missing_inputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contract_violations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

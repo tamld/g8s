@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "g8s Task Schema v1",
+  "type": "object",
+  "required": [
+    "task_id",
+    "prompt",
+    "provider",
+    "role",
+    "permission",
+    "state",
+    "created_at"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "parent_task_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "idempotency_key": {
+      "type": ["string", "null"]
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "prompt_hash": {
+      "type": ["string", "null"]
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["agy", "claude", "gemini", "ollama"]
+    },
+    "role": {
+      "type": "string",
+      "enum": ["collector", "scout", "mcp-mapper", "summarizer", "verifier", "test-runner"]
+    },
+    "permission": {
+      "type": "string",
+      "enum": ["read_only", "automation_read", "workspace_write"]
+    },
+    "receipt_id": {
+      "type": ["string", "null"]
+    },
+    "state": {
+      "type": "string",
+      "enum": ["QUEUED", "LEASED", "RUNNING", "NEEDS_INFO", "BLOCKED", "SUCCEEDED", "FAILED", "CANCELLED"]
+    },
+    "priority": {
+      "type": "integer",
+      "default": 0
+    },
+    "attempts": {
+      "type": "integer",
+      "default": 0
+    },
+    "max_attempts": {
+      "type": "integer",
+      "default": 3
+    },
+    "lease_owner": {
+      "type": ["string", "null"]
+    },
+    "lease_expires_at": {
+      "type": ["integer", "null"]
+    },
+    "exit_code": {
+      "type": ["integer", "null"]
+    },
+    "created_at": {
+      "type": "integer"
+    },
+    "updated_at": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false
+}

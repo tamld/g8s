@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "g8s",
+  "display_name": "g8s (The Gatekeepers)",
+  "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
+  "version": "0.1.0-alpha",
+  "license": "MIT",
+  "repository": "https://github.com/tamld/g8s",
+  "governance": {
+    "constitution": "spec/constitution.md",
+    "master_matrix": "docs/MASTER_MATRIX.md",
+    "rules": "docs/RULES.md",
+    "philosophy": "docs/DESIGN_PHILOSOPHY.md",
+    "lifecycle": "docs/LIFECYCLE_AND_EVIDENCE.md",
+    "experience": "docs/CLI_AND_EXPERIENCE_DESIGN.md",
+    "versioning": "docs/VERSIONING.md",
+    "release_sop": "docs/RELEASE_SOP.md",
+    "contributing": "CONTRIBUTING.md",
+    "agent_protocol": "AGENTS.md"
+  },
+  "runtime": {
+    "language": "Go 1.22+",
+    "cgo_enabled": 0,
+    "module": "github.com/tamld/g8s",
+    "entrypoint": "cmd/g8s/main.go",
+    "sqlite_driver": "modernc.org/sqlite",
+    "protocols": ["MCP JSON-RPC 2.0 (Stdio)", "LSP Client (Stdio)"]
+  },
+  "roles": [
+    {
+      "name": "collector",
+      "default_permission": "read_only",
+      "sow": "Multi-directory file collection and AST tree extraction"
+    },
+    {
+      "name": "scout",
+      "default_permission": "read_only",
+      "sow": "Codebase scanning, pattern discovery, and MCP candidate mapping"
+    },
+    {
+      "name": "mcp-mapper",
+      "default_permission": "read_only",
+      "sow": "Tool schema mapping and MCP server discovery"
+    },
+    {
+      "name": "summarizer",
+      "default_permission": "read_only",
+      "sow": "Log digestion and context compression"
+    },
+    {
+      "name": "verifier",
+      "default_permission": "read_only",
+      "sow": "Output validation against schemas and physical evidence checks"
+    },
+    {
+      "name": "test-runner",
+      "default_permission": "workspace_write",
+      "sow": "Unit test synthesis and targeted test suite execution"
+    }
+  ],
+  "permissions": [
+    {
+      "name": "read_only",
+      "allows_mutation": false,
+      "requires_receipt": false
+    },
+    {
+      "name": "automation_read",
+      "allows_mutation": false,
+      "requires_receipt": false,
+      "auto_skip_prompts": true
+    },
+    {
+      "name": "workspace_write",
+      "allows_mutation": true,
+      "requires_receipt": true
+    }
+  ],
+  "schemas": {
+    "task": "schemas/task-v1.schema.json",
+    "receipt": "schemas/receipt-v1.schema.json",
+    "result": "schemas/result-v1.schema.json"
+  },
+  "specifications": [
+    {
+      "id": "DELTA-01",
+      "title": "Core Role & Permission Harness",
+      "path": "spec/openspec/01-core-harness-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-02",
+      "title": "Write Receipt Delegation Engine",
+      "path": "spec/openspec/02-receipt-delegation-spec.md",
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DELTA-05",
+      "title": "Provider Registry & Resource Pool Governor",
+      "path": "spec/openspec/05-provider-and-resource-pool-spec.md",
+      "status": "PROPOSED"
+    },
+    {
+      "id": "DELTA-07",
+      "title": "LSP & Dependency Blast Radius Analyzer",
+      "path": "spec/openspec/07-blast-radius-analyzer-spec.md",
+      "status": "PROPOSED"
+    }
+  ],
+  "milestones": {
+    "M1": "Pure-Go Core & Receipt Engine (Foundation)",
+    "M2": "Control Plane, Multi-Worker Governor & Pluggable Providers",
+    "M3": "LSP Blast Radius, OS Service Daemon & Public Open-Source Release"
+  }
+}

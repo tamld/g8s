@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "g8s Write Receipt Schema v1",
+  "type": "object",
+  "required": [
+    "receipt_id",
+    "issuer",
+    "allowed_paths",
+    "created_at",
+    "expires_at",
+    "consumed"
+  ],
+  "properties": {
+    "receipt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "issuer": {
+      "type": "string"
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "created_at": {
+      "type": "integer"
+    },
+    "expires_at": {
+      "type": "integer"
+    },
+    "consumed": {
+      "type": "boolean",
+      "default": false
+    },
+    "consumed_at": {
+      "type": ["integer", "null"]
+    },
+    "consumer_task_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+}
