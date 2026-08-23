@@ -1,0 +1,51 @@
+# GoReleaser Configuration for g8s
+version: 2
+
+project_name: g8s
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: g8s
+    main: ./cmd/g8s
+    binary: g8s
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+      - spec/constitution.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
