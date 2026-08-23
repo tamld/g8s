@@ -1,14 +1,25 @@
-# OpenSpec Technical Delta Specifications
+# OpenSpec Registry for g8s
 
-This directory follows the **OpenSpec (Spec-Driven Development)** framework. Each technical module, API change, or capability advancement is specified as an incremental **Spec Delta** (`Explore -> Propose -> Apply -> Archive`).
+This directory contains the **Technical Delta Specifications (OpenSpec)** governing all incremental modifications, schema additions, and engine enhancements for `g8s`.
 
-## Spec Delta Registry
+---
 
-| Spec ID | Name | Target Milestone | Status |
-| :--- | :--- | :---: | :---: |
-| **DELTA-01** | [Core Harness & Role Gates](01-core-harness-spec.md) | M1 (Foundation) | `APPLIED` |
-| **DELTA-02** | [Receipt-Based Write Delegation](02-receipt-delegation-spec.md) | M1 (Foundation) | `PROPOSED` |
-| **DELTA-03** | [SQLite WAL Control Plane & Leases](03-controlplane-sqlite-spec.md) | M1 (Foundation) | `PROPOSED` |
-| **DELTA-04** | [Stdio MCP Server Interface](04-mcp-stdio-server-spec.md) | M2 (Capability) | `PROPOSED` |
-| **DELTA-05** | [Pluggable Worker Providers](05-pluggable-providers-spec.md) | M2 (Capability) | `PROPOSED` |
-| **DELTA-06** | [Cross-Platform OS Daemon Service](06-os-daemon-service-spec.md) | M3 (Daemon) | `PROPOSED` |
+## 📋 OpenSpec Index
+
+| Spec ID | Title | Target Package | Milestone | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **[`DELTA-01`](01-core-harness-spec.md)** | Core Role & Permission Harness | `internal/harness` | M1 (Foundation) | `APPLIED` |
+| **[`DELTA-02`](02-receipt-delegation-spec.md)** | Write Receipt Delegation Engine | `internal/receipt` | M1 (Foundation) | `PROPOSED` |
+| **[`DELTA-03`](03-controlplane-sqlite-spec.md)** | SQLite WAL Control Plane & Leases | `internal/controlplane` | M1 (Foundation) | `PROPOSED` |
+| **[`DELTA-04`](04-mcp-stdio-server-spec.md)** | Stdio JSON-RPC 2.0 MCP Server | `internal/mcp` | M2 (Capabilities) | `PROPOSED` |
+| **[`DELTA-05`](05-provider-and-resource-pool-spec.md)**| Provider Registry & Resource Pool Governor | `internal/provider` | M2 (Capabilities) | `PROPOSED` |
+| **[`DELTA-06`](06-os-daemon-service-spec.md)** | Cross-Platform OS Daemon Service | `internal/service` | M3 (OS Daemon) | `PROPOSED` |
+| **[`DELTA-07`](07-blast-radius-analyzer-spec.md)** | LSP & Dependency Blast Radius Analyzer | `internal/analyzer` | M2 (Capabilities) | `PROPOSED` |
+
+---
+
+## 📜 OpenSpec Lifecycle
+
+```
+PROPOSED ──► ACCEPTED ──► IMPLEMENTING ──► APPLIED (Passes -race tests) ──► RETIRED
+```
