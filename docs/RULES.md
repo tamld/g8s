@@ -5,7 +5,7 @@
 
 ---
 
-## 1. The 7 Non-Negotiable Engineering Rules (The "Iron Laws")
+## 1. The 8 Non-Negotiable Engineering Rules (The "Iron Laws")
 
 ### Rule 1 — Pure-Go Invariant (Zero-CGO)
 * **Standard**: The codebase MUST compile cleanly with `CGO_ENABLED=0` across all target architectures (`darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, `windows/amd64`).
@@ -34,3 +34,7 @@
 
 ### Rule 7 — Language & Documentation Purity
 * **Standard**: 100% of codebase artifacts (source code, tests, docstrings, schema files, documentation, commit messages, and PRs) must be written in standard, professional English with zero non-ASCII diacritics.
+
+### Rule 8 — The Self-Describing Executable (SDE) Standard
+* **Standard**: The CLI binary itself MUST be the primary living documentation. Every command must declare explicit flag types, valid enums, default values, and machine-readable output modes (`--json`).
+* **Enforcement**: An AI agent running `g8s <cmd> --help` or `g8s <cmd> --json` must receive 100% sufficient metadata to execute the command without reading external markdown files. Exit codes must strictly map to unambiguous failure modes (`0`=Success, `1`=System Error, `2`=CLI Argument Syntax, `3`=Read-Only Violation, `4`=Unauthorized/Expired Receipt, `5`=Timeout/Process Killed).

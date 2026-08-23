@@ -26,6 +26,11 @@
    - All state databases, log files, and receipt artifacts must adhere to POSIX `0600` file permissions and `0700` directory permissions.
    - Prompts containing potential confidential material are redacted into SHA-256 hashes upon task completion.
 
+5. **Axiom of the Self-Describing Executable (CLI as Living Documentation)**:
+   - The CLI binary and its runtime schemas are the **Single Source of Truth (SSoT)**.
+   - An AI agent or human MUST be able to discover 100% of capabilities, flags, roles, permissions, exit codes, and JSON schemas directly via `--help`, `--json`, and subcommands without reading static markdown manuals.
+   - All CLI flags must declare explicit types, default values, and valid enums. Every error must return actionable machine-parseable exit codes and diagnostic remediation hints.
+
 ---
 
 ## 2. Coding & Architecture Standards
