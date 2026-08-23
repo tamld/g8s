@@ -1,3 +1,10 @@
+# g8s CI — Spec-Driven Development gate.
+#
+# Dual-pass testing strategy (see plans/M1-receipt-sprint-log.md deviation D4):
+#   Pass 1 runs with CGO_ENABLED=0 to prove the Zero-CGO constitution axiom holds.
+#   Pass 2 enables cgo solely because the Go race detector requires it;
+#   the modernc.org/sqlite driver remains pure Go either way.
+
 name: CI
 
 on:
@@ -8,12 +15,12 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
+    name: Test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
-        go: [ '1.22' ]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -21,9 +28,23 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go }}
+          go-version: '1.25'
 
-      - name: Run Tests
-        run: go test -v -race ./...
+      - name: Vet (Zero-CGO)
+        run: go vet ./...
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: '0'
+
+      - name: Test plain build (Zero-CGO)
+        run: go test -count=1 ./...
+        env:
+          CGO_ENABLED: '0'
+
+      - name: Test race detector
+        run: go test -race -count=1 ./internal/...
+        env:
+          CGO_ENABLED: '1'
+
+      - name: Build smoke (all packages, including cmd/g8s which has no tests)
+        run: go build ./...
+
