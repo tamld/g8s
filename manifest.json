@@ -92,7 +92,7 @@
       "id": "DELTA-02",
       "title": "Write Receipt Delegation Engine",
       "path": "spec/openspec/02-receipt-delegation-spec.md",
-      "status": "PROPOSED"
+      "status": "APPLIED"
     },
     {
       "id": "DELTA-05",
