@@ -28,7 +28,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeClock struct {
-	mu sync.Mutex
+	mu  sync.Mutex
 	now time.Time
 }
 
@@ -621,13 +621,13 @@ func TestFreshDatabaseSchemaColumnTypesExact(t *testing.T) {
 	defer func() { _ = m.Close() }()
 
 	want := map[string]string{
-		"receipt_id":        "TEXT",
-		"issuer":            "TEXT",
+		"receipt_id":         "TEXT",
+		"issuer":             "TEXT",
 		"allowed_paths_json": "TEXT",
-		"expires_at":        "REAL",
-		"consumed":          "INTEGER",
-		"consumer_task_id":  "TEXT",
-		"created_at":        "REAL",
+		"expires_at":         "REAL",
+		"consumed":           "INTEGER",
+		"consumer_task_id":   "TEXT",
+		"created_at":         "REAL",
 	}
 
 	raw := openRawDB(t, dbPath)
