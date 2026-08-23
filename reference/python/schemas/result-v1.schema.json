@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agy.result.v1",
+  "title": "AGY worker result",
+  "type": "object",
+  "required": ["ok"],
+  "properties": {
+    "ok": {"type": "boolean"},
+    "status": {"type": "string"},
+    "returncode": {"type": "integer"},
+    "harness_returncode": {"type": "integer"},
+    "duration_seconds": {"type": "number", "minimum": 0},
+    "model": {"type": "string"},
+    "role": {"type": "string"},
+    "permission": {"type": "string"},
+    "contract_violation": {"type": "object"}
+  },
+  "additionalProperties": true
+}

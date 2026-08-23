@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agy.receipt.v1",
+  "title": "AGY task receipt",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "parent_task_id",
+    "state",
+    "request_hash",
+    "events_hash",
+    "attempts",
+    "created_at",
+    "signed",
+    "receipt_hash"
+  ],
+  "properties": {
+    "schema_version": {"const": "agy.receipt.v1"},
+    "task_id": {"type": "string", "format": "uuid"},
+    "parent_task_id": {"type": ["string", "null"], "format": "uuid"},
+    "state": {"type": "string"},
+    "request_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "result_hash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "events_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "attempts": {"type": "integer", "minimum": 0},
+    "created_at": {"type": "number"},
+    "completed_at": {"type": ["number", "null"]},
+    "signed": {"const": false},
+    "receipt_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "additionalProperties": false
+}

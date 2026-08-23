@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agy.task.v1",
+  "title": "AGY durable task submission",
+  "type": "object",
+  "required": ["idempotency_key", "request"],
+  "properties": {
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 200},
+    "parent_task_id": {"type": ["string", "null"], "minLength": 1},
+    "priority": {"type": "integer", "minimum": -100, "maximum": 100, "default": 0},
+    "max_attempts": {"type": "integer", "minimum": 1, "maximum": 10, "default": 1},
+    "request": {
+      "type": "object",
+      "required": ["prompt", "model", "add_dirs"],
+      "properties": {
+        "prompt": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "default": "collector"},
+        "permission": {"enum": ["read_only", "automation_read"]},
+        "timeout": {"type": "string", "default": "5m0s"},
+        "add_dirs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "skip_permissions": {"type": "boolean", "default": false},
+        "no_sandbox": {"const": false}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
