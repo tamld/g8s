@@ -1,0 +1,14 @@
+{
+  "result": "done",
+  "summary": "Judge slicing approved: single package internal/controlplane (Option A), 3 sequential vertical slices T006-T008 each landing compile-green with incremental tests; spec naming wins over Python names; 4 open decisions resolved.",
+  "decision": "approved_with_amendments",
+  "evidence": [
+    "D1 NAMING: spec/openspec/03 SSoT -> ControlPlane interface exactly as spec lines 25-40 (SubmitTask/ClaimTask/RenewHeartbeat/CompleteTask/FailTask/CancelTask/GetTask/ListTasks w/ ctx); Python semantics fill gaps spec omits (maintenance, retry budget, execution signals, path safety)",
+    "D2 RECEIPTS OWNERSHIP: write_receipts stays owned by internal/receipt (DELTA-02 APPLIED); controlplane schema contains ONLY tasks/task_events/control_plane_maintenance; deviation vs python baseline co-location recorded; JIT-check test L292 receipt_hash during T008 - if it needs the table, wire internal/receipt.Manager instead of duplicating DDL",
+    "D3 MAINTENANCE SURFACE: keep public Begin/EndMaintenance + ReconcileExpired + ActiveTaskCount + Events methods on concrete type (spec interface is minimum not maximum; 4 python tests demand them)",
+    "D4 MIGRATION SCOPE: PRAGMA user_version accepts 0 (fresh) and current version; legacy v1/v2 accepted with parent_task_id ALTER parity for python test L109; other versions RuntimeError 'unsupported control-plane schema version'",
+    "SLICING: single package internal/controlplane mirroring internal/receipt style (subpackages rejected: shared types + tx boundaries argue one package); slices: T006 foundation (model.go+store.go: schema/user_version migration/pragmas/events/_decode + GetTask/ListTasks/ActiveTaskCount; tests: fresh-schema column exactness, v1->current parent-column migration, list pagination vs active count); T007 queue+lease (SubmitTask idempotency+lineage, ClaimTask CAS ordering priority DESC created ASC, StartTask/RenewHeartbeat stale-token rejection, ReconcileExpired retry-budget; tests L59-L93,L129,L149,L159,L168,L188,L203,L221); T008 lifecycle+safety (CompleteTask/FailTask prompt redaction SHA-256, CancelTask queued-vs-running semantics, PauseTask, FinishAttempt receipt_hash reproducibility, Begin/EndMaintenance single-owner TTL, ValidateRequest workspace_write/no_sandbox/traversal blocks; tests L240-L368)",
+    "EXECUTION MODE: explore-subagent infra down twice (API connection error) -> T006-T008 run PM-fallback direct like T004"
+  ],
+  "notes": "Workers MUST JIT-read exact method bodies at line ranges in notes/T004-delta03-map.md section 3 before asserting verbatim error strings. Each slice ends CGO_ENABLED=0 go test ./internal/controlplane/... green in Docker oracle env."
+}

@@ -1,0 +1,23 @@
+{
+  "result": "done",
+  "task": "T008",
+  "summary": "Lifecycle+safety slice delivered and green; full DELTA-03 interface now implemented and compile-asserted (var _ ControlPlane = (*Store)(nil) re-added in lifecycle.go). lifecycle.go: ErrUnknownTask sentinel (spec-first deviation vs python silent None); ValidateSubmitRequest enforcing the v0.1 envelope (prompt required, model required, explicit scope roots, no_sandbox/agy_bin/workspace_write rejected, harness.ValidateRequest delegation for role/permission/blocked-pattern/denied-path gates wired into SubmitTask pre-hash); redactPayload SHA-256 prompt fingerprinting; buildReceiptTx unsigned receipt payload with events_hash over canonically-sorted event maps and self-referential receipt_hash via map path; FinishAttempt python-parity transition table (cancel_requested->CANCELLED / success->SUCCEEDED / retryable-within-budget->QUEUED keeping prompt / else FAILED) with strict owner+token CAS guard, final-state redaction+receipt sealing, attempt_finished events always; spec wrappers CompleteTask/FailTask adopting current lease holder as Brain-tier trusted convenience (axiom 1) with FailTask exit-code error formatting; CancelTask queued-terminal vs running-cooperative semantics; PauseTask always-redact+receipt for NEEDS_INFO/BLOCKED; BeginMaintenance/EndMaintenance singleton TTL lock with held-by rejection; Events audit accessor. reconcileExpiredTx enriched: CANCELLED/FAILED branches now redact request and seal receipts (completes T007 deferral). DSN fixed to _txlock=immediate matching python BEGIN IMMEDIATE - eliminates deferred-read-to-write SQLITE_BUSY upgrade races in cross-handle claims.",
+  "changed_files": [
+    "internal/controlplane/model.go",
+    "internal/controlplane/store.go",
+    "internal/controlplane/lifecycle.go",
+    "internal/controlplane/controlplane_test.go"
+  ],
+  "commands": [
+    {
+      "cmd": "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/controlplane/... && go test -count=1 ./internal/controlplane/...'",
+      "status": "pass"
+    },
+    {
+      "cmd": "CGO_ENABLED=1 go test -race -count=1 ./internal/controlplane/... (inside golang:1.25 container)",
+      "status": "pass"
+    }
+  ],
+  "evidence": "[RUNTIME] go vet clean; ok github.com/tamld/g8s/internal/controlplane 1.135s with 32/32 tests passing under CGO_ENABLED=0; race pass ok 2.789s zero reports. New tests cover finish-redaction+receipt, receipt reproducibility from unsigned payload, retryable prompt retention, stale lease rejection, spec wrapper adoption, cancel terminal/cooperative, pause validation+redaction, maintenance block/release lifecycle, safety gates (no_sandbox/agy_bin/scope-required/denied-path/traversal), unknown-task typed errors, event ordering, expiry-exhaust reconciler enrichment.",
+  "notes": "Deviations: CancelTask returns ErrUnknownTask where python returned None silently (spec-first D1); CompleteTask/FailTask adopt current lease owner/token since spec signatures carry no worker identity (documented Brain-trusted convenience); Go receipt hash values are internally reproducible but not byte-comparable with python baseline hash literals (canonicalization path documented in buildReceiptTx godoc); export_task deferred beyond T008 (filesystem surface, not in spec interface, lands with consolidation T010 if needed)."
+}

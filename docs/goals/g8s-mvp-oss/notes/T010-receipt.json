@@ -1,0 +1,17 @@
+{
+  "result": "done",
+  "task": "T010",
+  "summary": "Provider registry slice delivered and green per DELTA-05. provider.go (~340 lines): ProviderStatus consts READY/DEGRADED/UNAVAILABLE; ModelDescriptor + ProviderInfo with verbatim spec json tags; ProviderRegistry interface verbatim (DiscoverAll/GetProvider/AcquireSlot); concrete Registry over Config fleet (DefaultConfigs: agy slots10 gemini-3.7-flash-high, claude slots5 haiku, ollama slots2 local /api/tags probe); discovery resolves override env (AGY_BIN etc) then LookPath, missing = UNAVAILABLE with empty BinaryPath, ollama HTTP smoke probe via injectable OLLAMA_HOST (200=READY, non-200=DEGRADED, unreachable=UNAVAILABLE), LastHealthCheckAt through injected clock; AcquireSlot semaphore channel with ctx cancellation and release func decrementing inFlight; compile assertion var _ ProviderRegistry = (*Registry)(nil). provider_test.go: 11 tests covering unavailable-defaults, ready-on-resolve, env override precedence, unknown-provider error message verbatim, max-concurrency cap with cancelled third acquirer, release-frees-capacity liveness, ollama probe state table via httptest (ready/degraded/unreachable), json tag round-trip, race-safe concurrent slot accounting peak<=max, injected-clock timestamps, sorted stable discovery order.",
+  "changed_files": [
+    "internal/provider/provider.go",
+    "internal/provider/provider_test.go"
+  ],
+  "commands": [
+    {
+      "cmd": "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/provider/... && go test -count=1 ./internal/provider/...'",
+      "status": "pass"
+    }
+  ],
+  "evidence": "[RUNTIME] gofmt clean after fixes; vet clean; ok github.com/tamld/g8s/internal/provider 0.089s; 11/11 verbose PASS under CGO_ENABLED=0 golang:1.25. Fixes during gate: probe() gained ctx param (vet undefined ctx), unused encoding/json import removed, struct alignment gofmt -w.",
+  "notes": "Incident logged: a stale duplicate helper file was mistakenly written to internal/controlplane/lifecycle_test.go outside card scope; deleted immediately before any test run, controlplane pkg verified untouched (3 green files only). Spec-first port - python baseline has no provider registry section."
+}
