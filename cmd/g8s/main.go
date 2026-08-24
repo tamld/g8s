@@ -15,7 +15,6 @@ import (
 
 	"github.com/pterm/pterm"
 
-
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/mcp"
@@ -212,7 +211,7 @@ func runReceipt(args []string) {
 
 func failIf(err error) {
 	if err != nil {
-		pterm.Error.Println(fmt.Sprintf("%s: %v", AppName, err))
+		pterm.Error.WithWriter(os.Stderr).Println(fmt.Sprintf("%s: %v", AppName, err))
 		os.Exit(1)
 	}
 }
