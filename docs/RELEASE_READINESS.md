@@ -34,3 +34,21 @@ owner-gated decisions made at release time.
 
 - [ ] Publish GitHub Release with generated archives and checksums.
 - [ ] Announce the MCP tool surface (`g8s_*`) in the README quick-start.
+
+## Side-by-side verification assessment (REFACTORING_PLAN line 87)
+
+Feasibility confirmed locally: the `agy` binary is installed at `/Users/tamld/.local/bin/agy`
+and the Python reference scripts remain under `reference/python/scripts/`. Running a true
+side-by-side comparison requires an identical-workload parity matrix exercised against both
+stacks with output comparison. Proposed matrix:
+
+| Workload | Go surface | Python surface | Comparison |
+| --- | --- | --- | --- |
+| Task lifecycle (submit -> claim -> complete) | `controlplane` store via CLI | `agy_control_plane.py` | Final task state + receipt fields |
+| Receipt exactly-once consume | `receipt` Manager | `agy_control.py` receipt path | Second validate must fail identically |
+| Dispatch command construction | `dispatch.BuildCommand` | `agy_dispatch.build_agy_command` | argv equality for same options |
+| Read-only contract detection | `dispatch.DetectReadOnlyContractViolations` | `agy_dispatch.detect_read_only_contract_violations` | Same violation types per input |
+| MCP tools listing shape | `internal/mcp` tools/list | `agy_mcp_server.py` tools/list | Tool names and guard semantics |
+
+Execution is deferred until the release audit window so it can run against the tagged
+candidate rather than a moving main.
