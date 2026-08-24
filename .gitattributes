@@ -1,0 +1,3 @@
+# Normalize line endings across platforms so the gofmt CI gate is deterministic.
+* text=auto
+*.go text eol=lf
