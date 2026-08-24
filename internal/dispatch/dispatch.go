@@ -146,8 +146,9 @@ func expandUser(reference, home string) string {
 // hasSuffix reports whether the reference already ends with a known Windows
 // executable suffix (case-insensitive).
 func hasSuffix(reference string) bool {
+	lowerRef := strings.ToLower(reference)
 	for _, suffix := range windowsExecutableSuffixes {
-		if strings.HasSuffix(strings.ToLower(reference), suffix) {
+		if strings.HasSuffix(lowerRef, suffix) {
 			return true
 		}
 	}
