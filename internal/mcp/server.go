@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 )
@@ -68,10 +69,13 @@ type toolDescriptor struct {
 }
 
 // ControlPlaneAPI is the slice of internal/controlplane the MCP server needs.
-// *controlplane.Store satisfies it directly.
+// *controlplane.Store satisfies it directly (Amendment A adds ListTasks and
+// CancelTask to the original SubmitTask/GetTask pair).
 type ControlPlaneAPI interface {
 	SubmitTask(ctx context.Context, req controlplane.SubmitTaskRequest) (*controlplane.Task, error)
 	GetTask(ctx context.Context, taskID string) (*controlplane.Task, error)
+	ListTasks(ctx context.Context, filter controlplane.TaskFilter) ([]*controlplane.Task, error)
+	CancelTask(ctx context.Context, taskID string, reason string) error
 }
 
 // ReceiptIssuer is the slice of internal/receipt the MCP server needs.
@@ -91,16 +95,37 @@ type Server struct {
 	cp        ControlPlaneAPI
 	receipts  ReceiptIssuer
 	providers ProviderSource
+	dispatch  SyncDispatcher
+	prober    BinaryProber
 	tools     map[string]toolHandler
 	list      []toolDescriptor
 }
+
+// Option customizes optional Server dependencies; unspecified options keep the
+// production defaults.
+type Option func(*Server)
+
+// WithDispatcher overrides the synchronous dispatch seam (tests inject fakes).
+func WithDispatcher(d SyncDispatcher) Option { return func(s *Server) { s.dispatch = d } }
+
+// WithBinaryProber overrides the worker-binary resolution seam.
+func WithBinaryProber(p BinaryProber) Option { return func(s *Server) { s.prober = p } }
 
 // toolHandler executes one tools/call invocation and returns the result value.
 type toolHandler func(ctx context.Context, args json.RawMessage) (any, *jsonRPCError)
 
 // NewServer wires dependencies and registers the DELTA-04 tool set.
-func NewServer(in io.Reader, out io.Writer, cp ControlPlaneAPI, receipts ReceiptIssuer, providers ProviderSource) *Server {
+func NewServer(in io.Reader, out io.Writer, cp ControlPlaneAPI, receipts ReceiptIssuer, providers ProviderSource, opts ...Option) *Server {
 	s := &Server{in: in, out: out, cp: cp, receipts: receipts, providers: providers}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.dispatch == nil {
+		s.dispatch = NewSyncDispatcher()
+	}
+	if s.prober == nil {
+		s.prober = defaultBinaryProber
+	}
 	_ = s.RegisterTools()
 	return s
 }
@@ -108,20 +133,30 @@ func NewServer(in io.Reader, out io.Writer, cp ControlPlaneAPI, receipts Receipt
 // RegisterTools builds the tool registry required by the MCPServer contract.
 func (s *Server) RegisterTools() error {
 	s.tools = map[string]toolHandler{
-		"g8s_run":            s.runTool,
-		"g8s_submit":         s.submitTool,
-		"g8s_get":            s.getTool,
-		"g8s_receipt_issue":  s.receiptIssueTool,
-		"g8s_self_awareness": s.selfAwarenessTool,
-		"g8s_blast_radius":   s.blastRadiusTool,
+		"g8s_run":              s.runTool,
+		"g8s_submit":           s.submitTool,
+		"g8s_get":              s.getTool,
+		"g8s_receipt_issue":    s.receiptIssueTool,
+		"g8s_self_awareness":   s.selfAwarenessTool,
+		"g8s_blast_radius":     s.blastRadiusTool,
+		"g8s_dispatch":         s.dispatchTool,
+		"g8s_list_tasks":       s.listTasksTool,
+		"g8s_cancel_task":      s.cancelTaskTool,
+		"g8s_list_roles":       s.listRolesTool,
+		"g8s_list_permissions": s.listPermissionsTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
-		{Name: "g8s_submit", Description: "Queue a durable background task in the SQLite-backed control plane.", InputSchema: json.RawMessage(`{"type":"object","properties":{"idempotency_key":{"type":"string"},"payload":{"type":"object"},"priority":{"type":"integer"},"max_attempts":{"type":"integer"},"model":{"type":"string"}},"required":["idempotency_key","payload"]}`)},
+		{Name: "g8s_submit", Description: "Queue a durable background task in the SQLite-backed control plane.", InputSchema: json.RawMessage(`{"type":"object","properties":{"idempotency_key":{"type":"string"},"payload":{"type":"object"},"priority":{"type":"integer"},"max_attempts":{"type":"integer"},"model":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"no_sandbox":{"type":"boolean"},"add_dirs":{"type":"array","items":{"type":"string"}}},"required":["idempotency_key","payload"]}`)},
 		{Name: "g8s_get", Description: "Fetch sanitized task status by task id.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}`)},
 		{Name: "g8s_receipt_issue", Description: "Issue a path-scoped, single-use write receipt (TTL seconds, max 3600).", InputSchema: json.RawMessage(`{"type":"object","properties":{"allowed_paths":{"type":"array","items":{"type":"string"}},"ttl_seconds":{"type":"integer"}},"required":["allowed_paths"]}`)},
 		{Name: "g8s_self_awareness", Description: "Report discovered providers, model availability, and concurrency slots.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		{Name: "g8s_blast_radius", Description: "LSP call-hierarchy impact analysis for a symbol (DELTA-07, pending).", InputSchema: json.RawMessage(`{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}`)},
+		{Name: "g8s_dispatch", Description: "Run one bounded read-only dispatch through the g8s wrapper (guards apply).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"timeout":{"type":"string"},"add_dirs":{"type":"array","items":{"type":"string"}},"skip_permissions":{"type":"boolean"},"no_sandbox":{"type":"boolean"},"receipt_id":{"type":"string"}},"required":["prompt","add_dirs"]}`)},
+		{Name: "g8s_list_tasks", Description: "List durable tasks, optionally filtered by state.", InputSchema: json.RawMessage(`{"type":"object","properties":{"state":{"type":"string"},"limit":{"type":"integer"}}}`)},
+		{Name: "g8s_cancel_task", Description: "Request cooperative cancellation of a durable task.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","reason"]}`)},
+		{Name: "g8s_list_roles", Description: "Enumerate registered role profiles.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		{Name: "g8s_list_permissions", Description: "Enumerate permission profiles with MCP enablement metadata.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 	}
 	return nil
 }
@@ -167,7 +202,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 	switch req.Method {
 	case "initialize":
 		return okResponse(req.ID, map[string]any{
-			"protocolVersion": "2025-06-18",
+			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "g8s", "version": "0.1.0-alpha"},
 		})
@@ -226,6 +261,10 @@ type submitArgs struct {
 	Priority       int             `json:"priority"`
 	MaxAttempts    int             `json:"max_attempts"`
 	Model          string          `json:"model"`
+	Role           string          `json:"role"`
+	Permission     string          `json:"permission"`
+	NoSandbox      bool            `json:"no_sandbox"`
+	AddDirs        []string        `json:"add_dirs"`
 }
 
 func (s *Server) submitTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
@@ -233,17 +272,35 @@ func (s *Server) submitTool(ctx context.Context, args json.RawMessage) (any, *js
 	if err := json.Unmarshal(args, &a); err != nil || a.IdempotencyKey == "" || len(a.Payload) == 0 {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_submit requires idempotency_key and payload"}
 	}
+	if a.Permission == "" {
+		a.Permission = "read_only"
+	}
+	profile, permErr := harness.GetPermission(a.Permission)
+	if permErr != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: permErr.Error()}
+	}
+	if profile.MutationAllowed {
+		return nil, blockedStatus("blocked_by_policy",
+			fmt.Sprintf("durable submission with permission %s requires an explicit Brain write receipt; the MCP surface cannot carry receipts", a.Permission))
+	}
+	if a.NoSandbox {
+		return nil, blockedStatus("blocked_by_sandbox_policy",
+			"no_sandbox is rejected on the MCP surface; the OS sandbox always stays enabled")
+	}
 	task, err := s.cp.SubmitTask(ctx, controlplane.SubmitTaskRequest{
 		IdempotencyKey: a.IdempotencyKey,
 		Payload:        a.Payload,
 		Priority:       a.Priority,
 		MaxAttempts:    a.MaxAttempts,
 		Model:          a.Model,
+		Role:           a.Role,
+		Permission:     a.Permission,
+		AddDirs:        a.AddDirs,
 	})
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}
-	return map[string]any{"task_id": task.TaskID, "state": task.State}, nil
+	return map[string]any{"task_id": task.TaskID, "state": task.State, "deduplicated": task.Deduplicated}, nil
 }
 
 func (s *Server) getTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
