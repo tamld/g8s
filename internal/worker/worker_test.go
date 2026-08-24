@@ -496,6 +496,72 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 	}
 }
 
+func TestClampDuration(t *testing.T) {
+	tests := []struct {
+		name      string
+		v, lo, hi time.Duration
+		want      time.Duration
+	}{
+		{
+			name: "within bounds",
+			v:    5 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 5 * time.Second,
+		},
+		{
+			name: "below lower bound",
+			v:    0 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 1 * time.Second,
+		},
+		{
+			name: "above upper bound",
+			v:    15 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "equal to lower bound",
+			v:    1 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 1 * time.Second,
+		},
+		{
+			name: "equal to upper bound",
+			v:    10 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "negative duration, clamped to zero",
+			v:    -5 * time.Second,
+			lo:   0 * time.Second,
+			hi:   10 * time.Second,
+			want: 0 * time.Second,
+		},
+		{
+			name: "all negative bounds",
+			v:    -15 * time.Second,
+			lo:   -10 * time.Second,
+			hi:   -1 * time.Second,
+			want: -10 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampDuration(tt.v, tt.lo, tt.hi)
+			if got != tt.want {
+				t.Errorf("clampDuration(%v, %v, %v) = %v, want %v", tt.v, tt.lo, tt.hi, got, tt.want)
+			}
+		})
+	}
+}
 func TestStdbuf(t *testing.T) {
 	tests := []struct {
 		name     string
