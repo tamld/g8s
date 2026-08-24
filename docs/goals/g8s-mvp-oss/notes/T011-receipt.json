@@ -1,0 +1,17 @@
+{
+  "result": "done",
+  "task": "T011",
+  "summary": "DELTA-04 MCP stdio server delivered and green. internal/mcp/server.go: newline-delimited JSON-RPC 2.0 over stdio (ServeStdio with ctx cancellation, 4MB scanner guard), initialize handshake (protocolVersion 2025-06-18, serverInfo g8s), tools/list exposing exactly the six spec tools with JSON-schema input descriptors, tools/call dispatcher wrapping results in MCP text-content envelope. Tool wiring against existing packages: g8s_submit -> controlplane SubmitTask (idempotency_key/payload/priority/max_attempts/model passthrough), g8s_get -> GetTask sanitized view (task_id/state/attempts/cancel_requested) with unknown-task error, g8s_receipt_issue -> receipt.IssueReceipt (default TTL 10min when omitted, issuer mcp-server), g8s_self_awareness -> provider.DiscoverAll. g8s_run and g8s_blast_radius registered but return honest internal errors disclosing Phase 4 supervisor / DELTA-07 LSP dependencies. ControlPlaneAPI interface uses concrete controlplane types so *controlplane.Store satisfies it directly; ReceiptIssuer and ProviderSource mirror receipt/provider packages. Compile-time assertion covers the spec MCPServer method set.",
+  "changed_files": [
+    "internal/mcp/server.go",
+    "internal/mcp/server_test.go"
+  ],
+  "commands": [
+    {
+      "cmd": "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/mcp/ ; go vet ./internal/mcp/... && go test -count=1 ./internal/mcp/...'",
+      "status": "pass"
+    }
+  ],
+  "evidence": "[RUNTIME] gofmt clean; vet clean; ok github.com/tamld/g8s/internal/mcp; 14/14 verbose PASS under CGO_ENABLED=0 golang:1.25 (handshake, 6-tool list, unknown method -32601, parse error -32700 null id, submit/get/receipt/self-awareness happy paths, pending-dependency disclosures, end-to-end two-request stdio round trip). One debug iteration: []byte inside map[string]any base64-encoded during test param construction; fixed by routing through json.RawMessage helper.",
+  "notes": "Card amended before implementation: package path internal/mcpserver -> internal/mcp per spec DELTA-04 explicit package name (D1 spec-first precedent). g8s_run/g8s_blast_radius intentionally return typed errors until Phase 4/DELTA-07 land."
+}

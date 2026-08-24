@@ -11,15 +11,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/tamld/g8s/internal/harness"
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver (Zero-CGO constitution axiom).
 )
 
@@ -28,7 +31,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeClock struct {
-	mu sync.Mutex
+	mu  sync.Mutex
 	now time.Time
 }
 
@@ -621,13 +624,13 @@ func TestFreshDatabaseSchemaColumnTypesExact(t *testing.T) {
 	defer func() { _ = m.Close() }()
 
 	want := map[string]string{
-		"receipt_id":        "TEXT",
-		"issuer":            "TEXT",
+		"receipt_id":         "TEXT",
+		"issuer":             "TEXT",
 		"allowed_paths_json": "TEXT",
-		"expires_at":        "REAL",
-		"consumed":          "INTEGER",
-		"consumer_task_id":  "TEXT",
-		"created_at":        "REAL",
+		"expires_at":         "REAL",
+		"consumed":           "INTEGER",
+		"consumer_task_id":   "TEXT",
+		"created_at":         "REAL",
 	}
 
 	raw := openRawDB(t, dbPath)
@@ -763,5 +766,346 @@ func TestDirectDatabaseTamperIsKnownLimitation(t *testing.T) {
 	defer func() { _ = m2.Close() }()
 	if _, err := m2.ValidateAndConsume(r.ReceiptID, "attacker"); err != nil {
 		t.Errorf("documented limitation broken: tampered receipt should re-consume, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T018: safety coordination hardening (port of test_safety_coordination.py)
+// ---------------------------------------------------------------------------
+
+func TestRevokeConsumedReceiptReturnsFalseAndRowPersists(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := m.ValidateAndConsume(rc.ReceiptID, "worker-1"); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	revoked, err := m.RevokeReceipt(rc.ReceiptID)
+	if err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if revoked {
+		t.Fatal("revoking a consumed receipt must report false")
+	}
+	var already *AlreadyConsumedError
+	_, err = m.ValidateAndConsume(rc.ReceiptID, "worker-2")
+	if !errors.As(err, &already) {
+		t.Fatalf("consumed row must persist for audit; got %v", err)
+	}
+}
+
+func TestRevokeUnknownReceiptReturnsFalse(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	revoked, err := m.RevokeReceipt("rc-missing")
+	if err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if revoked {
+		t.Fatal("revoking a nonexistent receipt must return false")
+	}
+}
+
+func TestRevokedReceiptCannotBeRevalidated(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, _ := m.IssueReceipt("brain", []string{"src/**"}, time.Minute)
+	if ok, err := m.RevokeReceipt(rc.ReceiptID); err != nil || !ok {
+		t.Fatalf("first revoke: %v %v", ok, err)
+	}
+	var notFound *NotFoundError
+	_, err := m.ValidateAndConsume(rc.ReceiptID, "worker")
+	if !errors.As(err, &notFound) {
+		t.Fatalf("want NotFoundError after revoke, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "write receipt not found") {
+		t.Fatalf("error text mismatch: %v", err)
+	}
+	reissued, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute)
+	if err != nil {
+		t.Fatalf("reissue: %v", err)
+	}
+	if reissued.ReceiptID == rc.ReceiptID {
+		t.Fatal("reissued receipt must carry a fresh id")
+	}
+}
+
+func TestExpiryMathUsesInjectedClockExactly(t *testing.T) {
+	base := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	m := newTestManagerWithClock(t, clock.Now)
+	defer m.Close()
+	rc, err := m.IssueReceipt("brain", []string{"docs/**"}, 10*time.Second)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if !rc.ExpiresAt.Equal(base.Add(10 * time.Second)) {
+		t.Fatalf("expires_at = %v, want %v", rc.ExpiresAt, base.Add(10*time.Second))
+	}
+	clock.Advance(4 * time.Second)
+	active, err := m.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active = %d, want 1", len(active))
+	}
+	remaining := active[0].ExpiresAt.Sub(clock.Now()).Round(time.Second)
+	if remaining != 6*time.Second {
+		t.Fatalf("remaining = %v, want 6s", remaining)
+	}
+}
+
+func TestListActiveExcludesConsumedAndExpiredAcrossHandles(t *testing.T) {
+	base := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	dbPath := filepath.Join(t.TempDir(), "shared.sqlite3")
+	consumer, err := NewReceiptManager(dbPath, clock.Now)
+	if err != nil {
+		t.Fatalf("open consumer: %v", err)
+	}
+	consumedRc, _ := consumer.IssueReceipt("brain", []string{"a/**"}, time.Minute)
+	expiredRc, _ := consumer.IssueReceipt("brain", []string{"b/**"}, 5*time.Second)
+	liveRc, _ := consumer.IssueReceipt("brain", []string{"c/**"}, time.Minute)
+	if _, err := consumer.ValidateAndConsume(consumedRc.ReceiptID, "w"); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if expiredRc.ExpiresAt.Before(base.Add(5 * time.Second)) {
+		t.Fatalf("expired receipt ttl wrong: %v", expiredRc.ExpiresAt)
+	}
+	consumer.Close()
+
+	clock.Advance(10 * time.Second)
+
+	fresh, err := NewReceiptManager(dbPath, clock.Now)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer fresh.Close()
+	active, err := fresh.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("list on fresh handle: %v", err)
+	}
+	if len(active) != 1 || active[0].ReceiptID != liveRc.ReceiptID {
+		t.Fatalf("fresh handle must see only the live receipt; got %+v", active)
+	}
+}
+
+func TestTwoManagersOnSameDatabaseValidateIndependently(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "multi.sqlite3")
+	brain, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("brain handle: %v", err)
+	}
+	defer brain.Close()
+	worker, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("worker handle: %v", err)
+	}
+	defer worker.Close()
+
+	forBrain, _ := brain.IssueReceipt("brain", []string{"x/**"}, time.Minute)
+	forWorker, _ := worker.IssueReceipt("worker-a", []string{"y/**"}, time.Minute)
+
+	gotBrain, err := worker.ValidateAndConsume(forBrain.ReceiptID, "task-b")
+	if err != nil || gotBrain.Issuer != "brain" {
+		t.Fatalf("cross-handle validate failed: %v (%+v)", err, gotBrain)
+	}
+	gotWorker, err := brain.ValidateAndConsume(forWorker.ReceiptID, "task-w")
+	if err != nil || gotWorker.Issuer != "worker-a" {
+		t.Fatalf("reverse cross-handle validate failed: %v (%+v)", err, gotWorker)
+	}
+}
+
+func TestConcurrentValidateSameReceiptExactlyOneWinner(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, _ := m.IssueReceipt("brain", []string{"z/**"}, time.Minute)
+
+	const racers = 2
+	winner := make(chan struct{}, racers)
+	var consumedErrs int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if _, err := m.ValidateAndConsume(rc.ReceiptID, fmt.Sprintf("racer-%d", i)); err == nil {
+				winner <- struct{}{}
+			} else {
+				var already *AlreadyConsumedError
+				if errors.As(err, &already) {
+					atomic.AddInt32(&consumedErrs, 1)
+				} else {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(winner)
+	if len(winner) != 1 || atomic.LoadInt32(&consumedErrs) != racers-1 {
+		t.Fatalf("exactly-one-winner violated: winners=%d losers=%d", len(winner), consumedErrs)
+	}
+}
+
+func TestBrainIssueWorkerConsumeLeavesNoActiveReceipts(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "flow.sqlite3")
+	brain, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("brain: %v", err)
+	}
+	defer brain.Close()
+	worker, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	defer worker.Close()
+
+	rc, err := brain.IssueReceipt("brain", []string{"out/**"}, time.Minute)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := worker.ValidateAndConsume(rc.ReceiptID, "task-9"); err != nil {
+		t.Fatalf("worker consume: %v", err)
+	}
+	active, err := brain.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("brain must see zero active receipts, got %d", len(active))
+	}
+}
+
+func TestTenGoroutinesSingleUseReceiptOneSuccess(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, _ := m.IssueReceipt("brain", []string{"s/**"}, time.Minute)
+
+	const n = 10
+	var successes, consumedFailures int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := m.ValidateAndConsume(rc.ReceiptID, "contender"); err == nil {
+				atomic.AddInt32(&successes, 1)
+				return
+			} else if _, ok := err.(*AlreadyConsumedError); ok {
+				atomic.AddInt32(&consumedFailures, 1)
+			} else {
+				t.Errorf("unexpected: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if atomic.LoadInt32(&successes) != 1 || atomic.LoadInt32(&consumedFailures) != n-1 {
+		t.Fatalf("single-use violated: success=%d consumed=%d", successes, consumedFailures)
+	}
+	active, _ := m.ListActiveReceipts()
+	if len(active) != 0 {
+		t.Fatalf("list must drain to zero after consumption, got %d", len(active))
+	}
+}
+
+func TestExpiredReceiptInvisibleToFreshHandle(t *testing.T) {
+	base := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	dbPath := filepath.Join(t.TempDir(), "session.sqlite3")
+
+	prev, err := NewReceiptManager(dbPath, clock.Now)
+	if err != nil {
+		t.Fatalf("prev session: %v", err)
+	}
+	stale, _ := prev.IssueReceipt("brain", []string{"old/**"}, 30*time.Second)
+	prev.Close()
+
+	clock.Advance(time.Hour)
+
+	next, err := NewReceiptManager(dbPath, clock.Now)
+	if err != nil {
+		t.Fatalf("next session: %v", err)
+	}
+	defer next.Close()
+	active, err := next.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("expired receipts leaked across sessions: %+v", active)
+	}
+	var expired *ExpiredError
+	_, err = next.ValidateAndConsume(stale.ReceiptID, "late-worker")
+	if !errors.As(err, &expired) {
+		t.Fatalf("want ExpiredError on late validate, got %v", err)
+	}
+}
+
+func TestEndToEndIssueGatePromptDrainsActive(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, err := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	consumed, err := m.ValidateAndConsume(rc.ReceiptID, "task-e2e")
+	if err != nil {
+		t.Fatalf("gate consume: %v", err)
+	}
+	prompt, err := harness.BuildContractPromptWithReceipt(
+		"write the report", "collector", "workspace_write",
+		consumed.AllowedPaths,
+		&harness.ReceiptRef{ReceiptID: consumed.ReceiptID, Issuer: consumed.Issuer},
+	)
+	if err != nil {
+		t.Fatalf("gate prompt: %v", err)
+	}
+	if !strings.Contains(prompt, "Receipt ID: "+rc.ReceiptID) || !strings.Contains(prompt, "Issuer: brain") {
+		t.Fatalf("prompt missing receipt identity:\n%s", prompt)
+	}
+	active, _ := m.ListActiveReceipts()
+	if len(active) != 0 {
+		t.Fatalf("receipt must be drained after gate use, got %d", len(active))
+	}
+}
+
+func TestEndToEndRevokeThenGateRejectsWithNotFound(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, _ := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute)
+	if _, err := m.RevokeReceipt(rc.ReceiptID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	_, err := m.ValidateAndConsume(rc.ReceiptID, "task-late")
+	if err == nil || !strings.Contains(err.Error(), "write receipt not found") {
+		t.Fatalf("revoked gate must reject with not-found, got %v", err)
+	}
+}
+
+func TestEndToEndIssueThenConsumeViaGateDrainsList(t *testing.T) {
+	m := newTestManager(t)
+	defer m.Close()
+	rc, _ := m.IssueReceipt("brain", []string{"g/**"}, time.Minute)
+	active, _ := m.ListActiveReceipts()
+	if len(active) != 1 {
+		t.Fatalf("pre-consume list = %d, want 1", len(active))
+	}
+	if _, err := m.ValidateAndConsume(rc.ReceiptID, "gate-task"); err != nil {
+		t.Fatalf("gate consume: %v", err)
+	}
+	active, _ = m.ListActiveReceipts()
+	if len(active) != 0 {
+		t.Fatalf("post-consume list = %d, want 0", len(active))
 	}
 }

@@ -1,0 +1,11 @@
+{
+  "result": "done",
+  "summary": "DELTA-03 mapped end-to-end: spec interface (8 methods) + Python baseline (17 methods, full schema, 21-test inventory) consolidated into notes/T004-delta03-map.md with candidate package layout and 4 Judge decisions.",
+  "evidence": [
+    "spec/openspec/03-controlplane-sqlite-spec.md read in full (40 lines): 8-method ControlPlane interface + CAS/pragmas/redaction/idempotency invariants; supporting types undefined by spec -> baseline fills gaps",
+    "reference/python/scripts/agy_control_plane.py L70-L976 mapped: 17 methods w/ line ranges + defaults (maintenance ttl=300s, lease=30s), schema _initialize L92-188 captured verbatim (tasks 20 cols, task_events, control_plane_maintenance, write_receipts, user_version migration)",
+    "test_agy_control_plane.py inventoried: 21 tests, all FakeClock, threads only for concurrent-claim L168",
+    "subagent infra down: explore agents failed twice w/ API connection error (bg_92afe64d, bg_51d95bea, retries bg_f550307d/bg_0f045f5d) -> PM fallback direct scouting per goal-execution fallback rules"
+  ],
+  "notes": "Full map at notes/T004-delta03-map.md incl. candidate package layout (single package internal/controlplane) + 4 open decisions for Judge: spec-vs-python naming, write_receipts table ownership vs internal/receipt, maintenance API surface, SCHEMA_VERSION migration scope."
+}

@@ -1,0 +1,18 @@
+{
+  "result": "done",
+  "task": "T007",
+  "summary": "Queue+lease slice delivered and green. SubmitTask with verbatim python validation (idempotency key blank/200-char, priority -100..100, max_attempts 1..10 default 1, unknown parent, idempotency collision on request_hash or parent mismatch), canonical payload hash, QUEUED insert + task_submitted event, dedup returns existing task with Deduplicated=true. ClaimTask CAS lease grant: reconcile-expired inside tx, active maintenance blocks claims (stale row deleted), priority DESC created ASC candidate selection, guarded UPDATE with RowsAffected check, task_claimed event. StartTask LEASED->RUNNING owner+token+cancel guard. Heartbeat duality: spec-exact RenewHeartbeat(ctx,taskID,workerID,extensionSeconds) plus python-parity token-scoped Heartbeat; shared extendLease conditional SQL; stale/empty token -> ErrLeaseLost. ExecutionSignal active/cancel_requested/lease_lost. ReconcileExpired public wrapper + receiverless reconcileExpiredTx implementing cancel/requeue/exhaust transition table with lease_expired events; final-state prompt redaction and receipt_hash enrichment deferred to T008 per slice boundary. insertTaskEvent refactored to package-level for tx-scope reuse.",
+  "changed_files": [
+    "internal/controlplane/model.go",
+    "internal/controlplane/store.go",
+    "internal/controlplane/controlplane_test.go"
+  ],
+  "commands": [
+    {
+      "cmd": "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/controlplane/... && go test -count=1 ./internal/controlplane/...'",
+      "status": "pass"
+    }
+  ],
+  "evidence": "[RUNTIME] go vet clean; ok github.com/tamld/g8s/internal/controlplane 0.422s; 19/19 tests pass under CGO_ENABLED=0 in golang:1.25 container (9 foundation + 10 new queue/lease tests incl concurrent single-winner claim via two Store handles sharing one dbPath)",
+  "notes": "Deferred to T008: reconcile final-state redaction+receipt_hash enrichment, TestChildTask build_receipt assertion, maintenance end/release test half, execution-signal cancel_requested assert, interface compile assertion var _ ControlPlane = (*Store)(nil). Contract note: scanTask returns (nil,nil) for missing rows by design; callers nil-check."
+}

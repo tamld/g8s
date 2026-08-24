@@ -1,0 +1,18 @@
+{
+  "result": "done",
+  "task": "T006",
+  "summary": "Foundation slice of internal/controlplane delivered and green. model.go: 8 state constants + FinalStates + IsValidState, json-tagged Task struct with float64 unix timestamps, SubmitTaskRequest/TaskResult/TaskFilter, ControlPlane interface verbatim from spec (ctx-first), canonicalJSON (compact/sorted/HTML-unescaped) + contentHash helpers matching python canonical_json/content_hash parity. store.go: Store{db,clock} with injectable clock, DSN pragmas busy_timeout(30000)/foreign_keys(ON)/WAL/synchronous(FULL), BEGIN EXCLUSIVE initialize with user_version gate accepting 0/1/2/3, tasks+task_events+control_plane_maintenance DDL (write_receipts deliberately excluded per judge decision D2), parent_task_id migration via PRAGMA table_info scan, appendEvent helper, scanTask decoder, GetTask(nil-not-error), ListTasks(state validation, limit bounds, created_at DESC), ActiveTaskCount(LEASED,RUNNING). controlplane_test.go: 9 tests covering exact schema columns/types/order, absent write_receipts guard (D2), 0600 permissions, v1 legacy migration adding parent column, unsupported version rejection message, GetTask unknown nil, list state+limit validation incl -5/201 rejected, active-count ignores page size (201 rows), canonical JSON compactness. Compile assertion for full interface intentionally deferred to T008 when remaining methods exist.",
+  "changed_files": [
+    "internal/controlplane/model.go",
+    "internal/controlplane/store.go",
+    "internal/controlplane/controlplane_test.go"
+  ],
+  "commands": [
+    {
+      "cmd": "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/controlplane/... && go test -count=1 ./internal/controlplane/...'",
+      "status": "pass",
+      "evidence": "go vet clean; ok github.com/tamld/g8s/internal/controlplane 0.354s"
+    }
+  ],
+  "notes": "Deviations recorded: write_receipts excluded from schema per T005-D2 (ownership stays internal/receipt); ListTasks treats limit==0 as default 50 while explicit negatives are rejected (python conflated both). Interface assertion var _ ControlPlane = (*Store)(nil) re-added at T008 completion."
+}

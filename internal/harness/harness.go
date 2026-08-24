@@ -103,12 +103,35 @@ func ValidateRequest(
 	return nil
 }
 
+// ReceiptRef carries the minimal receipt identity injected into delegated-write
+// prompts (spec 01: BuildContractPrompt injects exact allowed paths when a
+// receipt is present).
+type ReceiptRef struct {
+	ReceiptID string
+	Issuer    string
+}
+
 // BuildContractPrompt constructs the enforced boundary prompt sent to the LLM worker.
 func BuildContractPrompt(
 	prompt string,
 	roleName string,
 	permissionName string,
 	allowedPaths []string,
+) (string, error) {
+	return BuildContractPromptWithReceipt(prompt, roleName, permissionName, allowedPaths, nil)
+}
+
+// BuildContractPromptWithReceipt builds the contract prompt with optional
+// receipt identity. When the permission allows mutation and a receipt ref is
+// supplied, the delegated-write block always renders (even with empty path
+// patterns) and carries the receipt ID plus issuer so workers can trace their
+// write authorization back to a single-use Brain grant.
+func BuildContractPromptWithReceipt(
+	prompt string,
+	roleName string,
+	permissionName string,
+	allowedPaths []string,
+	receipt *ReceiptRef,
 ) (string, error) {
 	role, err := GetRole(roleName)
 	if err != nil {
@@ -121,16 +144,23 @@ func BuildContractPrompt(
 	}
 
 	var mutationLine string
-	if permission.MutationAllowed && len(allowedPaths) > 0 {
-		var pathList []string
-		for _, p := range allowedPaths {
-			pathList = append(pathList, fmt.Sprintf("  - %s", p))
-		}
-		mutationLine = fmt.Sprintf("This task has DELEGATED WRITE permission via receipt.\nYou may ONLY write to files matching these path patterns:\n%s\nWriting outside this scope is a policy violation.", strings.Join(pathList, "\n"))
-	} else if permission.MutationAllowed {
+	switch {
+	case permission.MutationAllowed && receipt != nil:
+		mutationLine = buildDelegatedWriteBlock(allowedPaths, receipt)
+	case permission.MutationAllowed && len(allowedPaths) > 0:
+		mutationLine = buildDelegatedWriteBlock(allowedPaths, nil)
+	case permission.MutationAllowed:
 		mutationLine = "This task may mutate files only inside the explicit workspace scope."
-	} else {
+	default:
 		mutationLine = "This task is read-only: do not edit, delete, move, install, commit, or write files."
+	}
+
+	wikiBlock := ""
+	if !permission.MutationAllowed {
+		wikiBlock = "\n\nWiki engine policy (MANDATORY):\n" +
+			"- ALLOWED: wiki.py query, wiki.py search, wiki.py read, wiki.py classify\n" +
+			"- FORBIDDEN: wiki.py write, wiki.py reflect, wiki.py orient, wiki.py claim, wiki.py bypass\n" +
+			"  These commands mutate shared session state and are reserved for the Brain orchestrator."
 	}
 
 	forbiddenItems := make([]string, len(role.Forbidden))
@@ -143,7 +173,7 @@ func BuildContractPrompt(
 Role: %s
 Purpose: %s
 Permission profile: %s — %s
-Mutation policy: %s
+Mutation policy: %s%s
 
 Forbidden for this role:
 %s
@@ -158,7 +188,32 @@ Output contract:
 - Do not claim completion beyond the evidence you inspected.
 
 Original task:
-%s`, role.Name, role.Purpose, permission.Name, permission.Description, mutationLine, strings.Join(forbiddenItems, "\n"), prompt)
+%s`, role.Name, role.Purpose, permission.Name, permission.Description, mutationLine, wikiBlock, strings.Join(forbiddenItems, "\n"), prompt)
 
 	return contract, nil
+}
+
+// buildDelegatedWriteBlock renders the delegated-write section. With a receipt
+// ref the block always renders its header lines even when no path patterns are
+// attached; without one it keeps the legacy path-only rendering.
+func buildDelegatedWriteBlock(allowedPaths []string, receipt *ReceiptRef) string {
+	var block string
+	if receipt != nil {
+		block = "This task has DELEGATED WRITE permission via receipt.\n"
+		if len(allowedPaths) > 0 {
+			pathList := make([]string, 0, len(allowedPaths))
+			for _, p := range allowedPaths {
+				pathList = append(pathList, fmt.Sprintf("  - %s", p))
+			}
+			block += fmt.Sprintf("You may ONLY write to files matching these path patterns:\n%s\n", strings.Join(pathList, "\n"))
+		}
+		block += "Writing to ANY path outside this scope is a policy violation.\n"
+		block += fmt.Sprintf("Receipt ID: %s\nIssuer: %s", receipt.ReceiptID, receipt.Issuer)
+		return block
+	}
+	pathList := make([]string, 0, len(allowedPaths))
+	for _, p := range allowedPaths {
+		pathList = append(pathList, fmt.Sprintf("  - %s", p))
+	}
+	return fmt.Sprintf("This task has DELEGATED WRITE permission via receipt.\nYou may ONLY write to files matching these path patterns:\n%s\nWriting outside this scope is a policy violation.", strings.Join(pathList, "\n"))
 }
