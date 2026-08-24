@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,8 +54,10 @@ func TestDatabasePathCreatesParentDirectoriesWithRestrictedPermissions(t *testin
 	if err != nil {
 		t.Fatalf("stat nested dir: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		t.Fatalf("created directory perms = %o, want no group/other access", perm)
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("created directory perms = %o, want no group/other access", perm)
+		}
 	}
 }
 

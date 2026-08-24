@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -106,6 +107,9 @@ func TestFreshDatabaseSchemaExact(t *testing.T) {
 
 func TestFreshDatabaseFilePermissionsRestricted(t *testing.T) {
 	_, path := newTestStore(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("windows stat modes carry no POSIX permission bits")
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat db file: %v", err)

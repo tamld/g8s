@@ -206,8 +206,14 @@ func TestSymlinkedBinaryResolvesToCanonicalPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	if mgr.cfg.BinaryPath != real {
-		t.Fatalf("binary = %q, want canonical %q", mgr.cfg.BinaryPath, real)
+	// macOS temp dirs live behind the /var -> /private/var symlink, so the
+	// canonical form must be resolved through EvalSymlinks as well.
+	wantCanonical, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("resolve expected canonical path: %v", err)
+	}
+	if mgr.cfg.BinaryPath != wantCanonical {
+		t.Fatalf("binary = %q, want canonical %q", mgr.cfg.BinaryPath, wantCanonical)
 	}
 }
 

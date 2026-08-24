@@ -156,7 +156,9 @@ func NewManager(cfg Config, guard LifecycleGuard) (*Manager, error) {
 	if err != nil {
 		return nil, serr("stat binary %s: %v", canonical, err)
 	}
-	if info.Mode().Perm()&0o022 != 0 {
+	// Windows os.Stat mode bits carry no POSIX group/other write semantics
+	// (Go reports 0666-style modes), so this rejection is POSIX-only.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0 {
 		return nil, serr("binary %s is group/world-writable; refusing to pin it into a service unit", canonical)
 	}
 	m := &Manager{
