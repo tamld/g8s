@@ -62,28 +62,28 @@ reference/python/                                     g8s/ (Pure Go)
 
 ## 3. 5-Phase Execution Plan
 
-### Phase 1: Core Harness & Receipt Gate (In Progress)
+### Phase 1: Core Harness & Receipt Gate (Complete)
 * [x] Copy Python baseline to `reference/python/`.
 * [x] Port `harness` (Roles, Permissions, Blocked patterns, Denied paths).
-* [ ] Port `receipt` Manager (SQLite WAL, atomic single-use consume, TTL validation, mock clock).
-* [ ] Port 38 Receipt Delegation tests to Go (`internal/receipt/receipt_test.go`).
+* [x] Port `receipt` Manager (SQLite WAL, atomic single-use consume, TTL validation, mock clock). Done in Milestone 1 (`internal/receipt`, commit `1a2a561`).
+* [x] Port Receipt Delegation tests to Go (`internal/receipt/receipt_test.go`). 41 tests including the T018 safety-coordination hardening suite (commit `08007c1`).
 
 ### Phase 2: Control Plane & Process Group Worker
-* [ ] Implement pure-Go SQLite WAL Task Queue with atomic CAS leases and heartbeat renewals.
-* [ ] Implement `worker.Supervisor` using `os/exec` with process group termination (`Setpgid`).
-* [ ] Implement post-run mutation detector (`READ_ONLY_VIOLATION_PATTERNS`).
-* [ ] Port ControlPlane and Worker tests (30 tests) to Go.
+* [x] Implement pure-Go SQLite WAL Task Queue with atomic CAS leases and heartbeat renewals. DELTA-03 control plane (commit `a652675`).
+* [x] Implement `worker.Supervisor` using `os/exec` with process group termination (`Setpgid`). DELTA-09 supervisor (commit `fedee74`).
+* [x] Implement post-run mutation detector (`DetectReadOnlyContractViolations` in `internal/dispatch`). DELTA-08 wrapper (commit `184d85d`).
+* [x] Port ControlPlane and Worker tests to Go: 32 controlplane + 14 worker tests.
 
 ### Phase 3: Pluggable Providers & MCP Server
-* [ ] Define `WorkerProvider` interface and implement `AgyProvider`, `ClaudeProvider`, `GeminiProvider`.
-* [ ] Implement Stdio JSON-RPC 2.0 MCP server (`internal/mcp/server.go`).
-* [ ] Port MCP server tests to Go.
+* [x] Define `WorkerProvider` interface and implement Agy/Claude/Ollama providers. DELTA-05 registry (commit `cd31d1e`).
+* [x] Implement Stdio JSON-RPC 2.0 MCP server (`internal/mcp/server.go`). DELTA-04 (commit `203afe8`) plus Amendment A surface expansion to eleven `g8s_*` tools (commit `6fb3b0d`).
+* [x] Port MCP server tests to Go: 28 tests including guard-chain and durable round-trip coverage.
 
 ### Phase 4: Cross-Platform OS Service & CLI Commands
-* [ ] Integrate `kardianos/service` for macOS `launchd`, Linux `systemd`, and Windows Service.
-* [ ] Complete CLI subcommands in `cmd/g8s/main.go` using `cobra`.
+* [~] Integrate a cross-platform service layer for macOS `launchd`, Linux `systemd`, and Windows Service. Shipped as native stdlib-only launchd manager (DELTA-06A, commit `37e13c6`); kardianos integration deferred post-MVP per the recorded platform decision.
+* [~] Complete CLI subcommands in `cmd/g8s/main.go`. Stdlib flag-based subcommands shipped (commit `1f98a08`: mcp/submit/get/receipt-issue); cobra migration deferred post-MVP.
 
 ### Phase 5: Parity Verification & CI Pipeline
 * [ ] Run side-by-side verification: Go `g8s` vs Python `reference/` on identical workloads.
-* [ ] Achieve $\ge 140$ passing Go tests with `CGO_ENABLED=0 go test -race ./...`.
-* [ ] Configure multi-OS automated build with GoReleaser.
+* [x] Achieve $\ge 140$ passing Go tests: 187 test functions green under dual-pass verification (CGO_ENABLED=0 full suite and CGO_ENABLED=1 race detector with zero reports).
+* [x] Configure multi-OS automated build with GoReleaser. Config present since `eb5b14d`; snapshot smoke verified in T019 producing darwin/linux/windows amd64+arm64 archives (modernized v2 formats schema, commit `c73e0b1`).
