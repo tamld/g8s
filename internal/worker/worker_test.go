@@ -495,3 +495,14 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 		t.Fatalf("stale child.pid should be removed, stat err=%v", err)
 	}
 }
+
+func TestDerefString(t *testing.T) {
+	if got := derefString(nil); got != "" {
+		t.Errorf("derefString(nil) = %q, want %q", got, "")
+	}
+
+	val := "hello"
+	if got := derefString(&val); got != "hello" {
+		t.Errorf("derefString(&val) = %q, want %q", got, "hello")
+	}
+}
