@@ -607,3 +607,57 @@ func TestCommandPreview(t *testing.T) {
 		})
 	}
 }
+func TestExpandUser(t *testing.T) {
+	cases := []struct {
+		name      string
+		reference string
+		home      string
+		want      string
+	}{
+		{
+			name:      "empty home",
+			reference: "~/bin",
+			home:      "",
+			want:      "~/bin",
+		},
+		{
+			name:      "exact match",
+			reference: "~",
+			home:      "/home/user",
+			want:      "/home/user",
+		},
+		{
+			name:      "forward slash",
+			reference: "~/bin",
+			home:      "/home/user",
+			want:      "/home/user/bin",
+		},
+		{
+			name:      "backslash",
+			reference: `~\bin`,
+			home:      `C:\Users\user`,
+			want:      `C:\Users\user\bin`,
+		},
+		{
+			name:      "no prefix",
+			reference: "/usr/bin/agy",
+			home:      "/home/user",
+			want:      "/usr/bin/agy",
+		},
+		{
+			name:      "tilde in middle",
+			reference: "/opt/~/bin",
+			home:      "/home/user",
+			want:      "/opt/~/bin",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := expandUser(tc.reference, tc.home)
+			if got != tc.want {
+				t.Errorf("expandUser(%q, %q) = %q; want %q", tc.reference, tc.home, got, tc.want)
+			}
+		})
+	}
+}
