@@ -74,7 +74,7 @@ visual_board:
     url: null
     command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
 
-active_task: T099
+active_task: T015
 
 tasks:
   - id: T001
@@ -395,10 +395,209 @@ tasks:
           status: pass
       evidence: "[RUNTIME] FULL-REPO-GREEN: gofmt clean, vet clean, all 6 packages ok (cmd/g8s 0.002s controlplane 0.492s harness 0.001s mcp 0.002s provider 0.065s receipt 1.719s), go build ./... ok, 95 top-level test functions pass repo-wide."
       notes: "PARITY LEDGER vs oracle >=140: honest count is 95 Go test functions (~102 counting subtests). Python baseline has 7 suites; 2 are ported (test_receipt_delegation 38 cases -> 28 Go funcs; test_agy_control_plane 21 -> inside 32 Go funcs). The remaining 5 suites (test_agy_dispatch, test_agy_mcp_server [Go-native 14-test equivalent exists], test_agy_service, test_agy_worker, test_safety_coordination) map to post-MVP Phases 4-5 per REFACTORING_PLAN, so the >=140 oracle number was a Phase-5-complete target. Gap analysis recorded for final judge adjudication rather than gaming counts. Cobra deviation disclosed above."
+  - id: T013
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: default
+    objective: "Map next-tranche port scope per T999 amendments: inventory the 5 unported python suites (test_agy_dispatch, test_agy_mcp_server, test_agy_service, test_agy_worker, test_safety_coordination) with per-suite test counts, source-method line ranges, overlap audit vs existing Go packages, and recommended Worker slice boundaries toward oracle >=140 tests plus Phase 4 service daemon."
+    inputs:
+      - "reference/python/scripts/test_agy_dispatch.py"
+      - "reference/python/scripts/test_agy_mcp_server.py"
+      - "reference/python/scripts/test_agy_service.py"
+      - "reference/python/scripts/test_agy_worker.py"
+      - "reference/python/scripts/test_safety_coordination.py"
+      - "notes/T004-delta03-map.md (map conventions)"
+      - "docs/REFACTORING_PLAN.md Phases 4-5 wording"
+    constraints:
+      - "Read-only. JIT reads only; do not scan the whole reference tree."
+    expected_output:
+      - "Per-suite test inventory mapped to categories"
+      - "Overlap verdict: what internal/mcp already covers natively vs true gaps"
+      - "Candidate Go package layout + recommended Worker slice boundaries"
+    receipt:
+      result: done
+      summary: "Next-tranche port scope mapped end-to-end per T999 amendments. All 5 unported python suites inventoried in full: test_agy_dispatch 12 tests, test_agy_mcp_server 12, test_agy_service 16, test_agy_worker 9, test_safety_coordination 32 (categories A-F) = 81 tests across 1817 lines. Overlap audit vs existing Go packages recorded with true-gap lists (dispatch resolver fallbacks/capture/redaction/wiki-detector; mcp list+cancel tools/permission metadata/negotiation echo/guard statuses; safety revocation edges/listing enrichment/multi-agent races/prompt content/e2e flows). Six Worker slices defined T014-T019 with allowed_files, verify commands, stop_if, and spec-first prerequisites (T016/T017 require NEW OpenSpec deltas before code; T015 requires DELTA-04 amendment). Sequencing T014-T015-T018-T016-T017-T019 projects ~160-170 top-level test funcs >= oracle 140 with margin."
+      evidence:
+        - "reference/python/scripts/test_agy_dispatch.py read in full (229L, 12 tests: resolver precedence chain incl win32 .cmd + home fallbacks, sandbox flag matrix, wiki_reflect_side_effect detector, READ_ONLY_CONTRACT_EXIT envelope, credential redaction, capture bounds)"
+        - "reference/python/scripts/test_agy_mcp_server.py read in full (292L, 12 tests: 8-tool surface, workspace_write mcp_enabled:false metadata, blocked_by_policy/blocked_by_harness/setup_required guards, protocolVersion negotiation echo, durable idempotent round-trip w/ sanitized request view)"
+        - "reference/python/scripts/test_agy_worker.py read in full (263L, 9 tests: parse_duration, run_once attempt-dir export, process-group kill on cancel/timeout/SIGTERM-143, NEEDS_INFO lease release, output bounds, orphan reaping)"
+        - "reference/python/scripts/test_agy_service.py read in full (291L, 16 tests: launchd plist security properties, bootout-before-bootstrap ordering, rollback on failed bootstrap, maintenance gate integration, symlink/world-writable fail-closed, DB-preserving uninstall)"
+        - "reference/python/scripts/test_safety_coordination.py read in full (742L, 32 tests: A prompt-scope injection x8, B revocation x6, C active listing x4, D multi-agent concurrency x6 incl same-receipt barrier race, E contract-prompt security x5, F e2e orchestration x3)"
+        - "notes/T013-port-map.md written: summary matrix, per-suite inventories, true-gap lists, six-slice plan T014-T019 with prereqs and cross-cutting invariants"
+        - "state.yaml updated: T014-T019 queued cards added with objectives/inputs/constraints/allowed_files/verify/stop_if"
+      notes: "Read-only scout card; no repo code touched. Key judgment calls for downstream workers: (1) keep g8s_* naming per T005-D1 spec-first precedent, python agy_* names are reference only; (2) DELTA-04 listed exactly six tools - T015 additions need a documented spec amendment BEFORE implementation; (3) T016 worker supervisor and T017 service manager are net-new Phase 4 surfaces gated behind NEW OpenSpec deltas; kardianos/service is the recommended abstraction for T017 matching charter Phase 4 wording; (4) parity math: 95 current funcs + faithful ports of 81 python tests lands well past the >=140 oracle; (5) concurrency slices MUST be proven under CGO_ENABLED=1 -race dual-pass."
+  - id: T014
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: default
+    objective: "Dispatch-wrapper parity slice per notes/T013-port-map.md §2: NEW internal/dispatch with binary resolver hardening (win32 .cmd suffix, home fallback %APPDATA%/Roaming/npm/agy.cmd, injectable env/which/platform/home), output capture bounds (<OUTPUT_TRUNCATED> marker, invalid utf8 -> \\ufffd), credential redaction (postgresql://user:password@ -> <REDACTED>), and wiki read-only contract detector ('Session logged to log.md' -> wiki_reflect_side_effect; negative instructions ignored; rc=0 side-effect -> READ_ONLY_CONTRACT_EXIT envelope)."
+    inputs:
+      - "notes/T013-port-map.md section 'test_agy_dispatch.py'"
+      - "reference/python/scripts/agy_dispatch.py (JIT)"
+      - "internal/provider/provider.go (existing AGY_BIN>LookPath precedence - extend or delegate, do not duplicate)"
+    constraints:
+      - "Spec-first: check spec/openspec/ for a dispatch-wrapper delta; author one if absent."
+      - "Injectable env/home/which/platform params; no global mutation."
+      - "Never emit credentials into logs or test fixtures."
+    allowed_files:
+      - "spec/openspec/08-dispatch-wrapper-spec.md"
+      - "internal/dispatch/dispatch.go"
+      - "internal/dispatch/envelope.go"
+      - "internal/dispatch/dispatch_test.go"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/dispatch/ ; go vet ./internal/dispatch/... && go test -count=1 ./internal/dispatch/...'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+    receipt:
+      result: done
+      summary: "DELTA-08 dispatch wrapper ported to internal/dispatch per spec/openspec/08-dispatch-wrapper-spec.md: ResolveBinary (explicit > AGY_BIN > PATH > home fallbacks, Windows .exe/.cmd/.bat suffix expansion, injectable env/platform/home/which/exists), BuildCommand (sandbox default on, skip-permissions additive, ~ expansion via injectable Home), six read-only violation detectors verbatim from python baseline with +/-96-rune sanitized snippets, credential sanitization x4 patterns, bounded 2MiB capture with <OUTPUT_TRUNCATED> head/tail halves and U+FFFD replacement, Run envelope gating via harness.ValidateRequest before spawn with injectable runner/clock and fail-closed exit 3 on read-only side effects."
+      commands:
+        - command: "docker golang:1.25 CGO_ENABLED=0: go vet ./... && go test ./..."
+          status: pass
+        - command: "docker golang:1.25 CGO_ENABLED=1: go test -race ./..."
+          status: pass
+        - command: "gofmt -l . (in golang:1.25 container)"
+          status: pass
+        - command: "grep -c '^func Test' internal/dispatch/dispatch_test.go = 27; repo-wide top-level test funcs 95 -> 122"
+          status: pass
+      changed_files:
+        - spec/openspec/08-dispatch-wrapper-spec.md
+        - internal/dispatch/dispatch.go
+        - internal/dispatch/envelope.go
+        - internal/dispatch/dispatch_test.go
+      notes_file: null
+      commit: 184d85d
+  - id: T015
+    type: worker
+    assignee: Worker
+    status: active
+    reasoning_hint: default
+    objective: "MCP surface expansion per notes/T013-port-map.md §3: add g8s_list_tasks + g8s_cancel_task tools over existing controlplane methods, roles/permissions listing exposing workspace_write {mcp_enabled:false}+disabled_reason, protocolVersion negotiation echo, sanitized submit request view (prompt omitted), and sync-dispatch guard statuses (blocked_by_policy / blocked_by_harness / setup_required+setup_hint / explicit-add_dirs / no-sandbox)."
+    inputs:
+      - "notes/T013-port-map.md section 'test_agy_mcp_server.py'"
+      - "spec/openspec DELTA-04 (six-tool surface - additions need amendment)"
+      - "internal/mcp/server.go (JIT)"
+    constraints:
+      - "SPEC-FIRST: amend DELTA-04 delta documenting the new tools before code (T005-D1 precedent)."
+      - "Keep g8s_* naming; never adopt python agy_* names."
+    allowed_files:
+      - "spec/openspec/"
+      - "internal/mcp/server.go"
+      - "internal/mcp/server_test.go"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/mcp/ ; go vet ./internal/mcp/... && go test -count=1 ./internal/mcp/...'"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+    receipt: null
+  - id: T016
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: default
+    objective: "Worker supervisor vertical per notes/T013-port-map.md §4: NEW OpenSpec delta then NEW internal/worker implementing parse_duration ('250ms'/'1m2s'/reject '0s'), run_once lifecycle claim->start->execute->finish over controlplane, attempt dirs runs/<task_id>/attempt-N/receipt.json export with prompt.txt cleanup-on-success-and-failure, process-group spawn with cancel/timeout kill, SIGTERM coordination exit 143 via child.pid file, NEEDS_INFO pause with lease release, bounded output capture without persisting worker.stdout/stderr."
+    inputs:
+      - "notes/T013-port-map.md section 'test_agy_worker.py'"
+      - "reference/python/scripts/agy_worker.py (JIT)"
+      - "internal/controlplane public API (claim/start/heartbeat/finish/cancel)"
+    constraints:
+      - "NEW OpenSpec delta REQUIRED before any code (net-new Phase 4 surface)."
+      - "Process containment: setpgid process groups, kill(-pgid) on cancel/timeout/signal."
+      - "Injectable clock for timeout math; injectable command for tests (no real sleep binaries in CI)."
+    allowed_files:
+      - "spec/openspec/"
+      - "internal/worker/worker.go"
+      - "internal/worker/duration.go"
+      - "internal/worker/worker_test.go"
+      - "go.mod"
+      - "go.sum"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/worker/ ; go vet ./internal/worker/... && go test -count=1 ./internal/worker/...'"
+    stop_if:
+      - "Need files outside allowed_files beyond go.mod/go.sum."
+      - "Verification fails twice."
+    receipt: null
+  - id: T017
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: default
+    objective: "Service manager vertical per notes/T013-port-map.md §5: NEW OpenSpec delta deciding kardianos/service cross-platform abstraction (launchd/systemd/windows vs launchd-only port), then NEW internal/service with unit security properties (0644 unit, 0600 logs, umask/env pinning, PATH exclusion, zero secrets in unit), install/reinstall(bootout-before-bootstrap)/uninstall(DB preserved)/restart/restatus flows, failed-install rollback restoring prior unit bytes, maintenance gate holding controlplane BeginMaintenance across install, fail-closed validations (world-writable binary, symlinked unit/log victims untouched, runner timeout, corrupt DB status, unsupported platform)."
+    inputs:
+      - "notes/T013-port-map.md section 'test_agy_service.py'"
+      - "reference/python/scripts/agy_service.py (JIT)"
+      - "internal/controlplane Begin/EndMaintenance API"
+    constraints:
+      - "NEW OpenSpec delta REQUIRED before code; record platform-support decision explicitly."
+      - "kardianos dependency only via go.mod; no other new deps without PM approval."
+      - "Runner interface injection pattern (FakeRunner parity) so tests never invoke real init systems."
+    allowed_files:
+      - "spec/openspec/"
+      - "internal/service/service.go"
+      - "internal/service/service_test.go"
+      - "go.mod"
+      - "go.sum"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/service/ ; go vet ./internal/service/... && go test -count=1 ./internal/service/...'"
+    stop_if:
+      - "Need files outside allowed_files beyond go.mod/go.sum."
+      - "Verification fails twice."
+    receipt: null
+  - id: T018
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: default
+    objective: "Safety & coordination hardening per notes/T013-port-map.md §6: receipt revocation edges (revoke consumed=false w/ persisted audit row, revoke-reissue fresh id), ListActiveReceipts enrichment (remaining_seconds rounding, exact expires_at, consumed/expired/cross-session exclusion), multi-agent concurrency on one sqlite file via separate handles (barrier same-receipt race exactly-one-winner 'already consumed', 10-worker validate sweep) proven under CGO_ENABLED=1 -race, contract prompt content tests (exact wiki ALLOWED/FORBIDDEN strings across every read-only profile, DELEGATED WRITE block fields, generic mutation line, empty-paths block, hostile payload rendered literal), full-flow integration issue->gate->prompt->list_active==0 and revoked-gate fail-closed."
+    inputs:
+      - "notes/T013-port-map.md sections 6 B-F gaps"
+      - "reference/python/scripts/test_safety_coordination.py (JIT at exact line ranges)"
+      - "internal/receipt + internal/harness current APIs (JIT)"
+    constraints:
+      - "Extend existing packages; no new package without PM approval."
+      - "Concurrency tests MUST pass dual-pass incl. CGO_ENABLED=1 -race zero reports."
+      - "Do not weaken existing redaction or path-safety behavior."
+    allowed_files:
+      - "internal/receipt/receipt.go"
+      - "internal/receipt/receipt_test.go"
+      - "internal/harness/harness.go"
+      - "internal/harness/harness_test.go"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/receipt/ internal/harness/ ; go vet ./internal/receipt/... ./internal/harness/... && go test -count=1 ./internal/receipt/... ./internal/harness/...'"
+      - "CGO_ENABLED=1 go test -race -count=1 ./internal/receipt/... ./internal/harness/... (inside golang:1.25 container)"
+    stop_if:
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+    receipt: null
+  - id: T019
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: default
+    objective: "Release gate per notes/T013-port-map.md §7: goreleaser release --snapshot --clean runtime smoke inside Docker producing darwin/linux/windows amd64+arm64 binaries (windows/arm64 known gap documented); merge feat/mvp-consolidation into main --no-ff after full dual-pass re-verify on the branch; post-merge FULL-REPO-GREEN proof on main."
+    inputs:
+      - ".goreleaser.yaml"
+      - "git branch state feat/mvp-consolidation vs main"
+      - "goreleaser/goreleaser docker image"
+    constraints:
+      - "No push; merge stays local. Owner-gated publication remains T099."
+      - "Snapshot artifacts land outside repo tree or in ignored dir; never commit dist/."
+    allowed_files:
+      - ".goreleaser.yaml"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges goreleaser/goreleaser release --snapshot --clean --skip-publish"
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -count=1 ./... && echo PASS-CGO0' && docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 golang:1.25 sh -c 'go test -race -count=1 ./internal/... && echo PASS-RACE'"
+    stop_if:
+      - "Merge conflicts require semantic decisions beyond clean resolution."
+      - "Snapshot build fails on config grounds needing owner input."
+    receipt: null
   - id: T099
     type: pm
     assignee: PM
-    status: active
+    status: queued
     reasoning_hint: default
     objective: "Publication readiness packet at MVP gate: LICENSE/MIT verification, README/versioning checks, publish checklist - terminal card blocked on explicit owner approval before any push/visibility change."
     constraints:
