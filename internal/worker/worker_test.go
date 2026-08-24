@@ -603,3 +603,23 @@ func TestStdbuf(t *testing.T) {
 		})
 	}
 }
+func TestFirstOf(t *testing.T) {
+	cases := []struct {
+		name string
+		dirs []string
+		want string
+	}{
+		{"nil slice", nil, ""},
+		{"empty slice", []string{}, ""},
+		{"one element", []string{"a"}, "a"},
+		{"multiple elements", []string{"a", "b", "c"}, "a"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstOf(tc.dirs); got != tc.want {
+				t.Errorf("firstOf(%v) = %q, want %q", tc.dirs, got, tc.want)
+			}
+		})
+	}
+}
