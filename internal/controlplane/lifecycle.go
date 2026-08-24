@@ -236,6 +236,27 @@ func (s *Store) BuildReceipt(_ context.Context, taskID string) (map[string]any, 
 
 const finishStaleLeaseMsg = "lease ownership lost; refusing stale completion"
 
+func checkLeaseOwnership(task *Task, workerID, leaseToken string) error {
+	if task.State != StateRunning ||
+		task.LeaseOwner == nil || *task.LeaseOwner != workerID ||
+		task.LeaseToken == nil || *task.LeaseToken != leaseToken {
+		return errors.New(finishStaleLeaseMsg)
+	}
+	return nil
+}
+
+func determineNextState(task *Task, params FinishAttemptParams) string {
+	switch {
+	case task.CancelRequested:
+		return StateCancelled
+	case params.Success:
+		return StateSucceeded
+	case params.Retryable && task.Attempts < task.MaxAttempts:
+		return StateQueued
+	}
+	return StateFailed
+}
+
 // FinishAttempt applies the worker verdict for a RUNNING lease with strict
 // ownership enforcement. Transitions follow the baseline priority table:
 // cancel_requested -> CANCELLED, success -> SUCCEEDED, retryable within
@@ -257,22 +278,12 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	if task == nil {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
 	}
-	if task.State != StateRunning ||
-		task.LeaseOwner == nil || *task.LeaseOwner != workerID ||
-		task.LeaseToken == nil || *task.LeaseToken != leaseToken {
-		return nil, errors.New(finishStaleLeaseMsg)
+	if err := checkLeaseOwnership(task, workerID, leaseToken); err != nil {
+		return nil, err
 	}
 
 	now := float64(s.clock().UnixNano()) / 1e9
-	nextState := StateFailed
-	switch {
-	case task.CancelRequested:
-		nextState = StateCancelled
-	case params.Success:
-		nextState = StateSucceeded
-	case params.Retryable && task.Attempts < task.MaxAttempts:
-		nextState = StateQueued
-	}
+	nextState := determineNextState(task, params)
 
 	resultCanonical, err := canonicalJSON(params.Result)
 	if err != nil {
