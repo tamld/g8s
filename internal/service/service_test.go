@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -85,10 +86,12 @@ func newServiceEnv(t *testing.T) *serviceEnv {
 		PlistPath:     filepath.Join(root, "LaunchAgents", "com.test.g8s-worker.plist"),
 		StdoutLogPath: filepath.Join(root, "Logs", "worker.out.log"),
 		StderrLogPath: filepath.Join(root, "Logs", "worker.err.log"),
-		PathEnv:       "/usr/bin:/bin:" + filepath.Join(root, ".local", "bin") + ":/usr/local/bin",
-		Home:          root,
-		Platform:      "darwin",
-		Timeout:       5 * time.Second,
+		PathEnv: strings.Join([]string{
+			"/usr/bin", "/bin", filepath.Join(root, ".local", "bin"), "/usr/local/bin",
+		}, string(os.PathListSeparator)),
+		Home:     root,
+		Platform: "darwin",
+		Timeout:  5 * time.Second,
 	}
 	runner := &fakeRunner{}
 	mgr, err := NewManager(cfg, nil)
@@ -147,13 +150,15 @@ func TestInstallIssuesBootstrapThenKickstartWithHardenedFiles(t *testing.T) {
 	if len(subs) != 3 || subs[0] != "print" || subs[1] != "bootstrap" || subs[2] != "kickstart" {
 		t.Fatalf("command sequence mismatch: %v", env.runner.subcommands())
 	}
-	info, err := os.Stat(env.manager.cfg.PlistPath)
-	if err != nil || info.Mode().Perm() != 0o644 {
-		t.Fatalf("plist mode = %v err=%v, want 0644", info.Mode().Perm(), err)
-	}
-	logInfo, err := os.Stat(env.manager.cfg.StdoutLogPath)
-	if err != nil || logInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("stdout log mode = %v err=%v, want 0600", logInfo.Mode().Perm(), err)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(env.manager.cfg.PlistPath)
+		if err != nil || info.Mode().Perm() != 0o644 {
+			t.Fatalf("plist mode = %v err=%v, want 0644", info.Mode().Perm(), err)
+		}
+		logInfo, err := os.Stat(env.manager.cfg.StdoutLogPath)
+		if err != nil || logInfo.Mode().Perm() != 0o600 {
+			t.Fatalf("stdout log mode = %v err=%v, want 0600", logInfo.Mode().Perm(), err)
+		}
 	}
 	delete(env.runner.errs, "print")
 	st, err := env.manager.Status()
@@ -218,6 +223,9 @@ func TestSymlinkedBinaryResolvesToCanonicalPath(t *testing.T) {
 }
 
 func TestWorldWritableBinaryRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("world-writable rejection is POSIX-only and is skipped on windows by design")
+	}
 	root := t.TempDir()
 	binary := filepath.Join(root, "g8s")
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o777); err != nil {

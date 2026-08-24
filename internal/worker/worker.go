@@ -283,6 +283,10 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
+	// Close capture handles before collect reads and removes the files; on
+	// Windows an open handle makes os.Remove fail with a sharing violation.
+	_ = outFile.Close()
+	_ = errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
 		runDir, promptPath, resultPath, stdoutPath, stderrPath)
 }
