@@ -74,7 +74,7 @@ visual_board:
     url: null
     command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
 
-active_task: T017
+active_task: T019
 
 tasks:
   - id: T001
@@ -557,7 +557,7 @@ tasks:
   - id: T017
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Service manager vertical per notes/T013-port-map.md §5: NEW OpenSpec delta deciding kardianos/service cross-platform abstraction (launchd/systemd/windows vs launchd-only port), then NEW internal/service with unit security properties (0644 unit, 0600 logs, umask/env pinning, PATH exclusion, zero secrets in unit), install/reinstall(bootout-before-bootstrap)/uninstall(DB preserved)/restart/restatus flows, failed-install rollback restoring prior unit bytes, maintenance gate holding controlplane BeginMaintenance across install, fail-closed validations (world-writable binary, symlinked unit/log victims untouched, runner timeout, corrupt DB status, unsupported platform)."
     inputs:
@@ -579,7 +579,20 @@ tasks:
     stop_if:
       - "Need files outside allowed_files beyond go.mod/go.sum."
       - "Verification fails twice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Ported agy_service.py (16 tests) to internal/service as a stdlib-only hardened macOS launchd service manager. Spec 06 amended with Amendment A recording the platform decision (macOS LaunchAgents only; systemd/windows deferred post-MVP fail-closed) and all hardening requirements. Delivered: ServiceManager iface (Install/Start/Stop/Status/Uninstall) with injectable Runner seam and LifecycleGuard (*controlplane.Store satisfies); unit hardening (0644 plist, 0600 private logs, Umask 0077, canonical binary via EvalSymlinks, AGY_BIN pinning, PATH excludes ~/.local/bin, API/TOKEN secret scan on env values); install bootstrap+kickstart with bootout-before-bootstrap reinstall and exact previous-plist-bytes rollback on failed bootstrap; maintenance gate Begin/EndMaintenance spanning install (claims blocked inside callbacks, resume after); lifecycle refusal when tasks LEASED/RUNNING with zero commands issued; symlink fail-closed protections for stdout log and plist (victims untouched); exec timeout fails closed 'timed out'; uninstall preserves DB while removing unit; status never creates the DB and rejects corrupt headers without leaking prompt data; restart guard; world-writable binary rejection; unsupported-platform error."
+      changed_files:
+        - spec/openspec/06-os-daemon-service-spec.md
+        - internal/service/service.go
+        - internal/service/service_test.go
+      commands:
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/service/ ; go vet ./internal/service/... && go test -count=1 ./internal/service/...'"
+          status: pass
+          evidence: "gofmt clean, vet clean, ok github.com/tamld/g8s/internal/service 0.203s"
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -race -count=1 ./...'"
+          status: pass
+          evidence: "all 9 packages ok under race detector, zero race reports; repo total 187 test funcs >= oracle 140"
   - id: T018
     type: worker
     assignee: Worker
@@ -623,7 +636,7 @@ tasks:
   - id: T019
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: default
     objective: "Release gate per notes/T013-port-map.md §7: goreleaser release --snapshot --clean runtime smoke inside Docker producing darwin/linux/windows amd64+arm64 binaries (windows/arm64 known gap documented); merge feat/mvp-consolidation into main --no-ff after full dual-pass re-verify on the branch; post-merge FULL-REPO-GREEN proof on main."
     inputs:
