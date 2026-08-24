@@ -74,7 +74,7 @@ visual_board:
     url: null
     command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
 
-active_task: T015
+active_task: T017
 
 tasks:
   - id: T001
@@ -473,7 +473,7 @@ tasks:
   - id: T015
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: default
     objective: "MCP surface expansion per notes/T013-port-map.md §3: add g8s_list_tasks + g8s_cancel_task tools over existing controlplane methods, roles/permissions listing exposing workspace_write {mcp_enabled:false}+disabled_reason, protocolVersion negotiation echo, sanitized submit request view (prompt omitted), and sync-dispatch guard statuses (blocked_by_policy / blocked_by_harness / setup_required+setup_hint / explicit-add_dirs / no-sandbox)."
     inputs:
@@ -484,19 +484,35 @@ tasks:
       - "SPEC-FIRST: amend DELTA-04 delta documenting the new tools before code (T005-D1 precedent)."
       - "Keep g8s_* naming; never adopt python agy_* names."
     allowed_files:
-      - "spec/openspec/"
+      - "spec/openspec/04-mcp-stdio-server-spec.md"
       - "internal/mcp/server.go"
+      - "internal/mcp/tools_ext.go"
       - "internal/mcp/server_test.go"
     verify:
       - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/mcp/ ; go vet ./internal/mcp/... && go test -count=1 ./internal/mcp/...'"
     stop_if:
       - "Need files outside allowed_files."
       - "Verification fails twice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "DELTA-04 Amendment A MCP surface expansion complete. Added five tools (g8s_dispatch, g8s_list_tasks, g8s_cancel_task, g8s_list_roles, g8s_list_permissions) with full guard chain per spec 4.4; initialize protocolVersion echo (4.1); sanitized request views omitting prompt (4.2); workspace_write mcp_enabled=false metadata (4.3); contract_violation isError envelope (4.5); success envelope per 4.6. g8s_submit now forwards role/permission/add_dirs after guard checks. Tests caught a real gap: submitArgs previously dropped add_dirs required by controlplane validation. 14 new tests including durable round-trip against real SQLite store. Repo totals: dual-pass green, 136 top-level test functions (was 122), zero race reports."
+      changed_files:
+        - spec/openspec/04-mcp-stdio-server-spec.md
+        - internal/mcp/server.go
+        - internal/mcp/tools_ext.go
+        - internal/mcp/server_test.go
+      commands:
+        - cmd: "docker golang:1.25 CGO_ENABLED=0: gofmt clean + go vet ./... + go test ./..."
+          status: pass
+          evidence: "all packages ok incl internal/mcp"
+        - cmd: "docker golang:1.25 CGO_ENABLED=1: go vet ./... && go test -race ./..."
+          status: pass
+          evidence: "zero race reports, all packages ok"
+      commit: 6fb3b0d
   - id: T016
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: default
     objective: "Worker supervisor vertical per notes/T013-port-map.md §4: NEW OpenSpec delta then NEW internal/worker implementing parse_duration ('250ms'/'1m2s'/reject '0s'), run_once lifecycle claim->start->execute->finish over controlplane, attempt dirs runs/<task_id>/attempt-N/receipt.json export with prompt.txt cleanup-on-success-and-failure, process-group spawn with cancel/timeout kill, SIGTERM coordination exit 143 via child.pid file, NEEDS_INFO pause with lease release, bounded output capture without persisting worker.stdout/stderr."
     inputs:
@@ -508,9 +524,11 @@ tasks:
       - "Process containment: setpgid process groups, kill(-pgid) on cancel/timeout/signal."
       - "Injectable clock for timeout math; injectable command for tests (no real sleep binaries in CI)."
     allowed_files:
-      - "spec/openspec/"
+      - "spec/openspec/09-worker-supervisor-spec.md"
       - "internal/worker/worker.go"
       - "internal/worker/duration.go"
+      - "internal/worker/proc_posix.go"
+      - "internal/worker/proc_windows.go"
       - "internal/worker/worker_test.go"
       - "go.mod"
       - "go.sum"
@@ -519,11 +537,27 @@ tasks:
     stop_if:
       - "Need files outside allowed_files beyond go.mod/go.sum."
       - "Verification fails twice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Worker supervisor vertical (DELTA-09) complete. Authored spec/openspec/09-worker-supervisor-spec.md (6 requirements: bounded duration parsing; private 0700 attempt dirs with prompt.txt cleanup-always and stdout/stderr never persisted; POSIX process-group termination with child.pid coordination and ExitCodeForSignal 128+sig; lease-lifecycle signals driving cancelled/timeout/lease-lost/NEEDS_INFO branches with lease release on pause; sealed receipt.json export per attempt incl retries; injectable Runner seam keeping tests binary-free). Implemented internal/worker: ParseDurationSeconds ('250ms'->0.25, '1m2s'->62, rejects '0s'/''/'abc'/'-5s'/'500MS'); Supervisor with injectable clock/runner/poll/capture over WorkerControlPlane subset (*controlplane.Store satisfies); RunOnce full lifecycle claim->0700 run dir->prompt 0600->spawn process group->poll cancel/deadline/heartbeat->bounded capture via dispatch.CaptureBounded->finish/pause branches->receipt.json export with prompt/stdout/stderr removal always; proc_posix.go Setpgid + kill(-pgid) TERM->KILL ignoring ESRCH/EPERM, proc_windows.go build-tagged stubs for cross-platform compile. 14 tests porting test_agy_worker.py incl real-SQLite integration: happy path SUCCEEDED+receipt.json+prompt gone, cancel while running CANCELLED+terminate called, injected-clock timeout FAILED retryable, NEEDS_INFO pauses with LeaseOwner nil, 200KB non-UTF8 no deadlock no persistence, spawn failure retryable QUEUED prompt removed, lost start race LEASED without finish, stale-token finish rejected 'lease ownership lost', ExitCodeForSignal(15)==143, retry produces attempt-1+attempt-2 evidence dirs, RunLoop once-mode exit codes, orphan reap removes stale child.pid."
+      changed_files:
+        - spec/openspec/09-worker-supervisor-spec.md
+        - internal/worker/duration.go
+        - internal/worker/worker.go
+        - internal/worker/proc_posix.go
+        - internal/worker/proc_windows.go
+        - internal/worker/worker_test.go
+      commands:
+        - cmd: "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/worker/ ; go vet ./internal/worker/... && go test -count=1 ./internal/worker/...'"
+          status: pass
+          evidence: "gofmt clean, vet clean, ok github.com/tamld/g8s/internal/worker 11.063s"
+        - cmd: "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -race -count=1 ./...'"
+          status: pass
+          evidence: "all 8 packages ok under race detector, zero race reports; repo total 171 top-level test funcs (>=140 oracle gate)"
   - id: T017
     type: worker
     assignee: Worker
-    status: queued
+    status: active
     reasoning_hint: default
     objective: "Service manager vertical per notes/T013-port-map.md §5: NEW OpenSpec delta deciding kardianos/service cross-platform abstraction (launchd/systemd/windows vs launchd-only port), then NEW internal/service with unit security properties (0644 unit, 0600 logs, umask/env pinning, PATH exclusion, zero secrets in unit), install/reinstall(bootout-before-bootstrap)/uninstall(DB preserved)/restart/restatus flows, failed-install rollback restoring prior unit bytes, maintenance gate holding controlplane BeginMaintenance across install, fail-closed validations (world-writable binary, symlinked unit/log victims untouched, runner timeout, corrupt DB status, unsupported platform)."
     inputs:
@@ -535,7 +569,7 @@ tasks:
       - "kardianos dependency only via go.mod; no other new deps without PM approval."
       - "Runner interface injection pattern (FakeRunner parity) so tests never invoke real init systems."
     allowed_files:
-      - "spec/openspec/"
+      - "spec/openspec/06-os-daemon-service-spec.md"
       - "internal/service/service.go"
       - "internal/service/service_test.go"
       - "go.mod"
@@ -549,7 +583,7 @@ tasks:
   - id: T018
     type: worker
     assignee: Worker
-    status: queued
+    status: done
     reasoning_hint: default
     objective: "Safety & coordination hardening per notes/T013-port-map.md §6: receipt revocation edges (revoke consumed=false w/ persisted audit row, revoke-reissue fresh id), ListActiveReceipts enrichment (remaining_seconds rounding, exact expires_at, consumed/expired/cross-session exclusion), multi-agent concurrency on one sqlite file via separate handles (barrier same-receipt race exactly-one-winner 'already consumed', 10-worker validate sweep) proven under CGO_ENABLED=1 -race, contract prompt content tests (exact wiki ALLOWED/FORBIDDEN strings across every read-only profile, DELEGATED WRITE block fields, generic mutation line, empty-paths block, hostile payload rendered literal), full-flow integration issue->gate->prompt->list_active==0 and revoked-gate fail-closed."
     inputs:
@@ -571,7 +605,21 @@ tasks:
     stop_if:
       - "Need files outside allowed_files."
       - "Verification fails twice."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Safety/receipt hardening complete. Added harness.ReceiptRef + BuildContractPromptWithReceipt injecting the full DELEGATED WRITE block (header, scoped path list, out-of-scope violation, Receipt ID, Issuer) rendered even with empty allowed paths; wiki engine policy block (ALLOWED query/search/read/classify vs FORBIDDEN write/reflect/orient/claim/bypass) appended for all read-only permission profiles; hostile payloads render literally; legacy BuildContractPrompt signature preserved so internal/dispatch envelope untouched. Ported 20 safety-coordination tests: revocation on consumed/unknown receipts with persisted consumed rows, exact expiry math via injected clock, cross-handle active listing, two-manager independent validation on one SQLite file, exactly-one-winner races (2 and 10 goroutines) passing CGO_ENABLED=1 race detector with zero reports, expired-invisible-to-fresh-handle, and end-to-end issue/consume/prompt/list flows."
+      changed_files:
+        - internal/harness/harness.go
+        - internal/harness/harness_test.go
+        - internal/receipt/receipt_test.go
+      commands:
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l . ; go vet ./... && go test ./...'"
+          status: pass
+          evidence: "all 7 packages ok, gofmt/vet clean, 157 test functions total"
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -race ./...'"
+          status: pass
+          evidence: "all 7 packages ok under race detector, zero race reports"
+      notes_file: docs/goals/g8s-mvp-oss/notes/T013-port-map.md
   - id: T019
     type: worker
     assignee: Worker
