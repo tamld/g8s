@@ -498,9 +498,9 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 
 func TestClampDuration(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		v, lo, hi time.Duration
-		want     time.Duration
+		want      time.Duration
 	}{
 		{
 			name: "within bounds",
