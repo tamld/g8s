@@ -172,6 +172,54 @@ func submitTask(t *testing.T, env *workerEnv, idem string, maxAttempts int, payl
 
 // --- duration tests ---
 
+func TestFirstNonEmpty(t *testing.T) {
+	tests := []struct {
+		name     string
+		values   []string
+		expected string
+	}{
+		{
+			name:     "no arguments",
+			values:   nil,
+			expected: "",
+		},
+		{
+			name:     "all empty",
+			values:   []string{"", "", ""},
+			expected: "",
+		},
+		{
+			name:     "first non-empty",
+			values:   []string{"first", "", ""},
+			expected: "first",
+		},
+		{
+			name:     "second non-empty",
+			values:   []string{"", "second", ""},
+			expected: "second",
+		},
+		{
+			name:     "multiple non-empty",
+			values:   []string{"first", "second", "third"},
+			expected: "first",
+		},
+		{
+			name:     "mixed empty and non-empty",
+			values:   []string{"", "", "third", "", "fifth"},
+			expected: "third",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := firstNonEmpty(tt.values...)
+			if result != tt.expected {
+				t.Errorf("firstNonEmpty(%v) = %v; want %v", tt.values, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseDurationSecondsAcceptsBoundedExpressions(t *testing.T) {
 	cases := []struct {
 		in   string
