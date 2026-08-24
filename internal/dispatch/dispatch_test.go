@@ -480,3 +480,44 @@ func TestEnvelopeBinaryMissingErrors(t *testing.T) {
 		t.Fatal("resolution failure must not execute anything")
 	}
 }
+
+func TestHomeFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		home string
+		want []string
+	}{
+		{
+			name: "empty home",
+			home: "",
+			want: []string{
+				"/.local/bin/agy",
+				"/AppData/Local/Programs/agy/agy",
+				"/AppData/Roaming/npm/agy",
+			},
+		},
+		{
+			name: "typical unix home",
+			home: "/home/user",
+			want: []string{
+				"/home/user/.local/bin/agy",
+				"/home/user/AppData/Local/Programs/agy/agy",
+				"/home/user/AppData/Roaming/npm/agy",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := homeFallbacks(tt.home)
+			if len(got) != len(tt.want) {
+				t.Fatalf("homeFallbacks() returned %d items, want %d", len(got), len(tt.want))
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("homeFallbacks()[%d] = %v, want %v", i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
