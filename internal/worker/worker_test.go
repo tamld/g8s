@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"strconv"
 	"testing"
 	"time"
 
@@ -493,5 +494,86 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 	env.sup.reapOrphans()
 	if _, err := os.Stat(orphanPID); !os.IsNotExist(err) {
 		t.Fatalf("stale child.pid should be removed, stat err=%v", err)
+	}
+}
+func TestMaybePause(t *testing.T) {
+	tests := []struct {
+		name       string
+		wr         workerResult
+		stdoutText string
+		token      string
+		wantPaused bool
+	}{
+		{
+			name:       "direct needs info",
+			wr:         workerResult{Status: controlplane.StateNeedsInfo},
+			stdoutText: "",
+			token:      "valid",
+			wantPaused: true,
+		},
+		{
+			name:       "direct blocked",
+			wr:         workerResult{Status: controlplane.StateBlocked},
+			stdoutText: "",
+			token:      "valid",
+			wantPaused: true,
+		},
+		{
+			name:       "fenced needs info",
+			wr:         workerResult{Status: controlplane.StateFailed},
+			stdoutText: "some log\n`json {\"status\":\"NEEDS_INFO\"}`",
+			token:      "valid",
+			wantPaused: true,
+		},
+		{
+			name:       "fenced blocked",
+			wr:         workerResult{Status: controlplane.StateFailed},
+			stdoutText: "some log\n`json {\"status\":\"BLOCKED\"}`\nend",
+			token:      "valid",
+			wantPaused: true,
+		},
+		{
+			name:       "no pause state",
+			wr:         workerResult{Status: "SUCCESS"},
+			stdoutText: "some log\n`json {\"status\":\"SUCCESS\"}`\nend",
+			token:      "valid",
+			wantPaused: false,
+		},
+		{
+			name:       "fenced invalid json ignored",
+			wr:         workerResult{Status: "SUCCESS"},
+			stdoutText: "some log\n`json {\"status\":\"BLOCKED\"`\nend", // missing closing brace
+			token:      "valid",
+			wantPaused: false,
+		},
+		{
+			name:       "control plane failure (stale token)",
+			wr:         workerResult{Status: controlplane.StateNeedsInfo},
+			stdoutText: "",
+			token:      "bad-token",
+			wantPaused: false,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newWorkerEnv(t, nil)
+			_ = submitTask(t, env, "test-pause-" + strconv.Itoa(i), 3, nil)
+			claimed, err := env.store.ClaimTask(context.Background(), "w1", 60)
+			if err != nil || claimed == nil {
+				t.Fatalf("ClaimTask: %v", err)
+			}
+			env.store.StartTask(claimed.TaskID, "w1", *claimed.LeaseToken)
+
+			token := *claimed.LeaseToken
+			if tc.token == "bad-token" {
+				token = "bad-token"
+			}
+
+			got := env.sup.maybePause(context.Background(), tc.wr, tc.stdoutText, claimed.TaskID, "w1", token)
+			if got != tc.wantPaused {
+				t.Errorf("maybePause() = %v, want %v", got, tc.wantPaused)
+			}
+		})
 	}
 }
