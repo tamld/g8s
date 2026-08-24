@@ -74,7 +74,7 @@ visual_board:
     url: null
     command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
 
-active_task: T019
+active_task: T099
 
 tasks:
   - id: T001
@@ -636,7 +636,7 @@ tasks:
   - id: T019
     type: worker
     assignee: Worker
-    status: active
+    status: done
     reasoning_hint: default
     objective: "Release gate per notes/T013-port-map.md §7: goreleaser release --snapshot --clean runtime smoke inside Docker producing darwin/linux/windows amd64+arm64 binaries (windows/arm64 known gap documented); merge feat/mvp-consolidation into main --no-ff after full dual-pass re-verify on the branch; post-merge FULL-REPO-GREEN proof on main."
     inputs:
@@ -654,11 +654,34 @@ tasks:
     stop_if:
       - "Merge conflicts require semantic decisions beyond clean resolution."
       - "Snapshot build fails on config grounds needing owner input."
-    receipt: null
+    receipt:
+      result: done
+      summary: "Goreleaser snapshot smoke executed locally and MVP tranche consolidated into main. First run (config as-is since eb5b14d) succeeded in 22s producing 0.0.0-SNAPSHOT-b1c61d0 across all five targets (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64; windows/arm64 excluded per ignore rule) but surfaced two goreleaser v2 deprecation warnings on archives.format and format_overrides.format. Modernized .goreleaser.yaml to the v2 'formats' list schema and re-ran: release succeeded clean with zero deprecation warnings, 5/5 archives + checksums.txt regenerated (PE32+ windows binary verified earlier). Snapshot mode explicitly skips announce/publish/validate - no remote side effects, no GitHub Actions triggered per owner directive. Full dual-pass re-verification at merge point: CGO_ENABLED=0 gofmt/vet/test all 9 packages ok AND CGO_ENABLED=1 go test -race all 9 packages ok zero race reports; 187 test functions >= oracle gate 140. Merged feat/mvp-consolidation into main --no-ff (merge commit a6de142, +10122 lines across 41 files); bookkeeping commits c86cfdb/b1c61d0. NO PUSH: main ahead of origin/main locally only. All four oracle completion criteria met."
+      changed_files:
+        - .goreleaser.yaml
+      commands:
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build --security-opt=no-new-privileges goreleaser/goreleaser release --snapshot --clean"
+          status: pass
+          evidence: "run1: succeeded 22s version 0.0.0-SNAPSHOT-b1c61d0 w/ 2 deprecation warnings; run2 after formats fix: succeeded 1s zero warnings, targets windows_amd64_v1 darwin_arm64_v8.0 darwin_amd64_v1 linux_arm64_v8.0 linux_amd64_v1"
+        - cmd: "git add .goreleaser.yaml && git commit -m 'chore(release): adopt goreleaser v2 archives formats schema'"
+          status: pass
+          evidence: "committed on feat/mvp-consolidation"
+        - cmd: "ls dist/*.tar.gz dist/*.zip dist/checksums.txt && file dist/g8s_windows_amd64_v1/g8s.exe"
+          status: pass
+          evidence: "5 archives + checksums.txt present; g8s.exe = PE32+ executable x86-64"
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l . ; go vet ./... && go test -count=1 ./...'"
+          status: pass
+          evidence: "all 9 packages ok"
+        - cmd: "docker run --rm -v \"$PWD\":/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -race -count=1 ./...'"
+          status: pass
+          evidence: "all 9 packages ok, zero race reports"
+        - cmd: "git checkout main && git merge --no-ff feat/mvp-consolidation -m 'merge: consolidate MVP tranche (T014-T019) into main'"
+          status: pass
+          evidence: "merge commit a6de142, 41 files changed +10122 lines; NOT pushed (main ahead of origin/main locally)"
   - id: T099
     type: pm
     assignee: PM
-    status: queued
+    status: active
     reasoning_hint: default
     objective: "Publication readiness packet at MVP gate: LICENSE/MIT verification, README/versioning checks, publish checklist - terminal card blocked on explicit owner approval before any push/visibility change."
     constraints:
