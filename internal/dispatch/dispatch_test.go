@@ -480,3 +480,98 @@ func TestEnvelopeBinaryMissingErrors(t *testing.T) {
 		t.Fatal("resolution failure must not execute anything")
 	}
 }
+
+func TestValidateGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        RunOptions
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "happy path with explicit role and permission",
+			opts: RunOptions{
+				Role:       "scout",
+				Permission: "automation_read",
+				Prompt:     "find something",
+			},
+			wantErr: false,
+		},
+		{
+			name: "implicit defaults used when empty",
+			opts: RunOptions{
+				Prompt: "collect things",
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown role",
+			opts: RunOptions{
+				Role:       "unknown_role",
+				Permission: "read_only",
+				Prompt:     "test",
+			},
+			wantErr:     true,
+			errContains: "unknown role",
+		},
+		{
+			name: "unknown permission",
+			opts: RunOptions{
+				Role:       "collector",
+				Permission: "unknown_permission",
+				Prompt:     "test",
+			},
+			wantErr:     true,
+			errContains: "unknown permission",
+		},
+		{
+			name: "prompt too long",
+			opts: RunOptions{
+				Role:       "collector",
+				Permission: "read_only",
+				Prompt:     strings.Repeat("a", 30001), // max for read_only is 30000
+			},
+			wantErr:     true,
+			errContains: "prompt too long",
+		},
+		{
+			name: "skip permissions not allowed by profile",
+			opts: RunOptions{
+				Role:            "collector",
+				Permission:      "read_only", // skip permissions not allowed
+				SkipPermissions: true,
+				Prompt:          "test",
+			},
+			wantErr:     true,
+			errContains: "--skip-permissions is not allowed",
+		},
+		{
+			name: "skip permissions allowed by profile",
+			opts: RunOptions{
+				Role:            "collector",
+				Permission:      "automation_read", // skip permissions allowed
+				SkipPermissions: true,
+				Prompt:          "test",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateGate(tc.opts)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.errContains) {
+					t.Errorf("expected error containing %q, got %q", tc.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
