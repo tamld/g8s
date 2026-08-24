@@ -496,6 +496,133 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 	}
 }
 
+func TestClampDuration(t *testing.T) {
+	tests := []struct {
+		name      string
+		v, lo, hi time.Duration
+		want      time.Duration
+	}{
+		{
+			name: "within bounds",
+			v:    5 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 5 * time.Second,
+		},
+		{
+			name: "below lower bound",
+			v:    0 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 1 * time.Second,
+		},
+		{
+			name: "above upper bound",
+			v:    15 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "equal to lower bound",
+			v:    1 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 1 * time.Second,
+		},
+		{
+			name: "equal to upper bound",
+			v:    10 * time.Second,
+			lo:   1 * time.Second,
+			hi:   10 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "negative duration, clamped to zero",
+			v:    -5 * time.Second,
+			lo:   0 * time.Second,
+			hi:   10 * time.Second,
+			want: 0 * time.Second,
+		},
+		{
+			name: "all negative bounds",
+			v:    -15 * time.Second,
+			lo:   -10 * time.Second,
+			hi:   -1 * time.Second,
+			want: -10 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampDuration(tt.v, tt.lo, tt.hi)
+			if got != tt.want {
+				t.Errorf("clampDuration(%v, %v, %v) = %v, want %v", tt.v, tt.lo, tt.hi, got, tt.want)
+			}
+		})
+	}
+}
+func TestStdbuf(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		expected []byte
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: []byte{},
+		},
+		{
+			name:     "empty input",
+			input:    []byte{},
+			expected: []byte{},
+		},
+		{
+			name:     "non-empty input",
+			input:    []byte("hello"),
+			expected: []byte("hello"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stdbuf(tt.input)
+			if tt.input == nil && result == nil {
+				t.Errorf("stdbuf(nil) returned nil, expected non-nil empty slice")
+			}
+			if len(result) != len(tt.expected) {
+				t.Errorf("stdbuf() returned length %d, expected %d", len(result), len(tt.expected))
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("stdbuf() returned %v, expected %v", result, tt.expected)
+					break
+				}
+			}
+		})
+	}
+}
+func TestFirstOf(t *testing.T) {
+	cases := []struct {
+		name string
+		dirs []string
+		want string
+	}{
+		{"nil slice", nil, ""},
+		{"empty slice", []string{}, ""},
+		{"one element", []string{"a"}, "a"},
+		{"multiple elements", []string{"a", "b", "c"}, "a"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstOf(tc.dirs); got != tc.want {
+				t.Errorf("firstOf(%v) = %q, want %q", tc.dirs, got, tc.want)
+			}
+		})
+	}
+}
 func TestDerefString(t *testing.T) {
 	if got := derefString(nil); got != "" {
 		t.Errorf("derefString(nil) = %q, want %q", got, "")
