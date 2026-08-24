@@ -480,3 +480,38 @@ func TestEnvelopeBinaryMissingErrors(t *testing.T) {
 		t.Fatal("resolution failure must not execute anything")
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "''"},
+		{"safe_string123", "safe_string123"},
+		{"safe-string", "safe-string"},
+		{"safe.string", "safe.string"},
+		{"safe@string", "safe@string"},
+		{"safe=string", "safe=string"},
+		{"safe:string", "safe:string"},
+		{"safe,string", "safe,string"},
+		{"safe+string", "safe+string"},
+		{"safe%string", "safe%string"},
+		{"safe/string", "safe/string"},
+		{"string with spaces", "'string with spaces'"},
+		{"string'with'quotes", "'string'\\''with'\\''quotes'"},
+		{"string\"with\"doublequotes", "'string\"with\"doublequotes'"},
+		{"'onlyquotes'", "''\\''onlyquotes'\\'''"},
+		{"\\", "'\\'"},
+		{"\n", "'\n'"},
+		{"-", "-"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q; want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
