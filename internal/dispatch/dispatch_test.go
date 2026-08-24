@@ -80,6 +80,54 @@ func TestResolvePATHLookupFallback(t *testing.T) {
 	}
 }
 
+func TestSuffixCandidates(t *testing.T) {
+	tests := []struct {
+		name      string
+		reference string
+		platform  string
+		want      []string
+	}{
+		{
+			name:      "non-windows platform",
+			reference: "agy",
+			platform:  "linux",
+			want:      []string{"agy"},
+		},
+		{
+			name:      "windows platform with existing suffix",
+			reference: "agy.exe",
+			platform:  "windows",
+			want:      []string{"agy.exe"},
+		},
+		{
+			name:      "windows platform without suffix",
+			reference: "agy",
+			platform:  "windows",
+			want:      []string{"agy", "agy.exe", "agy.cmd", "agy.bat"},
+		},
+		{
+			name:      "windows platform with different case existing suffix",
+			reference: "agy.CMD",
+			platform:  "windows",
+			want:      []string{"agy.CMD"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := suffixCandidates(tt.reference, tt.platform)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d candidates, want %d", len(got), len(tt.want))
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("candidate %d = %q, want %q", i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestResolveWindowsSuffixExpansion(t *testing.T) {
 	opts := makeResolver(
 		map[string]bool{"/tools/agy.cmd": true},
