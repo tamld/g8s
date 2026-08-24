@@ -495,3 +495,45 @@ func TestReapOrphansRemovesStaleCoordinationFiles(t *testing.T) {
 		t.Fatalf("stale child.pid should be removed, stat err=%v", err)
 	}
 }
+
+func TestStdbuf(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		expected []byte
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: []byte{},
+		},
+		{
+			name:     "empty input",
+			input:    []byte{},
+			expected: []byte{},
+		},
+		{
+			name:     "non-empty input",
+			input:    []byte("hello"),
+			expected: []byte("hello"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stdbuf(tt.input)
+			if tt.input == nil && result == nil {
+				t.Errorf("stdbuf(nil) returned nil, expected non-nil empty slice")
+			}
+			if len(result) != len(tt.expected) {
+				t.Errorf("stdbuf() returned length %d, expected %d", len(result), len(tt.expected))
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Errorf("stdbuf() returned %v, expected %v", result, tt.expected)
+					break
+				}
+			}
+		})
+	}
+}
