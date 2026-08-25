@@ -64,16 +64,16 @@
       "type": ["string", "null"]
     },
     "lease_expires_at": {
-      "type": ["integer", "null"]
+      "type": ["number", "null"]
     },
     "exit_code": {
       "type": ["integer", "null"]
     },
     "created_at": {
-      "type": "integer"
+      "type": ["number", "string"]
     },
     "updated_at": {
-      "type": "integer"
+      "type": ["number", "string"]
     }
   },
   "additionalProperties": false

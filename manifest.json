@@ -95,16 +95,46 @@
       "status": "APPLIED"
     },
     {
+      "id": "DELTA-03",
+      "title": "Control Plane SQLite WAL Task Queue",
+      "path": "spec/openspec/03-controlplane-sqlite-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-04",
+      "title": "Stdio JSON-RPC 2.0 MCP Server",
+      "path": "spec/openspec/04-mcp-stdio-server-spec.md",
+      "status": "APPLIED"
+    },
+    {
       "id": "DELTA-05",
       "title": "Provider Registry & Resource Pool Governor",
       "path": "spec/openspec/05-provider-and-resource-pool-spec.md",
-      "status": "PROPOSED"
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-06",
+      "title": "OS Daemon Service Manager (LaunchAgent)",
+      "path": "spec/openspec/06-os-daemon-service-spec.md",
+      "status": "APPLIED"
     },
     {
       "id": "DELTA-07",
       "title": "LSP & Dependency Blast Radius Analyzer",
       "path": "spec/openspec/07-blast-radius-analyzer-spec.md",
       "status": "PROPOSED"
+    },
+    {
+      "id": "DELTA-08",
+      "title": "Bounded AGY CLI Dispatch Wrapper",
+      "path": "spec/openspec/08-dispatch-wrapper-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-09",
+      "title": "Worker Process Supervisor & Sandbox",
+      "path": "spec/openspec/09-worker-supervisor-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

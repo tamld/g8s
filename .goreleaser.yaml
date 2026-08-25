@@ -63,3 +63,20 @@ nfpms:
       - deb
       - rpm
       - apk
+
+brews:
+  - repository:
+      owner: tamld
+      name: homebrew-tap
+      branch: main
+      token: "{{ if index .Env \"HOMEBREW_TAP_GITHUB_TOKEN\" }}{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}{{ else }}{{ .Env.GITHUB_TOKEN }}{{ end }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    homepage: "https://github.com/tamld/g8s"
+    description: "Zero-CGO pure-Go harness orchestrating AI subagents"
+    license: "MIT"
+    test: |
+      system "#{bin}/g8s", "version"
+
+
