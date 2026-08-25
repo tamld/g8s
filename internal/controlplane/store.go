@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	dsn := fmt.Sprintf(
 		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
-		dbPath,
+		url.PathEscape(dbPath),
 	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -76,16 +77,43 @@ func (s *Store) initialize() error {
 		return fmt.Errorf("begin exclusive schema transaction: %w", err)
 	}
 
+	if err := checkSchemaVersion(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := applyBaseSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateTasksTable(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+
+	if _, err := conn.ExecContext(context.Background(),
+		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+		rollbackInit(conn)
+		return fmt.Errorf("record schema version: %w", err)
+	}
+
+	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
+		return fmt.Errorf("commit schema transaction: %w", err)
+	}
+	return nil
+}
+
+func checkSchemaVersion(conn *sql.Conn) error {
 	version := 0
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if version < 0 || (version > 2 && version != SchemaVersion) {
-		rollbackInit(conn)
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
+	return nil
+}
 
+func applyBaseSchema(conn *sql.Conn) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS tasks (
 			task_id TEXT PRIMARY KEY,
@@ -131,17 +159,19 @@ func (s *Store) initialize() error {
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
-			rollbackInit(conn)
 			return fmt.Errorf("apply control-plane schema: %w", err)
 		}
 	}
+	return nil
+}
 
+func migrateTasksTable(conn *sql.Conn) error {
 	var hasParent int
 	parentRows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(tasks)")
 	if err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("inspect tasks columns: %w", err)
 	}
+	defer parentRows.Close()
 	for parentRows.Next() {
 		var cid int
 		var name, colType string
@@ -149,35 +179,20 @@ func (s *Store) initialize() error {
 		var dflt sql.NullString
 		var pk int
 		if err := parentRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			parentRows.Close()
-			rollbackInit(conn)
 			return fmt.Errorf("scan tasks columns: %w", err)
 		}
 		if name == "parent_task_id" {
 			hasParent = 1
 		}
 	}
-	parentRows.Close()
 	if err := parentRows.Err(); err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("iterate tasks columns: %w", err)
 	}
 	if hasParent == 0 {
 		if _, err := conn.ExecContext(context.Background(),
 			"ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(task_id)"); err != nil {
-			rollbackInit(conn)
 			return fmt.Errorf("migrate parent_task_id column: %w", err)
 		}
-	}
-
-	if _, err := conn.ExecContext(context.Background(),
-		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
-		rollbackInit(conn)
-		return fmt.Errorf("record schema version: %w", err)
-	}
-
-	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
-		return fmt.Errorf("commit schema transaction: %w", err)
 	}
 	return nil
 }
@@ -314,29 +329,27 @@ func (s *Store) ActiveTaskCount(ctx context.Context) (int, error) {
 // (stale worker, expired lease, or unknown task).
 var ErrLeaseLost = errors.New("lease lost")
 
-// SubmitTask validates and inserts a QUEUED task, deduplicating on
-// idempotency key plus request hash plus parent lineage.
-func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, error) {
+func prepareSubmitRequest(req SubmitTaskRequest) (SubmitTaskRequest, string, string, error) {
 	if req.IdempotencyKey == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, errors.New("idempotency_key is required")
+		return req, "", "", errors.New("idempotency_key is required")
 	}
 	if len(req.IdempotencyKey) > 200 {
-		return nil, errors.New("idempotency_key must be at most 200 characters")
+		return req, "", "", errors.New("idempotency_key must be at most 200 characters")
 	}
 	if req.ParentTaskID != nil && *req.ParentTaskID == "" {
-		return nil, errors.New("parent_task_id must be a non-empty string when provided")
+		return req, "", "", errors.New("parent_task_id must be a non-empty string when provided")
 	}
 	if req.MaxAttempts == 0 {
 		req.MaxAttempts = 1
 	}
 	if req.Priority < -100 || req.Priority > 100 {
-		return nil, errors.New("priority must be an integer between -100 and 100")
+		return req, "", "", errors.New("priority must be an integer between -100 and 100")
 	}
 	if req.MaxAttempts < 1 || req.MaxAttempts > 10 {
-		return nil, errors.New("max_attempts must be an integer between 1 and 10")
+		return req, "", "", errors.New("max_attempts must be an integer between 1 and 10")
 	}
 	if err := ValidateSubmitRequest(req); err != nil {
-		return nil, err
+		return req, "", "", err
 	}
 	payload := req.Payload
 	if len(payload) == 0 {
@@ -344,32 +357,32 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	}
 	requestJSON, err := canonicalJSON(payload)
 	if err != nil {
-		return nil, fmt.Errorf("canonicalize request: %w", err)
+		return req, "", "", fmt.Errorf("canonicalize request: %w", err)
 	}
 	requestHash, err := contentHash(requestJSON)
 	if err != nil {
-		return nil, fmt.Errorf("hash request: %w", err)
+		return req, "", "", fmt.Errorf("hash request: %w", err)
 	}
-	now := float64(s.clock().UnixNano()) / 1e9
+	return req, requestJSON, requestHash, nil
+}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+func checkParentTask(ctx context.Context, tx *sql.Tx, parentTaskID *string) error {
+	if parentTaskID == nil {
+		return nil
+	}
+	var one int
+	err := tx.QueryRowContext(ctx,
+		"SELECT 1 FROM tasks WHERE task_id = ?", *parentTaskID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("unknown parent task: %s", *parentTaskID)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("begin submit: %w", err)
+		return fmt.Errorf("check parent task: %w", err)
 	}
-	defer tx.Rollback()
+	return nil
+}
 
-	if req.ParentTaskID != nil {
-		var one int
-		err := tx.QueryRowContext(ctx,
-			"SELECT 1 FROM tasks WHERE task_id = ?", *req.ParentTaskID).Scan(&one)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("unknown parent task: %s", *req.ParentTaskID)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("check parent task: %w", err)
-		}
-	}
-
+func checkExistingTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, requestHash string) (*Task, error) {
 	existing := tx.QueryRowContext(ctx,
 		"SELECT "+taskColumns+" FROM tasks WHERE idempotency_key = ?", req.IdempotencyKey)
 	task, scanErr := scanTask(existing)
@@ -382,17 +395,20 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 			return nil, errors.New("idempotency_key already exists with a different request")
 		}
 		task.Deduplicated = true
-		return task, tx.Commit()
+		return task, nil
 	}
+	return nil, nil
+}
 
+func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, requestJSON string, requestHash string, now float64) (*Task, error) {
 	taskID := uuid.NewString()
-	_, err = tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks(
 			task_id, parent_task_id, idempotency_key, schema_version, state, priority,
 			request_json, request_hash, max_attempts, created_at, updated_at
 		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)`,
 		taskID, req.ParentTaskID, req.IdempotencyKey, TaskSchemaVersion,
-		req.Priority, string(requestJSON), requestHash, req.MaxAttempts, now, now)
+		req.Priority, requestJSON, requestHash, req.MaxAttempts, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
 	}
@@ -413,6 +429,40 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	}
 	if inserted == nil {
 		return nil, errors.New("submitted task missing after insert")
+	}
+	return inserted, nil
+}
+
+// SubmitTask validates and inserts a QUEUED task, deduplicating on
+// idempotency key plus request hash plus parent lineage.
+func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, error) {
+	req, requestJSON, requestHash, err := prepareSubmitRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin submit: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := checkParentTask(ctx, tx, req.ParentTaskID); err != nil {
+		return nil, err
+	}
+
+	task, err := checkExistingTask(ctx, tx, req, requestHash)
+	if err != nil {
+		return nil, err
+	}
+	if task != nil {
+		return task, tx.Commit()
+	}
+
+	inserted, err := insertNewTask(ctx, tx, req, requestJSON, requestHash, now)
+	if err != nil {
+		return nil, err
 	}
 	return inserted, tx.Commit()
 }
