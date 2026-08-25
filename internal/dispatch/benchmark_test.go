@@ -2,6 +2,9 @@ package dispatch
 
 import "testing"
 
+// benchSink prevents the compiler from eliminating the benchmarked call.
+var benchSink bool
+
 func BenchmarkHasSuffix(b *testing.B) {
 	cases := []string{
 		"path/to/some/executable.EXE",
@@ -11,7 +14,7 @@ func BenchmarkHasSuffix(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, c := range cases {
-			hasSuffix(c)
+			benchSink = hasSuffix(c)
 		}
 	}
 }
