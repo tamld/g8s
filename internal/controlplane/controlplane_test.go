@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -29,7 +30,7 @@ func newTestStore(t *testing.T) (*Store, string) {
 
 func openRawDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(ON)")
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(ON)")
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
