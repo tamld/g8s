@@ -96,7 +96,7 @@ Per released version:
 | D3 | Side-by-side Go-vs-Python parity verification (matrix in RELEASE_READINESS.md) not yet executed | Executed against tagged candidate before publishing v0.1.0 |
 | D4 | ldflags stamp check (`./g8s version` must equal the tag) | v0.1.0 publish gate |
 | D5 | Tag-triggered release automation absent (only ci.yml exists); SOP assumes it | Decide before v0.1.0: add release.yml or codify local-run procedure |
-| D6 | pterm dependency tree (~10 modules) binary-size impact unmeasured | Measure in v0.1.x; slim down in v0.2.0 if material |
+| D6 | pterm dependency tree (~10 modules) binary-size impact unmeasured — MEASURED 2026-08-25: pre-pterm (48d4b90) darwin/arm64 `-trimpath -ldflags "-s -w"` = 10,214,674 B; post-pterm (main 8fd0f39) = 10,740,114 B; delta ≈ 513 KB (+5.1%). Accepted as proportionate for the TUI value; no slim-down planned for v0.1.x; revisit only if v0.2.0 profiling shows material bloat elsewhere | Closed as measured/accepted in v0.1.0 |
 | D7 | cobra CLI migration deferred (T012) | v0.2.0 |
 | D8 | kardianos cross-platform service backends deferred (T017; launchd-only today) | v0.2.0+ |
 | D9 | Formal security audit required for GA claims | v1.0.0 |
