@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="g8s gatekeeper mark">
+  <!-- g8s: The Gatekeepers — Zero-CGO, Pure Go -->
+  <defs>
+    <linearGradient id="g8sShield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F62FE"/>
+      <stop offset="100%" stop-color="#0D1B2A"/>
+    </linearGradient>
+  </defs>
+  <path d="M64 6 L114 26 V70 C114 98 92 116 64 124 C36 116 14 98 14 70 V26 Z"
+        fill="url(#g8sShield)" stroke="#4DA3FF" stroke-width="3"/>
+  <rect x="44" y="56" width="40" height="34" rx="4" fill="none" stroke="#E8F1FF" stroke-width="5"/>
+  <path d="M52 56 V46 a12 12 0 0 1 24 0 V56" fill="none" stroke="#E8F1FF" stroke-width="5"/>
+  <circle cx="64" cy="70" r="6" fill="#E8F1FF"/>
+  <rect x="61" y="72" width="6" height="10" rx="2" fill="#E8F1FF"/>
+</svg>
