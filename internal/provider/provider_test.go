@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -307,5 +312,144 @@ func TestDiscoveryOrderIsSortedAndStable(t *testing.T) {
 		if first[i].Name != name {
 			t.Errorf("index %d = %q, want %q", i, first[i].Name, name)
 		}
+	}
+}
+
+// --- DELTA-10 two-class wiring ---
+
+func TestDefaultConfigsArePlatformDispatchClass(t *testing.T) {
+	for _, cfg := range DefaultConfigs() {
+		if cfg.Class != "platform_dispatch" {
+			t.Errorf("default provider %q class = %q, want platform_dispatch", cfg.Name, cfg.Class)
+		}
+	}
+}
+
+func TestLoadProvidersJSONMergesApiCallEntries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	content := fmt.Sprintf(`{"providers":[
+	  {"class": "api_call", "name": "9router", "base_url": %q, "auth_env": "ROUTER_KEY", "models": [{"id": "gemini-3.7-flash-high", "context_window": 1000000}], "slots": 4},
+	  {"class": "platform_dispatch", "name": "opencode", "models": [{"id": "free-model"}], "slots": 2}
+	]}`, server.URL)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	// DELTA-10 R2 fail-closed contract: an api_call provider whose declared
+	// auth_env is unset must stay UNAVAILABLE. Setting the variable here lets
+	// the probe reach the HTTP smoke check and report READY.
+	t.Setenv("ROUTER_KEY", "test-credential")
+
+	info, err := r.GetProvider("9router")
+	if err != nil {
+		t.Fatalf("get 9router: %v", err)
+	}
+	if info.Status != StatusReady || info.Class != "api_call" {
+		t.Fatalf("9router = %s/%s, want READY/api_call", info.Status, info.Class)
+	}
+	ocInfo, err := r.GetProvider("opencode")
+	if err != nil {
+		t.Fatalf("get opencode: %v", err)
+	}
+	if ocInfo.Class != "platform_dispatch" {
+		t.Fatalf("opencode class = %q", ocInfo.Class)
+	}
+}
+
+func TestLoadProvidersJSONRejectsDuplicateNames(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+	content := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server.URL + `","auth_env":"","models":[{"id":"m"}],"slots":1}]}`
+	os.WriteFile(path, []byte(content), 0o600)
+
+	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	err := r.LoadProvidersJSON(path)
+	if err == nil || !strings.Contains(err.Error(), "duplicate provider name") {
+		t.Fatalf("want duplicate error, got %v", err)
+	}
+}
+
+func TestApiCallAuthEnvUnsetFailsClosedWithoutHTTP(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	content := `{"providers":[{"class":"api_call","name":"locked","base_url":"` + server.URL + `","auth_env":"PARITY_TEST_MISSING_KEY","models":[{"id":"m"}],"slots":1}]}`
+	os.WriteFile(path, []byte(content), 0o600)
+
+	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	t.Setenv("PARITY_TEST_MISSING_KEY", "")
+	info, err := r.GetProvider("locked")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if info.Status != StatusUnavailable {
+		t.Fatalf("status = %s, want UNAVAILABLE", info.Status)
+	}
+	if !strings.Contains(info.Reason, "auth_env PARITY_TEST_MISSING_KEY is not set") {
+		t.Fatalf("reason = %q", info.Reason)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&requests) != 0 {
+		t.Fatalf("HTTP request issued despite unset auth_env")
+	}
+}
+
+func TestSelectForModelPrefersApiCallOverPlatformDispatch(t *testing.T) {
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer okServer.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	content := `{"providers":[{"class":"api_call","name":"pool","base_url":"` + okServer.URL + `","auth_env":"","models":[{"id":"shared-model"}],"slots":1}]}`
+	os.WriteFile(path, []byte(content), 0o600)
+
+	r := NewRegistry(nil, nil, stubLookPath(map[string]string{"cli-dispatch": "/bin/cli"}))
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("load api_call: %v", err)
+	}
+	path2 := filepath.Join(dir, "p2.json")
+	content2 := `{"providers":[{"class":"platform_dispatch","name":"cli-dispatch","models":[{"id":"shared-model"}],"slots":1}]}`
+	os.WriteFile(path2, []byte(content2), 0o600)
+	if err := r.LoadProvidersJSON(path2); err != nil {
+		t.Fatalf("load platform_dispatch: %v", err)
+	}
+	if _, err := r.DiscoverAll(context.Background()); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+
+	name, release, err := r.SelectForModel(context.Background(), "shared-model")
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	defer release()
+	if name != "pool" {
+		t.Fatalf("selected %q, want api_call pool first", name)
 	}
 }
