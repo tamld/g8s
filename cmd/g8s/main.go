@@ -145,7 +145,11 @@ func runSubmit(args []string) {
 	prompt := fs.String("prompt", "", "task prompt handed to the worker")
 	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner)")
 	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write)")
+<<<<<<< HEAD
 	timeout := fs.String("timeout", "30s", "execution window for the worker")
+=======
+	timeout := fs.String("timeout", "30s", "execution window handed to the worker")
+>>>>>>> dbfec1d (feat(cli): enhance submit flags, launchagent PATH, task lineage & install script)
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
 	parentTaskID := fs.String("parent-task-id", "", "parent task ID for subtask lineage tracking")
 	skipPermissions := fs.Bool("skip-permissions", false, "bypass permission checks if permitted by profile")
@@ -240,6 +244,7 @@ func runGet(args []string) {
 	fmt.Println(string(out))
 }
 
+<<<<<<< HEAD
 // runResume moves a NEEDS_INFO or BLOCKED task back to QUEUED with optional clarifying prompt.
 func runResume(args []string) {
 	if len(args) == 0 {
@@ -276,6 +281,8 @@ func runResume(args []string) {
 	fmt.Println(string(out))
 }
 
+=======
+>>>>>>> dbfec1d (feat(cli): enhance submit flags, launchagent PATH, task lineage & install script)
 // runTasks lists durable tasks optionally filtered by state.
 func runTasks(args []string) {
 	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
@@ -395,7 +402,10 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  submit       Queue an asynchronous durable task with harness safety checks")
 	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
+<<<<<<< HEAD
 	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
+=======
+>>>>>>> dbfec1d (feat(cli): enhance submit flags, launchagent PATH, task lineage & install script)
 	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
