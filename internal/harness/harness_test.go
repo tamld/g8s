@@ -253,4 +253,18 @@ func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "denied path fragment") {
 		t.Fatalf("expected symlink pointing to .ssh to be rejected, got %v", err)
 	}
+
+	// Also test non-existent child under symlink
+	nestedPath := filepath.Join(symlinkPath, "non_existent_key.pub")
+	errNested := ValidateRequest(
+		"Scan nested",
+		"collector",
+		"read_only",
+		[]string{nestedPath},
+		false,
+		"",
+	)
+	if errNested == nil || !strings.Contains(errNested.Error(), "denied path fragment") {
+		t.Fatalf("expected nested path under symlink pointing to .ssh to be rejected, got %v", errNested)
+	}
 }

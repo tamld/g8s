@@ -694,6 +694,14 @@ func TestReceiptHashIsReproducibleFromUnsignedPayload(t *testing.T) {
 	if recomputed != stored {
 		t.Errorf("receipt hash mismatch: stored %s recomputed %s", stored, recomputed)
 	}
+
+	freshTask, err := s.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if freshTask.ReceiptHash == nil || *freshTask.ReceiptHash != stored {
+		t.Fatalf("database sealed receipt_hash %v != BuildReceipt %s", freshTask.ReceiptHash, stored)
+	}
 }
 
 func TestRetryableFinishKeepsPromptWhileQueued(t *testing.T) {
