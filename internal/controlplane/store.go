@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	dsn := fmt.Sprintf(
 		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
-		dbPath,
+		url.PathEscape(dbPath),
 	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
