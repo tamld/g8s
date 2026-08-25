@@ -13,6 +13,8 @@
     "philosophy": "docs/DESIGN_PHILOSOPHY.md",
     "lifecycle": "docs/LIFECYCLE_AND_EVIDENCE.md",
     "experience": "docs/CLI_AND_EXPERIENCE_DESIGN.md",
+    "decoupled_memory": "docs/DECOUPLED_MEMORY_ARCHITECTURE.md",
+    "distillation_spec": "docs/CONTEXTUAL_DISTILLATION_SPEC.md",
     "versioning": "docs/VERSIONING.md",
     "release_sop": "docs/RELEASE_SOP.md",
     "contributing": "CONTRIBUTING.md",

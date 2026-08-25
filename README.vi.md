@@ -63,9 +63,13 @@ hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 - [Kết nối MCP](docs/user-guide/mcp-tools.md)
 - [Quản lý service](docs/user-guide/service.md)
 
-## Kiến trúc & đặc tả
+## Kiến trúc & Đặc tả
 
-Đặc tả đầy đủ nằm trong [`spec/openspec/`](spec/openspec/) — phát triển theo phương pháp Spec-Driven.
+- [Kiến trúc Decoupled Memory Whitepaper](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
+- [Đặc tả Chưng cất Tri thức Tri-Anchor](docs/CONTEXTUAL_DISTILLATION_SPEC.md)
+- [Kiến trúc 3-Plane System Architecture](docs/ARCHITECTURE.md)
+- [Hiến pháp Spec Kit](spec/constitution.md)
+- [Danh mục đặc tả OpenSpec](spec/openspec/)
 
 ## Giấy phép
 
