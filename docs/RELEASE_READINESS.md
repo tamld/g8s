@@ -32,7 +32,7 @@ owner-gated decisions made at release time.
 
 ## Post-release
 
-- [ ] Publish GitHub Release with generated archives and checksums.
+- [x] Publish GitHub Release with generated archives and checksums. (v0.1.0 live: https://github.com/tamld/g8s/releases/tag/v0.1.0, 6 assets, 2026-08-25)
 - [ ] Announce the MCP tool surface (`g8s_*`) in the README quick-start.
 
 ## Side-by-side verification assessment (REFACTORING_PLAN line 87)
@@ -49,6 +49,21 @@ stacks with output comparison. Proposed matrix:
 | Dispatch command construction | `dispatch.BuildCommand` | `agy_dispatch.build_agy_command` | argv equality for same options |
 | Read-only contract detection | `dispatch.DetectReadOnlyContractViolations` | `agy_dispatch.detect_read_only_contract_violations` | Same violation types per input |
 | MCP tools listing shape | `internal/mcp` tools/list | `agy_mcp_server.py` tools/list | Tool names and guard semantics |
+
+### Execution results (2026-08-25, against v0.1.0 candidate)
+
+All rows executed on identical inputs; Go side via throwaway harness compiled from `main`
+(8fd0f39), Python side via python3 3.14.7 against `reference/python/scripts/`.
+
+| Row | Result | Evidence |
+| --- | --- | --- |
+| Task lifecycle | PASS — identical state vocabulary | Both stacks progress QUEUED -> LEASED -> RUNNING -> SUCCEEDED; Python `validate_request` raises "request.add_dirs requires at least one explicit scope root" verbatim matching Go `ValidateSubmitRequest`. |
+| Receipt exactly-once | PASS — identical semantics + error text | Second validate fails with "write receipt already consumed: <id>" in both stacks (Go `AlreadyConsumedError` format string matches character-for-character). |
+| Dispatch command construction | PASS — argv byte-identical | Same inputs produce `[agy --prompt <p> --model gemini-3.7-flash-high --print-timeout 5m0s --dangerously-skip-permissions --sandbox --add-dir /tmp/a]` in both. |
+| Read-only contract detection | PASS — same violation types | Probe inputs map to identical violation types and snippets (`wiki_reflect_side_effect`, `wiki_write_side_effect`, negative instruction ignored). |
+| MCP tools/list shape | DOCUMENTED DEVIATION (by design) | Go exposes eleven `g8s_*` tools vs Python baseline eight `agy_*` tools per DELTA-04 Amendment A naming decision (T005-D1). Not an equality failure. |
+
+L87 is CLOSED: every row either passes outright or is a documented intentional deviation.
 
 Execution is deferred until the release audit window so it can run against the tagged
 candidate rather than a moving main.

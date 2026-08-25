@@ -84,6 +84,6 @@ reference/python/                                     g8s/ (Pure Go)
 * [~] Complete CLI subcommands in `cmd/g8s/main.go`. Stdlib flag-based subcommands shipped (commit `1f98a08`: mcp/submit/get/receipt-issue); cobra migration deferred post-MVP.
 
 ### Phase 5: Parity Verification & CI Pipeline
-* [ ] Run side-by-side verification: Go `g8s` vs Python `reference/` on identical workloads.
+* [x] Run side-by-side verification: Go `g8s` vs Python `reference/` on identical workloads. Executed 2026-08-25 against the v0.1.0 candidate — all five parity-matrix rows pass or are documented deviations (see docs/RELEASE_READINESS.md).
 * [x] Achieve $\ge 140$ passing Go tests: 187 test functions green under dual-pass verification (CGO_ENABLED=0 full suite and CGO_ENABLED=1 race detector with zero reports).
 * [x] Configure multi-OS automated build with GoReleaser. Config present since `eb5b14d`; snapshot smoke verified in T019 producing darwin/linux/windows amd64+arm64 archives (modernized v2 formats schema, commit `c73e0b1`).
