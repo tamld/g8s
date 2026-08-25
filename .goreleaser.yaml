@@ -51,3 +51,15 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+nfpms:
+  - package_name: g8s
+    vendor: TamLD
+    homepage: https://github.com/tamld/g8s
+    maintainer: TamLD <tamld@users.noreply.github.com>
+    description: Zero-CGO pure-Go harness orchestrating AI subagents
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
