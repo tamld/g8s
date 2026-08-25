@@ -1,12 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestReportErrorWritesToConfiguredWriter(t *testing.T) {
+	var buf bytes.Buffer
+	reportError(errors.New("boom"), &buf)
+	want := fmt.Sprintf("%s: boom", AppName)
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("reportError output = %q, want it to contain %q", buf.String(), want)
+	}
+}
 
 func TestDatabasePathHonorsEnvOverride(t *testing.T) {
 	override := filepath.Join(t.TempDir(), "custom", "gatekeepers.db")
