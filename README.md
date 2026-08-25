@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="g8s logo" width="128"/>
+</p>
+
 # g8s (The Gatekeepers)
 
 > **A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers.**  
@@ -45,7 +49,7 @@
 
 ## 🚀 Key Features
 
-* **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single 15MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
+* **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single ~11MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
 * **🛡️ Defense-in-Depth Safety Gates**:
   * **6 Built-in Roles**: `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`.
   * **3 Permission Profiles**: `read_only`, `automation_read`, `workspace_write`.
@@ -54,7 +58,7 @@
 * **🎟️ Receipt-Based Write Delegation**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain.
 * **📦 Durable Control Plane**: SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases, idempotency keys, and parent-child task lineage.
 * **🔌 Stdio MCP Protocol**: Plugs directly into Claude Desktop, Cursor, Codex, and Windsurf via standard JSON-RPC.
-* **🖥️ Cross-Platform Service Manager**: One-command background service installation for macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
+* **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: One-command background service installation for macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
 
 ---
 
@@ -126,6 +130,15 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 * [Architecture Design](docs/ARCHITECTURE.md)
 
 ---
+
+### User Guide
+
+- [Quick Start](docs/quickstart.md) — zero to first delegated task.
+- [CLI Reference](docs/user-guide/cli-reference.md) — every subcommand and flag.
+- [Configuration](docs/user-guide/configuration.md) — env vars, profiles, bounds.
+- [Receipt Delegation](docs/user-guide/receipt-workflow.md) — write receipts end-to-end.
+- [MCP Tools](docs/user-guide/mcp-tools.md) — connect Claude Desktop / Cursor.
+- [Service Management](docs/user-guide/service.md) — macOS LaunchAgent lifecycle.
 
 ## 📄 License
 
