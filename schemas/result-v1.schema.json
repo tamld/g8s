@@ -29,7 +29,7 @@
       "enum": ["SUCCEEDED", "FAILED", "NEEDS_INFO", "BLOCKED", "CANCELLED"]
     },
     "duration_ms": {
-      "type": "integer"
+      "type": ["integer", "number"]
     },
     "stdout": {
       "type": "string"

@@ -69,7 +69,7 @@ brews:
       owner: tamld
       name: homebrew-tap
       branch: main
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      token: "{{ if index .Env \"HOMEBREW_TAP_GITHUB_TOKEN\" }}{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}{{ else }}{{ .Env.GITHUB_TOKEN }}{{ end }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
@@ -78,4 +78,5 @@ brews:
     license: "MIT"
     test: |
       system "#{bin}/g8s --version"
+
 
