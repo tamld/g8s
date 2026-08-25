@@ -10,6 +10,10 @@
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
+<p align="center">
+  <a href="README.md">English</a> | <b>Tiếng Việt</b>
+</p>
+
 *Tài liệu này là bản dịch tiếng Việt của [README.md](README.md).*
 
 ## Tổng quan

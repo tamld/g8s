@@ -11,6 +11,10 @@
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
 
+<p align="center">
+  <b>English</b> | <a href="README.vi.md">Tiếng Việt</a>
+</p>
+
 ---
 
 ## 🌟 Overview
