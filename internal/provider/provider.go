@@ -18,6 +18,8 @@ package provider
 import (
 	"context"
 	"fmt"
+
+	"github.com/tamld/g8s/internal/config"
 	"net/http"
 	"os"
 	"os/exec"
@@ -60,6 +62,13 @@ type ProviderInfo struct {
 	MaxConcurrency    int               `json:"max_concurrency"`
 	CurrentInFlight   int               `json:"current_in_flight"`
 	LastHealthCheckAt int64             `json:"last_health_check_at"`
+
+	// Class tags the provider resource class per DELTA-10:
+	// api_call (remote HTTP pool) or platform_dispatch (local CLI binary).
+	Class string `json:"class"`
+
+	// Reason carries the fail-closed explanation when Status is UNAVAILABLE.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ProviderRegistry is the DELTA-05 contract consumed by the future
@@ -93,6 +102,15 @@ type Config struct {
 
 	// HealthProbeURL, when set, turns discovery into an HTTP smoke check.
 	HealthProbeURL string
+
+	// Class tags the provider resource class (DELTA-10): api_call entries
+	// are remote HTTP pools loaded from providers.json; platform_dispatch
+	// entries resolve local CLI binaries through the discovery chain.
+	Class string
+
+	// AuthEnv names the environment variable carrying the API credential
+	// for api_call providers. Empty means no credential is required.
+	AuthEnv string
 }
 
 const ollamaDefaultHost = "http://127.0.0.1:11434"
@@ -104,6 +122,7 @@ func DefaultConfigs() []Config {
 			Name:           "agy",
 			Binary:         "agy",
 			OverrideEnvVar: "AGY_BIN",
+			Class:          "platform_dispatch",
 			MaxConcurrency: 10,
 			Models: []ModelDescriptor{
 				{
@@ -119,6 +138,7 @@ func DefaultConfigs() []Config {
 			Name:           "claude",
 			Binary:         "claude",
 			OverrideEnvVar: "CLAUDE_BIN",
+			Class:          "platform_dispatch",
 			MaxConcurrency: 5,
 			Models: []ModelDescriptor{
 				{
@@ -134,6 +154,7 @@ func DefaultConfigs() []Config {
 			Name:           "ollama",
 			Binary:         "ollama",
 			OverrideEnvVar: "OLLAMA_HOST",
+			Class:          "platform_dispatch",
 			MaxConcurrency: 2,
 			IsLocal:        true,
 			Models: []ModelDescriptor{
@@ -230,6 +251,25 @@ func (r *Registry) probe(ctx context.Context, name string) ProviderInfo {
 	info.AvailableModels = append([]ModelDescriptor(nil), cfg.Models...)
 	info.CurrentInFlight = inFlight
 
+	info.Class = cfg.Class
+
+	// DELTA-10 R2: api_call pools fail closed BEFORE any network traffic
+	// when their declared credential environment variable is unset.
+	if cfg.Class == "api_call" {
+		if cfg.AuthEnv != "" && os.Getenv(cfg.AuthEnv) == "" {
+			info.Reason = fmt.Sprintf("auth_env %s is not set", cfg.AuthEnv)
+			r.mu.Lock()
+			st.last = info
+			r.mu.Unlock()
+			return info
+		}
+		info.Status = r.probeHTTP(ctx, cfg.HealthProbeURL)
+		r.mu.Lock()
+		st.last = info
+		r.mu.Unlock()
+		return info
+	}
+
 	binPath := ""
 	if cfg.OverrideEnvVar != "" {
 		if override := os.Getenv(cfg.OverrideEnvVar); override != "" && name != "ollama" {
@@ -262,6 +302,87 @@ func (r *Registry) probe(ctx context.Context, name string) ProviderInfo {
 	return info
 }
 
+// LoadProvidersJSON merges provider entries from a providers.json file
+// (DELTA-10 R2/R3): api_call entries become remote HTTP pools and
+// platform_dispatch entries resolve local CLI binaries through the
+// standard discovery chain. Duplicate names are rejected.
+func (r *Registry) LoadProvidersJSON(path string) error {
+	file, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, entry := range file.Providers {
+		if _, exists := r.states[entry.Name]; exists {
+			return fmt.Errorf("duplicate provider name %q", entry.Name)
+		}
+		models := make([]ModelDescriptor, 0, len(entry.Models))
+		for _, m := range entry.Models {
+			models = append(models, ModelDescriptor{
+				ID:            m.ID,
+				Name:          m.ID,
+				ContextWindow: m.ContextWindow,
+			})
+		}
+		cfg := Config{
+			Name:           entry.Name,
+			Class:          entry.Class,
+			MaxConcurrency: entry.Slots,
+			Models:         models,
+		}
+		switch entry.Class {
+		case "api_call":
+			cfg.HealthProbeURL = entry.BaseURL
+			cfg.AuthEnv = entry.AuthEnv
+		default: // platform_dispatch
+			cfg.Binary = entry.Name
+		}
+		r.states[entry.Name] = &state{
+			cfg: cfg,
+			sem: make(chan struct{}, cfg.MaxConcurrency),
+		}
+	}
+	return nil
+}
+
+// SelectForModel acquires a slot on the READY provider serving modelID,
+// preferring api_call pools over platform_dispatch entries per DELTA-10 R5.
+func (r *Registry) SelectForModel(ctx context.Context, modelID string) (string, func(), error) {
+	r.mu.Lock()
+	candidates := make([]string, 0, 2)
+	for name := range r.states {
+		st := r.states[name]
+		serves := false
+		for _, m := range st.cfg.Models {
+			if m.ID == modelID {
+				serves = true
+				break
+			}
+		}
+		if serves && st.last.Status == StatusReady {
+			candidates = append(candidates, name)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		ci, cj := r.states[candidates[i]].cfg.Class, r.states[candidates[j]].cfg.Class
+		if ci != cj {
+			return ci == "api_call"
+		}
+		return candidates[i] < candidates[j]
+	})
+	r.mu.Unlock()
+
+	for _, name := range candidates {
+		if release, err := r.AcquireSlot(ctx, name); err == nil {
+			return name, release, nil
+		}
+	}
+	return "", nil, fmt.Errorf("no ready provider serves model %q", modelID)
+}
+
 // probeHTTP performs the synthetic smoke health check for local daemons.
 func (r *Registry) probeHTTP(ctx context.Context, url string) ProviderStatus {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -282,11 +403,23 @@ func (r *Registry) probeHTTP(ctx context.Context, url string) ProviderStatus {
 // GetProvider returns the most recently observed snapshot for name.
 func (r *Registry) GetProvider(name string) (ProviderInfo, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	st, ok := r.states[name]
 	if !ok {
+		r.mu.Unlock()
 		return ProviderInfo{}, fmt.Errorf("unknown provider: %s", name)
 	}
+	neverProbed := st.last.LastHealthCheckAt == 0
+	r.mu.Unlock()
+
+	// DELTA-10: probe lazily on first access so entries loaded from
+	// providers.json report meaningful status without requiring an
+	// explicit DiscoverAll sweep first.
+	if neverProbed {
+		return r.probe(context.Background(), name), nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return st.last, nil
 }
 
