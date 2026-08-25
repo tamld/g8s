@@ -63,7 +63,11 @@ func main() {
 	case "receipt":
 		runReceipt(os.Args[2:])
 	case "internal":
-		if err := runWrapExec(os.Args[1:]); err != nil {
+		if len(os.Args) < 3 || os.Args[2] != "wrap-exec" {
+			fmt.Fprintf(os.Stderr, "%s: usage: g8s internal wrap-exec --out <path> -- <child argv>\n", AppName)
+			os.Exit(2)
+		}
+		if err := runWrapExec(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
 			os.Exit(2)
 		}
