@@ -89,3 +89,60 @@ g8s/
 │
 └── reference/python/                 # Historical parity baseline
 ```
+
+---
+
+## 4. Visual Workflow & State Machine
+
+### A. Two-Tier Zero-Trust Capability Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator as Brain Orchestrator (Opus / GPT-4o)
+    participant CP as g8s Control Plane (SQLite WAL)
+    participant RC as g8s Receipt Engine
+    participant HN as g8s Security Harness
+    participant WK as Worker Subagent (agy / claude / gemini)
+
+    Operator->>RC: g8s receipt issue --path "./src/*" --ttl 600
+    RC-->>Operator: Return WriteReceipt { ReceiptID: "rcpt-123", ExpiresAt }
+    Operator->>CP: g8s submit --prompt "Refactor" --role "scout" --receipt-id "rcpt-123"
+    CP->>HN: ValidateRequest(prompt, role, permission, addDirs, receiptID)
+    HN-->>CP: Request Validated (Zero-Trust Gate Passed)
+    CP-->>Operator: Task Enqueued { TaskID: "task-001", State: "QUEUED" }
+
+    CP->>WK: ClaimTaskLease (CAS Lock)
+    WK->>RC: ValidateAndConsume("rcpt-123")
+    RC-->>WK: Receipt Consumed (Atomic CAS: consumed=1)
+    WK->>WK: Execute in Process Group Sandbox
+    WK->>CP: FinishAttempt { Status: "SUCCEEDED", ResultHash }
+    CP->>CP: Seal ReceiptHash & Redact Prompt (Zero-Leak)
+```
+
+### B. Task Lifecycle Finite State Machine (8 States)
+
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED : SubmitTask
+
+    QUEUED --> LEASED : ClaimTaskLease (CAS)
+    LEASED --> RUNNING : StartTask
+    LEASED --> QUEUED : Lease Expired / Reconcile
+
+    RUNNING --> RUNNING : Heartbeat Extension
+    RUNNING --> QUEUED : Worker Crash / Expired Lease (Retries Left)
+    RUNNING --> NEEDS_INFO : Worker Requires Clarification
+    RUNNING --> BLOCKED : Policy / Environment Barrier
+
+    NEEDS_INFO --> QUEUED : ResumeTaskWithInputs
+    BLOCKED --> QUEUED : UnblockTaskWithReceipt
+
+    RUNNING --> SUCCEEDED : FinishAttempt (Success)
+    RUNNING --> FAILED : FinishAttempt (Errors / Retry Exhausted)
+    RUNNING --> CANCELLED : CancelTask
+
+    SUCCEEDED --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```

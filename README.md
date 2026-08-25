@@ -149,13 +149,15 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ---
 
-### User Guide
+### User Guide & Integrations
 
 - [Quick Start](docs/quickstart.md) — zero to first delegated task.
 - [CLI Reference](docs/user-guide/cli-reference.md) — every subcommand and flag.
-- [Configuration](docs/user-guide/configuration.md) — env vars, profiles, bounds.
+- [Claude Desktop Integration](docs/integrations/claude-desktop.md) — connect Claude 3.7 / Opus.
+- [Cursor IDE Integration](docs/integrations/cursor.md) — connect Cursor MCP.
+- [Google Antigravity Integration](docs/integrations/antigravity.md) — supervise AGY workers.
+- [Windsurf Integration](docs/integrations/windsurf.md) — connect Cascade MCP.
 - [Receipt Delegation](docs/user-guide/receipt-workflow.md) — write receipts end-to-end.
-- [MCP Tools](docs/user-guide/mcp-tools.md) — connect Claude Desktop / Cursor.
 - [Service Management](docs/user-guide/service.md) — macOS LaunchAgent lifecycle.
 
 ## 📄 License

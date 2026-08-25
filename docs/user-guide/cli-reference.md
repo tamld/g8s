@@ -1,105 +1,161 @@
 # CLI Reference
 
-The `g8s` binary is the single entry point for task submission, inspection, receipts,
-and MCP serving. All state lives in a single SQLite database (Zero-CGO, WAL mode).
+The `g8s` binary is the self-describing, single entry point for task submission, control-plane inspection, task lineage queries, write receipt delegation, and Stdio MCP serving. All state lives in a Zero-CGO SQLite database (`modernc.org/sqlite`) running in WAL mode.
 
-## Environment
+---
+
+## Environment Variables
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
-| `G8S_DB` | Control-plane database path | `~/.local/state/g8s/g8s.db` |
-| `AGY_BIN` | Explicit worker binary path (overrides PATH lookup) | resolved from PATH |
+| :--- | :--- | :--- |
+| `G8S_DB` | Path to shared SQLite control-plane & receipt database | `~/.local/state/g8s/g8s.db` |
+| `AGY_BIN` | Explicit worker binary path (overrides PATH lookup) | Resolved from `PATH` |
+
+---
 
 ## Subcommands
 
-### `version`
-
-Prints the build banner.
-
-```sh
-g8s version
-# g8s v0.1.0 (The Gatekeepers - Zero-CGO, Pure Go)
-```
-
-### `roles`
-
-Lists all six role profiles with purpose and forbidden actions.
-
-```sh
-g8s roles
-```
-
-Roles: `collector`, `mcp-mapper`, `scout`, `summarizer`, `test-runner`, `verifier`.
-
-### `permissions`
-
-Lists permission profiles including whether each is enabled on the MCP surface.
-
-```sh
-g8s permissions
-```
-
-Profiles: `read_only`, `automation_read`, `workspace_write` (`workspace_write`
-is never enabled over MCP — it requires a delegated receipt).
-
-### `submit`
-
-Enqueues a task for workers to claim.
+### 1. `g8s submit`
+Queues an asynchronous durable task into the SQLite WAL control plane after validating it against the security harness.
 
 ```sh
 g8s submit \
-  --idempotency-key inventory-1 \
-  --payload '{"prompt": "inventory the module", "timeout": "30s"}' \
-  --model gemini-3.7-flash-high \
-  --role collector \
-  --permission read_only \
-  --add-dir . \
-  --timeout 30s
+  --idempotency-key "task-refactor-001" \
+  --prompt "Scan internal/harness for security bypasses" \
+  --role "collector" \
+  --permission "read_only" \
+  --add-dir "." \
+  --model "gemini-3.7-flash-high" \
+  --priority 10 \
+  --max-attempts 3
 ```
 
-| Flag | Meaning |
-| --- | --- |
-| `--idempotency-key` | Unique key; resubmitting returns the same task (`deduplicated: true`) |
-| `--payload` | JSON payload decoded by the worker (must include worker-facing fields such as `prompt`) |
-| `--model` | Worker model identifier (required) |
-| `--role` | Role profile name (default `collector`) |
-| `--permission` | Permission profile name (default `read_only`) |
-| `--add-dir` | Explicit filesystem scope root (repeatable, required) |
-| `--timeout` | Execution window (required, e.g. `30s`) |
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--idempotency-key` | `string` | *(Required)* | Unique idempotency key. Resubmissions deduplicate atomically. |
+| `--prompt` | `string` | *(Required)* | Task prompt handed to the worker LLM. |
+| `--role` | `string` | `"collector"` | Worker role contract (`collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`). |
+| `--permission` | `string` | `"read_only"` | Permission profile (`read_only`, `automation_read`, `workspace_write`). |
+| `--add-dir` | `string` | `[cwd]` | Allowed filesystem directory (repeatable). Validated against forbidden paths. |
+| `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). |
+| `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
+| `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
+| `--model` | `string` | `"gemini-3.7-flash-high"` | Target worker model identifier. |
+| `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
+| `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
 
-Exit codes: `0` submitted or deduplicated; non-zero on validation failure
-(missing model/add_dirs, bad role or permission, oversized key).
+---
 
-### `get <task-id>`
-
-Returns a sanitized task view (the raw prompt payload is never echoed back).
+### 2. `g8s get <task-id>`
+Prints the current durable JSON representation of a task from the control plane.
 
 ```sh
-g8s get a1b2c3d4-0000-0000-0000-000000000000
+g8s get 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31
 ```
 
-States you will observe: `QUEUED`, `LEASED`, `RUNNING`, `NEEDS_INFO`, `BLOCKED`,
-`SUCCEEDED`, `FAILED`, `CANCELLED`.
+---
 
-### `receipt-issue`
-
-Issues a single-use delegated write receipt.
+### 3. `g8s tasks`
+Lists durable tasks in the control-plane queue with optional state filtering and pagination limits.
 
 ```sh
-g8s receipt-issue -issuer brain -path './src/*' -ttl 300
+# List all tasks
+g8s tasks
+
+# Filter by state with custom limit
+g8s tasks --state QUEUED --limit 20
 ```
 
-| Flag | Meaning |
-| --- | --- |
-| `-issuer` | Identity of the issuing orchestrator (required) |
-| `-path` | Allowed path pattern (repeatable) |
-| `-ttl` | Seconds until expiry, bounded 1..3600 |
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--state` | `string` | `""` | Filter by state: `QUEUED`, `LEASED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`, `NEEDS_INFO`, `BLOCKED`. |
+| `--limit` | `int` | `50` | Maximum number of tasks to return (`1..200`). |
 
-Output is a JSON envelope containing `receipt_id`, `allowed_paths`,
-`expires_at`. Pass these fields to the worker so it can consume the receipt
-exactly once during its run.
+---
 
-### `mcp`
+### 4. `g8s lineage <task-id>`
+Prints the full ancestry chain of a task up to the root parent, ordered chronologically (`Root -> Child -> Grandchild`).
 
-Serves the eleven-tool stdio MCP server on stdin/stdout. See the
-[MCP tools guide](mcp-tools.md).
+```sh
+g8s lineage grandchild-task-id-123
+```
+
+---
+
+### 5. `g8s children <parent-task-id>`
+Lists all direct child subtasks submitted under a specified parent task ID.
+
+```sh
+g8s children root-task-id-123
+```
+
+---
+
+### 6. `g8s receipt issue`
+Issues a cryptographic, single-use, TTL-bounded, path-scoped Write Receipt on behalf of the Brain orchestrator.
+
+```sh
+g8s receipt issue \
+  --issuer "brain-orchestrator" \
+  --path "./internal/receipt/*" \
+  --allow "./spec/openspec/*" \
+  --ttl 600
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--issuer` | `string` | `"operator"` | Identity of the issuing agent/orchestrator recorded on the receipt. |
+| `--path`, `--allow` | `string` | *(Required)* | Allowed file path glob pattern (repeatable). |
+| `--ttl` | `int` | `600` | Time-to-live in seconds (`1` to `3600`). |
+
+---
+
+### 7. `g8s mcp`
+Serves the standard Stdio JSON-RPC 2.0 Model Context Protocol (MCP) server on `stdin`/`stdout`.
+
+```sh
+g8s mcp
+```
+
+Tools exposed over MCP:
+* `g8s_dispatch`: Submit tasks to the control-plane queue with role and capability enforcement.
+* `g8s_get_task`: Check task status and execution results.
+* `g8s_list_tasks`: List active tasks.
+* `g8s_cancel_task`: Request early cancellation for a running task.
+
+---
+
+### 8. `g8s roles` & `g8s permissions`
+Inspect built-in security profiles directly in your terminal:
+
+```sh
+g8s roles
+g8s permissions
+```
+
+---
+
+### 9. `g8s version`
+Prints binary version banner, Go runtime, and Zero-CGO pure Go status.
+
+```sh
+g8s version
+```
+
+---
+
+## Standalone 1-Liner Installation
+
+Install or upgrade `g8s` directly via curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+```
+
+Custom installation directory:
+```sh
+G8S_INSTALL_DIR="/usr/local/bin" curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+```

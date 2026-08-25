@@ -55,17 +55,19 @@ brew install g8s
 
 hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 
-## Hướng dẫn sử dụng
+## Hướng dẫn sử dụng & Tích hợp
 
 - [Tham chiếu CLI](docs/user-guide/cli-reference.md)
-- [Cấu hình](docs/user-guide/configuration.md)
+- [Tích hợp Claude Desktop](docs/integrations/claude-desktop.md)
+- [Tích hợp Cursor IDE](docs/integrations/cursor.md)
+- [Tích hợp Google Antigravity](docs/integrations/antigravity.md)
+- [Tích hợp Windsurf](docs/integrations/windsurf.md)
 - [Quy trình receipt delegation](docs/user-guide/receipt-workflow.md)
-- [Kết nối MCP](docs/user-guide/mcp-tools.md)
-- [Quản lý service](docs/user-guide/service.md)
+- [Quản lý service daemon](docs/user-guide/service.md)
 
 ## Kiến trúc & Đặc tả
 
-- [Kiến trúc Decoupled Memory Whitepaper](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
+- [Kiến trúc Decoupled Memory & Cognitive Whitepaper](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
 - [Đặc tả Chưng cất Tri thức Tri-Anchor](docs/CONTEXTUAL_DISTILLATION_SPEC.md)
 - [Kiến trúc 3-Plane System Architecture](docs/ARCHITECTURE.md)
 - [Hiến pháp Spec Kit](spec/constitution.md)
