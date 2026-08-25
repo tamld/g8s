@@ -587,7 +587,7 @@ func (s *Store) ResumeTask(ctx context.Context, taskID string, resumedPayload js
 	}
 
 	res, err := tx.Exec(
-		`UPDATE tasks SET state = 'QUEUED', request_json = ?, request_hash = ?, result_json = NULL, result_hash = NULL,
+		`UPDATE tasks SET state = 'QUEUED', attempts = 0, request_json = ?, request_hash = ?, result_json = NULL, result_hash = NULL,
 		 last_error = NULL, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ?
 		 WHERE task_id = ? AND (state = 'NEEDS_INFO' OR state = 'BLOCKED')`,
 		reqCanonical, reqHash, now, taskID)

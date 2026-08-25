@@ -103,6 +103,9 @@ func WithCaptureMaxBytes(n int) Option { return func(s *Supervisor) { s.captureM
 // WithBinaryPath pins the worker entrypoint used when building argv.
 func WithBinaryPath(path string) Option { return func(s *Supervisor) { s.binaryPath = path } }
 
+// WithEvidenceDir overrides the centralized Evidence Lake storage directory.
+func WithEvidenceDir(dir string) Option { return func(s *Supervisor) { s.evidenceDir = dir } }
+
 // Supervisor executes claimed tasks one attempt at a time with containment,
 // bounded capture, and sealed evidence export.
 type Supervisor struct {
@@ -113,10 +116,22 @@ type Supervisor struct {
 	pollInterval    time.Duration
 	captureMaxBytes int
 	binaryPath      string
+	evidenceDir     string
 }
 
 // NewSupervisor builds a supervisor over the given control plane and run root.
 func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Supervisor {
+	evidenceDir := os.Getenv("G8S_EVIDENCE_DIR")
+	if evidenceDir == "" {
+		if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+			evidenceDir = filepath.Join(xdg, "g8s", "evidence")
+		} else if home, _ := os.UserHomeDir(); home != "" {
+			evidenceDir = filepath.Join(home, ".local", "state", "g8s", "evidence")
+		} else {
+			evidenceDir = filepath.Join(os.TempDir(), "g8s", "evidence")
+		}
+	}
+
 	s := &Supervisor{
 		cp:              cp,
 		runRoot:         runRoot,
@@ -125,6 +140,7 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 		pollInterval:    defaultPollInterval,
 		captureMaxBytes: defaultCaptureBytes,
 		binaryPath:      "g8s",
+		evidenceDir:     evidenceDir,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -220,7 +236,7 @@ type workerResult struct {
 	ContractViolation json.RawMessage `json:"contract_violation,omitempty"`
 }
 
-var fencedJSONPattern = regexp.MustCompile("(?s)" + "`" + `json\s*(\{.*?\})` + "`")
+var fencedJSONPattern = regexp.MustCompile("(?s)(?:```|`)(?:json)?\\s*(\\{.*?\\})\\s*(?:```|`)")
 
 // RunOnce claims one task and drives a single supervised attempt to a
 // terminal or paused outcome, cleaning private artifacts either way.
@@ -411,12 +427,7 @@ func (s *Supervisor) collect(
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
 	default:
-		wr := readWorkerResult(resultPath)
-		if !wr.OK && wr.Status == "invalid_result" && resultMode == "stdout" && code == 0 {
-			// DELTA-10 R4 stdout mode: the child exited cleanly without
-			// writing a result envelope; treat clean exit as success.
-			wr = workerResult{OK: true, Status: "succeeded"}
-		}
+		wr := readWorkerResult(resultPath, stdoutText, code)
 		success := code == 0 && wr.OK
 		if paused := s.maybePause(ctx, wr, stdoutText, taskID, workerID, token); paused {
 			break
@@ -462,16 +473,33 @@ func (s *Supervisor) maybePause(ctx context.Context, wr workerResult, stdoutText
 	return false
 }
 
-func readWorkerResult(resultPath string) workerResult {
-	raw, err := os.ReadFile(resultPath)
-	if err != nil {
-		return workerResult{OK: false, Status: "invalid_result"}
+func readWorkerResult(resultPath string, stdoutText string, code int) workerResult {
+	if raw, err := os.ReadFile(resultPath); err == nil {
+		var wr workerResult
+		if json.Unmarshal(raw, &wr) == nil && wr.Status != "" {
+			return wr
+		}
 	}
-	var wr workerResult
-	if json.Unmarshal(raw, &wr) != nil {
-		return workerResult{OK: false, Status: "invalid_result"}
+	// Fallback 1: Extract fenced JSON from captured stdout
+	for _, raw := range fencedJSONPattern.FindAllStringSubmatch(stdoutText, -1) {
+		var fenced workerResult
+		if json.Unmarshal([]byte(raw[1]), &fenced) == nil && fenced.Status != "" {
+			return fenced
+		}
 	}
-	return wr
+	// Fallback 2: Exit code based synthesis for CLI worker compatibility
+	if code == 0 {
+		return workerResult{
+			OK:      true,
+			Status:  "succeeded",
+			Summary: "worker completed execution successfully",
+		}
+	}
+	return workerResult{
+		OK:     false,
+		Status: "failed",
+		Reason: fmt.Sprintf("worker process exited with code %d", code),
+	}
 }
 
 // buildArgv assembles the worker invocation mirroring the baseline contract:
@@ -506,7 +534,8 @@ func (s *Supervisor) snapshot(ctx context.Context, taskID, runDir string, leftov
 }
 
 // ExportReceipt writes the redacted task snapshot as sealed evidence into the
-// attempt directory; failures are swallowed so cleanup never masks outcomes.
+// attempt directory and centralized Evidence Lake; failures are swallowed so
+// cleanup never masks outcomes.
 func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
 	snap, err := s.cp.GetTask(ctx, taskID)
 	if err != nil || snap == nil {
@@ -517,6 +546,17 @@ func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(runDir, "receipt.json"), data, 0600)
+
+	// Centralized Evidence Lake export
+	if s.evidenceDir != "" {
+		taskEvidenceDir := filepath.Join(s.evidenceDir, taskID)
+		if err := os.MkdirAll(taskEvidenceDir, 0700); err == nil {
+			_ = os.WriteFile(filepath.Join(taskEvidenceDir, "receipt.json"), data, 0600)
+			if snap.Attempts > 0 {
+				_ = os.WriteFile(filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts)), data, 0600)
+			}
+		}
+	}
 }
 
 // LoopOptions parameterize RunLoop.

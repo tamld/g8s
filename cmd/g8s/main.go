@@ -239,6 +239,42 @@ func runGet(args []string) {
 	fmt.Println(string(out))
 }
 
+// runResume moves a NEEDS_INFO or BLOCKED task back to QUEUED with optional clarifying prompt.
+func runResume(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: g8s resume <task-id> [--prompt <text>] [--reason <reason>]")
+		os.Exit(2)
+	}
+	taskID := args[0]
+	fs := flag.NewFlagSet("resume", flag.ExitOnError)
+	prompt := fs.String("prompt", "", "updated prompt or clarifying answer")
+	reason := fs.String("reason", "resumed via CLI", "reason for resuming")
+	failIf(fs.Parse(args[1:]))
+
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer func() { _ = store.Close() }()
+
+	var resumedPayload json.RawMessage
+	if *prompt != "" {
+		payloadMap := map[string]any{
+			"prompt": *prompt,
+		}
+		raw, err := json.Marshal(payloadMap)
+		failIf(err)
+		resumedPayload = raw
+	}
+
+	task, err := store.ResumeTask(context.Background(), taskID, resumedPayload, *reason)
+	failIf(err)
+
+	out, err := json.MarshalIndent(task, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
 // runTasks lists durable tasks optionally filtered by state.
 func runTasks(args []string) {
 	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
@@ -358,6 +394,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  submit       Queue an asynchronous durable task with harness safety checks")
 	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
+	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
 	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
@@ -368,4 +405,15 @@ func printUsage() {
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch), service (daemon lifecycle)")
+}
+
+// sliceFlags collects repeated occurrences of one flag into a slice,
+// enabling repeatable -add-dir scope roots on the submit command.
+type sliceFlags []string
+
+func (s *sliceFlags) String() string { return strings.Join(*s, ",") }
+
+func (s *sliceFlags) Set(v string) error {
+	*s = append(*s, v)
+	return nil
 }

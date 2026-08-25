@@ -830,7 +830,11 @@ func TestPauseValidatesStateOwnershipAndRedacts(t *testing.T) {
 func TestResumeTaskLifecycle(t *testing.T) {
 	s, _ := newTestStore(t)
 	task := mustSubmit(t, s, submitReq("resume-lifecycle"))
-	claimed, token := mustClaim(t, s, "worker-1", 30)
+	claimed, err := s.ClaimTask(context.Background(), "worker-1", 30)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	token := *claimed.LeaseToken
 	if !s.StartTask(task.TaskID, "worker-1", token) {
 		t.Fatal("StartTask failed")
 	}
@@ -858,7 +862,10 @@ func TestResumeTaskLifecycle(t *testing.T) {
 	}
 
 	// Verify task can now be claimed again by worker-2
-	reclaimed, _ := mustClaim(t, s, "worker-2", 30)
+	reclaimed, err := s.ClaimTask(context.Background(), "worker-2", 30)
+	if err != nil || reclaimed == nil {
+		t.Fatalf("reclaimed: %v", err)
+	}
 	if reclaimed.TaskID != task.TaskID {
 		t.Fatalf("reclaimed task ID = %s, want %s", reclaimed.TaskID, task.TaskID)
 	}
