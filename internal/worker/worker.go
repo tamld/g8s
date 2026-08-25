@@ -46,6 +46,12 @@ type taskRequest struct {
 	AddDirs     []string `json:"add_dirs"`
 	NoSandbox   bool     `json:"no_sandbox"`
 	SkipPermiss bool     `json:"skip_permissions"`
+
+	// ResultMode selects the result-envelope contract per DELTA-10 R4:
+	// "" (default) wraps the child in g8s internal wrap-exec which writes
+	// the envelope; "stdout" synthesizes {ok:true} from bounded stdout when
+	// the child exits 0 without writing a result file.
+	ResultMode string `json:"result_mode"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -255,8 +261,20 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	defer errFile.Close()
 
+	childArgv := s.buildArgv(req, promptPath, resultPath)
+	if req.ResultMode != "stdout" {
+		// DELTA-10 R4 wrapper mode (default): run the child through the
+		// wrap-exec adapter so a result envelope is always produced even
+		// for CLIs that never write result.json themselves.
+		if self, exeErr := os.Executable(); exeErr == nil {
+			wrapped := make([]string, 0, len(childArgv)+5)
+			wrapped = append(wrapped, self, "internal", "wrap-exec", "--out", resultPath, "--")
+			wrapped = append(wrapped, childArgv...)
+			childArgv = wrapped
+		}
+	}
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
-		Argv:       s.buildArgv(req, promptPath, resultPath),
+		Argv:       childArgv,
 		Dir:        firstNonEmpty(firstOf(req.AddDirs), s.runRoot),
 		Stdout:     outFile,
 		Stderr:     errFile,
@@ -288,7 +306,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	_ = outFile.Close()
 	_ = errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode)
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -343,6 +361,7 @@ func (s *Supervisor) collect(
 	ctx context.Context,
 	child Child,
 	reason, taskID, workerID, token, runDir, promptPath, resultPath, stdoutPath, stderrPath string,
+	resultMode string,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -393,6 +412,11 @@ func (s *Supervisor) collect(
 		}
 	default:
 		wr := readWorkerResult(resultPath)
+		if !wr.OK && wr.Status == "invalid_result" && resultMode == "stdout" && code == 0 {
+			// DELTA-10 R4 stdout mode: the child exited cleanly without
+			// writing a result envelope; treat clean exit as success.
+			wr = workerResult{OK: true, Status: "succeeded"}
+		}
 		success := code == 0 && wr.OK
 		if paused := s.maybePause(ctx, wr, stdoutText, taskID, workerID, token); paused {
 			break

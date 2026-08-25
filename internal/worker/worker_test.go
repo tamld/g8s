@@ -763,3 +763,32 @@ func TestMaybePause(t *testing.T) {
 		})
 	}
 }
+
+func TestRunOnceStdoutModeSynthesizesSuccessWithoutResultFile(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	done := make(chan struct{})
+	close(done)
+	env.runner.factory = func(opts SpawnOptions) Child {
+		// Real-agy shape: exits 0 immediately, writes NO result.json.
+		return &instantChild{done: done}
+	}
+	submitTask(t, env, "stdout-mode-1", 1, map[string]any{
+		"result_mode": "stdout",
+	})
+	task, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-stdout", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if task.State != "SUCCEEDED" {
+		t.Fatalf("state = %q, want SUCCEEDED (stdout mode must synthesize envelope)", task.State)
+	}
+}
+
+// instantChild is a Child that has already exited successfully without
+// producing any output or result file (the real-agy shape).
+type instantChild struct{ done chan struct{} }
+
+func (c *instantChild) PID() int                { return 7 }
+func (c *instantChild) Done() <-chan struct{}   { return c.done }
+func (c *instantChild) WaitCode() int           { return 0 }
+func (c *instantChild) Terminate(time.Duration) {}

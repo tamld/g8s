@@ -62,6 +62,11 @@ func main() {
 		runGet(os.Args[2:])
 	case "receipt":
 		runReceipt(os.Args[2:])
+	case "internal":
+		if err := runWrapExec(os.Args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
+			os.Exit(2)
+		}
 	case "help", "-h", "--help":
 		printUsage()
 	default:
