@@ -1,6 +1,6 @@
 # OpenSpec DELTA-05: Provider Registry, Model Governance & Resource Pool Discovery
 
-**Status**: `PROPOSED`  
+**Status**: `APPLIED`  
 **Milestone**: M2 (Advanced Capabilities)  
 **Package**: `internal/provider`, `internal/pool`  
 

@@ -1,6 +1,6 @@
 # OpenSpec DELTA-04: Stdio JSON-RPC 2.0 Model Context Protocol (MCP) Server
 
-**Status**: `PROPOSED` (Amendment A applied)  
+**Status**: `APPLIED` (Amendment A applied)  
 **Milestone**: M2 (Capabilities)  
 **Package**: `internal/mcp`  
 **Amendment**: A — T015 MCP surface expansion (2026-08-24)

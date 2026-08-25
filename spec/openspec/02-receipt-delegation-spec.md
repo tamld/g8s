@@ -1,6 +1,6 @@
 # OpenSpec DELTA-02: Receipt-Based Write Delegation
 
-**Status**: `PROPOSED`  
+**Status**: `APPLIED`  
 **Milestone**: M1 (Foundation)  
 **Package**: `internal/receipt`  
 

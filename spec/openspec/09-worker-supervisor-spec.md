@@ -1,5 +1,6 @@
 # 09 — Worker Supervisor Spec (DELTA-09)
 
+**Status**: `APPLIED`
 Port of `reference/python/scripts/agy_worker.py` to a Pure-Go package
 `internal/worker`. The supervisor claims one durable task from the
 `internal/controlplane` store, runs it as an isolated process group inside a

@@ -1,5 +1,6 @@
 # 08 — Dispatch Wrapper Spec (DELTA-08)
 
+**Status**: `APPLIED`
 Port of `reference/python/scripts/agy_dispatch.py` to a Pure-Go package
 `internal/dispatch`. The wrapper runs ONE bounded AGY CLI job behind the
 harness gate and returns a structured, sanitized result.

@@ -1,6 +1,6 @@
 # OpenSpec DELTA-03: SQLite WAL Control Plane, Atomic CAS Leases & Task Queue
 
-**Status**: `PROPOSED`  
+**Status**: `APPLIED`  
 **Milestone**: M1 (Foundation)  
 **Package**: `internal/controlplane`  
 
