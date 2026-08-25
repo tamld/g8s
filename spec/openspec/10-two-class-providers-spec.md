@@ -37,14 +37,14 @@ entry with exactly two allowed values:
 Scenario: registry rejects unknown classes.
 
 ```gherkin
-When a providers.yaml entry declares class: teleport
+When a providers.json entry declares class: teleport
 Then config load fails with error containing "unknown provider class"
 And no provider is registered.
 ```
 
 ### Requirement: Config-driven api_call entries
 
-Host declaration (`~/.config/g8s/providers.yaml`) SHALL accept entries of the
+Host declaration (`~/.config/g8s/providers.json`) SHALL accept entries of the
 shape:
 
 ```yaml
@@ -62,7 +62,7 @@ providers:
 Scenario: operator defines a proxy pool.
 
 ```gherkin
-Given a providers.yaml with one api_call entry
+Given a providers.json with one api_call entry
 When the registry discovers providers
 Then the entry appears with status READY only after a successful health probe
 And AcquireSlot respects the declared slot count.
