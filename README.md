@@ -71,35 +71,47 @@ cd g8s
 go build -o bin/g8s ./cmd/g8s
 ```
 
-### 2. Run a Read-Only Scout Task
+### 2. Submit a Read-Only Scout Task
 ```bash
-./bin/g8s run \
-  --provider agy \
+g8s submit \
+  --idempotency-key scout-1 \
   --role scout \
   --permission read_only \
   --add-dir ./src \
-  --prompt "Scan ./src for MCP server candidate implementations and return JSON."
+  --model gemini-3.7-flash-high \
+  --timeout 60s \
+  --payload '{"prompt": "Scan ./src for MCP server candidate implementations and return JSON."}'
 ```
+Workers claim queued tasks automatically; poll with `g8s get <task-id>`.
 
 ### 3. Issue a Write Receipt (Brain-Only)
 ```bash
-./bin/g8s receipt issue \
-  --issuer "opus-session-01" \
-  --allow "./tests/*.py" \
-  --ttl 600
-# Output: Returns receipt_id: 3c8e41bf-23d9-4822-86ec-350e82c16fa8
+g8s receipt-issue \
+  -issuer "opus-session-01" \
+  -path "./tests/*.py" \
+  -ttl 600
 ```
+The command prints a JSON receipt envelope (`receipt_id`, `allowed_paths`,
+`expires_at`). Pass the receipt fields to the worker payload so it can consume
+the receipt exactly once during its delegated-write run.
 
-### 4. Run Delegated Write Worker
+### 4. Run a Delegated-Write Worker Task
+Submit the task with `workspace_write` and embed the issued receipt in the
+worker payload; the worker validates and consumes it exactly once at runtime.
+
 ```bash
-./bin/g8s run \
-  --provider agy \
+g8s submit \
+  --idempotency-key testwriter-1 \
   --role test-runner \
   --permission workspace_write \
-  --receipt-id "3c8e41bf-23d9-4822-86ec-350e82c16fa8" \
   --add-dir ./tests \
-  --prompt "Generate pytest test cases for user authentication."
+  --model gemini-3.7-flash-high \
+  --timeout 120s \
+  --payload '{"prompt": "Generate pytest test cases for user authentication.", "receipt_id": "<receipt_id>", "receipt_issuer": "opus-session-01", "allowed_paths": ["./tests/*.py"]}'
 ```
+
+> Note: receipts cannot be carried through the MCP surface — they are consumed
+> by workers directly against the control plane.
 
 ---
 
