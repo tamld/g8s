@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	dsn := fmt.Sprintf(
 		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
-		dbPath,
+		url.PathEscape(dbPath),
 	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -76,16 +77,43 @@ func (s *Store) initialize() error {
 		return fmt.Errorf("begin exclusive schema transaction: %w", err)
 	}
 
+	if err := checkSchemaVersion(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := applyBaseSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateTasksTable(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+
+	if _, err := conn.ExecContext(context.Background(),
+		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+		rollbackInit(conn)
+		return fmt.Errorf("record schema version: %w", err)
+	}
+
+	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
+		return fmt.Errorf("commit schema transaction: %w", err)
+	}
+	return nil
+}
+
+func checkSchemaVersion(conn *sql.Conn) error {
 	version := 0
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if version < 0 || (version > 2 && version != SchemaVersion) {
-		rollbackInit(conn)
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
+	return nil
+}
 
+func applyBaseSchema(conn *sql.Conn) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS tasks (
 			task_id TEXT PRIMARY KEY,
@@ -131,17 +159,19 @@ func (s *Store) initialize() error {
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
-			rollbackInit(conn)
 			return fmt.Errorf("apply control-plane schema: %w", err)
 		}
 	}
+	return nil
+}
 
+func migrateTasksTable(conn *sql.Conn) error {
 	var hasParent int
 	parentRows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(tasks)")
 	if err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("inspect tasks columns: %w", err)
 	}
+	defer parentRows.Close()
 	for parentRows.Next() {
 		var cid int
 		var name, colType string
@@ -149,35 +179,20 @@ func (s *Store) initialize() error {
 		var dflt sql.NullString
 		var pk int
 		if err := parentRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			parentRows.Close()
-			rollbackInit(conn)
 			return fmt.Errorf("scan tasks columns: %w", err)
 		}
 		if name == "parent_task_id" {
 			hasParent = 1
 		}
 	}
-	parentRows.Close()
 	if err := parentRows.Err(); err != nil {
-		rollbackInit(conn)
 		return fmt.Errorf("iterate tasks columns: %w", err)
 	}
 	if hasParent == 0 {
 		if _, err := conn.ExecContext(context.Background(),
 			"ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(task_id)"); err != nil {
-			rollbackInit(conn)
 			return fmt.Errorf("migrate parent_task_id column: %w", err)
 		}
-	}
-
-	if _, err := conn.ExecContext(context.Background(),
-		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
-		rollbackInit(conn)
-		return fmt.Errorf("record schema version: %w", err)
-	}
-
-	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
-		return fmt.Errorf("commit schema transaction: %w", err)
 	}
 	return nil
 }

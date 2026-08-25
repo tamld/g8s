@@ -8,10 +8,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/pterm/pterm"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
@@ -34,19 +37,23 @@ func main() {
 	command := os.Args[1]
 	switch command {
 	case "version":
-		fmt.Printf("%s v%s (The Gatekeepers - Zero-CGO, Pure Go)\n", AppName, Version)
+		pterm.DefaultHeader.WithFullWidth().Println(fmt.Sprintf("%s v%s (The Gatekeepers - Zero-CGO, Pure Go)", AppName, Version))
 	case "roles":
-		fmt.Println("g8s Worker Roles:")
+		var td pterm.TableData
+		td = append(td, []string{"Name", "Purpose"})
 		for _, name := range harness.RoleNames() {
 			r, _ := harness.GetRole(name)
-			fmt.Printf("  %s\t%s\n", r.Name, r.Purpose)
+			td = append(td, []string{r.Name, r.Purpose})
 		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 	case "permissions":
-		fmt.Println("g8s Permission Profiles:")
+		var td pterm.TableData
+		td = append(td, []string{"Name", "Description", "Mutation Allowed"})
 		for _, name := range harness.PermissionNames() {
 			p, _ := harness.GetPermission(name)
-			fmt.Printf("  %s\t%s (Mutation: %t)\n", p.Name, p.Description, p.MutationAllowed)
+			td = append(td, []string{p.Name, p.Description, fmt.Sprintf("%t", p.MutationAllowed)})
 		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 	case "mcp":
 		runMCPServer()
 	case "submit":
@@ -205,9 +212,15 @@ func runReceipt(args []string) {
 
 func failIf(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
+		reportError(err, os.Stderr)
 		os.Exit(1)
 	}
+}
+
+// reportError renders a failure through pterm on the provided writer so tests
+// can assert where diagnostics land.
+func reportError(err error, w io.Writer) {
+	pterm.Error.WithWriter(w).Println(fmt.Sprintf("%s: %v", AppName, err))
 }
 
 func printUsage() {

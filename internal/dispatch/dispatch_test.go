@@ -80,6 +80,54 @@ func TestResolvePATHLookupFallback(t *testing.T) {
 	}
 }
 
+func TestSuffixCandidates(t *testing.T) {
+	tests := []struct {
+		name      string
+		reference string
+		platform  string
+		want      []string
+	}{
+		{
+			name:      "non-windows platform",
+			reference: "agy",
+			platform:  "linux",
+			want:      []string{"agy"},
+		},
+		{
+			name:      "windows platform with existing suffix",
+			reference: "agy.exe",
+			platform:  "windows",
+			want:      []string{"agy.exe"},
+		},
+		{
+			name:      "windows platform without suffix",
+			reference: "agy",
+			platform:  "windows",
+			want:      []string{"agy", "agy.exe", "agy.cmd", "agy.bat"},
+		},
+		{
+			name:      "windows platform with different case existing suffix",
+			reference: "agy.CMD",
+			platform:  "windows",
+			want:      []string{"agy.CMD"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := suffixCandidates(tt.reference, tt.platform)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d candidates, want %d", len(got), len(tt.want))
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("candidate %d = %q, want %q", i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestResolveWindowsSuffixExpansion(t *testing.T) {
 	opts := makeResolver(
 		map[string]bool{"/tools/agy.cmd": true},
@@ -478,5 +526,314 @@ func TestEnvelopeBinaryMissingErrors(t *testing.T) {
 	}
 	if len(runner.commands) != 0 {
 		t.Fatal("resolution failure must not execute anything")
+	}
+}
+
+func TestHomeFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		home string
+		want []string
+	}{
+		{
+			name: "empty home",
+			home: "",
+			want: []string{
+				"/.local/bin/agy",
+				"/AppData/Local/Programs/agy/agy",
+				"/AppData/Roaming/npm/agy",
+			},
+		},
+		{
+			name: "typical unix home",
+			home: "/home/user",
+			want: []string{
+				"/home/user/.local/bin/agy",
+				"/home/user/AppData/Local/Programs/agy/agy",
+				"/home/user/AppData/Roaming/npm/agy",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := homeFallbacks(tt.home)
+			if len(got) != len(tt.want) {
+				t.Fatalf("homeFallbacks() returned %d items, want %d", len(got), len(tt.want))
+			}
+			for i, v := range got {
+				if v != tt.want[i] {
+					t.Errorf("homeFallbacks()[%d] = %v, want %v", i, v, tt.want[i])
+				}
+			}
+		})
+	}
+}
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "safe characters only",
+			input:    "safe_value-123",
+			expected: "safe_value-123",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "''",
+		},
+		{
+			name:     "spaces require quotes",
+			input:    "hello world",
+			expected: "'hello world'",
+		},
+		{
+			name:     "single quotes get escaped",
+			input:    "it's cool",
+			expected: "'it'\\''s cool'",
+		},
+		{
+			name:     "multiple single quotes",
+			input:    "a'b'c",
+			expected: "'a'\\''b'\\''c'",
+		},
+		{
+			name:     "special characters require quotes",
+			input:    "value&value",
+			expected: "'value&value'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shellQuote(tt.input); got != tt.expected {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCommandPreview(t *testing.T) {
+	tests := []struct {
+		name     string
+		binary   string
+		model    string
+		timeout  string
+		expected string
+	}{
+		{
+			name:     "safe arguments",
+			binary:   "/usr/bin/cmd",
+			model:    "gpt-4",
+			timeout:  "30s",
+			expected: "/usr/bin/cmd --prompt <prompt> --model gpt-4 --print-timeout 30s",
+		},
+		{
+			name:     "arguments with spaces",
+			binary:   "/path with spaces/cmd",
+			model:    "model with spaces",
+			timeout:  "1m 30s",
+			expected: "'/path with spaces/cmd' --prompt <prompt> --model 'model with spaces' --print-timeout '1m 30s'",
+		},
+		{
+			name:     "arguments with single quotes",
+			binary:   "/usr/bin/it's_cmd",
+			model:    "model's",
+			timeout:  "30's",
+			expected: "'/usr/bin/it'\\''s_cmd' --prompt <prompt> --model 'model'\\''s' --print-timeout '30'\\''s'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commandPreview(tt.binary, tt.model, tt.timeout); got != tt.expected {
+				t.Errorf("commandPreview(%q, %q, %q) = %q, want %q", tt.binary, tt.model, tt.timeout, got, tt.expected)
+			}
+		})
+	}
+}
+func TestExpandUser(t *testing.T) {
+	cases := []struct {
+		name      string
+		reference string
+		home      string
+		want      string
+	}{
+		{
+			name:      "empty home",
+			reference: "~/bin",
+			home:      "",
+			want:      "~/bin",
+		},
+		{
+			name:      "exact match",
+			reference: "~",
+			home:      "/home/user",
+			want:      "/home/user",
+		},
+		{
+			name:      "forward slash",
+			reference: "~/bin",
+			home:      "/home/user",
+			want:      "/home/user/bin",
+		},
+		{
+			name:      "backslash",
+			reference: `~\bin`,
+			home:      `C:\Users\user`,
+			want:      `C:\Users\user\bin`,
+		},
+		{
+			name:      "no prefix",
+			reference: "/usr/bin/agy",
+			home:      "/home/user",
+			want:      "/usr/bin/agy",
+		},
+		{
+			name:      "tilde in middle",
+			reference: "/opt/~/bin",
+			home:      "/home/user",
+			want:      "/opt/~/bin",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := expandUser(tc.reference, tc.home)
+			if got != tc.want {
+				t.Errorf("expandUser(%q, %q) = %q; want %q", tc.reference, tc.home, got, tc.want)
+			}
+		})
+	}
+}
+func TestShellQuoteEdgeCases(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "''"},
+		{"safe_string123", "safe_string123"},
+		{"safe-string", "safe-string"},
+		{"safe.string", "safe.string"},
+		{"safe@string", "safe@string"},
+		{"safe=string", "safe=string"},
+		{"safe:string", "safe:string"},
+		{"safe,string", "safe,string"},
+		{"safe+string", "safe+string"},
+		{"safe%string", "safe%string"},
+		{"safe/string", "safe/string"},
+		{"string with spaces", "'string with spaces'"},
+		{"string'with'quotes", "'string'\\''with'\\''quotes'"},
+		{"string\"with\"doublequotes", "'string\"with\"doublequotes'"},
+		{"'onlyquotes'", "''\\''onlyquotes'\\'''"},
+		{"\\", "'\\'"},
+		{"\n", "'\n'"},
+		{"-", "-"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q; want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+func TestValidateGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        RunOptions
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "happy path with explicit role and permission",
+			opts: RunOptions{
+				Role:       "scout",
+				Permission: "automation_read",
+				Prompt:     "find something",
+			},
+			wantErr: false,
+		},
+		{
+			name: "implicit defaults used when empty",
+			opts: RunOptions{
+				Prompt: "collect things",
+			},
+			wantErr: false,
+		},
+		{
+			name: "unknown role",
+			opts: RunOptions{
+				Role:       "unknown_role",
+				Permission: "read_only",
+				Prompt:     "test",
+			},
+			wantErr:     true,
+			errContains: "unknown role",
+		},
+		{
+			name: "unknown permission",
+			opts: RunOptions{
+				Role:       "collector",
+				Permission: "unknown_permission",
+				Prompt:     "test",
+			},
+			wantErr:     true,
+			errContains: "unknown permission",
+		},
+		{
+			name: "prompt too long",
+			opts: RunOptions{
+				Role:       "collector",
+				Permission: "read_only",
+				Prompt:     strings.Repeat("a", 30001), // max for read_only is 30000
+			},
+			wantErr:     true,
+			errContains: "prompt too long",
+		},
+		{
+			name: "skip permissions not allowed by profile",
+			opts: RunOptions{
+				Role:            "collector",
+				Permission:      "read_only", // skip permissions not allowed
+				SkipPermissions: true,
+				Prompt:          "test",
+			},
+			wantErr:     true,
+			errContains: "--skip-permissions is not allowed",
+		},
+		{
+			name: "skip permissions allowed by profile",
+			opts: RunOptions{
+				Role:            "collector",
+				Permission:      "automation_read", // skip permissions allowed
+				SkipPermissions: true,
+				Prompt:          "test",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateGate(tc.opts)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.errContains) {
+					t.Errorf("expected error containing %q, got %q", tc.errContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }
