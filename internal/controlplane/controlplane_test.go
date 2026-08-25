@@ -1009,3 +1009,52 @@ func TestExpiryExhaustSealsReceiptAndRedacts(t *testing.T) {
 		t.Error("exhausted task must redact prompt via reconciler")
 	}
 }
+
+func TestListChildTasksAndGetTaskLineage(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// 1. Submit root task
+	rootReq := submitReq("root-task-1")
+	rootTask := mustSubmit(t, s, rootReq)
+
+	// 2. Submit 2 child tasks referencing root
+	child1Req := submitReq("child-task-1")
+	child1Req.ParentTaskID = &rootTask.TaskID
+	child1Task := mustSubmit(t, s, child1Req)
+
+	child2Req := submitReq("child-task-2")
+	child2Req.ParentTaskID = &rootTask.TaskID
+	child2Task := mustSubmit(t, s, child2Req)
+
+	// 3. Submit grandchild task referencing child1
+	grandchildReq := submitReq("grandchild-task-1")
+	grandchildReq.ParentTaskID = &child1Task.TaskID
+	grandchildTask := mustSubmit(t, s, grandchildReq)
+
+	// Test ListChildTasks
+	children, err := s.ListChildTasks(ctx, rootTask.TaskID)
+	if err != nil {
+		t.Fatalf("ListChildTasks: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("ListChildTasks count = %d, want 2", len(children))
+	}
+	if children[0].TaskID != child1Task.TaskID || children[1].TaskID != child2Task.TaskID {
+		t.Errorf("child tasks mismatch: got [%s, %s]", children[0].TaskID, children[1].TaskID)
+	}
+
+	// Test GetTaskLineage on grandchild -> [root, child1, grandchild]
+	lineage, err := s.GetTaskLineage(ctx, grandchildTask.TaskID)
+	if err != nil {
+		t.Fatalf("GetTaskLineage: %v", err)
+	}
+	if len(lineage) != 3 {
+		t.Fatalf("lineage count = %d, want 3", len(lineage))
+	}
+	if lineage[0].TaskID != rootTask.TaskID || lineage[1].TaskID != child1Task.TaskID || lineage[2].TaskID != grandchildTask.TaskID {
+		t.Errorf("lineage chain mismatch: got [%s, %s, %s], want [%s, %s, %s]",
+			lineage[0].TaskID, lineage[1].TaskID, lineage[2].TaskID,
+			rootTask.TaskID, child1Task.TaskID, grandchildTask.TaskID)
+	}
+}

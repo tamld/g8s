@@ -138,6 +138,8 @@ type ControlPlane interface {
 	ResumeTask(ctx context.Context, taskID string, resumedPayload json.RawMessage, reason string) (*Task, error)
 	GetTask(ctx context.Context, taskID string) (*Task, error)
 	ListTasks(ctx context.Context, filter TaskFilter) ([]*Task, error)
+	ListChildTasks(ctx context.Context, parentTaskID string) ([]*Task, error)
+	GetTaskLineage(ctx context.Context, taskID string) ([]*Task, error)
 }
 
 // canonicalJSON serializes value deterministically: map keys sorted
