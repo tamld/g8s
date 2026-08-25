@@ -13,7 +13,7 @@ func TestWrapExecWritesSuccessEnvelope(t *testing.T) {
 		t.Skip("posix fixtures")
 	}
 	out := filepath.Join(t.TempDir(), "result.json")
-	err := runWrapExec([]string{"wrap-exec", "--out", out, "--", "/bin/true"})
+	err := runWrapExec([]string{"wrap-exec", "--out", out, "--", "true"})
 	if err != nil {
 		t.Fatalf("runWrapExec: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestWrapExecCapturesFailureExitCode(t *testing.T) {
 		t.Skip("posix fixtures")
 	}
 	out := filepath.Join(t.TempDir(), "result.json")
-	err := runWrapExec([]string{"wrap-exec", "--out", out, "--", "/bin/false"})
+	err := runWrapExec([]string{"wrap-exec", "--out", out, "--", "false"})
 	if err != nil {
 		t.Fatalf("runWrapExec: %v", err)
 	}
