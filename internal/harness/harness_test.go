@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -226,5 +228,29 @@ func TestLegacyPathOnlyPromptUnchangedByRefactor(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("legacy rendering lost %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	fakeSSH := filepath.Join(tempDir, ".ssh")
+	if err := os.MkdirAll(fakeSSH, 0700); err != nil {
+		t.Fatalf("create fake .ssh: %v", err)
+	}
+	symlinkPath := filepath.Join(tempDir, "innocent_symlink")
+	if err := os.Symlink(fakeSSH, symlinkPath); err != nil {
+		t.Skip("skipping symlink test on platform without symlink support")
+	}
+
+	err := ValidateRequest(
+		"Scan files",
+		"collector",
+		"read_only",
+		[]string{symlinkPath},
+		false,
+		"",
+	)
+	if err == nil || !strings.Contains(err.Error(), "denied path fragment") {
+		t.Fatalf("expected symlink pointing to .ssh to be rejected, got %v", err)
 	}
 }

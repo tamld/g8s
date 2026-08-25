@@ -153,9 +153,8 @@ func DefaultConfigs() []Config {
 		{
 			Name:           "ollama",
 			Binary:         "ollama",
-			OverrideEnvVar: "OLLAMA_HOST",
 			Class:          "platform_dispatch",
-			MaxConcurrency: 2,
+			HealthProbeURL: "/api/tags",
 			IsLocal:        true,
 			Models: []ModelDescriptor{
 				{

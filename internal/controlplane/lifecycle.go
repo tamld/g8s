@@ -325,6 +325,10 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 
 	fresh := *task
 	fresh.State = nextState
+	fresh.ResultHash = &resultHash
+	if isFinal {
+		fresh.CompletedAt = &now
+	}
 	if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
 		"next_state":  nextState,
 		"success":     params.Success,
@@ -452,6 +456,9 @@ func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
 	fresh := *task
 	fresh.State = nextState
 	fresh.CancelRequested = true
+	if nextState == StateCancelled {
+		fresh.CompletedAt = &now
+	}
 	if err := insertTaskEvent(tx, taskID, "cancel_requested", "brain", map[string]any{
 		"reason":     reason,
 		"next_state": nextState,
@@ -527,6 +534,7 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 
 	fresh := *task
 	fresh.State = pauseState
+	fresh.ResultHash = &resultHash
 	if err := insertTaskEvent(tx, taskID, "task_paused", workerID, map[string]any{
 		"state":       pauseState,
 		"reason":      reason,

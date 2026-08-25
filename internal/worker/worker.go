@@ -180,9 +180,13 @@ func (c *processChild) WaitCode() int {
 // ignoring processes that already exited.
 func (c *processChild) Terminate(grace time.Duration) {
 	pid := c.cmd.Process.Pid
-	_ = killProcessGroup(pid, syscallSIGTERM)
+	if err := killProcessGroup(pid, syscallSIGTERM); err != nil && c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+	}
 	timer := time.AfterFunc(grace, func() {
-		_ = killProcessGroup(pid, syscallSIGKILL)
+		if err := killProcessGroup(pid, syscallSIGKILL); err != nil && c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
 	})
 	defer timer.Stop()
 	select {

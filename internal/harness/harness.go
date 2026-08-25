@@ -91,6 +91,9 @@ func ValidateRequest(
 		if err != nil {
 			absDir = cleanDir
 		}
+		if realDir, err := filepath.EvalSymlinks(absDir); err == nil {
+			absDir = realDir
+		}
 		normalized := strings.ToLower(filepath.ToSlash(absDir))
 
 		for _, fragment := range DeniedPathFragments {
