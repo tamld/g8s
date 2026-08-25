@@ -827,6 +827,43 @@ func TestPauseValidatesStateOwnershipAndRedacts(t *testing.T) {
 	}
 }
 
+func TestResumeTaskLifecycle(t *testing.T) {
+	s, _ := newTestStore(t)
+	task := mustSubmit(t, s, submitReq("resume-lifecycle"))
+	claimed, token := mustClaim(t, s, "worker-1", 30)
+	if !s.StartTask(task.TaskID, "worker-1", token) {
+		t.Fatal("StartTask failed")
+	}
+
+	paused, err := s.PauseTask(claimed.TaskID, "worker-1", token, StateNeedsInfo,
+		json.RawMessage(`{"question":"which cluster?"}`), "needs cluster name")
+	if err != nil {
+		t.Fatalf("PauseTask: %v", err)
+	}
+	if paused.State != StateNeedsInfo {
+		t.Fatalf("paused state = %s, want NEEDS_INFO", paused.State)
+	}
+
+	// Resuming task from NEEDS_INFO back to QUEUED
+	resumed, err := s.ResumeTask(context.Background(), task.TaskID,
+		json.RawMessage(`{"prompt":"use cluster us-east-1","model":"gemini-3.7-flash-high"}`), "operator provided cluster name")
+	if err != nil {
+		t.Fatalf("ResumeTask: %v", err)
+	}
+	if resumed.State != StateQueued {
+		t.Fatalf("resumed state = %s, want QUEUED", resumed.State)
+	}
+	if resumed.LeaseOwner != nil {
+		t.Fatal("resumed task must have nil LeaseOwner")
+	}
+
+	// Verify task can now be claimed again by worker-2
+	reclaimed, _ := mustClaim(t, s, "worker-2", 30)
+	if reclaimed.TaskID != task.TaskID {
+		t.Fatalf("reclaimed task ID = %s, want %s", reclaimed.TaskID, task.TaskID)
+	}
+}
+
 func TestMaintenanceLifecycleBlocksAndReleasesClaims(t *testing.T) {
 	s, _ := newTestStore(t)
 	mustSubmit(t, s, submitReq("queued-under-maintenance"))

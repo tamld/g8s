@@ -9,23 +9,19 @@ import (
 )
 
 var BlockedTaskPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\brm\s+-rf\b`),
-	regexp.MustCompile(`(?i)\bdel\s+/[sS]\b`),
-	regexp.MustCompile(`(?i)\brmdir\s+/[sS]\b`),
+	// rm with recursive and force in any flag combination: -rf, -fr, -r -f, -f -r, --recursive --force, etc.
+	regexp.MustCompile(`(?i)\brm\s+(?:-[a-z0-9]*[rf][a-z0-9]*\s+)+|(?i)\brm\s+-(?:[a-z0-9]*r[a-z0-9]*f|[a-z0-9]*f[a-z0-9]*r)[a-z0-9]*\b|(?i)\brm\s+.*(?:--recursive\s+--force|--force\s+--recursive)\b`),
+	regexp.MustCompile(`(?i)\bdel\s+(?:/[a-z0-9]+\s+)*[/\-][sS]\b`),
+	regexp.MustCompile(`(?i)\brmdir\s+(?:/[a-z0-9]+\s+)*[/\-][sS]\b`),
 	regexp.MustCompile(`(?i)\bfdisk\b`),
 	regexp.MustCompile(`(?i)\bmkfs\b`),
 	regexp.MustCompile(`(?i)\bdd\s+if=`),
-	regexp.MustCompile(`(?i)\bdrop\s+database\b`),
-	regexp.MustCompile(`(?i)\bdrop\s+table\b`),
+	regexp.MustCompile(`(?i)\bdrop\s+(?:database|table|schema)\b`),
 	regexp.MustCompile(`(?i)\btruncate\s+table\b`),
-	regexp.MustCompile(`(?i)\bshutdown\b`),
-	regexp.MustCompile(`(?i)\breboot\b`),
-	regexp.MustCompile(`(?i)\bhalt\b`),
+	regexp.MustCompile(`(?i)\b(?:shutdown|reboot|halt)\b`),
 	regexp.MustCompile(`(?i)\binit\s+0\b`),
-	regexp.MustCompile(`(?i)\bcopy\s+private\s+key\b`),
-	regexp.MustCompile(`(?i)\bexfiltrate\s+private\s+key\b`),
-	regexp.MustCompile(`(?i)\bcat\s+\.env\b`),
-	regexp.MustCompile(`(?i)\bopen\s+\.env\b`),
+	regexp.MustCompile(`(?i)\b(?:copy|exfiltrate)\s+private\s+key\b`),
+	regexp.MustCompile(`(?i)\b(?:cat|open|type)\s+\.env\b`),
 	regexp.MustCompile(`(?i)\bcopy\s+token\s+store\b`),
 }
 

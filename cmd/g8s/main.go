@@ -60,6 +60,14 @@ func main() {
 		runSubmit(os.Args[2:])
 	case "get":
 		runGet(os.Args[2:])
+	case "resume":
+		runResume(os.Args[2:])
+	case "tasks":
+		runTasks(os.Args[2:])
+	case "lineage":
+		runLineage(os.Args[2:])
+	case "children":
+		runChildren(os.Args[2:])
 	case "receipt":
 		runReceipt(os.Args[2:])
 	case "internal":
@@ -133,17 +141,26 @@ func runSubmit(args []string) {
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	prompt := fs.String("prompt", "", "task prompt handed to the worker")
-	role := fs.String("role", "collector", "worker role profile")
-	permission := fs.String("permission", "read_only", "permission profile for this task")
-	timeout := fs.String("timeout", "30s", "execution window handed to the worker")
+	role := fs.String("role", "collector", "role profile for the worker")
+	permission := fs.String("permission", "read_only", "permission profile for the worker")
+	timeout := fs.String("timeout", "30s", "execution window for the worker")
+	var addDirs sliceFlags
+	fs.Var(&addDirs, "add-dir", "explicit filesystem scope root (repeatable)")
 	failIf(fs.Parse(args))
 
 	if *key == "" || *prompt == "" {
 		fmt.Fprintln(os.Stderr, "submit requires --idempotency-key and --prompt")
 		os.Exit(2)
 	}
+	scopes := []string(addDirs)
+	if len(scopes) == 0 {
+		cwdDefault, err := os.Getwd()
+		failIf(err)
+		scopes = append(scopes, cwdDefault)
+	}
 	cwd, err := os.Getwd()
 	failIf(err)
+	_ = cwd
 
 	dbPath, err := databasePath()
 	failIf(err)
@@ -151,7 +168,7 @@ func runSubmit(args []string) {
 	failIf(err)
 	defer func() { _ = store.Close() }()
 
-	payload, err := json.Marshal(map[string]string{"prompt": *prompt, "timeout": *timeout})
+	payload, err := json.Marshal(map[string]any{"prompt": *prompt, "timeout": *timeout})
 	failIf(err)
 
 	task, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
@@ -163,7 +180,7 @@ func runSubmit(args []string) {
 		Role:           *role,
 		Permission:     *permission,
 		Timeout:        *timeout,
-		AddDirs:        []string{cwd},
+		AddDirs:        scopes,
 	})
 	failIf(err)
 
