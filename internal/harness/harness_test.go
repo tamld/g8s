@@ -101,6 +101,33 @@ func TestWikiPolicyBlockInjectedForReadOnlyProfiles(t *testing.T) {
 	}
 }
 
+func BenchmarkBuildDelegatedWriteBlock(b *testing.B) {
+	receipt := &ReceiptRef{ReceiptID: "rc-bench-12345", Issuer: "brain-orchestrator"}
+
+	testCases := []struct {
+		name         string
+		allowedPaths []string
+		receipt      *ReceiptRef
+	}{
+		{"EmptyPaths_NoReceipt", nil, nil},
+		{"EmptyPaths_WithReceipt", nil, receipt},
+		{"ShortPaths_NoReceipt", []string{"src/**"}, nil},
+		{"ShortPaths_WithReceipt", []string{"src/**"}, receipt},
+		{"LongPaths_NoReceipt", []string{"src/**", "docs/*.md", "tests/unit/*.go", "config.json", ".env.example"}, nil},
+		{"LongPaths_WithReceipt", []string{"src/**", "docs/*.md", "tests/unit/*.go", "config.json", ".env.example"}, receipt},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = buildDelegatedWriteBlock(tc.allowedPaths, tc.receipt)
+			}
+		})
+	}
+}
+
 func TestWikiPolicyBlockAbsentForMutationProfile(t *testing.T) {
 	prompt, err := BuildContractPrompt("mutate", "collector", "workspace_write", []string{"src/**"})
 	if err != nil {

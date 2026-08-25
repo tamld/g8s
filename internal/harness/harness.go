@@ -197,23 +197,48 @@ Original task:
 // ref the block always renders its header lines even when no path patterns are
 // attached; without one it keeps the legacy path-only rendering.
 func buildDelegatedWriteBlock(allowedPaths []string, receipt *ReceiptRef) string {
-	var block string
+	var sb strings.Builder
+
 	if receipt != nil {
-		block = "This task has DELEGATED WRITE permission via receipt.\n"
-		if len(allowedPaths) > 0 {
-			pathList := make([]string, 0, len(allowedPaths))
-			for _, p := range allowedPaths {
-				pathList = append(pathList, fmt.Sprintf("  - %s", p))
-			}
-			block += fmt.Sprintf("You may ONLY write to files matching these path patterns:\n%s\n", strings.Join(pathList, "\n"))
+		// Calculate capacity
+		cap := 150 + len(receipt.ReceiptID) + len(receipt.Issuer)
+		for _, p := range allowedPaths {
+			cap += len(p) + 5
 		}
-		block += "Writing to ANY path outside this scope is a policy violation.\n"
-		block += fmt.Sprintf("Receipt ID: %s\nIssuer: %s", receipt.ReceiptID, receipt.Issuer)
-		return block
+		sb.Grow(cap)
+
+		sb.WriteString("This task has DELEGATED WRITE permission via receipt.\n")
+		if len(allowedPaths) > 0 {
+			sb.WriteString("You may ONLY write to files matching these path patterns:\n")
+			for _, p := range allowedPaths {
+				sb.WriteString("  - ")
+				sb.WriteString(p)
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("Writing to ANY path outside this scope is a policy violation.\n")
+		sb.WriteString("Receipt ID: ")
+		sb.WriteString(receipt.ReceiptID)
+		sb.WriteString("\nIssuer: ")
+		sb.WriteString(receipt.Issuer)
+		return sb.String()
 	}
-	pathList := make([]string, 0, len(allowedPaths))
+
+	cap := 165
 	for _, p := range allowedPaths {
-		pathList = append(pathList, fmt.Sprintf("  - %s", p))
+		cap += len(p) + 5
 	}
-	return fmt.Sprintf("This task has DELEGATED WRITE permission via receipt.\nYou may ONLY write to files matching these path patterns:\n%s\nWriting outside this scope is a policy violation.", strings.Join(pathList, "\n"))
+	sb.Grow(cap)
+
+	sb.WriteString("This task has DELEGATED WRITE permission via receipt.\nYou may ONLY write to files matching these path patterns:\n")
+	for _, p := range allowedPaths {
+		sb.WriteString("  - ")
+		sb.WriteString(p)
+		sb.WriteString("\n")
+	}
+	if len(allowedPaths) == 0 {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("Writing outside this scope is a policy violation.")
+	return sb.String()
 }
