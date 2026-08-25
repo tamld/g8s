@@ -26,21 +26,20 @@
       "minItems": 1
     },
     "created_at": {
-      "type": "integer"
+      "type": ["string", "integer"]
     },
     "expires_at": {
-      "type": "integer"
+      "type": ["string", "integer"]
     },
     "consumed": {
       "type": "boolean",
       "default": false
     },
     "consumed_at": {
-      "type": ["integer", "null"]
+      "type": ["string", "integer", "null"]
     },
     "consumer_task_id": {
-      "type": ["string", "null"],
-      "format": "uuid"
+      "type": ["string", "null"]
     }
   },
   "additionalProperties": false

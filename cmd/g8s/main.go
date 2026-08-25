@@ -191,10 +191,11 @@ func runReceipt(args []string) {
 	ttlSeconds := fs.Int("ttl", 600, "time-to-live in seconds (1..3600)")
 	var paths pathFlags
 	fs.Var(&paths, "path", "allowed path glob (repeatable)")
+	fs.Var(&paths, "allow", "alias for --path (allowed path glob, repeatable)")
 	failIf(fs.Parse(args[1:]))
 
 	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "receipt issue requires at least one --path")
+		fmt.Fprintln(os.Stderr, "receipt issue requires at least one --path or --allow")
 		os.Exit(2)
 	}
 	dbPath, err := databasePath()
