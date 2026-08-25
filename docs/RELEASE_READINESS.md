@@ -67,3 +67,25 @@ L87 is CLOSED: every row either passes outright or is a documented intentional d
 
 Execution is deferred until the release audit window so it can run against the tagged
 candidate rather than a moving main.
+
+## Type-2 dispatch validation (g8s -> real agy CLI)
+
+Executed 2026-08-25 against agy v1.1.20 (`~/.local/bin/agy`) via a throwaway
+harness calling `dispatch.Run` with `BinaryOverride` set to the real binary:
+
+```text
+err=<nil>
+ok=true returncode=0 harness_rc=0 duration=8.8s
+preview=/Users/tamld/.local/bin/agy --prompt <prompt> --model gemini-3.7-flash-high --print-timeout 2m0s
+stdout="READY"
+stderr=""
+```
+
+Findings:
+
+- The DELTA-08 flag contract (`--prompt/--model/--print-timeout/--sandbox/
+  --dangerously-skip-permissions/--add-dir`) matches the real agy CLI exactly.
+- agy runs headless non-interactively with existing session state.
+- `dispatch.Run` is exit-code based; no result envelope required for this path.
+- The worker-supervisor path still needs a result-envelope adapter for real
+  CLIs that do not natively write `result.json` (tracked as DELTA-10 input).
