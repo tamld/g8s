@@ -77,6 +77,6 @@ brews:
     description: "Zero-CGO pure-Go harness orchestrating AI subagents"
     license: "MIT"
     test: |
-      system "#{bin}/g8s --version"
+      system "#{bin}/g8s", "version"
 
 
