@@ -1,0 +1,67 @@
+# Release automation for g8s.
+#
+# Triggered by annotated SemVer tag pushes (e.g. v0.1.0, v0.2.0-rc.1).
+# Verifies the tag matches the Version constant baked into cmd/g8s/main.go,
+# runs the full build + test suite, then publishes cross-platform archives
+# and a GitHub Release via GoReleaser.
+#
+# Conventions adopted from the defense-in-depth sibling project's
+# release workflow (tag-triggered, version assertion, fail-closed).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, verify, and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25'
+
+      - name: Assert tag matches source version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${TAG_NAME#v}"
+          SRC_VERSION="$(grep -o 'Version = "[^"]*"' cmd/g8s/main.go | cut -d'"' -f2)"
+          echo "tag version : ${TAG_VERSION}"
+          echo "src  version: ${SRC_VERSION}"
+          if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]; then
+            echo "::error::Tag ${TAG_NAME} does not match cmd/g8s/main.go Version '${SRC_VERSION}'."
+            exit 1
+          fi
+
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Run test suite
+        run: go test -count=1 ./...
+
+      - name: Run race detector on internal packages
+        run: go test -race -count=1 ./internal/...
+
+      - name: Publish release via GoReleaser
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
