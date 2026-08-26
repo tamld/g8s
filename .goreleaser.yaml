@@ -27,6 +27,12 @@ builds:
       - -s -w
       - -X main.Version={{.Version}}
 
+universal_binaries:
+  - id: darwin_all
+    ids:
+      - g8s
+    replace: true
+
 archives:
   - id: default
     formats:

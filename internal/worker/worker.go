@@ -110,7 +110,7 @@ func WithEvidenceDir(dir string) Option { return func(s *Supervisor) { s.evidenc
 // task request to a custom child argv (DELTA-10 R6). When the resolver
 // returns ok=true the returned argv replaces the dispatch-contract argv;
 // wrapper and stdout result modes still apply around it.
-func WithCommandResolver(fn func(req taskRequest) ([]string, bool)) Option {
+func WithCommandResolver(fn func(prompt, model, timeout string) ([]string, bool)) Option {
 	return func(s *Supervisor) { s.commandResolver = fn }
 }
 
@@ -147,7 +147,7 @@ type Supervisor struct {
 
 	// commandResolver optionally overrides the dispatch-contract argv with
 	// an operator-defined invocation template (DELTA-10 R6).
-	commandResolver func(req taskRequest) ([]string, bool)
+	commandResolver func(prompt, model, timeout string) ([]string, bool)
 }
 
 // NewSupervisor builds a supervisor over the given control plane and run root.
@@ -314,8 +314,8 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	childArgv := s.buildArgv(req, promptPath, resultPath)
 	if s.commandResolver != nil {
-		if templateArgv, ok := s.commandResolver(req); ok {
-			childArgv = substituteTemplate(templateArgv, req.Prompt, req.Model, req.Timeout)
+		if templateArgv, ok := s.commandResolver(req.Prompt, req.Model, req.Timeout); ok {
+			childArgv = templateArgv
 		}
 	}
 	if req.ResultMode != "stdout" {

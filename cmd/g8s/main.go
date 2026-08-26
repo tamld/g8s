@@ -16,8 +16,10 @@ import (
 
 	"github.com/pterm/pterm"
 
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
+	"github.com/tamld/g8s/internal/worker"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/mcp"
 	"github.com/tamld/g8s/internal/provider"
@@ -77,6 +79,8 @@ func main() {
 		runDoctor(os.Args[2:])
 	case "service":
 		runService(os.Args[2:])
+	case "worker":
+		runWorker(os.Args[2:])
 	case "internal":
 		if len(os.Args) < 3 || os.Args[2] != "wrap-exec" {
 			fmt.Fprintf(os.Stderr, "%s: usage: g8s internal wrap-exec --out <path> -- <child argv>\n", AppName)
@@ -513,4 +517,99 @@ func (s *sliceFlags) String() string { return strings.Join(*s, ",") }
 func (s *sliceFlags) Set(v string) error {
 	*s = append(*s, v)
 	return nil
+}
+
+// runWorker runs the supervisor loop claiming tasks from the queue,
+// resolving provider command templates from providers.json when present
+// (DELTA-10 phase-2 registry-to-worker bridge).
+func runWorker(args []string) {
+	fs := flag.NewFlagSet("worker", flag.ContinueOnError)
+	once := fs.Bool("once", true, "claim and execute a single task, then exit")
+	model := fs.String("model", "", "restrict to tasks targeting this model")
+	lease := fs.Int("lease", 60, "lease duration seconds")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	dbPath, dbErr := databasePath()
+	if dbErr != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, dbErr)
+		os.Exit(1)
+	}
+
+	templates := map[string][]string{}
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			cfgFile, loadErr := config.Load(providersPath)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, loadErr)
+				os.Exit(1)
+			}
+			for _, entry := range cfgFile.Providers {
+				if entry.Class != "platform_dispatch" || len(entry.Args) == 0 {
+					continue
+				}
+				for _, m := range entry.Models {
+					templates[m.ID] = entry.Args
+				}
+			}
+		}
+	}
+
+	store, cpErr := controlplane.NewControlPlane(dbPath, nil)
+	if cpErr != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, cpErr)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	sup := worker.NewSupervisor(store, filepath.Join(filepath.Dir(dbPath), "runs"),
+		worker.WithBinaryPath(os.Args[0]),
+		worker.WithCommandResolver(func(prompt, modelID, taskTimeout string) ([]string, bool) {
+			tmpl, ok := templates[modelID]
+			if !ok {
+				return nil, false
+			}
+			out := make([]string, len(tmpl))
+			for i, part := range tmpl {
+				switch part {
+				case "{prompt}":
+					out[i] = prompt
+				case "{model}":
+					out[i] = modelID
+				case "{timeout}":
+					out[i] = taskTimeout
+				default:
+					out[i] = part
+				}
+			}
+			return out, true
+		}))
+
+	ctx := context.Background()
+	for {
+		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: "cli-worker", LeaseSeconds: *lease})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
+			os.Exit(1)
+		}
+		if task == nil {
+			fmt.Println("queue drained")
+			return
+		}
+		fmt.Printf("%s %s\n", task.TaskID, task.State)
+		if *model != "" && task.State != "SUCCEEDED" && task.State != "FAILED" {
+			// model filter is advisory; states printed per cycle
+			_ = model
+		}
+		if *once {
+			return
+		}
+	}
 }

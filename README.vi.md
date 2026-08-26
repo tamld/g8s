@@ -55,8 +55,10 @@ brew install g8s
 
 hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 
-## Hướng dẫn sử dụng & Tích hợp
+## Hướng dẫn sử dụng & Vận hành
 
+- [Sổ tay vận hành (Operations Runbook)](docs/OPERATIONS.md)
+- [Hướng dẫn xác minh bảo mật & Checksum](docs/security/VERIFICATION_GUIDE.md)
 - [Tham chiếu CLI](docs/user-guide/cli-reference.md)
 - [Cấu hình hệ thống](docs/user-guide/configuration.md)
 - [Tham chiếu MCP Tools](docs/user-guide/mcp-tools.md)
