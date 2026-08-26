@@ -858,7 +858,7 @@ func TestCommandResolverOverridesContractArgv(t *testing.T) {
 		WithRunner(env.runner),
 		WithPollInterval(2*time.Millisecond),
 		WithCommandResolver(func(prompt, model, timeout string) ([]string, bool) {
-			return []string{"-p", req.Prompt}, true
+			return []string{"-p", prompt}, true
 		}),
 	)
 	done := make(chan struct{})
