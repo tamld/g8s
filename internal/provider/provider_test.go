@@ -453,3 +453,35 @@ func TestSelectForModelPrefersApiCallOverPlatformDispatch(t *testing.T) {
 		t.Fatalf("selected %q, want api_call pool first", name)
 	}
 }
+
+func TestLoadProvidersJSONMapsArgsTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	content := `{
+  "providers": [
+    {
+      "class": "platform_dispatch",
+      "name": "agy-direct",
+      "models": [{"id": "gemini-3.7-flash-high"}],
+      "slots": 4,
+      "args": ["-p", "{prompt}", "--model", "{model}"]
+    }
+  ]
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	r := NewRegistry(nil, nil, func(name string) (string, error) {
+		return "/bin/" + name, nil
+	})
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("LoadProvidersJSON: %v", err)
+	}
+	info, err := r.GetProvider("agy-direct")
+	if err != nil {
+		t.Fatalf("GetProvider: %v", err)
+	}
+	if info.Status != StatusReady {
+		t.Fatalf("status = %q, want READY", info.Status)
+	}
+}

@@ -92,6 +92,21 @@ When the registry discovers providers on a machine where agy is on PATH
 Then the entry is READY and its BinaryPath equals the resolved absolute path.
 ```
 
+### Requirement: Provider command templates override the dispatch contract
+Platform-dispatch entries MAY declare an explicit argument template so locally
+resolved CLIs that do not natively speak the g8s dispatch contract can still be
+supervised. Templates are OPERATOR-defined in providers.json — never accepted
+from task payloads — and placeholders are substituted verbatim without shell
+interpretation.
+
+Scenario: template-driven invocation.
+
+- **WHEN** a platform_dispatch entry declares `"args": ["-p", "{prompt}", "--model", "{model}", "--print-timeout", "{timeout}"]`
+- **THEN** the supervisor builds the child argv from this template, substituting `{prompt}` with the decoded prompt text, `{model}` with the requested model id, and `{timeout}` with the parsed duration
+- **AND** the resulting argv executes through the same process-group containment and result-envelope adapter as contract-based invocations
+- **WHEN** a submitter attempts to inject a template through the task payload
+- **THEN** the payload field is ignored: only operator configuration may define templates
+
 ### Requirement: Result-envelope adapter for real CLIs
 
 The DELTA-09 worker supervisor SHALL accept real platform CLIs that do not

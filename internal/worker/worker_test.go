@@ -851,3 +851,36 @@ func TestExportReceiptCentralizedEvidenceLake(t *testing.T) {
 		t.Fatalf("snap.TaskID = %s, want %s", snap.TaskID, task.TaskID)
 	}
 }
+
+func TestCommandResolverOverridesContractArgv(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	sup := NewSupervisor(env.store, env.runDir,
+		WithRunner(env.runner),
+		WithPollInterval(2*time.Millisecond),
+		WithCommandResolver(func(req taskRequest) ([]string, bool) {
+			return []string{"-p", req.Prompt}, true
+		}),
+	)
+	done := make(chan struct{})
+	close(done)
+	resolved := false
+	env.runner.factory = func(opts SpawnOptions) Child {
+		for _, a := range opts.Argv {
+			if a == "-p" {
+				resolved = true
+			}
+		}
+		return &instantChild{done: done}
+	}
+	submitTask(t, env, "resolver-1", 1, map[string]any{})
+	task, err := sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-resolver", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if task.State != "SUCCEEDED" {
+		t.Fatalf("state = %q, want SUCCEEDED", task.State)
+	}
+	if !resolved {
+		t.Fatalf("resolver argv not used: %v", env.runner.spawned[0].Argv)
+	}
+}

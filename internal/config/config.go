@@ -23,6 +23,13 @@ type ProviderEntry struct {
 	AuthEnv string       `json:"auth_env,omitempty"`
 	Models  []ModelEntry `json:"models"`
 	Slots   int          `json:"slots,omitempty"`
+
+	// Args optionally declares an operator-defined invocation template for
+	// platform_dispatch binaries that do not speak the g8s dispatch
+	// contract (DELTA-10 R6). Placeholders {prompt}, {model} and {timeout}
+	// are substituted verbatim into the exec argv; templates never
+	// originate from task payloads.
+	Args []string `json:"args,omitempty"`
 }
 
 // File is the root shape of providers.json.

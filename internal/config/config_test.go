@@ -106,3 +106,38 @@ func TestLoadRejectsEntryWithoutModels(t *testing.T) {
 		t.Fatal("want error for entry without models")
 	}
 }
+
+func TestLoadPreservesArgsTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	content := `{
+  "providers": [
+    {
+      "class": "platform_dispatch",
+      "name": "agy-direct",
+      "models": [{"id": "gemini-3.7-flash-high"}],
+      "slots": 4,
+      "args": ["-p", "{prompt}", "--model", "{model}", "--print-timeout", "{timeout}"]
+    }
+  ]
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	file, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(file.Providers) != 1 || file.Providers[0].Name != "agy-direct" {
+		t.Fatalf("entry = %+v", file.Providers)
+	}
+	want := []string{"-p", "{prompt}", "--model", "{model}", "--print-timeout", "{timeout}"}
+	if len(file.Providers[0].Args) != len(want) {
+		t.Fatalf("args = %v, want %v", file.Providers[0].Args, want)
+	}
+	for i := range want {
+		if file.Providers[0].Args[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q", i, file.Providers[0].Args[i], want[i])
+		}
+	}
+}
