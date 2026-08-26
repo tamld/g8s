@@ -857,7 +857,7 @@ func TestCommandResolverOverridesContractArgv(t *testing.T) {
 	sup := NewSupervisor(env.store, env.runDir,
 		WithRunner(env.runner),
 		WithPollInterval(2*time.Millisecond),
-		WithCommandResolver(func(req taskRequest) ([]string, bool) {
+		WithCommandResolver(func(prompt, model, timeout string) ([]string, bool) {
 			return []string{"-p", req.Prompt}, true
 		}),
 	)
