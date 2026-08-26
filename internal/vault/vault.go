@@ -74,6 +74,8 @@ type VaultFilter struct {
 	Offset    int     `json:"offset,omitempty"`
 }
 
+var schemaInitMu sync.Mutex
+
 // Vault manages the persistence and full-text search indexing of knowledge records.
 type Vault struct {
 	db    *sql.DB
@@ -107,7 +109,35 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 	return v, nil
 }
 
+// SetClock allows injecting a mock or deterministic clock function safely.
+func (v *Vault) SetClock(clock func() time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if clock == nil {
+		clock = time.Now
+	}
+	v.clock = clock
+}
+
+func (v *Vault) getClock() time.Time {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.clock()
+}
+
+// Close closes the underlying SQLite database safely.
+func (v *Vault) Close() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.db != nil {
+		return v.db.Close()
+	}
+	return nil
+}
+
 func (v *Vault) initSchema() error {
+	schemaInitMu.Lock()
+	defer schemaInitMu.Unlock()
 	schema := `
 	CREATE TABLE IF NOT EXISTS vault_records (
 		id TEXT PRIMARY KEY,
@@ -189,7 +219,7 @@ func (v *Vault) Store(ctx context.Context, rec DistillationRecord) (*Distillatio
 		rec.Milestone = "v0.3.0"
 	}
 
-	now := v.clock().UTC()
+	now := v.getClock().UTC()
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = now
 	}
@@ -382,12 +412,43 @@ func (v *Vault) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Close terminates database connections.
-func (v *Vault) Close() error {
-	return v.db.Close()
+// TokenizeCodeSymbols splits camelCase, PascalCase, snake_case, and kebab-case
+// identifiers into their constituent lowercase words.
+// Example: "CalculateBlastRadius" -> ["calculate", "blast", "radius"]
+// Example: "write_receipt_id" -> ["write", "receipt", "id"]
+func TokenizeCodeSymbols(s string) []string {
+	var tokens []string
+	words := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || r == '/' || r == ':' || r == '(' || r == ')' || unicode.IsSpace(r)
+	})
+	for _, word := range words {
+		if len(word) == 0 {
+			continue
+		}
+		var current strings.Builder
+		runes := []rune(word)
+		for i := 0; i < len(runes); i++ {
+			r := runes[i]
+			if i > 0 && unicode.IsUpper(r) {
+				prev := runes[i-1]
+				if unicode.IsLower(prev) || (i+1 < len(runes) && unicode.IsLower(runes[i+1]) && unicode.IsUpper(prev)) {
+					if current.Len() > 0 {
+						tokens = append(tokens, strings.ToLower(current.String()))
+						current.Reset()
+					}
+				}
+			}
+			current.WriteRune(r)
+		}
+		if current.Len() > 0 {
+			tokens = append(tokens, strings.ToLower(current.String()))
+		}
+	}
+	return tokens
 }
 
-// sanitizeFTSQuery cleans user search strings for FTS5 syntax safety.
+// sanitizeFTSQuery cleans user search strings and decomposes code symbol identifiers for FTS5 matching.
+>>>>>>> a0fedc7 (fix(vault): wire mutex synchronization, exclusive DDL init lock & handle taskkill exit codes)
 func sanitizeFTSQuery(q string) string {
 	terms := strings.Fields(q)
 	if len(terms) == 0 {
