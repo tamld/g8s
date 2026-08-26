@@ -297,6 +297,70 @@ func TestVaultConcurrency(t *testing.T) {
 	}
 
 	wg.Wait()
+
+	// Post-mortem assertion: All 200 records must exist and be searchable without corruption
+	recs, err := v.List(ctx, VaultFilter{Limit: 300})
+	if err != nil {
+		t.Fatalf("post-mortem list: %v", err)
+	}
+	if len(recs) != workers*iterations {
+		t.Fatalf("expected %d records in vault, found %d", workers*iterations, len(recs))
+	}
+}
+
+func TestConcurrentNewVaultInitialization(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "shared_vault.db")
+
+	var wg sync.WaitGroup
+	goroutines := 20
+	vaults := make([]*Vault, goroutines)
+	errorsChan := make(chan error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			v, err := NewVault(dbPath, nil)
+			if err != nil {
+				errorsChan <- fmt.Errorf("goroutine %d: %w", idx, err)
+				return
+			}
+			vaults[idx] = v
+		}(i)
+	}
+
+	wg.Wait()
+	close(errorsChan)
+
+	for err := range errorsChan {
+		t.Fatalf("concurrent NewVault error: %v", err)
+	}
+
+	// Verify all vaults can read and write concurrently on the shared DB
+	ctx := context.Background()
+	for i, v := range vaults {
+		if v == nil {
+			continue
+		}
+		defer v.Close()
+		recID := fmt.Sprintf("INIT-REC-%d", i)
+		rec := sampleRecord(recID, fmt.Sprintf("Initialization verification record %d", i))
+		if _, err := v.Store(ctx, rec); err != nil {
+			t.Fatalf("store on vault instance %d: %v", i, err)
+		}
+	}
+
+	// Verify FTS table and triggers survived without corruption
+	if len(vaults) > 0 && vaults[0] != nil {
+		matches, err := vaults[0].Query(ctx, "verification", 50)
+		if err != nil {
+			t.Fatalf("FTS query on shared DB: %v", err)
+		}
+		if len(matches) != goroutines {
+			t.Fatalf("expected %d FTS matches, got %d", goroutines, len(matches))
+		}
+	}
 }
 
 func TestTokenizeCodeSymbols(t *testing.T) {

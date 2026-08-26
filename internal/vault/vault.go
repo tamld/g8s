@@ -75,6 +75,8 @@ type VaultFilter struct {
 	Offset    int     `json:"offset,omitempty"`
 }
 
+var schemaInitMu sync.Mutex
+
 // Vault manages the persistence and full-text search indexing of knowledge records.
 type Vault struct {
 	db    *sql.DB
@@ -108,7 +110,35 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 	return v, nil
 }
 
+// SetClock allows injecting a mock or deterministic clock function safely.
+func (v *Vault) SetClock(clock func() time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if clock == nil {
+		clock = time.Now
+	}
+	v.clock = clock
+}
+
+func (v *Vault) getClock() time.Time {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.clock()
+}
+
+// Close closes the underlying SQLite database safely.
+func (v *Vault) Close() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.db != nil {
+		return v.db.Close()
+	}
+	return nil
+}
+
 func (v *Vault) initSchema() error {
+	schemaInitMu.Lock()
+	defer schemaInitMu.Unlock()
 	schema := `
 	CREATE TABLE IF NOT EXISTS vault_records (
 		id TEXT PRIMARY KEY,
@@ -190,7 +220,7 @@ func (v *Vault) Store(ctx context.Context, rec DistillationRecord) (*Distillatio
 		rec.Milestone = "v0.3.0"
 	}
 
-	now := v.clock().UTC()
+	now := v.getClock().UTC()
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = now
 	}
@@ -381,11 +411,6 @@ func (v *Vault) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-// Close terminates database connections.
-func (v *Vault) Close() error {
-	return v.db.Close()
 }
 
 // TokenizeCodeSymbols splits camelCase, PascalCase, snake_case, and kebab-case
