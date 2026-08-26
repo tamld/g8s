@@ -487,7 +487,6 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Printf("  %s <command> [arguments]\n\n", AppName)
 	fmt.Println("Commands:")
-<<<<<<< HEAD
 	fmt.Println("  submit       Queue an asynchronous durable task with harness safety checks")
 	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
 	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
