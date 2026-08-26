@@ -38,8 +38,8 @@ g8s submit \
 | `--role` | `string` | `"collector"` | Worker role contract (`collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`). |
 | `--permission` | `string` | `"read_only"` | Permission profile (`read_only`, `automation_read`, `workspace_write`). |
 | `--add-dir` | `string` | `[cwd]` | Allowed filesystem directory (repeatable). Validated against forbidden paths. |
-| `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). |
-| `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
+| `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). *(Arrives in v0.2.0 via PR #51)* |
+| `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. *(Arrives in v0.2.0 via PR #51)* |
 | `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
 | `--model` | `string` | `"gemini-3.7-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
@@ -75,7 +75,7 @@ g8s tasks --state QUEUED --limit 20
 
 ---
 
-### 4. `g8s lineage <task-id>`
+### 4. `g8s lineage <task-id>` *(Targeted: v0.2.0 / Issue #44)*
 Prints the full ancestry chain of a task up to the root parent, ordered chronologically (`Root -> Child -> Grandchild`).
 
 ```sh
@@ -84,7 +84,7 @@ g8s lineage grandchild-task-id-123
 
 ---
 
-### 5. `g8s children <parent-task-id>`
+### 5. `g8s children <parent-task-id>` *(Targeted: v0.2.0 / Issue #44)*
 Lists all direct child subtasks submitted under a specified parent task ID.
 
 ```sh
@@ -147,7 +147,7 @@ g8s version
 
 ---
 
-## Standalone 1-Liner Installation
+## Standalone 1-Liner Installation *(Available in v0.2.0)*
 
 Install or upgrade `g8s` directly via curl:
 

@@ -58,6 +58,8 @@ hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 ## Hướng dẫn sử dụng & Tích hợp
 
 - [Tham chiếu CLI](docs/user-guide/cli-reference.md)
+- [Cấu hình hệ thống](docs/user-guide/configuration.md)
+- [Tham chiếu MCP Tools](docs/user-guide/mcp-tools.md)
 - [Tích hợp Claude Desktop](docs/integrations/claude-desktop.md)
 - [Tích hợp Cursor IDE](docs/integrations/cursor.md)
 - [Tích hợp Google Antigravity](docs/integrations/antigravity.md)
