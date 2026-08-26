@@ -111,9 +111,9 @@ func (s *Server) dispatchTool(ctx context.Context, args json.RawMessage) (any, *
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
 	}
-	if profile.MutationAllowed && a.ReceiptID == "" {
+	if profile.MutationAllowed {
 		return nil, blockedStatus("blocked_by_policy",
-			fmt.Sprintf("permission %s requires an explicit Brain write receipt; please supply receipt_id", a.Permission))
+			fmt.Sprintf("permission %s is disabled on the MCP surface (requires delegated write receipt)", a.Permission))
 	}
 	if a.SkipPermissions && !profile.SkipPermissionsAllowed {
 		return nil, blockedStatus("blocked_by_harness",

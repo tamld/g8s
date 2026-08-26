@@ -506,26 +506,6 @@ func TestDispatchRejectsWorkspaceWriteBeforeDispatcherRuns(t *testing.T) {
 	}
 }
 
-func TestDispatchAllowsWorkspaceWriteWithReceipt(t *testing.T) {
-	s, _, d := newExtServer(t)
-	d.result = dispatch.Result{OK: true, Permission: "workspace_write"}
-	_, rpcErr := callTool(t, s, "g8s_dispatch", map[string]any{
-		"prompt":     "mutate files",
-		"add_dirs":   []string{"/tmp/a"},
-		"permission": "workspace_write",
-		"receipt_id": "rc-12345",
-	})
-	if rpcErr != nil {
-		t.Fatalf("want success with receipt, got %+v", rpcErr)
-	}
-	if d.calls != 1 {
-		t.Fatalf("dispatcher should run once when receipt is present, ran %d times", d.calls)
-	}
-	if d.lastReq.ReceiptID != "rc-12345" {
-		t.Fatalf("receipt_id not passed to dispatcher: %s", d.lastReq.ReceiptID)
-	}
-}
-
 func TestDispatchRejectsSkipPermissionsForReadOnly(t *testing.T) {
 	s, _, d := newExtServer(t)
 	_, rpcErr := callTool(t, s, "g8s_dispatch", map[string]any{
