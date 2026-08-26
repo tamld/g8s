@@ -55,17 +55,24 @@ brew install g8s
 
 hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 
-## Hướng dẫn sử dụng
+## Hướng dẫn sử dụng & Tích hợp
 
 - [Tham chiếu CLI](docs/user-guide/cli-reference.md)
-- [Cấu hình](docs/user-guide/configuration.md)
+- [Cấu hình hệ thống](docs/user-guide/configuration.md)
+- [Tham chiếu MCP Tools](docs/user-guide/mcp-tools.md)
+- [Tích hợp Claude Desktop](docs/integrations/claude-desktop.md)
+- [Tích hợp Cursor IDE](docs/integrations/cursor.md)
+- [Tích hợp Google Antigravity](docs/integrations/antigravity.md)
+- [Tích hợp Windsurf](docs/integrations/windsurf.md)
 - [Quy trình receipt delegation](docs/user-guide/receipt-workflow.md)
-- [Kết nối MCP](docs/user-guide/mcp-tools.md)
-- [Quản lý service](docs/user-guide/service.md)
+- [Quản lý service daemon](docs/user-guide/service.md)
 
-## Kiến trúc & đặc tả
+## Kiến trúc & Đặc tả
 
-Đặc tả đầy đủ nằm trong [`spec/openspec/`](spec/openspec/) — phát triển theo phương pháp Spec-Driven.
+- [Kiến trúc Decoupled Memory & Cognitive Whitepaper](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
+- [Kiến trúc 3-Plane System Architecture](docs/ARCHITECTURE.md)
+- [Hiến pháp Spec Kit](spec/constitution.md)
+- [Danh mục đặc tả OpenSpec](spec/openspec/)
 
 ## Giấy phép
 
