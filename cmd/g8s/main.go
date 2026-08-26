@@ -16,15 +16,18 @@ import (
 
 	"github.com/pterm/pterm"
 
+	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
-	"github.com/tamld/g8s/internal/worker"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/initwiz"
 	"github.com/tamld/g8s/internal/mcp"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/service"
+	"github.com/tamld/g8s/internal/settings"
+	"github.com/tamld/g8s/internal/worker"
 )
 
 // Version is a var so goreleaser ldflags -X can inject the build tag (D4).
@@ -77,6 +80,12 @@ func main() {
 		runReceipt(os.Args[2:])
 	case "doctor":
 		runDoctor(os.Args[2:])
+	case "init":
+		runInit(os.Args[2:])
+	case "config":
+		runConfig(os.Args[2:])
+	case "completion":
+		runCompletion(os.Args[2:])
 	case "service":
 		runService(os.Args[2:])
 	case "worker":
@@ -389,10 +398,11 @@ func runReceipt(args []string) {
 func runDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	jsonMode := fs.Bool("json", false, "output diagnostics as machine-readable JSON")
+	fixMode := fs.Bool("fix", false, "apply automatic self-healing remediations")
 	failIf(fs.Parse(args))
 
 	dbPath, _ := databasePath()
-	report := doctor.RunDiagnostics(context.Background(), dbPath)
+	report := doctor.RunDiagnosticsWithFix(context.Background(), dbPath, *fixMode)
 
 	if *jsonMode {
 		out, err := json.MarshalIndent(report, "", "  ")
@@ -407,6 +417,14 @@ func runDoctor(args []string) {
 	pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Diagnostics")
 	fmt.Printf("Platform: %s | Runtime: %s | Zero-CGO: %t | Status: %s\n\n",
 		report.Platform, report.GoRuntime, report.ZeroCGO, report.OverallStatus)
+
+	if len(report.AppliedFixes) > 0 {
+		pterm.Info.Println("Applied Self-Healing Fixes:")
+		for _, fix := range report.AppliedFixes {
+			pterm.Success.Printf("  • %s\n", fix)
+		}
+		fmt.Println()
+	}
 
 	var td pterm.TableData
 	td = append(td, []string{"Check", "Status", "Message", "Details"})
@@ -426,6 +444,147 @@ func runDoctor(args []string) {
 	if report.OverallStatus == "UNHEALTHY" {
 		os.Exit(1)
 	}
+}
+
+// runInit handles interactive and headless onboarding wizard.
+func runInit(args []string) {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	agentMode := fs.Bool("agent", false, "run in non-interactive headless agent mode")
+	ideFlag := fs.String("ide", "", "target IDE to configure (cursor, claude, windsurf, antigravity, all)")
+	jsonMode := fs.Bool("json", false, "output result as machine-readable JSON")
+	failIf(fs.Parse(args))
+
+	var targetIDEs []string
+	if *ideFlag != "" {
+		targetIDEs = strings.Split(*ideFlag, ",")
+	}
+
+	res, err := initwiz.RunInit(targetIDEs, "", os.Args[0])
+	failIf(err)
+
+	if *jsonMode {
+		out, err := json.MarshalIndent(res, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+		return
+	}
+
+	pterm.DefaultHeader.WithFullWidth().Println("g8s Onboarding Wizard")
+	pterm.Success.Printf("Initialized state directory: %s\n", res.StateDir)
+	pterm.Success.Printf("Initialized evidence directory: %s\n", res.EvidenceDir)
+	if res.ProvidersConfig != "" {
+		pterm.Success.Printf("Created default provider configuration: %s\n", res.ProvidersConfig)
+	}
+
+	if len(res.ConfiguredIDEs) > 0 {
+		var td pterm.TableData
+		td = append(td, []string{"IDE", "Config Path", "Status"})
+		for _, ide := range res.ConfiguredIDEs {
+			td = append(td, []string{ide.Name, ide.ConfigPath, pterm.Green("Configured")})
+		}
+		fmt.Println()
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+	} else if !*agentMode {
+		pterm.Info.Println("No supported IDE configs were updated. Use --ide=<cursor|claude|windsurf|antigravity|all> to explicitly configure.")
+	}
+}
+
+// runConfig manages atomic key-value configuration.
+func runConfig(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "%s: usage: g8s config <get|set|list|unset> [key] [value] [--json]\n", AppName)
+		os.Exit(2)
+	}
+
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	jsonMode := fs.Bool("json", false, "output as machine-readable JSON")
+
+	subcmd := args[0]
+	failIf(fs.Parse(args[1:]))
+	extraArgs := fs.Args()
+
+	mgr, err := settings.NewManager("")
+	failIf(err)
+
+	switch subcmd {
+	case "list":
+		all := mgr.List()
+		if *jsonMode {
+			out, err := json.MarshalIndent(all, "", "  ")
+			failIf(err)
+			fmt.Println(string(out))
+			return
+		}
+		var td pterm.TableData
+		td = append(td, []string{"Key", "Value", "Description"})
+		for key, desc := range settings.AllowedConfigKeys {
+			val, _ := mgr.Get(key)
+			valStr := "<unset>"
+			if val != nil {
+				valStr = fmt.Sprintf("%v", val)
+			}
+			td = append(td, []string{key, valStr, desc})
+		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+
+	case "get":
+		if len(extraArgs) < 1 {
+			fmt.Fprintf(os.Stderr, "%s: usage: g8s config get <key> [--json]\n", AppName)
+			os.Exit(2)
+		}
+		key := extraArgs[0]
+		val, ok := mgr.Get(key)
+		if !ok || val == nil {
+			if *jsonMode {
+				fmt.Println("{}")
+			} else {
+				fmt.Fprintf(os.Stderr, "Key %q is not set\n", key)
+			}
+			os.Exit(1)
+		}
+		if *jsonMode {
+			out, err := json.MarshalIndent(map[string]any{key: val}, "", "  ")
+			failIf(err)
+			fmt.Println(string(out))
+		} else {
+			fmt.Println(val)
+		}
+
+	case "set":
+		if len(extraArgs) < 2 {
+			fmt.Fprintf(os.Stderr, "%s: usage: g8s config set <key> <value>\n", AppName)
+			os.Exit(2)
+		}
+		key, value := extraArgs[0], extraArgs[1]
+		err := mgr.Set(key, value)
+		failIf(err)
+		pterm.Success.Printf("Configured %s = %s\n", key, value)
+
+	case "unset":
+		if len(extraArgs) < 1 {
+			fmt.Fprintf(os.Stderr, "%s: usage: g8s config unset <key>\n", AppName)
+			os.Exit(2)
+		}
+		key := extraArgs[0]
+		err := mgr.Unset(key)
+		failIf(err)
+		pterm.Success.Printf("Unset %s\n", key)
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown config subcommand %q (supported: get, set, list, unset)\n", subcmd)
+		os.Exit(2)
+	}
+}
+
+// runCompletion emits shell autocompletion scripts.
+func runCompletion(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "%s: usage: g8s completion <bash|zsh|fish>\n", AppName)
+		os.Exit(2)
+	}
+	script, err := completion.Generate(args[0])
+	failIf(err)
+	fmt.Print(script)
 }
 
 // runService handles OS background daemon management (macOS launchd & Linux systemd).
@@ -498,8 +657,12 @@ func printUsage() {
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
-	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor)")
+	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor [--fix])")
+	fmt.Println("  init         Initialize g8s and configure IDE MCP integration (g8s init)")
+	fmt.Println("  config       Manage persistent configuration key-values (g8s config get|set|list)")
+	fmt.Println("  completion   Generate shell autocompletion scripts (g8s completion bash|zsh|fish)")
 	fmt.Println("  service      Manage background daemon lifecycle (g8s service install|start|status)")
+	fmt.Println("  worker       Run local background supervisor loop (g8s worker [--once])")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
