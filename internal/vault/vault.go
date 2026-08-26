@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -448,7 +449,6 @@ func TokenizeCodeSymbols(s string) []string {
 }
 
 // sanitizeFTSQuery cleans user search strings and decomposes code symbol identifiers for FTS5 matching.
->>>>>>> a0fedc7 (fix(vault): wire mutex synchronization, exclusive DDL init lock & handle taskkill exit codes)
 func sanitizeFTSQuery(q string) string {
 	terms := strings.Fields(q)
 	if len(terms) == 0 {
