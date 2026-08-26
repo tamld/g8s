@@ -106,6 +106,33 @@ func WithBinaryPath(path string) Option { return func(s *Supervisor) { s.binaryP
 // WithEvidenceDir overrides the centralized Evidence Lake storage directory.
 func WithEvidenceDir(dir string) Option { return func(s *Supervisor) { s.evidenceDir = dir } }
 
+// WithCommandResolver installs an optional resolver that maps a decoded
+// task request to a custom child argv (DELTA-10 R6). When the resolver
+// returns ok=true the returned argv replaces the dispatch-contract argv;
+// wrapper and stdout result modes still apply around it.
+func WithCommandResolver(fn func(req taskRequest) ([]string, bool)) Option {
+	return func(s *Supervisor) { s.commandResolver = fn }
+}
+
+// substituteTemplate replaces {prompt}, {model} and {timeout} placeholders
+// verbatim in an operator-defined invocation template (DELTA-10 R6).
+func substituteTemplate(tmpl []string, prompt, model, timeout string) []string {
+	out := make([]string, len(tmpl))
+	for i, part := range tmpl {
+		switch {
+		case part == "{prompt}":
+			out[i] = prompt
+		case part == "{model}":
+			out[i] = model
+		case part == "{timeout}":
+			out[i] = timeout
+		default:
+			out[i] = part
+		}
+	}
+	return out
+}
+
 // Supervisor executes claimed tasks one attempt at a time with containment,
 // bounded capture, and sealed evidence export.
 type Supervisor struct {
@@ -117,6 +144,10 @@ type Supervisor struct {
 	captureMaxBytes int
 	binaryPath      string
 	evidenceDir     string
+
+	// commandResolver optionally overrides the dispatch-contract argv with
+	// an operator-defined invocation template (DELTA-10 R6).
+	commandResolver func(req taskRequest) ([]string, bool)
 }
 
 // NewSupervisor builds a supervisor over the given control plane and run root.
@@ -282,6 +313,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	defer errFile.Close()
 
 	childArgv := s.buildArgv(req, promptPath, resultPath)
+	if s.commandResolver != nil {
+		if templateArgv, ok := s.commandResolver(req); ok {
+			childArgv = substituteTemplate(templateArgv, req.Prompt, req.Model, req.Timeout)
+		}
+	}
 	if req.ResultMode != "stdout" {
 		// DELTA-10 R4 wrapper mode (default): run the child through the
 		// wrap-exec adapter so a result envelope is always produced even
