@@ -302,18 +302,54 @@ func DetectReadOnlyContractViolations(stdout, stderr string) []Violation {
 // newlines, and passes the evidence through output sanitization.
 func matchSnippet(text string, start, end int) string {
 	const radius = 96
-	runes := []rune(text)
+
+	// Fast path for ASCII-only strings using string index
+	if len(text) == utf8.RuneCountInString(text) {
+		begin := start - radius
+		if begin < 0 {
+			begin = 0
+		}
+		finish := end + radius
+		if finish > len(text) {
+			finish = len(text)
+		}
+		snippet := text[begin:finish]
+		snippet = strings.ReplaceAll(snippet, "\n", "\\n")
+		return SanitizeOutput(snippet)
+	}
+
 	startRune := utf8.RuneCountInString(text[:start])
 	endRune := startRune + utf8.RuneCountInString(text[start:end])
-	begin := startRune - radius
-	if begin < 0 {
-		begin = 0
+
+	beginRune := startRune - radius
+	if beginRune < 0 {
+		beginRune = 0
 	}
-	finish := endRune + radius
-	if finish > len(runes) {
-		finish = len(runes)
+	finishRune := endRune + radius
+
+	// Find byte indices mapping to rune bounds
+	beginByte := 0
+	currentRune := 0
+	for i := range text {
+		if currentRune == beginRune {
+			beginByte = i
+			break
+		}
+		currentRune++
 	}
-	snippet := string(runes[begin:finish])
+
+	finishByte := len(text)
+	for i := beginByte; i < len(text); {
+		_, size := utf8.DecodeRuneInString(text[i:])
+		if currentRune == finishRune {
+			finishByte = i
+			break
+		}
+		i += size
+		currentRune++
+	}
+
+	snippet := text[beginByte:finishByte]
 	snippet = strings.ReplaceAll(snippet, "\n", "\\n")
 	return SanitizeOutput(snippet)
 }
