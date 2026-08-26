@@ -507,7 +507,6 @@ func runAnalyze(args []string) {
 	out, err := json.MarshalIndent(report, "", "  ")
 	failIf(err)
 	fmt.Println(string(out))
->>>>>>> e02525f (feat(analyzer): implement LSP & AST Blast Radius Analyzer for automated write scoping)
 }
 
 func failIf(err error) {
