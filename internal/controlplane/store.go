@@ -73,6 +73,12 @@ func (s *Store) initialize() error {
 	}
 	defer conn.Close()
 
+	// Fast-path: if database already matches current schema version, skip exclusive lock
+	var version int
+	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err == nil && version == SchemaVersion {
+		return nil
+	}
+
 	if _, err := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
 		return fmt.Errorf("begin exclusive schema transaction: %w", err)
 	}
@@ -309,6 +315,65 @@ func (s *Store) ListTasks(_ context.Context, filter TaskFilter) ([]*Task, error)
 		return nil, fmt.Errorf("iterate tasks: %w", err)
 	}
 	return out, nil
+}
+
+// ListChildTasks returns all direct subtasks where parent_task_id = parentTaskID,
+// ordered chronologically by created_at.
+func (s *Store) ListChildTasks(ctx context.Context, parentTaskID string) ([]*Task, error) {
+	if strings.TrimSpace(parentTaskID) == "" {
+		return nil, errors.New("parent_task_id is required")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+taskColumns+" FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC",
+		parentTaskID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list child tasks for %s: %w", parentTaskID, err)
+	}
+	defer rows.Close()
+
+	var out []*Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate child tasks: %w", err)
+	}
+	return out, nil
+}
+
+// GetTaskLineage returns the full ancestry chain of a task up to the root parent,
+// starting with the root task and ending with the requested task.
+func (s *Store) GetTaskLineage(ctx context.Context, taskID string) ([]*Task, error) {
+	var lineage []*Task
+	currentID := taskID
+	seen := make(map[string]bool)
+
+	for currentID != "" {
+		if seen[currentID] {
+			break // Guard against potential circular references
+		}
+		seen[currentID] = true
+
+		task, err := s.GetTask(ctx, currentID)
+		if err != nil {
+			return nil, err
+		}
+		if task == nil {
+			break
+		}
+		// Prepend to maintain root -> child order
+		lineage = append([]*Task{task}, lineage...)
+		if task.ParentTaskID == nil {
+			break
+		}
+		currentID = *task.ParentTaskID
+	}
+	return lineage, nil
 }
 
 // ActiveTaskCount reports how many tasks currently hold a LEASED or RUNNING
@@ -732,6 +797,7 @@ func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, erro
 			}
 			fresh := *t
 			fresh.State = nextState
+			fresh.CompletedAt = &now
 			_, receiptHash, err := buildReceiptTx(tx, &fresh)
 			if err != nil {
 				return reconciled, fmt.Errorf("receipt for task %s: %w", t.TaskID, err)

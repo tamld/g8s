@@ -694,6 +694,14 @@ func TestReceiptHashIsReproducibleFromUnsignedPayload(t *testing.T) {
 	if recomputed != stored {
 		t.Errorf("receipt hash mismatch: stored %s recomputed %s", stored, recomputed)
 	}
+
+	freshTask, err := s.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if freshTask.ReceiptHash == nil || *freshTask.ReceiptHash != stored {
+		t.Fatalf("database sealed receipt_hash %v != BuildReceipt %s", freshTask.ReceiptHash, stored)
+	}
 }
 
 func TestRetryableFinishKeepsPromptWhileQueued(t *testing.T) {
@@ -824,6 +832,50 @@ func TestPauseValidatesStateOwnershipAndRedacts(t *testing.T) {
 	if _, err := s.PauseTask(task.TaskID, "worker-x", "bad-token", StateBlocked, nil, "stale"); err == nil ||
 		!strings.Contains(err.Error(), "lease ownership lost") {
 		t.Errorf("stale pause error = %v", err)
+	}
+}
+
+func TestResumeTaskLifecycle(t *testing.T) {
+	s, _ := newTestStore(t)
+	task := mustSubmit(t, s, submitReq("resume-lifecycle"))
+	claimed, err := s.ClaimTask(context.Background(), "worker-1", 30)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	token := *claimed.LeaseToken
+	if !s.StartTask(task.TaskID, "worker-1", token) {
+		t.Fatal("StartTask failed")
+	}
+
+	paused, err := s.PauseTask(claimed.TaskID, "worker-1", token, StateNeedsInfo,
+		json.RawMessage(`{"question":"which cluster?"}`), "needs cluster name")
+	if err != nil {
+		t.Fatalf("PauseTask: %v", err)
+	}
+	if paused.State != StateNeedsInfo {
+		t.Fatalf("paused state = %s, want NEEDS_INFO", paused.State)
+	}
+
+	// Resuming task from NEEDS_INFO back to QUEUED
+	resumed, err := s.ResumeTask(context.Background(), task.TaskID,
+		json.RawMessage(`{"prompt":"use cluster us-east-1","model":"gemini-3.7-flash-high"}`), "operator provided cluster name")
+	if err != nil {
+		t.Fatalf("ResumeTask: %v", err)
+	}
+	if resumed.State != StateQueued {
+		t.Fatalf("resumed state = %s, want QUEUED", resumed.State)
+	}
+	if resumed.LeaseOwner != nil {
+		t.Fatal("resumed task must have nil LeaseOwner")
+	}
+
+	// Verify task can now be claimed again by worker-2
+	reclaimed, err := s.ClaimTask(context.Background(), "worker-2", 30)
+	if err != nil || reclaimed == nil {
+		t.Fatalf("reclaimed: %v", err)
+	}
+	if reclaimed.TaskID != task.TaskID {
+		t.Fatalf("reclaimed task ID = %s, want %s", reclaimed.TaskID, task.TaskID)
 	}
 }
 
@@ -970,5 +1022,54 @@ func TestExpiryExhaustSealsReceiptAndRedacts(t *testing.T) {
 	}
 	if _, hasPrompt := requestDoc(t, exhausted[0])["prompt"]; hasPrompt {
 		t.Error("exhausted task must redact prompt via reconciler")
+	}
+}
+
+func TestListChildTasksAndGetTaskLineage(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// 1. Submit root task
+	rootReq := submitReq("root-task-1")
+	rootTask := mustSubmit(t, s, rootReq)
+
+	// 2. Submit 2 child tasks referencing root
+	child1Req := submitReq("child-task-1")
+	child1Req.ParentTaskID = &rootTask.TaskID
+	child1Task := mustSubmit(t, s, child1Req)
+
+	child2Req := submitReq("child-task-2")
+	child2Req.ParentTaskID = &rootTask.TaskID
+	child2Task := mustSubmit(t, s, child2Req)
+
+	// 3. Submit grandchild task referencing child1
+	grandchildReq := submitReq("grandchild-task-1")
+	grandchildReq.ParentTaskID = &child1Task.TaskID
+	grandchildTask := mustSubmit(t, s, grandchildReq)
+
+	// Test ListChildTasks
+	children, err := s.ListChildTasks(ctx, rootTask.TaskID)
+	if err != nil {
+		t.Fatalf("ListChildTasks: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("ListChildTasks count = %d, want 2", len(children))
+	}
+	if children[0].TaskID != child1Task.TaskID || children[1].TaskID != child2Task.TaskID {
+		t.Errorf("child tasks mismatch: got [%s, %s]", children[0].TaskID, children[1].TaskID)
+	}
+
+	// Test GetTaskLineage on grandchild -> [root, child1, grandchild]
+	lineage, err := s.GetTaskLineage(ctx, grandchildTask.TaskID)
+	if err != nil {
+		t.Fatalf("GetTaskLineage: %v", err)
+	}
+	if len(lineage) != 3 {
+		t.Fatalf("lineage count = %d, want 3", len(lineage))
+	}
+	if lineage[0].TaskID != rootTask.TaskID || lineage[1].TaskID != child1Task.TaskID || lineage[2].TaskID != grandchildTask.TaskID {
+		t.Errorf("lineage chain mismatch: got [%s, %s, %s], want [%s, %s, %s]",
+			lineage[0].TaskID, lineage[1].TaskID, lineage[2].TaskID,
+			rootTask.TaskID, child1Task.TaskID, grandchildTask.TaskID)
 	}
 }

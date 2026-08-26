@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,16 +20,31 @@ func TestRolesAndPermissions(t *testing.T) {
 }
 
 func TestValidateRequestBlockedPatterns(t *testing.T) {
-	err := ValidateRequest(
+	dangerousPrompts := []string{
 		"Please run rm -rf /tmp/test to clean up",
-		"collector",
-		"read_only",
-		[]string{"/workspace"},
-		false,
-		"",
-	)
-	if err == nil || !strings.Contains(err.Error(), "blocked task pattern") {
-		t.Fatalf("expected blocked pattern error, got %v", err)
+		"Please run rm -fr /tmp/test to clean up",
+		"Please run rm -f -r /tmp/test to clean up",
+		"Please run rm -r -f /tmp/test to clean up",
+		"Please run rm --recursive --force /tmp/test",
+		"Please run del /s /f C:\\Windows",
+		"Please run rmdir /s /q C:\\Users",
+		"Execute drop schema public cascade",
+		"Execute drop database production",
+		"Execute type .env to view tokens",
+	}
+
+	for _, prompt := range dangerousPrompts {
+		err := ValidateRequest(
+			prompt,
+			"collector",
+			"read_only",
+			[]string{"/workspace"},
+			false,
+			"",
+		)
+		if err == nil || !strings.Contains(err.Error(), "blocked task pattern") {
+			t.Fatalf("expected blocked pattern error for %q, got %v", prompt, err)
+		}
 	}
 }
 
@@ -226,5 +243,43 @@ func TestLegacyPathOnlyPromptUnchangedByRefactor(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("legacy rendering lost %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	fakeSSH := filepath.Join(tempDir, ".ssh")
+	if err := os.MkdirAll(fakeSSH, 0700); err != nil {
+		t.Fatalf("create fake .ssh: %v", err)
+	}
+	symlinkPath := filepath.Join(tempDir, "innocent_symlink")
+	if err := os.Symlink(fakeSSH, symlinkPath); err != nil {
+		t.Skip("skipping symlink test on platform without symlink support")
+	}
+
+	err := ValidateRequest(
+		"Scan files",
+		"collector",
+		"read_only",
+		[]string{symlinkPath},
+		false,
+		"",
+	)
+	if err == nil || !strings.Contains(err.Error(), "denied path fragment") {
+		t.Fatalf("expected symlink pointing to .ssh to be rejected, got %v", err)
+	}
+
+	// Also test non-existent child under symlink
+	nestedPath := filepath.Join(symlinkPath, "non_existent_key.pub")
+	errNested := ValidateRequest(
+		"Scan nested",
+		"collector",
+		"read_only",
+		[]string{nestedPath},
+		false,
+		"",
+	)
+	if errNested == nil || !strings.Contains(errNested.Error(), "denied path fragment") {
+		t.Fatalf("expected nested path under symlink pointing to .ssh to be rejected, got %v", errNested)
 	}
 }

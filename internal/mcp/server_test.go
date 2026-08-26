@@ -502,7 +502,7 @@ func TestDispatchRejectsWorkspaceWriteBeforeDispatcherRuns(t *testing.T) {
 		t.Fatalf("status = %v, want blocked_by_policy", data["status"])
 	}
 	if d.calls != 0 {
-		t.Fatalf("dispatcher must never run for mutation requests, ran %d times", d.calls)
+		t.Fatalf("dispatcher must never run for mutation requests without receipt, ran %d times", d.calls)
 	}
 }
 

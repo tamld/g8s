@@ -31,7 +31,7 @@ Traditional multi-agent architectures treat the LLM's **Context Window** as a mo
 │  g8s MEMORY KERNEL & 3-TIER EVIDENCE LAKE (EXTERNAL PERSISTENCE)                            │
 │  ├── 1. HOT MEMORY   : SQLite WAL Queue (`g8s.db`), Compare-And-Swap Leases, POSIX 0600     │
 │  ├── 2. WARM MEMORY  : Task Lineage Graph (`parent_task_id`), JSONL Streaming Events       │
-│  └── 3. COLD VAULT   : POSIX 0600 Filesystem Lake (`~/.local/state/g8s/evidence/`)          │
+│  └── 3. COLD VAULT   : POSIX 0600 Filesystem Lake (`~/.local/state/g8s/evidence/`) [v0.2.0] │
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,8 +46,8 @@ In `g8s`, the **LLM is treated as a Pure Compute Unit (CPU)**, while `g8s` acts 
 | Memory Taxonomy | Cognitive Role | Physical Packaging in g8s | Lifecycle & Retention |
 | :--- | :--- | :--- | :--- |
 | **1. Working Memory** | Immediate reasoning buffer for one execution step. | In-flight HTTP/CLI request payload bounded by `MaxPromptChars` (4,000 / 12,000 chars). | Ephemeral. Destroyed immediately upon process termination. |
-| **2. Episodic Memory** | History of what occurred: subtasks, retries, worker outcomes, errors. | SQLite `tasks` table with `parent_task_id` hierarchy + `task_events` append-only log. | Durable. Queryable via `g8s lineage <task-id>` and `g8s children <parent-id>`. |
-| **3. Semantic Memory** | Facts, rules, architectural constraints, codebase knowledge SSoT. | Static Markdown artifacts (`spec/openspec/`, `manifest.json`, Markdown Knowledge Vault with SQLite FTS5 + BM25). | Immutable & Versioned. SHA-256 hashed and referenced without polluting context. |
+| **2. Episodic Memory** | History of what occurred: subtasks, retries, worker outcomes, errors. | SQLite `tasks` table with `parent_task_id` hierarchy + `task_events` append-only log. Queryable via `g8s lineage` and `g8s children` *(v0.2.0 / Issue #44)*. | Durable. Persisted across runs and machine restarts. |
+| **3. Semantic Memory** | Facts, rules, architectural constraints, codebase knowledge SSoT. | Static Markdown artifacts (`spec/openspec/`, `manifest.json`, Knowledge Vault with SQLite FTS5 + BM25 *(v0.3.0 / Issue #54)*). | Immutable & Versioned. SHA-256 hashed and referenced without polluting context. |
 | **4. Capability Memory** | Authorization state: which files the agent is allowed to mutate and for how long. | SQLite `write_receipts` table: single-use, path-scoped globs, TTL-bounded ($1..3600\text{s}$). | Expired on TTL lapse or consumed atomically via CAS on first use. |
 
 ---
@@ -61,9 +61,9 @@ To guarantee infinite durability without inflating hot SQLite database files, `g
                                      │
            ┌─────────────────────────┼─────────────────────────┐
            ▼                         ▼                         ▼
-      HOT STORAGE               WARM STORAGE              COLD STORAGE
+      HOT STORAGE               WARM STORAGE              COLD STORAGE *(v0.2.0 / #42)*
  (Metadata & Control Plane)   (Session Logs & Trees)     (Evidence Vault)
- ─────────────────────────   ──────────────────────     ────────────────
+ ─────────────────────────   ──────────────────────     ─────────────────────────────
  Path: `g8s.db`              Path: `task_events`        Path: `~/.local/state/g8s/evidence/`
  Format: SQLite WAL          Format: Relational JSON    Format: POSIX 0600 Content Addressed
  Retention: Active leases    Retention: Full session    Retention: Permanent audit trail
