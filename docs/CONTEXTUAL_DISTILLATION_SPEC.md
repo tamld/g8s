@@ -47,7 +47,7 @@ Defines cryptographic and test evidence proving ground truth:
 
 ## 3. Standard Schema for Distilled SSoT Artifacts
 
-When distilling lessons into `spec/openspec/` or the Pure-Go Knowledge Vault (`internal/vault`), the record MUST follow this structured schema:
+When distilling lessons into `spec/openspec/` or the Pure-Go Knowledge Vault (`internal/vault` *(Targeted: v0.3.0 / Issue #54)*), the record MUST follow this structured schema:
 
 ```yaml
 distillation_record:

@@ -107,6 +107,7 @@ sequenceDiagram
 
     Operator->>RC: g8s receipt issue --path "./src/*" --ttl 600
     RC-->>Operator: Return WriteReceipt { ReceiptID: "rcpt-123", ExpiresAt }
+    Note over Operator,CP: Note: --receipt-id flag arrives in v0.2.0 (PR #51)
     Operator->>CP: g8s submit --prompt "Refactor" --role "scout" --receipt-id "rcpt-123"
     CP->>HN: ValidateRequest(prompt, role, permission, addDirs, receiptID)
     HN-->>CP: Request Validated (Zero-Trust Gate Passed)
@@ -135,8 +136,8 @@ stateDiagram-v2
     RUNNING --> NEEDS_INFO : Worker Requires Clarification
     RUNNING --> BLOCKED : Policy / Environment Barrier
 
-    NEEDS_INFO --> QUEUED : ResumeTaskWithInputs
-    BLOCKED --> QUEUED : UnblockTaskWithReceipt
+    NEEDS_INFO --> QUEUED : ResumeTask (v0.2.0 / #41)
+    BLOCKED --> QUEUED : ResumeTask (v0.2.0 / #41)
 
     RUNNING --> SUCCEEDED : FinishAttempt (Success)
     RUNNING --> FAILED : FinishAttempt (Errors / Retry Exhausted)

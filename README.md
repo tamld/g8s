@@ -153,6 +153,8 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 - [Quick Start](docs/quickstart.md) — zero to first delegated task.
 - [CLI Reference](docs/user-guide/cli-reference.md) — every subcommand and flag.
+- [Configuration](docs/user-guide/configuration.md) — control plane and runtime settings.
+- [MCP Tools Reference](docs/user-guide/mcp-tools.md) — Stdio JSON-RPC tools reference.
 - [Claude Desktop Integration](docs/integrations/claude-desktop.md) — connect Claude 3.7 / Opus.
 - [Cursor IDE Integration](docs/integrations/cursor.md) — connect Cursor MCP.
 - [Google Antigravity Integration](docs/integrations/antigravity.md) — supervise AGY workers.
