@@ -152,6 +152,8 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 ### User Guide & Integrations
 
 - [Quick Start](docs/quickstart.md) — zero to first delegated task.
+- [Operations Runbook](docs/OPERATIONS.md) — complete command matrix, maintenance, and daemon runbooks.
+- [Security & Verification Guide](docs/security/VERIFICATION_GUIDE.md) — checksum, pure-Go, and Cosign verification.
 - [CLI Reference](docs/user-guide/cli-reference.md) — every subcommand and flag.
 - [Configuration](docs/user-guide/configuration.md) — control plane and runtime settings.
 - [MCP Tools Reference](docs/user-guide/mcp-tools.md) — Stdio JSON-RPC tools reference.
@@ -159,8 +161,7 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 - [Cursor IDE Integration](docs/integrations/cursor.md) — connect Cursor MCP.
 - [Google Antigravity Integration](docs/integrations/antigravity.md) — supervise AGY workers.
 - [Windsurf Integration](docs/integrations/windsurf.md) — connect Cascade MCP.
-- [Receipt Delegation](docs/user-guide/receipt-workflow.md) — write receipts end-to-end.
-- [Service Management](docs/user-guide/service.md) — macOS LaunchAgent lifecycle.
+- [Service Management](docs/user-guide/service.md) — background daemon lifecycle.
 
 ## 📄 License
 
