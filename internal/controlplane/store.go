@@ -732,6 +732,7 @@ func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, erro
 			}
 			fresh := *t
 			fresh.State = nextState
+			fresh.CompletedAt = &now
 			_, receiptHash, err := buildReceiptTx(tx, &fresh)
 			if err != nil {
 				return reconciled, fmt.Errorf("receipt for task %s: %w", t.TaskID, err)

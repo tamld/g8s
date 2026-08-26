@@ -91,6 +91,7 @@ func ValidateRequest(
 		if err != nil {
 			absDir = cleanDir
 		}
+		absDir = resolveExistingSymlinks(absDir)
 		normalized := strings.ToLower(filepath.ToSlash(absDir))
 
 		for _, fragment := range DeniedPathFragments {
@@ -236,9 +237,24 @@ func buildDelegatedWriteBlock(allowedPaths []string, receipt *ReceiptRef) string
 		sb.WriteString(p)
 		sb.WriteString("\n")
 	}
-	if len(allowedPaths) == 0 {
-		sb.WriteString("\n")
-	}
 	sb.WriteString("Writing outside this scope is a policy violation.")
 	return sb.String()
+}
+
+// resolveExistingSymlinks evaluates symlinks on a path, walking ancestor
+// directories if the target leaf path does not yet exist on disk.
+func resolveExistingSymlinks(path string) string {
+	if realPath, err := filepath.EvalSymlinks(path); err == nil {
+		return realPath
+	}
+	parent := path
+	var parts []string
+	for parent != "" && parent != "/" && parent != "." {
+		if realParent, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(append([]string{realParent}, parts...)...)
+		}
+		parts = append([]string{filepath.Base(parent)}, parts...)
+		parent = filepath.Dir(parent)
+	}
+	return path
 }
