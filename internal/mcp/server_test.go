@@ -303,13 +303,30 @@ func TestSelfAwarenessListsProviderInfos(t *testing.T) {
 	}
 }
 
-func TestRunAndBlastRadiusDisclosePendingDependencies(t *testing.T) {
+func TestRunDisclosesPendingDependency(t *testing.T) {
 	s, _, _, _ := newTestServer(t)
-	for _, name := range []string{"g8s_run", "g8s_blast_radius"} {
-		_, rpcErr := callTool(t, s, name, map[string]any{})
-		if rpcErr == nil || rpcErr.Code != codeInternal {
-			t.Fatalf("%s should return internal error, got %+v", name, rpcErr)
-		}
+	_, rpcErr := callTool(t, s, "g8s_run", map[string]any{})
+	if rpcErr == nil || rpcErr.Code != codeInternal {
+		t.Fatalf("g8s_run should return internal error, got %+v", rpcErr)
+	}
+}
+
+func TestBlastRadiusToolExecution(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+
+	// Missing file parameter returns codeInvalidParams
+	_, rpcErr := callTool(t, s, "g8s_blast_radius", map[string]any{})
+	if rpcErr == nil || rpcErr.Code != codeInvalidParams {
+		t.Fatalf("g8s_blast_radius missing file should return invalid params, got %+v", rpcErr)
+	}
+
+	// Valid target file executes analysis
+	res, rpcErr := callTool(t, s, "g8s_blast_radius", map[string]any{"file": "../../cmd/g8s/main.go"})
+	if rpcErr != nil {
+		t.Fatalf("g8s_blast_radius execution: %v", rpcErr)
+	}
+	if res == nil {
+		t.Fatalf("expected non-nil blast radius report")
 	}
 }
 

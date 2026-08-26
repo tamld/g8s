@@ -1,6 +1,6 @@
 # OpenSpec DELTA-07: LSP & Dependency Blast Radius Analyzer
 
-**Status**: `PROPOSED`  
+**Status**: `APPLIED`  
 **Milestone**: M2 (Advanced Capabilities)  
 **Package**: `internal/analyzer`  
 

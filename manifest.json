@@ -124,7 +124,7 @@
       "id": "DELTA-07",
       "title": "LSP & Dependency Blast Radius Analyzer",
       "path": "spec/openspec/07-blast-radius-analyzer-spec.md",
-      "status": "PROPOSED"
+      "status": "APPLIED"
     },
     {
       "id": "DELTA-08",

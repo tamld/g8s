@@ -17,6 +17,7 @@ import (
 	"github.com/pterm/pterm"
 
 	"github.com/tamld/g8s/internal/completion"
+	"github.com/tamld/g8s/internal/analyzer"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
@@ -27,6 +28,7 @@ import (
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/service"
 	"github.com/tamld/g8s/internal/settings"
+	"github.com/tamld/g8s/internal/vault"
 	"github.com/tamld/g8s/internal/worker"
 )
 
@@ -90,6 +92,10 @@ func main() {
 		runService(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "analyze":
+		runAnalyze(os.Args[2:])
+	case "vault":
+		runVault(os.Args[2:])
 	case "internal":
 		if len(os.Args) < 3 || os.Args[2] != "wrap-exec" {
 			fmt.Fprintf(os.Stderr, "%s: usage: g8s internal wrap-exec --out <path> -- <child argv>\n", AppName)
@@ -632,6 +638,172 @@ func runService(args []string) {
 	}
 }
 
+// runAnalyze computes Blast Radius Intelligence for a target file or symbol per DELTA-07.
+func runAnalyze(args []string) {
+	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
+	file := fs.String("file", "", "target file to analyze (required)")
+	symbol := fs.String("symbol", "", "target symbol identifier (optional)")
+	root := fs.String("root", "", "codebase root directory (defaults to cwd)")
+	failIf(fs.Parse(args))
+
+	if *file == "" {
+		if fs.NArg() > 0 {
+			*file = fs.Arg(0)
+		} else {
+			fmt.Fprintln(os.Stderr, "usage: g8s analyze --file <path> [--symbol <name>] [--root <dir>]")
+			os.Exit(2)
+		}
+	}
+
+	an, err := analyzer.NewAnalyzer(*root)
+	failIf(err)
+
+	var report *analyzer.BlastRadiusReport
+	if *symbol != "" {
+		report, err = an.AnalyzeSymbolImpact(*file, *symbol)
+	} else {
+		report, err = an.AnalyzeFileImpact(*file)
+	}
+	failIf(err)
+
+	out, err := json.MarshalIndent(report, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
+// runVault handles Tri-Anchor knowledge vault operations (store, query, list, get, delete).
+func runVault(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: g8s vault <store|query|list|get|delete> [options]")
+		os.Exit(2)
+	}
+
+	dbPath, err := databasePath()
+	failIf(err)
+	v, err := vault.NewVault(dbPath, nil)
+	failIf(err)
+	defer func() { _ = v.Close() }()
+
+	ctx := context.Background()
+
+	switch args[0] {
+	case "store":
+		fs := flag.NewFlagSet("vault store", flag.ExitOnError)
+		id := fs.String("id", "", "distillation record id (e.g. DELTA-01-A)")
+		title := fs.String("title", "", "record title")
+		milestone := fs.String("milestone", "v0.3.0", "target milestone")
+		status := fs.String("status", "APPLIED", "record status (PROPOSED, ACCEPTED, APPLIED, DEPRECATED)")
+		pkg := fs.String("package", "", "target package name")
+		file := fs.String("file", "", "target source file path")
+		symbol := fs.String("symbol", "", "target code symbol")
+		problem := fs.String("problem", "", "causality problem statement")
+		tradeOff := fs.String("trade-off", "", "causality architectural trade-off")
+		rootCause := fs.String("root-cause", "", "causality root cause")
+		testFile := fs.String("test-file", "", "forensic verification test file")
+		testCase := fs.String("test-case", "", "forensic verification test case")
+		filePath := fs.String("from-file", "", "load complete record JSON from file")
+		failIf(fs.Parse(args[1:]))
+
+		var rec vault.DistillationRecord
+		if *filePath != "" {
+			data, err := os.ReadFile(*filePath)
+			failIf(err)
+			failIf(json.Unmarshal(data, &rec))
+		} else {
+			rec = vault.DistillationRecord{
+				ID:        *id,
+				Title:     *title,
+				Milestone: *milestone,
+				Status:    *status,
+				Causality: vault.CausalityAnchor{
+					Problem:   *problem,
+					TradeOff:  *tradeOff,
+					RootCause: *rootCause,
+				},
+				SpatialCoordinates: vault.SpatialAnchor{
+					Package: *pkg,
+					File:    *file,
+					Symbol:  *symbol,
+				},
+				ForensicVerification: vault.ForensicAnchor{
+					TestFile: *testFile,
+					TestCase: *testCase,
+				},
+			}
+		}
+
+		stored, err := v.Store(ctx, rec)
+		failIf(err)
+		out, err := json.MarshalIndent(stored, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+
+	case "query":
+		fs := flag.NewFlagSet("vault query", flag.ExitOnError)
+		limit := fs.Int("limit", 10, "maximum number of results")
+		failIf(fs.Parse(args[1:]))
+
+		if fs.NArg() == 0 {
+			fmt.Fprintln(os.Stderr, "usage: g8s vault query <search-term> [--limit 10]")
+			os.Exit(2)
+		}
+		q := strings.Join(fs.Args(), " ")
+		results, err := v.Query(ctx, q, *limit)
+		failIf(err)
+		out, err := json.MarshalIndent(results, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+
+	case "get":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: g8s vault get <record-id>")
+			os.Exit(2)
+		}
+		rec, err := v.Get(ctx, args[1])
+		failIf(err)
+		out, err := json.MarshalIndent(rec, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+
+	case "list":
+		fs := flag.NewFlagSet("vault list", flag.ExitOnError)
+		milestone := fs.String("milestone", "", "filter by milestone")
+		status := fs.String("status", "", "filter by status")
+		pkg := fs.String("package", "", "filter by package")
+		limit := fs.Int("limit", 50, "maximum records to return")
+		failIf(fs.Parse(args[1:]))
+
+		filter := vault.VaultFilter{Limit: *limit}
+		if *milestone != "" {
+			filter.Milestone = milestone
+		}
+		if *status != "" {
+			filter.Status = status
+		}
+		if *pkg != "" {
+			filter.Package = pkg
+		}
+
+		list, err := v.List(ctx, filter)
+		failIf(err)
+		out, err := json.MarshalIndent(list, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+
+	case "delete":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: g8s vault delete <record-id>")
+			os.Exit(2)
+		}
+		failIf(v.Delete(ctx, args[1]))
+		fmt.Printf("Record %q deleted\n", args[1])
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown vault subcommand %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
 func failIf(err error) {
 	if err != nil {
 		reportError(err, os.Stderr)
@@ -663,6 +835,8 @@ func printUsage() {
 	fmt.Println("  completion   Generate shell autocompletion scripts (g8s completion bash|zsh|fish)")
 	fmt.Println("  service      Manage background daemon lifecycle (g8s service install|start|status)")
 	fmt.Println("  worker       Run local background supervisor loop (g8s worker [--once])")
+	fmt.Println("  analyze      Quantify code blast radius and recommend write scopes (g8s analyze ...)")
+	fmt.Println("  vault        Manage decoupled Tri-Anchor knowledge records (store/query/list)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
