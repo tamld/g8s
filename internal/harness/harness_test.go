@@ -20,16 +20,31 @@ func TestRolesAndPermissions(t *testing.T) {
 }
 
 func TestValidateRequestBlockedPatterns(t *testing.T) {
-	err := ValidateRequest(
+	dangerousPrompts := []string{
 		"Please run rm -rf /tmp/test to clean up",
-		"collector",
-		"read_only",
-		[]string{"/workspace"},
-		false,
-		"",
-	)
-	if err == nil || !strings.Contains(err.Error(), "blocked task pattern") {
-		t.Fatalf("expected blocked pattern error, got %v", err)
+		"Please run rm -fr /tmp/test to clean up",
+		"Please run rm -f -r /tmp/test to clean up",
+		"Please run rm -r -f /tmp/test to clean up",
+		"Please run rm --recursive --force /tmp/test",
+		"Please run del /s /f C:\\Windows",
+		"Please run rmdir /s /q C:\\Users",
+		"Execute drop schema public cascade",
+		"Execute drop database production",
+		"Execute type .env to view tokens",
+	}
+
+	for _, prompt := range dangerousPrompts {
+		err := ValidateRequest(
+			prompt,
+			"collector",
+			"read_only",
+			[]string{"/workspace"},
+			false,
+			"",
+		)
+		if err == nil || !strings.Contains(err.Error(), "blocked task pattern") {
+			t.Fatalf("expected blocked pattern error for %q, got %v", prompt, err)
+		}
 	}
 }
 

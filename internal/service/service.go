@@ -204,16 +204,17 @@ func xmlEscape(v string) string {
 	return r.Replace(v)
 }
 
-// sanitizedPathEnv drops the user-local bin directory so the daemon cannot
-// pick up binaries an attacker may have planted there.
+// sanitizedPathEnv cleans PATH by stripping empty and unsafe relative entries
+// while preserving user tool paths (~/.local/bin, ~/go/bin, /opt/homebrew/bin, etc.).
 func (m *Manager) sanitizedPathEnv() string {
-	localBin := filepath.Join(m.cfg.Home, ".local", "bin")
 	kept := make([]string, 0, 8)
+	seen := make(map[string]bool)
 	for _, dir := range strings.Split(m.cfg.PathEnv, string(os.PathListSeparator)) {
 		cleaned := strings.TrimSpace(dir)
-		if cleaned == localBin || cleaned == "" {
+		if cleaned == "" || cleaned == "." || strings.HasPrefix(cleaned, "./") || seen[cleaned] {
 			continue
 		}
+		seen[cleaned] = true
 		kept = append(kept, cleaned)
 	}
 	return strings.Join(kept, string(os.PathListSeparator))

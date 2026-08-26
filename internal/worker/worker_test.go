@@ -792,3 +792,62 @@ func (c *instantChild) PID() int                { return 7 }
 func (c *instantChild) Done() <-chan struct{}   { return c.done }
 func (c *instantChild) WaitCode() int           { return 0 }
 func (c *instantChild) Terminate(time.Duration) {}
+
+func TestReadWorkerResultFallbacks(t *testing.T) {
+	// Case 1: result file missing, exit code 0 -> synthesized success
+	wr := readWorkerResult("/nonexistent/path.json", "some random logs", 0)
+	if !wr.OK || wr.Status != "succeeded" {
+		t.Fatalf("expected synthesized success for exit code 0, got %+v", wr)
+	}
+
+	// Case 2: result file missing, exit code 1 -> failure
+	wr = readWorkerResult("/nonexistent/path.json", "some error logs", 1)
+	if wr.OK || wr.Status != "failed" {
+		t.Fatalf("expected failure for exit code 1, got %+v", wr)
+	}
+
+	// Case 3: result file missing, fenced JSON in stdout
+	fencedStdout := "Task execution:\n```json\n{\"ok\": false, \"status\": \"BLOCKED\", \"reason\": \"needs write receipt\"}\n```\nDone."
+	wr = readWorkerResult("/nonexistent/path.json", fencedStdout, 0)
+	if wr.Status != "BLOCKED" || wr.Reason != "needs write receipt" {
+		t.Fatalf("expected extracted fenced JSON, got %+v", wr)
+	}
+}
+
+func TestExportReceiptCentralizedEvidenceLake(t *testing.T) {
+	tempEvidenceDir := t.TempDir()
+	env := newWorkerEnv(t, nil)
+	env.sup.evidenceDir = tempEvidenceDir
+	task := submitTask(t, env, "test-evidence-lake", 3, nil)
+
+	runDir := filepath.Join(env.runDir, "attempt-1")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatalf("mkdir runDir: %v", err)
+	}
+
+	env.sup.ExportReceipt(context.Background(), task.TaskID, runDir)
+
+	// Verify local runDir receipt
+	localReceipt := filepath.Join(runDir, "receipt.json")
+	if _, err := os.Stat(localReceipt); os.IsNotExist(err) {
+		t.Fatalf("expected local receipt at %s", localReceipt)
+	}
+
+	// Verify centralized Evidence Lake receipt
+	centralReceipt := filepath.Join(tempEvidenceDir, task.TaskID, "receipt.json")
+	if _, err := os.Stat(centralReceipt); os.IsNotExist(err) {
+		t.Fatalf("expected centralized receipt at %s", centralReceipt)
+	}
+
+	data, err := os.ReadFile(centralReceipt)
+	if err != nil {
+		t.Fatalf("read central receipt: %v", err)
+	}
+	var snap controlplane.Task
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("unmarshal central receipt: %v", err)
+	}
+	if snap.TaskID != task.TaskID {
+		t.Fatalf("snap.TaskID = %s, want %s", snap.TaskID, task.TaskID)
+	}
+}

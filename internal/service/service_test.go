@@ -128,8 +128,8 @@ func TestBuildPlistHardensTheUnitDefinition(t *testing.T) {
 	}
 	localBin := filepath.Join(env.manager.cfg.Home, ".local", "bin")
 	sanitized := env.manager.sanitizedPathEnv()
-	if strings.Contains(sanitized, localBin) {
-		t.Fatalf("sanitized PATH must exclude %s: %q", localBin, sanitized)
+	if !strings.Contains(sanitized, localBin) {
+		t.Fatalf("sanitized PATH must preserve user localBin %s: %q", localBin, sanitized)
 	}
 	if !strings.Contains(sanitized, "/usr/bin") {
 		t.Fatalf("sanitized PATH dropped unrelated entries: %q", sanitized)

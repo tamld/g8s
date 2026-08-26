@@ -61,6 +61,14 @@ func main() {
 		runSubmit(os.Args[2:])
 	case "get":
 		runGet(os.Args[2:])
+	case "resume":
+		runResume(os.Args[2:])
+	case "tasks":
+		runTasks(os.Args[2:])
+	case "lineage":
+		runLineage(os.Args[2:])
+	case "children":
+		runChildren(os.Args[2:])
 	case "receipt":
 		runReceipt(os.Args[2:])
 	case "internal":
@@ -81,7 +89,7 @@ func main() {
 	}
 }
 
-// pathFlags collects repeated --path values for receipt scoping.
+// pathFlags collects repeated flag values for paths and directories.
 type pathFlags []string
 
 func (p *pathFlags) String() string { return strings.Join(*p, ",") }
@@ -126,7 +134,8 @@ func runMCPServer() {
 	failIf(server.ServeStdio(context.Background()))
 }
 
-// runSubmit queues one durable task through the control plane.
+// runSubmit queues one durable task through the control plane after validating
+// it against the security harness.
 func runSubmit(args []string) {
 	fs := flag.NewFlagSet("submit", flag.ExitOnError)
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
@@ -134,9 +143,14 @@ func runSubmit(args []string) {
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	prompt := fs.String("prompt", "", "task prompt handed to the worker")
-	role := fs.String("role", "collector", "worker role profile")
-	permission := fs.String("permission", "read_only", "permission profile for this task")
-	timeout := fs.String("timeout", "30s", "execution window handed to the worker")
+	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner)")
+	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write)")
+	timeout := fs.String("timeout", "30s", "execution window for the worker")
+	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
+	parentTaskID := fs.String("parent-task-id", "", "parent task ID for subtask lineage tracking")
+	skipPermissions := fs.Bool("skip-permissions", false, "bypass permission checks if permitted by profile")
+	var addDirs pathFlags
+	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
 	failIf(fs.Parse(args))
 
 	if *key == "" || *prompt == "" {
@@ -146,17 +160,47 @@ func runSubmit(args []string) {
 	cwd, err := os.Getwd()
 	failIf(err)
 
+	dirs := []string(addDirs)
+	if len(dirs) == 0 {
+		dirs = []string{cwd}
+	}
+
+	// Validate request against security harness gatekeeper
+	if err := harness.ValidateRequest(*prompt, *role, *permission, dirs, *skipPermissions, *receiptID); err != nil {
+		pterm.Error.Println(fmt.Sprintf("harness validation failed: %v", err))
+		os.Exit(1)
+	}
+
 	dbPath, err := databasePath()
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
 	defer func() { _ = store.Close() }()
 
-	payload, err := json.Marshal(map[string]string{"prompt": *prompt, "timeout": *timeout})
+	payloadMap := map[string]any{
+		"prompt":     *prompt,
+		"role":       *role,
+		"permission": *permission,
+		"timeout":    *timeout,
+		"add_dirs":   dirs,
+	}
+	if *receiptID != "" {
+		payloadMap["receipt_id"] = *receiptID
+	}
+	if *skipPermissions {
+		payloadMap["skip_permissions"] = true
+	}
+	payload, err := json.Marshal(payloadMap)
 	failIf(err)
+
+	var parentIDPtr *string
+	if *parentTaskID != "" {
+		parentIDPtr = parentTaskID
+	}
 
 	task, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
 		IdempotencyKey: *key,
+		ParentTaskID:   parentIDPtr,
 		Priority:       *priority,
 		MaxAttempts:    *maxAttempts,
 		Model:          *model,
@@ -164,7 +208,7 @@ func runSubmit(args []string) {
 		Role:           *role,
 		Permission:     *permission,
 		Timeout:        *timeout,
-		AddDirs:        []string{cwd},
+		AddDirs:        dirs,
 	})
 	failIf(err)
 
@@ -196,6 +240,110 @@ func runGet(args []string) {
 	fmt.Println(string(out))
 }
 
+// runResume moves a NEEDS_INFO or BLOCKED task back to QUEUED with optional clarifying prompt.
+func runResume(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: g8s resume <task-id> [--prompt <text>] [--reason <reason>]")
+		os.Exit(2)
+	}
+	taskID := args[0]
+	fs := flag.NewFlagSet("resume", flag.ExitOnError)
+	prompt := fs.String("prompt", "", "updated prompt or clarifying answer")
+	reason := fs.String("reason", "resumed via CLI", "reason for resuming")
+	failIf(fs.Parse(args[1:]))
+
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer func() { _ = store.Close() }()
+
+	var resumedPayload json.RawMessage
+	if *prompt != "" {
+		payloadMap := map[string]any{
+			"prompt": *prompt,
+		}
+		raw, err := json.Marshal(payloadMap)
+		failIf(err)
+		resumedPayload = raw
+	}
+
+	task, err := store.ResumeTask(context.Background(), taskID, resumedPayload, *reason)
+	failIf(err)
+
+	out, err := json.MarshalIndent(task, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
+// runTasks lists durable tasks optionally filtered by state.
+func runTasks(args []string) {
+	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
+	state := fs.String("state", "", "filter by task state (QUEUED, LEASED, RUNNING, SUCCEEDED, FAILED, CANCELLED, NEEDS_INFO, BLOCKED)")
+	limit := fs.Int("limit", 50, "maximum number of tasks to return (1..200)")
+	failIf(fs.Parse(args))
+
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer func() { _ = store.Close() }()
+
+	filter := controlplane.TaskFilter{Limit: *limit}
+	if *state != "" {
+		s := strings.ToUpper(*state)
+		filter.State = &s
+	}
+	tasks, err := store.ListTasks(context.Background(), filter)
+	failIf(err)
+
+	out, err := json.MarshalIndent(tasks, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
+// runLineage prints the full ancestry chain of a task up to the root.
+func runLineage(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: g8s lineage <task-id>")
+		os.Exit(2)
+	}
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer func() { _ = store.Close() }()
+
+	lineage, err := store.GetTaskLineage(context.Background(), args[0])
+	failIf(err)
+	if len(lineage) == 0 {
+		fmt.Fprintf(os.Stderr, "unknown task: %s\n", args[0])
+		os.Exit(1)
+	}
+	out, err := json.MarshalIndent(lineage, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
+// runChildren lists direct child subtasks for a parent task.
+func runChildren(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: g8s children <parent-task-id>")
+		os.Exit(2)
+	}
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer func() { _ = store.Close() }()
+
+	children, err := store.ListChildTasks(context.Background(), args[0])
+	failIf(err)
+	out, err := json.MarshalIndent(children, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
 // runReceipt issues write-delegation receipts on behalf of the operator.
 func runReceipt(args []string) {
 	if len(args) == 0 || args[0] != "issue" {
@@ -207,7 +355,7 @@ func runReceipt(args []string) {
 	ttlSeconds := fs.Int("ttl", 600, "time-to-live in seconds (1..3600)")
 	var paths pathFlags
 	fs.Var(&paths, "path", "allowed path glob (repeatable)")
-	fs.Var(&paths, "allow", "alias for --path (allowed path glob, repeatable)")
+	fs.Var(&paths, "allow", "allowed path glob (alias for --path)")
 	failIf(fs.Parse(args[1:]))
 
 	if len(paths) == 0 {
@@ -245,13 +393,28 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Printf("  %s <command> [arguments]\n\n", AppName)
 	fmt.Println("Commands:")
-	fmt.Println("  submit       Queue an asynchronous durable task (SQLite WAL Control Plane)")
-	fmt.Println("  get          Show the durable state of one queued task")
-	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue ...)")
+	fmt.Println("  submit       Queue an asynchronous durable task with harness safety checks")
+	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
+	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
+	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
+	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
+	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
+	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch), service (daemon lifecycle)")
+}
+
+// sliceFlags collects repeated occurrences of one flag into a slice,
+// enabling repeatable -add-dir scope roots on the submit command.
+type sliceFlags []string
+
+func (s *sliceFlags) String() string { return strings.Join(*s, ",") }
+
+func (s *sliceFlags) Set(v string) error {
+	*s = append(*s, v)
+	return nil
 }

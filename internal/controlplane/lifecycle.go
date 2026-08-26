@@ -557,6 +557,69 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 	return s.GetTask(context.Background(), taskID)
 }
 
+// ResumeTask moves a task from NEEDS_INFO or BLOCKED back to QUEUED,
+// updating its request payload with resumed inputs and recording a resumption event.
+func (s *Store) ResumeTask(ctx context.Context, taskID string, resumedPayload json.RawMessage, reason string) (*Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
+	task, err := scanTask(row)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+	}
+
+	if task.State != StateNeedsInfo && task.State != StateBlocked {
+		return nil, fmt.Errorf("task %s in state %s cannot be resumed (must be NEEDS_INFO or BLOCKED)", taskID, task.State)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+
+	newPayload := task.Request
+	if len(resumedPayload) > 0 && string(resumedPayload) != "null" {
+		newPayload = resumedPayload
+	}
+	reqCanonical, err := canonicalJSON(newPayload)
+	if err != nil {
+		return nil, err
+	}
+	reqHash, err := contentHash(newPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := tx.Exec(
+		`UPDATE tasks SET state = 'QUEUED', attempts = 0, request_json = ?, request_hash = ?, result_json = NULL, result_hash = NULL,
+		 last_error = NULL, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+		 WHERE task_id = ? AND (state = 'NEEDS_INFO' OR state = 'BLOCKED')`,
+		reqCanonical, reqHash, now, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if affected, err := res.RowsAffected(); err != nil || affected != 1 {
+		return nil, errors.New("failed to resume task: concurrent state change")
+	}
+
+	if err := insertTaskEvent(tx, taskID, "task_resumed", "orchestrator", map[string]any{
+		"previous_state": task.State,
+		"reason":         reason,
+	}, now); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return s.GetTask(ctx, taskID)
+}
+
 // BeginMaintenance acquires the singleton maintenance lock, blocking all new
 // claims while held. Returns the number of active (LEASED/RUNNING) tasks at
 // acquisition time.
