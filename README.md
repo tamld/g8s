@@ -139,6 +139,7 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 ## 📜 Documentation & Spec-Driven Development
 
 * [Decoupled Memory Architecture (`docs/DECOUPLED_MEMORY_ARCHITECTURE.md`)](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
+* [Tri-Anchor Knowledge Distillation (`docs/CONTEXTUAL_DISTILLATION_SPEC.md`)](docs/CONTEXTUAL_DISTILLATION_SPEC.md)
 * [Spec Kit Constitution (`spec/constitution.md`)](spec/constitution.md)
 * [OpenSpec Technical Deltas (`spec/openspec/`)](spec/openspec/)
 * [Architecture Design (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)

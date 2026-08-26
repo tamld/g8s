@@ -70,6 +70,7 @@ hoặc tải archive từ [Releases](https://github.com/tamld/g8s/releases).
 ## Kiến trúc & Đặc tả
 
 - [Kiến trúc Decoupled Memory & Cognitive Whitepaper](docs/DECOUPLED_MEMORY_ARCHITECTURE.md)
+- [Đặc tả Chưng cất Tri thức Tri-Anchor](docs/CONTEXTUAL_DISTILLATION_SPEC.md)
 - [Kiến trúc 3-Plane System Architecture](docs/ARCHITECTURE.md)
 - [Hiến pháp Spec Kit](spec/constitution.md)
 - [Danh mục đặc tả OpenSpec](spec/openspec/)
