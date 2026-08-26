@@ -457,7 +457,18 @@ func sanitizeFTSQuery(q string) string {
 		return ""
 	}
 	var sanitized []string
+	seen := make(map[string]bool)
+
 	for _, term := range terms {
+		// Extract sub-tokens from camelCase/snake_case
+		subTokens := TokenizeCodeSymbols(term)
+		for _, tok := range subTokens {
+			if !seen[tok] && len(tok) > 0 {
+				seen[tok] = true
+				sanitized = append(sanitized, tok+"*")
+			}
+		}
+
 		cleaned := strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
 				return r
@@ -465,10 +476,12 @@ func sanitizeFTSQuery(q string) string {
 			return ' '
 		}, term)
 		for _, sub := range strings.Fields(cleaned) {
-			if len(sub) > 0 {
-				sanitized = append(sanitized, sub+"*")
+			sLower := strings.ToLower(sub)
+			if !seen[sLower] && len(sLower) > 0 {
+				seen[sLower] = true
+				sanitized = append(sanitized, sLower+"*")
 			}
 		}
 	}
-	return strings.Join(sanitized, " ")
+	return strings.Join(sanitized, " OR ")
 }

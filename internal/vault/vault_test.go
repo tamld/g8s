@@ -362,3 +362,70 @@ func TestConcurrentNewVaultInitialization(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenizeCodeSymbols(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{
+			input:    "CalculateBlastRadius",
+			expected: []string{"calculate", "blast", "radius"},
+		},
+		{
+			input:    "write_receipt_id",
+			expected: []string{"write", "receipt", "id"},
+		},
+		{
+			input:    "XMLParser",
+			expected: []string{"xml", "parser"},
+		},
+		{
+			input:    "internal/worker/proc_windows.go:killProcessGroup",
+			expected: []string{"internal", "worker", "proc", "windows", "go", "kill", "process", "group"},
+		},
+	}
+
+	for _, tt := range tests {
+		got := TokenizeCodeSymbols(tt.input)
+		if len(got) != len(tt.expected) {
+			t.Fatalf("TokenizeCodeSymbols(%q) = %v, want %v", tt.input, got, tt.expected)
+		}
+		for i, tok := range got {
+			if tok != tt.expected[i] {
+				t.Errorf("token %d: got %s, want %s", i, tok, tt.expected[i])
+			}
+		}
+	}
+}
+
+func TestVaultSearchCodeSymbolDecomposition(t *testing.T) {
+	v := newTestVault(t, nil)
+	ctx := context.Background()
+
+	rec := sampleRecord("DELTA-07-BLAST", "Blast Radius Analysis")
+	rec.SpatialCoordinates.Symbol = "CalculateBlastRadius"
+	rec.SpatialCoordinates.File = "internal/analyzer/blast_radius.go"
+	_, err := v.Store(ctx, rec)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	// Query with exact CamelCase symbol
+	res, err := v.Query(ctx, "CalculateBlastRadius", 5)
+	if err != nil {
+		t.Fatalf("Query CalculateBlastRadius: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatalf("expected match for CalculateBlastRadius, got 0")
+	}
+
+	// Query with partial word token 'blast'
+	res, err = v.Query(ctx, "blast", 5)
+	if err != nil {
+		t.Fatalf("Query blast: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatalf("expected match for sub-token 'blast', got 0")
+	}
+}
