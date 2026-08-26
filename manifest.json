@@ -137,6 +137,18 @@
       "title": "Worker Process Supervisor & Sandbox",
       "path": "spec/openspec/09-worker-supervisor-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-10",
+      "title": "Two-Class Providers Architecture (API Call vs Platform Dispatch)",
+      "path": "spec/openspec/10-two-class-providers-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-11",
+      "title": "Decoupled Pure-Go Knowledge Vault with SQLite FTS5 & BM25 Ranking",
+      "path": "spec/openspec/11-knowledge-vault-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

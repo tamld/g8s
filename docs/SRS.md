@@ -28,10 +28,14 @@
 
 * **FR-5 (Stdio MCP Server)**:
   * Implement JSON-RPC 2.0 stdio protocol for MCP compatibility.
-  * Expose tools: `subdispatch_list_roles`, `subdispatch_list_permissions`, `subdispatch_self_awareness`, `subdispatch_run`, `subdispatch_submit`, `subdispatch_get`, `subdispatch_list`, `subdispatch_cancel`.
+  * Expose tools: `g8s_list_roles`, `g8s_list_permissions`, `g8s_self_awareness`, `g8s_run`, `g8s_dispatch`, `g8s_get_task`, `g8s_list_tasks`, `g8s_cancel_task`.
 
 * **FR-6 (Cross-Platform Daemon Service)**:
-  * Support `subdispatch service install|start|stop|restart|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
+  * Support `g8s service install|start|stop|restart|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
+
+* **FR-7 (Decoupled Pure-Go Knowledge Vault)**:
+  * Provide persistent storage and SQLite FTS5 + BM25 ranked full-text search indexing over Tri-Anchor distillation records (`internal/vault`).
+  * Support CLI subcommands: `g8s vault store`, `g8s vault query`, `g8s vault get`, `g8s vault list`, `g8s vault delete`.
 
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.
