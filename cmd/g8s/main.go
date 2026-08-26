@@ -18,11 +18,13 @@ import (
 
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/doctor"
 	"github.com/tamld/g8s/internal/worker"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/mcp"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/service"
 )
 
 // Version is a var so goreleaser ldflags -X can inject the build tag (D4).
@@ -73,6 +75,10 @@ func main() {
 		runChildren(os.Args[2:])
 	case "receipt":
 		runReceipt(os.Args[2:])
+	case "doctor":
+		runDoctor(os.Args[2:])
+	case "service":
+		runService(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
 	case "internal":
@@ -379,6 +385,94 @@ func runReceipt(args []string) {
 	fmt.Println(string(out))
 }
 
+// runDoctor executes diagnostic sanity checks for environment, permissions, and tools.
+func runDoctor(args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	jsonMode := fs.Bool("json", false, "output diagnostics as machine-readable JSON")
+	failIf(fs.Parse(args))
+
+	dbPath, _ := databasePath()
+	report := doctor.RunDiagnostics(context.Background(), dbPath)
+
+	if *jsonMode {
+		out, err := json.MarshalIndent(report, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+		if report.OverallStatus == "UNHEALTHY" {
+			os.Exit(1)
+		}
+		return
+	}
+
+	pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Diagnostics")
+	fmt.Printf("Platform: %s | Runtime: %s | Zero-CGO: %t | Status: %s\n\n",
+		report.Platform, report.GoRuntime, report.ZeroCGO, report.OverallStatus)
+
+	var td pterm.TableData
+	td = append(td, []string{"Check", "Status", "Message", "Details"})
+	for _, chk := range report.Checks {
+		statusStr := chk.Status
+		if chk.Status == "OK" {
+			statusStr = pterm.Green(chk.Status)
+		} else if chk.Status == "WARN" {
+			statusStr = pterm.Yellow(chk.Status)
+		} else {
+			statusStr = pterm.Red(chk.Status)
+		}
+		td = append(td, []string{chk.Name, statusStr, chk.Message, chk.Details})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+
+	if report.OverallStatus == "UNHEALTHY" {
+		os.Exit(1)
+	}
+}
+
+// runService handles OS background daemon management (macOS launchd & Linux systemd).
+func runService(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: g8s service <install|start|stop|status|uninstall>")
+		os.Exit(2)
+	}
+
+	subcmd := args[0]
+	dbPath, err := databasePath()
+	failIf(err)
+
+	exePath, err := os.Executable()
+	failIf(err)
+
+	mgr, err := service.NewPlatformServiceManager(service.Config{
+		BinaryPath:   exePath,
+		DatabasePath: dbPath,
+	}, nil, nil)
+	failIf(err)
+
+	switch subcmd {
+	case "install":
+		failIf(mgr.Install())
+		pterm.Success.Println("g8s service unit installed successfully")
+	case "start":
+		failIf(mgr.Start())
+		pterm.Success.Println("g8s service daemon started")
+	case "stop":
+		failIf(mgr.Stop())
+		pterm.Success.Println("g8s service daemon stopped")
+	case "uninstall":
+		failIf(mgr.Uninstall())
+		pterm.Success.Println("g8s service daemon uninstalled")
+	case "status":
+		status, err := mgr.Status()
+		failIf(err)
+		out, err := json.MarshalIndent(status, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+	default:
+		fmt.Fprintf(os.Stderr, "unknown service subcommand %q\n", subcmd)
+		os.Exit(2)
+	}
+}
+
 func failIf(err error) {
 	if err != nil {
 		reportError(err, os.Stderr)
@@ -404,12 +498,14 @@ func printUsage() {
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
+	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor)")
+	fmt.Println("  service      Manage background daemon lifecycle (g8s service install|start|status)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
-	fmt.Println("\nPlanned (post-MVP): run (sync dispatch), service (daemon lifecycle)")
+	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
 }
 
 // sliceFlags collects repeated occurrences of one flag into a slice,
