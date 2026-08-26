@@ -19,12 +19,12 @@ import (
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
-	"github.com/tamld/g8s/internal/worker"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/mcp"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/service"
+	"github.com/tamld/g8s/internal/worker"
 )
 
 // Version is a var so goreleaser ldflags -X can inject the build tag (D4).
