@@ -62,7 +62,7 @@
 * **🎟️ Receipt-Based Write Delegation**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain.
 * **📦 Durable Control Plane**: SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases, idempotency keys, and parent-child task lineage.
 * **🔌 Stdio MCP Protocol**: Plugs directly into Claude Desktop, Cursor, Codex, and Windsurf via standard JSON-RPC.
-* **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: One-command background service installation for macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
+* **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: one-command hardened background service installation for macOS (`launchd`); Linux (`systemd`) and Windows backends are on the roadmap.
 
 ---
 

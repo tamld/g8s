@@ -35,7 +35,7 @@ To prevent tight coupling and eliminate architectural fragility, `g8s` is strict
 │  • Stdio MCP Server: Standard JSON-RPC 2.0 interface (`internal/mcp`)                   │
 │  • Blast Radius Engine: LSP Client & Dependency Analyzer (`internal/analyzer`)          │
 │                                                                                         │
-│  👉 Role: The Pure-Go Kernel (15MB Static Binary), Stateless Execution, Zero CGO        │
+│  👉 Role: The Pure-Go Kernel (~11MB Static Binary), Stateless Execution, Zero CGO        │
 └────────────────────────────────────────────┬────────────────────────────────────────────┘
                                              │
                                       Drives & Isolates
