@@ -107,11 +107,15 @@ func WithBinaryPath(path string) Option { return func(s *Supervisor) { s.binaryP
 func WithEvidenceDir(dir string) Option { return func(s *Supervisor) { s.evidenceDir = dir } }
 
 // WithCommandResolver installs an optional resolver that maps a decoded
-// task request to a custom child argv (DELTA-10 R6). When the resolver
-// returns ok=true the returned argv replaces the dispatch-contract argv;
-// wrapper and stdout result modes still apply around it.
+// WithCommandResolver optionally overrides the dispatch-contract argv with
+// an operator-defined invocation template (DELTA-10 R6).
 func WithCommandResolver(fn func(prompt, model, timeout string) ([]string, bool)) Option {
 	return func(s *Supervisor) { s.commandResolver = fn }
+}
+
+// WithStreamCallback registers a callback invoked on real-time unbuffered stdout/stderr lines.
+func WithStreamCallback(fn StreamCallback) Option {
+	return func(s *Supervisor) { s.streamCallback = fn }
 }
 
 // substituteTemplate replaces {prompt}, {model} and {timeout} placeholders
@@ -144,6 +148,7 @@ type Supervisor struct {
 	captureMaxBytes int
 	binaryPath      string
 	evidenceDir     string
+	streamCallback  StreamCallback
 
 	// commandResolver optionally overrides the dispatch-contract argv with
 	// an operator-defined invocation template (DELTA-10 R6).
@@ -329,16 +334,25 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			childArgv = wrapped
 		}
 	}
+	outStreamer := NewUnbufferedPipeStreamer(task.TaskID, task.Attempts, "stdout", s.streamCallback)
+	errStreamer := NewUnbufferedPipeStreamer(task.TaskID, task.Attempts, "stderr", s.streamCallback)
+	outWriter := outStreamer.PipeTee(outFile)
+	errWriter := errStreamer.PipeTee(errFile)
+
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        firstNonEmpty(firstOf(req.AddDirs), s.runRoot),
-		Stdout:     outFile,
-		Stderr:     errFile,
+		Stdout:     outWriter,
+		Stderr:     errWriter,
 		ResultPath: resultPath,
 		RunDir:     runDir,
 	})
 
 	if spawnErr != nil {
+		_ = outWriter.Close()
+		_ = errWriter.Close()
+		_ = outFile.Close()
+		_ = errFile.Close()
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
@@ -353,12 +367,18 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 		child.Terminate(terminateGrace)
+		_ = outWriter.Close()
+		_ = errWriter.Close()
+		_ = outFile.Close()
+		_ = errFile.Close()
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
 
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
 	// Close capture handles before collect reads and removes the files; on
 	// Windows an open handle makes os.Remove fail with a sharing violation.
+	_ = outWriter.Close()
+	_ = errWriter.Close()
 	_ = outFile.Close()
 	_ = errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,

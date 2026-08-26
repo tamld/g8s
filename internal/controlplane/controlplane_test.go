@@ -1073,3 +1073,46 @@ func TestListChildTasksAndGetTaskLineage(t *testing.T) {
 			rootTask.TaskID, child1Task.TaskID, grandchildTask.TaskID)
 	}
 }
+
+func TestGetTaskLineageDeepTreeRecursiveCTE(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	const depth = 25
+	var taskIDs []string
+
+	var lastParentID *string
+	for i := 0; i < depth; i++ {
+		req := submitReq(fmt.Sprintf("deep-tree-task-%d", i))
+		req.ParentTaskID = lastParentID
+		task := mustSubmit(t, s, req)
+		taskIDs = append(taskIDs, task.TaskID)
+		lastParentID = &task.TaskID
+	}
+
+	// Fetch lineage of the deepest leaf task
+	deepestID := taskIDs[len(taskIDs)-1]
+	lineage, err := s.GetTaskLineage(ctx, deepestID)
+	if err != nil {
+		t.Fatalf("GetTaskLineage on depth %d: %v", depth, err)
+	}
+
+	if len(lineage) != depth {
+		t.Fatalf("lineage length = %d, want %d", len(lineage), depth)
+	}
+
+	for i, task := range lineage {
+		if task.TaskID != taskIDs[i] {
+			t.Errorf("lineage[%d] = %s, want %s", i, task.TaskID, taskIDs[i])
+		}
+	}
+
+	// Non-existent task returns empty lineage without error
+	emptyLineage, err := s.GetTaskLineage(ctx, "non-existent-task-id-xyz")
+	if err != nil {
+		t.Fatalf("GetTaskLineage on non-existent task: %v", err)
+	}
+	if len(emptyLineage) != 0 {
+		t.Errorf("expected empty lineage for unknown task, got %d items", len(emptyLineage))
+	}
+}
