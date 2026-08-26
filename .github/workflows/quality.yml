@@ -1,0 +1,181 @@
+# g8s Quality Gate — AI anti-pattern detection.
+#
+# Catches what gofmt + vet + race tests cannot:
+#   - Silent error swallowing (errcheck)
+#   - Type safety bypass (grep for `as any`, `// nolint`)
+#   - Cowboy debug prints (grep for fmt.Println in non-test code)
+#   - Panic as bypass (`panic("...)` , `t.Skip()`)
+#   - Security smells (gosec)
+#   - CVE in deps (govulncheck)
+#   - Coverage drops
+#   - Complexity / size (gocognit, funlen)
+#
+# Plan ref: .sisyphus/plans/g8s-orchestration.md §0 (Design Philosophy)
+
+name: Quality
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+
+      - name: Install linters
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install github.com/kisielk/errcheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/uudashr/gocognit/cmd/gocognit@latest
+          go install github.com/DominicKramer/go-linter/pkg/funlen@latest
+
+      - name: Cache modules
+        uses: actions/cache@v5
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod-${{ hashFiles('go.sum') }}
+
+      - name: gofumpt strict
+        run: |
+          unformatted=$(gofumpt -l . 2>/dev/null | grep -v '^reference/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not gofumpt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+        env:
+          CGO_ENABLED: '0'
+
+      - name: staticcheck
+        run: staticcheck ./...
+
+      - name: errcheck (no silent error swallow)
+        run: errcheck -blank -asserts -ignoretests ./...
+
+      - name: gosec (security smells)
+        run: gosec -severity=medium -confidence=medium -exclude=G104,G302,G304 ./...
+        # G104 = unhandled errors (covered by errcheck above)
+        # G302/G304 = file permission (overkill for daemon/service files)
+
+      - name: govulncheck (CVE in deps)
+        run: govulncheck ./...
+        env:
+          CGO_ENABLED: '0'
+
+      - name: Cyclomatic complexity <= 15
+        run: |
+          high=$(gocognit -over 15 ./... 2>/dev/null || true)
+          if [ -n "$high" ]; then
+            echo "::error::Functions with cyclomatic complexity > 15:"
+            echo "$high"
+            exit 1
+          fi
+
+      - name: Function length <= 100 LOC
+        run: |
+          long=$(funlen -over 100 ./... 2>/dev/null || true)
+          if [ -n "$long" ]; then
+            echo "::error::Functions exceeding 100 LOC:"
+            echo "$long"
+            exit 1
+          fi
+
+      - name: No AI anti-patterns (grep)
+        shell: bash
+        run: |
+          # Forbid type-safety bypass markers
+          forbidden_patterns=(
+            'as any'
+            '@ts-ignore'
+            '@ts-expect-error'
+            '//nolint'
+            '// nolint'
+            '//nolint:'
+            '// nolint:'
+          )
+          for pat in "${forbidden_patterns[@]}"; do
+            hits=$(grep -rn "$pat" --include='*.go' . 2>/dev/null | grep -v '^reference/' | grep -v '_test.go' || true)
+            if [ -n "$hits" ]; then
+              echo "::error::Forbidden pattern '$pat' found:"
+              echo "$hits"
+              exit 1
+            fi
+          done
+
+      - name: No panic-as-bypass
+        shell: bash
+        run: |
+          # Forbid `panic("..."` outside test files
+          panic_hits=$(grep -rn 'panic("' --include='*.go' . 2>/dev/null | grep -v '_test.go' | grep -v 'panic("recovered")' || true)
+          if [ -n "$panic_hits" ]; then
+            echo "::error::panic() with string literal in non-test code:"
+            echo "$panic_hits"
+            exit 1
+          fi
+          # Forbid t.Skip() outside _test.go
+          skip_hits=$(grep -rn 't\.Skip(' --include='*.go' . 2>/dev/null | grep -v '_test.go' || true)
+          if [ -n "$skip_hits" ]; then
+            echo "::error::t.Skip() in non-test code:"
+            echo "$skip_hits"
+            exit 1
+          fi
+
+      - name: No debug prints in library code
+        shell: bash
+        run: |
+          debug_hits=$(grep -rn 'fmt\.Println\|console\.log' --include='*.go' . 2>/dev/null | grep -v '_test.go' | grep -v 'cmd/g8s/' | grep -v '//.*fmt\.Println' || true)
+          if [ -n "$debug_hits" ]; then
+            echo "::warning::fmt.Println() in library code (CLI cmd/g8s exempt):"
+            echo "$debug_hits"
+            # warning-only, not blocking — but visible in PR
+          fi
+
+      - name: No TODO/FIXME debt in committed code
+        shell: bash
+        run: |
+          todo_hits=$(grep -rn '// TODO\|// FIXME\|// XXX' --include='*.go' . 2>/dev/null | grep -v '_test.go' || true)
+          if [ -n "$todo_hits" ]; then
+            echo "::error::TODO/FIXME/XXX debt in committed code:"
+            echo "$todo_hits"
+            exit 1
+          fi
+
+      - name: Coverage threshold >= 80%
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          cov=$(go test -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | grep -oE 'coverage: [0-9.]+%' | awk '{print $2}' | tr -d '%' | head -1)
+          if [ -z "$cov" ]; then
+            echo "::error::coverage extraction failed"
+            exit 1
+          fi
+          echo "Coverage: ${cov}%"
+          awk -v c="$cov" 'BEGIN { if (c+0 < 80) { exit 1 } else { exit 0 } }' || {
+            echo "::error::Coverage ${cov}% is below 80% threshold"
+            exit 1
+          }
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-report
+          path: coverage.out

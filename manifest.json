@@ -155,11 +155,18 @@
       "title": "Core Resilience, Recursive CTE Lineage & Unbuffered Streaming Pipe",
       "path": "spec/openspec/12-lineage-cte-and-stream-pipe-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-13",
+      "title": "DX/AX Experience, Interactive Onboarding Wizard & Self-Healing Auto-Remediation",
+      "path": "spec/openspec/13-dx-ax-init-and-autorepair-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {
     "M1": "Pure-Go Core & Receipt Engine (Foundation)",
     "M2": "Control Plane, Multi-Worker Governor & Pluggable Providers",
-    "M3": "LSP Blast Radius, OS Service Daemon & Public Open-Source Release"
+    "M3": "LSP Blast Radius, OS Service Daemon & Public Open-Source Release",
+    "M4": "DX/AX Experience, Interactive Setup Wizard & Self-Healing Auto-Remediation"
   }
 }

@@ -32,15 +32,59 @@ type DoctorReport struct {
 	GoRuntime     string             `json:"go_runtime"`
 	ZeroCGO       bool               `json:"zero_cgo"`
 	Checks        []DiagnosticResult `json:"checks"`
+	AppliedFixes  []string           `json:"applied_fixes,omitempty"`
 }
 
 // RunDiagnostics executes the full diagnostic suite across the environment.
 func RunDiagnostics(ctx context.Context, dbPath string) *DoctorReport {
+	return RunDiagnosticsWithFix(ctx, dbPath, false)
+}
+
+// RunDiagnosticsWithFix executes the diagnostic suite and optionally applies automatic self-healing remediations.
+func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *DoctorReport {
+	var appliedFixes []string
+
+	if dbPath == "" {
+		home, _ := os.UserHomeDir()
+		dbPath = filepath.Join(home, ".local", "state", "g8s", "g8s.db")
+	}
+
+	if autoFix {
+		// 1. Ensure state and evidence directories exist with mode 0700
+		stateDir := filepath.Dir(dbPath)
+		evidenceDir := filepath.Join(stateDir, "evidence")
+		for _, dir := range []string{stateDir, evidenceDir} {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				if err := os.MkdirAll(dir, 0700); err == nil {
+					appliedFixes = append(appliedFixes, fmt.Sprintf("Created directory %s (mode 0700)", dir))
+				}
+			} else if runtime.GOOS != "windows" {
+				if info, err := os.Stat(dir); err == nil && info.Mode().Perm() != 0700 {
+					if err := os.Chmod(dir, 0700); err == nil {
+						appliedFixes = append(appliedFixes, fmt.Sprintf("Fixed permissions on %s (0700)", dir))
+					}
+				}
+			}
+		}
+
+		// 2. Ensure database files have mode 0600 on POSIX
+		if runtime.GOOS != "windows" {
+			for _, file := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+				if info, err := os.Stat(file); err == nil && info.Mode().Perm() != 0600 {
+					if err := os.Chmod(file, 0600); err == nil {
+						appliedFixes = append(appliedFixes, fmt.Sprintf("Fixed permissions on %s (0600)", file))
+					}
+				}
+			}
+		}
+	}
+
 	report := &DoctorReport{
 		OverallStatus: "HEALTHY",
 		Platform:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 		GoRuntime:     runtime.Version(),
 		ZeroCGO:       true,
+		AppliedFixes:  appliedFixes,
 	}
 
 	report.Checks = append(report.Checks, checkDatabase(dbPath))
@@ -89,7 +133,7 @@ func checkDatabase(dbPath string) DiagnosticResult {
 	// Check POSIX permissions
 	if runtime.GOOS != "windows" {
 		mode := info.Mode().Perm()
-		if mode != 0600 && mode != 0644 {
+		if mode != 0600 {
 			return DiagnosticResult{
 				Name:    "Database Permissions",
 				Status:  "WARN",
