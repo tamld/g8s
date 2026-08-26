@@ -16,6 +16,7 @@ import (
 
 	"github.com/pterm/pterm"
 
+	"github.com/tamld/g8s/internal/analyzer"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
@@ -82,6 +83,8 @@ func main() {
 		runService(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "analyze":
+		runAnalyze(os.Args[2:])
 	case "vault":
 		runVault(os.Args[2:])
 	case "internal":
@@ -476,6 +479,39 @@ func runService(args []string) {
 	}
 }
 
+// runAnalyze computes Blast Radius Intelligence for a target file or symbol per DELTA-07.
+func runAnalyze(args []string) {
+	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
+	file := fs.String("file", "", "target file to analyze (required)")
+	symbol := fs.String("symbol", "", "target symbol identifier (optional)")
+	root := fs.String("root", "", "codebase root directory (defaults to cwd)")
+	failIf(fs.Parse(args))
+
+	if *file == "" {
+		if fs.NArg() > 0 {
+			*file = fs.Arg(0)
+		} else {
+			fmt.Fprintln(os.Stderr, "usage: g8s analyze --file <path> [--symbol <name>] [--root <dir>]")
+			os.Exit(2)
+		}
+	}
+
+	an, err := analyzer.NewAnalyzer(*root)
+	failIf(err)
+
+	var report *analyzer.BlastRadiusReport
+	if *symbol != "" {
+		report, err = an.AnalyzeSymbolImpact(*file, *symbol)
+	} else {
+		report, err = an.AnalyzeFileImpact(*file)
+	}
+	failIf(err)
+
+	out, err := json.MarshalIndent(report, "", "  ")
+	failIf(err)
+	fmt.Println(string(out))
+}
+
 // runVault handles Tri-Anchor knowledge vault operations (store, query, list, get, delete).
 func runVault(args []string) {
 	if len(args) == 0 {
@@ -636,6 +672,7 @@ func printUsage() {
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
 	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor)")
 	fmt.Println("  service      Manage background daemon lifecycle (g8s service install|start|status)")
+	fmt.Println("  analyze      Quantify code blast radius and recommend write scopes (g8s analyze ...)")
 	fmt.Println("  vault        Manage decoupled Tri-Anchor knowledge records (store/query/list)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
