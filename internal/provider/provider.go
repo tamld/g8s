@@ -111,6 +111,12 @@ type Config struct {
 	// AuthEnv names the environment variable carrying the API credential
 	// for api_call providers. Empty means no credential is required.
 	AuthEnv string
+
+	// ArgsTemplate optionally carries an operator-defined invocation
+	// template (DELTA-10 R6) for platform_dispatch binaries that do not
+	// speak the g8s dispatch contract. Placeholders {prompt}, {model} and
+	// {timeout} are substituted verbatim by the supervisor.
+	ArgsTemplate []string
 }
 
 const ollamaDefaultHost = "http://127.0.0.1:11434"
@@ -339,6 +345,7 @@ func (r *Registry) LoadProvidersJSON(path string) error {
 			cfg.AuthEnv = entry.AuthEnv
 		default: // platform_dispatch
 			cfg.Binary = entry.Name
+			cfg.ArgsTemplate = entry.Args
 		}
 		r.states[entry.Name] = &state{
 			cfg: cfg,
