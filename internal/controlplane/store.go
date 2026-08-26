@@ -346,32 +346,53 @@ func (s *Store) ListChildTasks(ctx context.Context, parentTaskID string) ([]*Tas
 	return out, nil
 }
 
+const taskColumnsPrefixed = `t.task_id, t.parent_task_id, t.idempotency_key, t.schema_version, t.state, t.priority,
+	t.request_json, t.request_hash, t.result_json, t.result_hash, t.receipt_hash,
+	t.attempts, t.max_attempts, t.lease_owner, t.lease_token, t.lease_expires_at,
+	t.cancel_requested, t.created_at, t.updated_at, t.completed_at, t.last_error`
+
 // GetTaskLineage returns the full ancestry chain of a task up to the root parent,
 // starting with the root task and ending with the requested task.
+// It executes via an atomic SQLite Recursive Common Table Expression (CTE) for O(1) query traversal.
 func (s *Store) GetTaskLineage(ctx context.Context, taskID string) ([]*Task, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+
+	query := `
+WITH RECURSIVE lineage_tree(task_id, parent_task_id, depth) AS (
+    SELECT task_id, parent_task_id, 0
+    FROM tasks
+    WHERE task_id = ?
+    UNION ALL
+    SELECT t.task_id, t.parent_task_id, lt.depth + 1
+    FROM tasks t
+    JOIN lineage_tree lt ON t.task_id = lt.parent_task_id
+    WHERE lt.depth < 1000
+)
+SELECT ` + taskColumnsPrefixed + `
+FROM tasks t
+JOIN lineage_tree lt ON t.task_id = lt.task_id
+ORDER BY lt.depth DESC;`
+
+	rows, err := s.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query task lineage: %w", err)
+	}
+	defer rows.Close()
+
 	var lineage []*Task
-	currentID := taskID
-	seen := make(map[string]bool)
-
-	for currentID != "" {
-		if seen[currentID] {
-			break // Guard against potential circular references
-		}
-		seen[currentID] = true
-
-		task, err := s.GetTask(ctx, currentID)
+	for rows.Next() {
+		t, err := scanTask(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan lineage task: %w", err)
 		}
-		if task == nil {
-			break
+		if t != nil {
+			lineage = append(lineage, t)
 		}
-		// Prepend to maintain root -> child order
-		lineage = append([]*Task{task}, lineage...)
-		if task.ParentTaskID == nil {
-			break
-		}
-		currentID = *task.ParentTaskID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task lineage: %w", err)
 	}
 	return lineage, nil
 }
