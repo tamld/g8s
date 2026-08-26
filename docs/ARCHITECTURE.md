@@ -12,7 +12,7 @@ To prevent tight coupling and eliminate architectural fragility, `g8s` is strict
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │                      PLANE 1: DESIGN LANGUAGE & SPECIFICATION PLANE                     │
-│                                  (NGÔN NGỮ THIẾT KẾ)                                    │
+│                               (DESIGN LANGUAGE PLANE)                                   │
 │                                                                                         │
 │  • Spec Kit Constitution (`spec/constitution.md`) — Foundational Laws                   │
 │  • OpenSpec Delta Specifications (`spec/openspec/*.md`) — Incremental Contracts         │
@@ -26,7 +26,7 @@ To prevent tight coupling and eliminate architectural fragility, `g8s` is strict
                                              │
 ┌────────────────────────────────────────────▼────────────────────────────────────────────┐
 │                              PLANE 2: RUNTIME ENGINE PLANE                              │
-│                                   (RUNTIME THỰC THI)                                    │
+│                                  (RUNTIME ENGINE PLANE)                                 │
 │                                                                                         │
 │  • Harness Engine: Request validator & Contract Prompt Builder (`internal/harness`)     │
 │  • ControlPlane: Pure-Go SQLite WAL Queue & Atomic CAS Leases (`internal/controlplane`) │
@@ -42,7 +42,7 @@ To prevent tight coupling and eliminate architectural fragility, `g8s` is strict
                                              │
 ┌────────────────────────────────────────────▼────────────────────────────────────────────┐
 │                             PLANE 3: INFRASTRUCTURE PLANE                               │
-│                                  (HẠ TẦNG VẬT LÝ)                                       │
+│                            (PHYSICAL INFRASTRUCTURE PLANE)                             │
 │                                                                                         │
 │  • Worker Executables: Installed CLIs (`agy`, `claude`, `gemini`)                       │
 │  • Local Hardware & GPU Backends: `ollama` (VRAM), Local LLM endpoints                 │
