@@ -21,6 +21,7 @@ import (
 // parallel: N Spawn calls complete in O(spawn latency), not O(worker latency).
 type AgyWorker struct {
 	binary string
+	clock  func() time.Time
 }
 
 // NewAgyWorker resolves the agy binary once. Missing binary does not fail
@@ -28,7 +29,7 @@ type AgyWorker struct {
 // a different worker without panicking.
 func NewAgyWorker() *AgyWorker {
 	bin, _ := dispatch.ResolveBinary("", dispatch.ResolveOptions{})
-	return &AgyWorker{binary: bin}
+	return &AgyWorker{binary: bin, clock: time.Now}
 }
 
 func (w *AgyWorker) Name() string { return "agy" }
@@ -86,8 +87,9 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		stdout:    &stdout,
 		stderr:    &stderr,
 		task:      t,
-		startedAt: time.Now(),
+		startedAt: w.clock(),
 		timeout:   timeout,
+		clock:     w.clock,
 	}, nil
 }
 
@@ -101,6 +103,7 @@ type agyHandle struct {
 	task      Task
 	startedAt time.Time
 	timeout   time.Duration
+	clock     func() time.Time
 	done      bool
 	cancelled bool
 	waitErr   error
@@ -157,7 +160,7 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 		Stdout:          h.stdout.String(),
 		Stderr:          h.stderr.String(),
 		StartedAt:       h.startedAt,
-		FinishedAt:      time.Now(),
+		FinishedAt:      h.clock(),
 		DurationSeconds: time.Since(h.startedAt).Seconds(),
 	}
 	switch {

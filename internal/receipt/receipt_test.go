@@ -1112,3 +1112,90 @@ func TestEndToEndIssueThenConsumeViaGateDrainsList(t *testing.T) {
 		t.Fatalf("post-consume list = %d, want 0", len(active))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Coverage hardening - drive error branches that the positive tests miss.
+// ---------------------------------------------------------------------------
+
+func TestListActiveReceiptsReportsTamperedJSON(t *testing.T) {
+	// Corrupt allowed_paths_json to force the unmarshal error branch in
+	// ListActiveReceipts. This is the only way to drive that path because
+	// json.Marshal of []string cannot fail.
+	dbPath := filepath.Join(t.TempDir(), "tamper.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"x/**"}, time.Minute)
+	if err := m.Close(); err != nil {
+		t.Fatalf("close before tamper: %v", err)
+	}
+
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(
+		"UPDATE write_receipts SET allowed_paths_json = ? WHERE receipt_id = ?",
+		"{not-json", rc.ReceiptID,
+	); err != nil {
+		t.Fatalf("tamper exec: %v", err)
+	}
+	_ = raw.Close()
+
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen tampered db: %v", err)
+	}
+	defer m2.Close()
+
+	_, err = m2.ListActiveReceipts()
+	if err == nil {
+		t.Fatal("ListActiveReceipts must fail on corrupted allowed_paths_json")
+	}
+	if !strings.Contains(err.Error(), rc.ReceiptID) {
+		t.Errorf("error %q must mention the failing receipt id", err.Error())
+	}
+}
+
+func TestValidateAndConsumeReportsTamperedJSON(t *testing.T) {
+	// Same tamper trick drives the json.Unmarshal error branch inside
+	// ValidateAndConsume. The path executes after a successful commit, so
+	// the receipt ends up consumed but the caller still receives the error.
+	dbPath := filepath.Join(t.TempDir(), "consume-tamper.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"y/**"}, time.Minute)
+	if err := m.Close(); err != nil {
+		t.Fatalf("close before tamper: %v", err)
+	}
+
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(
+		"UPDATE write_receipts SET allowed_paths_json = ? WHERE receipt_id = ?",
+		"{not-json", rc.ReceiptID,
+	); err != nil {
+		t.Fatalf("tamper exec: %v", err)
+	}
+	_ = raw.Close()
+
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen tampered db: %v", err)
+	}
+	defer m2.Close()
+
+	_, err = m2.ValidateAndConsume(rc.ReceiptID, "worker")
+	if err == nil {
+		t.Fatal("ValidateAndConsume must surface corrupted JSON")
+	}
+	if !strings.Contains(err.Error(), rc.ReceiptID) {
+		t.Errorf("error %q must mention the failing receipt id", err.Error())
+	}
+
+	// The row was still committed to consumed=1, so a retry sees AlreadyConsumedError.
+	_, err = m2.ValidateAndConsume(rc.ReceiptID, "worker")
+	var reused *AlreadyConsumedError
+	if !errors.As(err, &reused) {
+		t.Errorf("retry after corrupted commit must report AlreadyConsumedError, got %v", err)
+	}
+}

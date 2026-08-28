@@ -26,6 +26,7 @@ type UnbufferedPipeStreamer struct {
 	attempt  int
 	stream   string
 	callback StreamCallback
+	clock    func() time.Time
 	wg       sync.WaitGroup
 }
 
@@ -36,6 +37,7 @@ func NewUnbufferedPipeStreamer(taskID string, attempt int, stream string, cb Str
 		attempt:  attempt,
 		stream:   stream,
 		callback: cb,
+		clock:    time.Now,
 	}
 }
 
@@ -59,7 +61,7 @@ func (u *UnbufferedPipeStreamer) PipeTee(dst io.Writer) io.WriteCloser {
 				Attempt:   u.attempt,
 				Stream:    u.stream,
 				Line:      scanner.Text(),
-				Timestamp: time.Now(),
+				Timestamp: u.clock(),
 			})
 		}
 	}()

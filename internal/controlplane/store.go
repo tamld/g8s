@@ -95,6 +95,14 @@ func (s *Store) initialize() error {
 		rollbackInit(conn)
 		return err
 	}
+	if err := applySupervisorSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateSupervisorSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
 
 	if _, err := conn.ExecContext(context.Background(),
 		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
@@ -113,7 +121,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 2 && version != SchemaVersion) {
+	if version < 0 || (version > 3 && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -198,6 +206,112 @@ func migrateTasksTable(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(context.Background(),
 			"ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(task_id)"); err != nil {
 			return fmt.Errorf("migrate parent_task_id column: %w", err)
+		}
+	}
+	return nil
+}
+
+// applySupervisorSchema creates the three supervisor persistence tables
+// required by internal/supervisor (Concern A). CREATE TABLE IF NOT EXISTS is
+// idempotent; the table_info check in migrateSupervisorSchema covers any
+// partial upgrade from a pre-v4 database where the table existed but lacked
+// a column.
+func applySupervisorSchema(conn *sql.Conn) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS supervisor_tasks (
+			id              TEXT PRIMARY KEY,
+			state           TEXT NOT NULL,
+			envelope_json   TEXT NOT NULL,
+			approach_idx    INTEGER NOT NULL DEFAULT 0,
+			attempt_idx     INTEGER NOT NULL DEFAULT 0,
+			parent_task_id  TEXT,
+			created_at      REAL NOT NULL,
+			updated_at      REAL NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS supervisor_decisions (
+			id              TEXT PRIMARY KEY,
+			task_id         TEXT NOT NULL REFERENCES supervisor_tasks(id),
+			kind            TEXT NOT NULL,
+			payload_json    TEXT NOT NULL,
+			created_at      REAL NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_supervisor_decisions_task_id
+			ON supervisor_decisions(task_id)`,
+		`CREATE TABLE IF NOT EXISTS supervisor_metrics (
+			supervisor_task_id    TEXT PRIMARY KEY REFERENCES supervisor_tasks(id),
+			envelope_score        REAL NOT NULL,
+			first_attempt_success INTEGER NOT NULL,
+			attempts_to_success   INTEGER NOT NULL,
+			approaches_to_success INTEGER NOT NULL,
+			rca_confidence_avg    REAL NOT NULL,
+			cycle_duration_seconds REAL NOT NULL,
+			escalation_count      INTEGER NOT NULL,
+			false_escalation_rate  REAL NOT NULL
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("apply supervisor schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateSupervisorSchema is the defensive upgrade for pre-v4 databases. It
+// inspects each supervisor table's column set via PRAGMA table_info and
+// adds any missing column with ALTER TABLE ADD COLUMN. CREATE TABLE IF NOT
+// EXISTS already creates the latest shape on fresh databases, so this path
+// only fires when the table predates the current schema generation.
+func migrateSupervisorSchema(conn *sql.Conn) error {
+	expected := map[string]map[string]struct{}{
+		"supervisor_tasks": {
+			"id": {}, "state": {}, "envelope_json": {},
+			"approach_idx": {}, "attempt_idx": {},
+			"parent_task_id": {}, "created_at": {}, "updated_at": {},
+		},
+		"supervisor_decisions": {
+			"id": {}, "task_id": {}, "kind": {},
+			"payload_json": {}, "created_at": {},
+		},
+		"supervisor_metrics": {
+			"supervisor_task_id": {}, "envelope_score": {},
+			"first_attempt_success": {}, "attempts_to_success": {},
+			"approaches_to_success": {}, "rca_confidence_avg": {},
+			"cycle_duration_seconds": {}, "escalation_count": {},
+			"false_escalation_rate": {},
+		},
+	}
+	for table, cols := range expected {
+		present := map[string]struct{}{}
+		rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info("+table+")")
+		if err != nil {
+			return fmt.Errorf("inspect %s columns: %w", table, err)
+		}
+		for rows.Next() {
+			var cid int
+			var name, colType string
+			var notNull int
+			var dflt sql.NullString
+			var pk int
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan %s columns: %w", table, err)
+			}
+			present[name] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate %s columns: %w", table, err)
+		}
+		rows.Close()
+		for col := range cols {
+			if _, ok := present[col]; ok {
+				continue
+			}
+			if _, err := conn.ExecContext(context.Background(),
+				"ALTER TABLE "+table+" ADD COLUMN "+col+" TEXT"); err != nil {
+				return fmt.Errorf("migrate %s.%s: %w", table, col, err)
+			}
 		}
 	}
 	return nil

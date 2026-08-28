@@ -183,7 +183,7 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
-	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 3") {
+	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 4") {
 		t.Errorf("error mismatch: %v", err)
 	}
 }

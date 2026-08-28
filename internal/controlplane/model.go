@@ -4,9 +4,11 @@
 // Zero-CGO constitution: modernc.org/sqlite only, injectable deterministic
 // clock, and per-operation connection pragmas.
 //
-// Schema ownership decision (sprint log D2): this package owns ONLY the
-// tasks / task_events / control_plane_maintenance tables. Write receipts live
-// in internal/receipt and are wired in by higher layers, never duplicated here.
+// Schema ownership decision (sprint log D2): this package owns the v3
+// tasks / task_events / control_plane_maintenance tables AND the v4
+// supervisor_tasks / supervisor_decisions / supervisor_metrics tables
+// (added in WU3). Write receipts live in internal/receipt and are wired
+// in by higher layers, never duplicated here.
 package controlplane
 
 import (
@@ -15,12 +17,68 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
+	"time"
 )
 
 // SchemaVersion is the control-plane schema generation written into
 // PRAGMA user_version after initialization or migration.
-const SchemaVersion = 3
+//
+// Schema history:
+//   v3 (WU2 baseline): tasks / task_events / control_plane_maintenance.
+//   v4 (WU3 supervisor migration): adds supervisor_tasks / supervisor_decisions
+//       / supervisor_metrics for the internal/supervisor Concern A persistence
+//       layer. All v3 tables are untouched.
+const SchemaVersion = 4
+
+// ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
+// GetMetrics address a supervisor task id that does not exist.
+var ErrUnknownSupervisorTask = errors.New("controlplane: unknown supervisor task")
+
+// SupervisorTaskRow is the durable row written when a supervisor run starts
+// and updated when it ends. EnvelopeJSON holds the serialized TaskEnvelope
+// so the evidence contract survives a process restart. Field types are kept
+// primitive (no time.Time, no json.RawMessage) so this package does not
+// import internal/supervisor — the supervisor package owns the typed
+// surface and translates via FromRow/ToRow.
+type SupervisorTaskRow struct {
+	ID           string
+	State        string
+	EnvelopeJSON string
+	ApproachIdx  int
+	AttemptIdx   int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ParentTaskID *string
+}
+
+// SupervisorDecisionRow is one immutable entry in the supervisor audit
+// trail. Kind is free-form ("run_started", "attempt_started",
+// "review_verdict", "approach_shift", "escalated", "needs_info", ...);
+// PayloadJSON carries the structured detail.
+type SupervisorDecisionRow struct {
+	ID          string
+	TaskID      string
+	Kind        string
+	PayloadJSON string
+	CreatedAt   time.Time
+}
+
+// MetricsRow is the post-run telemetry bundle persisted for one supervisor
+// task. Eight scalar columns map 1:1 to the §10 contract; JSON encoding is
+// the supervisor package's responsibility, not the store's.
+type MetricsRow struct {
+	SupervisorTaskID    string
+	EnvelopeScore       float64
+	FirstAttemptSuccess bool
+	AttemptsToSuccess   int
+	ApproachesToSuccess int
+	RCAConfidenceAvg    float64
+	CycleDurationSeconds float64
+	EscalationCount     int
+	FalseEscalationRate float64
+}
 
 // TaskSchemaVersion tags request payloads submitted to the queue.
 const TaskSchemaVersion = "agy.task.v1"
