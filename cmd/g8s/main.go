@@ -16,8 +16,8 @@ import (
 
 	"github.com/pterm/pterm"
 
-	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/analyzer"
+	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
