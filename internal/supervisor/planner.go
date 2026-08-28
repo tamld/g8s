@@ -24,15 +24,15 @@ type EnvelopeHints map[string]bool
 // Validateds; the optional fields (SRS, PRD, FSM, DnD) activate only when the
 // caller sets the matching EnvelopeHints flag.
 type TaskEnvelope struct {
-	DoR            bool       // Definition of Ready
-	DoD            bool       // Definition of Done
-	DnD            bool       // Definition of Done-decision rationale
-	Validateds     bool       // Per-task validation checklist
-	SRS            bool       // Software Requirements Specification
-	PRD            bool       // Product Requirements Document
-	FSM            bool       // Finite State Machine / lifecycle spec
-	Score          float64    // Computed envelope quality score (0..1, higher better)
-	SelectedFields []string   // Names of fields actually included (for diagnostics)
+	DoR            bool     // Definition of Ready
+	DoD            bool     // Definition of Done
+	DnD            bool     // Definition of Done-decision rationale
+	Validateds     bool     // Per-task validation checklist
+	SRS            bool     // Software Requirements Specification
+	PRD            bool     // Product Requirements Document
+	FSM            bool     // Finite State Machine / lifecycle spec
+	Score          float64  // Computed envelope quality score (0..1, higher better)
+	SelectedFields []string // Names of fields actually included (for diagnostics)
 }
 
 // SelectEnvelope computes the minimal envelope required by Concern A plus any

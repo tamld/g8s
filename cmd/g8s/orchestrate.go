@@ -21,12 +21,12 @@ import (
 // the self-test mode. The `approaches_tried` and `total_attempts` keys are
 // load-bearing: the supervisor regression suite greps for them.
 type orchestrateResultJSON struct {
-	SupervisorTaskID string             `json:"supervisor_task_id"`
-	Outcome          string             `json:"outcome"`
-	Verdict          string             `json:"verdict"`
-	ApproachesTried  int                `json:"approaches_tried"`
-	TotalAttempts    int                `json:"total_attempts"`
-	Escalated        bool               `json:"escalated"`
+	SupervisorTaskID string                 `json:"supervisor_task_id"`
+	Outcome          string                 `json:"outcome"`
+	Verdict          string                 `json:"verdict"`
+	ApproachesTried  int                    `json:"approaches_tried"`
+	TotalAttempts    int                    `json:"total_attempts"`
+	Escalated        bool                   `json:"escalated"`
 	Escalation       *supervisor.Escalation `json:"escalation,omitempty"`
 }
 

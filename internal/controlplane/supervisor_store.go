@@ -188,10 +188,10 @@ func (s *Store) GetMetrics(ctx context.Context, supervisorTaskID string) (Metric
 // floatUnix convention as the rest of the package.
 func scanSupervisorTaskRow(scanner interface{ Scan(...any) error }) (SupervisorTaskRow, error) {
 	var (
-		st         SupervisorTaskRow
-		parent     sql.NullString
-		createdAt  float64
-		updatedAt  float64
+		st        SupervisorTaskRow
+		parent    sql.NullString
+		createdAt float64
+		updatedAt float64
 	)
 	err := scanner.Scan(
 		&st.ID, &st.State, &st.EnvelopeJSON, &st.ApproachIdx, &st.AttemptIdx,
@@ -226,4 +226,3 @@ func unixFloat(f float64) time.Time {
 	nsec := int64((f - float64(sec)) * 1e9)
 	return time.Unix(sec, nsec)
 }
-

@@ -162,8 +162,13 @@ type fakeWorker struct {
 	available bool
 }
 
-func (w fakeWorker) Name() string                       { return w.name }
-func (w fakeWorker) Available(_ context.Context) error  { if !w.available { return errFakeUnavailable }; return nil }
+func (w fakeWorker) Name() string { return w.name }
+func (w fakeWorker) Available(_ context.Context) error {
+	if !w.available {
+		return errFakeUnavailable
+	}
+	return nil
+}
 func (w fakeWorker) Spawn(_ context.Context, _ Task) (Handle, error) { return nil, nil }
 
 var errFakeUnavailable = stringErr("unavailable")

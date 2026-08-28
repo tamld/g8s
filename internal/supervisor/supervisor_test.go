@@ -72,7 +72,9 @@ func (h *stubHandle) Cancel(_ context.Context) error { return nil }
 func (h *stubHandle) StdoutStream() interface {
 	Read(p []byte) (int, error)
 	Close() error
-} { return nil }
+} {
+	return nil
+}
 
 func goodReceipt(taskID string) orchestrator.Receipt {
 	return orchestrator.Receipt{
@@ -411,7 +413,7 @@ func TestApproachShiftResetsAttempt(t *testing.T) {
 	worker := newStubWorker(
 		nonScopeFail("a"), nonScopeFail("b"), nonScopeFail("c"), // approach 0
 		nonScopeFail("d"), nonScopeFail("e"), nonScopeFail("f"), // approach 1
-		goodReceipt("g"),                                       // approach 2
+		goodReceipt("g"), // approach 2
 	)
 	sup := newSelfTestSupervisorForWorker(store, worker)
 	sup.Config.MaxAttemptsPerApproach = 3

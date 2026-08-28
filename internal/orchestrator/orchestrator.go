@@ -70,22 +70,22 @@ type Worktree struct {
 // Persisted into the controlplane evidence lake by the orchestrator after
 // validation.
 type Receipt struct {
-	OK               bool
-	WorkerName       string
-	TaskID           string
-	WorktreeID       string
-	Branch           string
-	CommitSHA        string
-	ReturnCode       int
-	HarnessCode      int
-	DurationSeconds  float64
-	Stdout           string
-	Stderr           string
-	Violations       []string
-	FilesModified    []string
-	ScopeViolations  []string
-	StartedAt        time.Time
-	FinishedAt       time.Time
+	OK              bool
+	WorkerName      string
+	TaskID          string
+	WorktreeID      string
+	Branch          string
+	CommitSHA       string
+	ReturnCode      int
+	HarnessCode     int
+	DurationSeconds float64
+	Stdout          string
+	Stderr          string
+	Violations      []string
+	FilesModified   []string
+	ScopeViolations []string
+	StartedAt       time.Time
+	FinishedAt      time.Time
 }
 
 // ErrWorkerUnavailable is returned by Worker.Spawn when Available was nil

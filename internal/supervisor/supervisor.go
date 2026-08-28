@@ -110,13 +110,13 @@ func (StubWorktreePool) Release(_ context.Context, _ orchestrator.Worktree, _ bo
 // AttemptRecord is one immutable row in the run history. Persisted as a
 // SupervisorDecision payload so the audit trail survives a process restart.
 type AttemptRecord struct {
-	ApproachIdx    int
-	AttemptIdx     int
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	Receipt        orchestrator.Receipt
-	ReviewVerdict  Verdict
-	ReviewReason   string
+	ApproachIdx   int
+	AttemptIdx    int
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	Receipt       orchestrator.Receipt
+	ReviewVerdict Verdict
+	ReviewReason  string
 }
 
 // Supervisor orchestrates the fix loop. All dependencies are fields so tests
@@ -124,19 +124,19 @@ type AttemptRecord struct {
 // Worker directly with an empty Worktree, so the loop is unit-testable
 // without a git repo or a real worker binary.
 type Supervisor struct {
-	Store         Persistence
-	Worker        orchestrator.Worker
-	Pool          WorktreePool
-	Envelope      TaskEnvelope
-	Config        SupervisorConfig
-	Clock         func() time.Time
-	Logger        *log.Logger
-	RCAFn         RCA
-	Reviewer      Reviewer
-	SelfTestMode  bool
-	Enforcer      *Enforcer
-	MetricsStore  MetricsStore
-	AgyClock      func() time.Time
+	Store        Persistence
+	Worker       orchestrator.Worker
+	Pool         WorktreePool
+	Envelope     TaskEnvelope
+	Config       SupervisorConfig
+	Clock        func() time.Time
+	Logger       *log.Logger
+	RCAFn        RCA
+	Reviewer     Reviewer
+	SelfTestMode bool
+	Enforcer     *Enforcer
+	MetricsStore MetricsStore
+	AgyClock     func() time.Time
 }
 
 // NewSelfTestSupervisor returns a Supervisor wired with stub defaults. Tests
@@ -303,13 +303,13 @@ func (s *Supervisor) runOneAttempt(
 ) (AttemptRecord, error) {
 	startedAt := s.Clock()
 	task := orchestrator.Task{
-		ID:         fmt.Sprintf("%s-a%d-att%d", supTaskID, approachIdx, attemptIdx),
-		Prompt:     req.TaskDescription,
-		Model:      req.Model,
-		Role:       req.Role,
-		Permission: req.Permission,
+		ID:           fmt.Sprintf("%s-a%d-att%d", supTaskID, approachIdx, attemptIdx),
+		Prompt:       req.TaskDescription,
+		Model:        req.Model,
+		Role:         req.Role,
+		Permission:   req.Permission,
 		AllowedFiles: req.AllowedFiles,
-		Iter:       attemptIdx,
+		Iter:         attemptIdx,
 	}
 	if req.Timeout > 0 {
 		task.Timeout = req.Timeout
@@ -336,10 +336,10 @@ func (s *Supervisor) runOneAttempt(
 		record.ReviewVerdict = VerdictRevise
 		record.ReviewReason = "spawn failed: " + err.Error()
 		_ = s.appendDecision(ctx, supTaskID, "review_verdict", mustJSON(map[string]any{
-			"approach_idx":  approachIdx,
-			"attempt_idx":   attemptIdx,
-			"verdict":       record.ReviewVerdict.String(),
-			"reason":        record.ReviewReason,
+			"approach_idx": approachIdx,
+			"attempt_idx":  attemptIdx,
+			"verdict":      record.ReviewVerdict.String(),
+			"reason":       record.ReviewReason,
 		}))
 		return record, nil
 	}

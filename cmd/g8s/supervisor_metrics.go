@@ -19,9 +19,9 @@ import (
 // Metrics or Aggregate is populated based on the flag combination; the
 // caller can tell which one via the top-level "mode" key.
 type supervisorMetricsOutput struct {
-	Mode      string                       `json:"mode"`
-	Metrics   *controlplane.MetricsRow     `json:"metrics,omitempty"`
-	Aggregate *supervisorMetricsAggregate  `json:"aggregate,omitempty"`
+	Mode      string                      `json:"mode"`
+	Metrics   *controlplane.MetricsRow    `json:"metrics,omitempty"`
+	Aggregate *supervisorMetricsAggregate `json:"aggregate,omitempty"`
 }
 
 type supervisorMetricsAggregate struct {

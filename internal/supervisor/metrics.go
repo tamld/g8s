@@ -14,14 +14,14 @@ import (
 // Metrics is the post-run telemetry bundle. All fields are scalar so they can
 // live in a wide table later without schema churn.
 type Metrics struct {
-	EnvelopeScore         float64 // planner-computed envelope quality (0..1)
-	FirstAttemptSuccess   bool    // true if attempt 1 was a pass
-	AttemptsToSuccess     int     // 1-based; 0 if never succeeded
-	ApproachesToSuccess   int     // 1-based; 0 if never succeeded
-	RCAConfidenceAvg      float64 // mean of every RCA call's confidence
-	CycleDurationSeconds  float64 // wall-clock duration of the run
-	EscalationCount       int     // 1 if escalated, 0 otherwise
-	FalseEscalationRate   float64 // T024 will compute from history; stub: 0
+	EnvelopeScore        float64 // planner-computed envelope quality (0..1)
+	FirstAttemptSuccess  bool    // true if attempt 1 was a pass
+	AttemptsToSuccess    int     // 1-based; 0 if never succeeded
+	ApproachesToSuccess  int     // 1-based; 0 if never succeeded
+	RCAConfidenceAvg     float64 // mean of every RCA call's confidence
+	CycleDurationSeconds float64 // wall-clock duration of the run
+	EscalationCount      int     // 1 if escalated, 0 otherwise
+	FalseEscalationRate  float64 // T024 will compute from history; stub: 0
 }
 
 // MetricsStore is the dependency-injection seam for metrics persistence.

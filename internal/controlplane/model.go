@@ -26,10 +26,11 @@ import (
 // PRAGMA user_version after initialization or migration.
 //
 // Schema history:
-//   v3 (WU2 baseline): tasks / task_events / control_plane_maintenance.
-//   v4 (WU3 supervisor migration): adds supervisor_tasks / supervisor_decisions
-//       / supervisor_metrics for the internal/supervisor Concern A persistence
-//       layer. All v3 tables are untouched.
+//
+//	v3 (WU2 baseline): tasks / task_events / control_plane_maintenance.
+//	v4 (WU3 supervisor migration): adds supervisor_tasks / supervisor_decisions
+//	    / supervisor_metrics for the internal/supervisor Concern A persistence
+//	    layer. All v3 tables are untouched.
 const SchemaVersion = 4
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
@@ -69,15 +70,15 @@ type SupervisorDecisionRow struct {
 // task. Eight scalar columns map 1:1 to the §10 contract; JSON encoding is
 // the supervisor package's responsibility, not the store's.
 type MetricsRow struct {
-	SupervisorTaskID    string
-	EnvelopeScore       float64
-	FirstAttemptSuccess bool
-	AttemptsToSuccess   int
-	ApproachesToSuccess int
-	RCAConfidenceAvg    float64
+	SupervisorTaskID     string
+	EnvelopeScore        float64
+	FirstAttemptSuccess  bool
+	AttemptsToSuccess    int
+	ApproachesToSuccess  int
+	RCAConfidenceAvg     float64
 	CycleDurationSeconds float64
-	EscalationCount     int
-	FalseEscalationRate float64
+	EscalationCount      int
+	FalseEscalationRate  float64
 }
 
 // TaskSchemaVersion tags request payloads submitted to the queue.

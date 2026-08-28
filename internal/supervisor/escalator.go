@@ -13,15 +13,15 @@ import (
 // when the supervisor gives up. JSON tags are part of the public schema (the
 // brain ingests them verbatim); do not rename keys without an OpenSpec delta.
 type Escalation struct {
-	TaskID              string   `json:"task_id"`
-	Trigger             string   `json:"trigger"`
-	EnvelopeSummary     string   `json:"envelope_summary"`
-	ApproachesTried     int      `json:"approaches_tried"`
-	TotalAttempts       int      `json:"total_attempts"`
-	FailedReceiptIDs    []string `json:"failed_receipt_ids"`
-	RCASummary          string   `json:"rca_summary"`
-	LastDiffSummary     string   `json:"last_diff_summary"`
-	RecommendedAction   string   `json:"recommended_human_action"`
+	TaskID            string   `json:"task_id"`
+	Trigger           string   `json:"trigger"`
+	EnvelopeSummary   string   `json:"envelope_summary"`
+	ApproachesTried   int      `json:"approaches_tried"`
+	TotalAttempts     int      `json:"total_attempts"`
+	FailedReceiptIDs  []string `json:"failed_receipt_ids"`
+	RCASummary        string   `json:"rca_summary"`
+	LastDiffSummary   string   `json:"last_diff_summary"`
+	RecommendedAction string   `json:"recommended_human_action"`
 }
 
 // BuildEscalation reduces the supervisor's run history into one Escalation
