@@ -105,6 +105,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
 			os.Exit(2)
 		}
+	case "orchestrate":
+		runOrchestrate(os.Args[2:])
+	case "supervisor-metrics":
+		runSupervisorMetrics(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -837,6 +841,8 @@ func printUsage() {
 	fmt.Println("  worker       Run local background supervisor loop (g8s worker [--once])")
 	fmt.Println("  analyze      Quantify code blast radius and recommend write scopes (g8s analyze ...)")
 	fmt.Println("  vault        Manage decoupled Tri-Anchor knowledge records (store/query/list)")
+	fmt.Println("  orchestrate  Run the supervisor self-test loop against the real agy worker")
+	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
