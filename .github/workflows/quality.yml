@@ -37,7 +37,7 @@ jobs:
       - name: Install linters
         run: |
           go install mvdan.cc/gofumpt@latest
-          go install honnef.co/go/tools/cmd/staticcheck@v0.5.1
+          go install honnef.co/go/tools/cmd/staticcheck@v0.4.3
           go install github.com/kisielk/errcheck@latest
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           go install golang.org/x/vuln/cmd/govulncheck@latest
