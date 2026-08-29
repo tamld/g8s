@@ -204,13 +204,13 @@ func (s *Store) Record(sessionID, status string, metadata map[string]any, opts .
 	}
 
 	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
+		tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("write temp heartbeat file: %w", err)
 	}
 
 	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
+		tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("sync temp heartbeat file: %w", err)
 	}
