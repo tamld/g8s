@@ -138,7 +138,10 @@ func TestStartHeartbeat_CPUTransitionsRunningToIdleAndBack(t *testing.T) {
 
 	// Wait for transition to idle
 	deadline := time.Now().Add(2 * time.Second)
-	var hb *heartbeat.Heartbeat
+	var (
+		hb  *heartbeat.Heartbeat
+		err error
+	)
 	for time.Now().Before(deadline) {
 		hb, err = store.Status("sess-cpu")
 		if err == nil && hb.Status == heartbeat.StatusIdle {
