@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/heartbeat"
+	"github.com/tamld/g8s/internal/worker"
 )
 
 func TestGenerateStatusReport(t *testing.T) {
@@ -136,7 +137,6 @@ func TestGenerateStatusReport(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-
 		data, err := json.Marshal(report)
 		if err != nil {
 			t.Fatalf("failed to marshal json: %v", err)
@@ -145,4 +145,38 @@ func TestGenerateStatusReport(t *testing.T) {
 			t.Errorf("expected valid json payload")
 		}
 	})
+
+	t.Run("active worker from worker.StartHeartbeat", func(t *testing.T) {
+		stop := worker.StartHeartbeat("sess-emitter-test", worker.EmitterOptions{
+			Binary:       "agy",
+			CommandLine:  "agy --model gemini-3.7-flash-high",
+			Status:       "running",
+			BaseDir:      tempDir,
+			Clock:        clock,
+			PollInterval: 10 * time.Second,
+		})
+		defer stop()
+
+		opts := StatusOptions{
+			HeartbeatDir: tempDir,
+			SessionID:    "sess-emitter-test",
+			Clock:        clock,
+		}
+
+		report, err := GenerateStatusReport(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Workers) != 1 {
+			t.Fatalf("expected 1 worker, got %d", len(report.Workers))
+		}
+		if report.Workers[0].SessionID != "sess-emitter-test" {
+			t.Errorf("expected sess-emitter-test, got %s", report.Workers[0].SessionID)
+		}
+		if report.Workers[0].Freshness != heartbeat.FreshnessActive {
+			t.Errorf("expected active freshness, got %s", report.Workers[0].Freshness)
+		}
+	})
 }
+
