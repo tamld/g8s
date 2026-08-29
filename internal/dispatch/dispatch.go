@@ -371,11 +371,14 @@ func CaptureBounded(raw []byte, maxBytes int) string {
 		return strings.ToValidUTF8(string(raw), ReplacementRune)
 	}
 	half := maxBytes / 2
-	payload := make([]byte, 0, maxBytes+len(TruncationMarker))
-	payload = append(payload, raw[:half]...)
-	payload = append(payload, TruncationMarker...)
-	payload = append(payload, raw[len(raw)-half:]...)
-	return strings.ToValidUTF8(string(payload), ReplacementRune)
+
+	var sb strings.Builder
+	sb.Grow(half*2 + len(TruncationMarker))
+	sb.Write(raw[:half])
+	sb.WriteString(TruncationMarker)
+	sb.Write(raw[len(raw)-half:])
+
+	return strings.ToValidUTF8(sb.String(), ReplacementRune)
 }
 
 // ExecResult carries one completed subprocess execution.
