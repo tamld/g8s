@@ -307,7 +307,7 @@ func parseWorktreeListPorcelain(output string) []WorktreeEntry {
 				entries = append(entries, *current)
 			}
 			current = &WorktreeEntry{
-				Path: strings.TrimPrefix(line, "worktree "),
+				Path: filepath.Clean(strings.TrimPrefix(line, "worktree ")),
 			}
 		} else if current != nil {
 			switch {
@@ -340,15 +340,15 @@ func parseWorktreeListPorcelain(output string) []WorktreeEntry {
 func isMainWorktree(repoDir, wtPath string) bool {
 	cleanRepo := filepath.Clean(repoDir)
 	cleanWT := filepath.Clean(wtPath)
-	if cleanRepo == cleanWT {
+	if strings.EqualFold(cleanRepo, cleanWT) {
 		return true
 	}
-	if strings.TrimPrefix(cleanRepo, "/private") == strings.TrimPrefix(cleanWT, "/private") {
+	if strings.EqualFold(strings.TrimPrefix(cleanRepo, "/private"), strings.TrimPrefix(cleanWT, "/private")) {
 		return true
 	}
 	realRepo, err1 := filepath.EvalSymlinks(cleanRepo)
 	realWT, err2 := filepath.EvalSymlinks(cleanWT)
-	if err1 == nil && err2 == nil && filepath.Clean(realRepo) == filepath.Clean(realWT) {
+	if err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(realRepo), filepath.Clean(realWT)) {
 		return true
 	}
 	gitPath := filepath.Join(wtPath, ".git")

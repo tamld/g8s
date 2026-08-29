@@ -16,10 +16,10 @@ import (
 func samePath(p1, p2 string) bool {
 	c1 := filepath.Clean(p1)
 	c2 := filepath.Clean(p2)
-	if c1 == c2 {
+	if strings.EqualFold(c1, c2) {
 		return true
 	}
-	if strings.TrimPrefix(c1, "/private") == strings.TrimPrefix(c2, "/private") {
+	if strings.EqualFold(strings.TrimPrefix(c1, "/private"), strings.TrimPrefix(c2, "/private")) {
 		return true
 	}
 	r1, err1 := filepath.EvalSymlinks(c1)
@@ -38,7 +38,7 @@ func samePath(p1, p2 string) bool {
 			err2 = nil
 		}
 	}
-	if err1 == nil && err2 == nil && filepath.Clean(r1) == filepath.Clean(r2) {
+	if err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(r1), filepath.Clean(r2)) {
 		return true
 	}
 	return false
@@ -73,12 +73,12 @@ prunable gitdir file points to non-existent location
 	}
 
 	// 1st entry: main
-	if !entries[0].IsMain || entries[0].Branch != "main" || entries[0].Path != "/path/to/main" {
+	if !entries[0].IsMain || entries[0].Branch != "main" || !samePath(entries[0].Path, "/path/to/main") {
 		t.Errorf("entry 0 mismatch: %+v", entries[0])
 	}
 
 	// 2nd entry: agy subagent
-	if entries[1].IsMain || entries[1].Branch != "agy/sup-1788003093729656000-5-sub-2" || entries[1].Path != "/path/to/wt-1" {
+	if entries[1].IsMain || entries[1].Branch != "agy/sup-1788003093729656000-5-sub-2" || !samePath(entries[1].Path, "/path/to/wt-1") {
 		t.Errorf("entry 1 mismatch: %+v", entries[1])
 	}
 
@@ -469,20 +469,20 @@ func TestCleanupWorktrees_RealGitIntegration(t *testing.T) {
 	}
 
 	// Verify wt1 is removed from worktrees
-	wtList := runGit(repoDir, "worktree", "list")
-	if strings.Contains(wtList, wt1) {
+	wtList := filepath.ToSlash(runGit(repoDir, "worktree", "list"))
+	if strings.Contains(wtList, filepath.ToSlash(wt1)) {
 		t.Fatalf("wt1 still present in git worktree list: %s", wtList)
 	}
 	// Verify dirty wt2 is preserved
-	if !strings.Contains(wtList, wt2) {
+	if !strings.Contains(wtList, filepath.ToSlash(wt2)) {
 		t.Fatalf("wt2 should be preserved in git worktree list: %s", wtList)
 	}
 	// Verify feat wt3 is preserved
-	if !strings.Contains(wtList, wt3) {
+	if !strings.Contains(wtList, filepath.ToSlash(wt3)) {
 		t.Fatalf("wt3 should be preserved in git worktree list: %s", wtList)
 	}
 	// Verify main repo is preserved
-	if !strings.Contains(wtList, repoDir) {
+	if !strings.Contains(wtList, filepath.ToSlash(repoDir)) {
 		t.Fatalf("main repo should be preserved in git worktree list: %s", wtList)
 	}
 }
