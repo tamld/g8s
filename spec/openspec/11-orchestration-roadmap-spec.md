@@ -151,137 +151,72 @@ authoritative inputs to the reviewer module.
 This requirement belongs to Concern B (receipt evolution). It is
 documented here because the supervisor's correctness depends on it.
 
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T020, T021)
+**Implementation Status**: IMPLEMENTING (T020)
 
-### Requirement: B.1 Additive receipt columns for supervisor provenance (SupervisorMeta)
+### Requirement: Meta-optimizer (Concern C) consumes per-cycle metrics
 
-`internal/receipt` SHALL define an exported struct `SupervisorMeta` carrying
-four decision-provenance fields:
-- `ApproachIdx int`: the 0-indexed approach attempt (0..2), identifying the high-level strategy pursued.
-- `AttemptIdx int`: the 0-indexed attempt within the current approach (0..2), tracking retry count.
-- `RCAConfidence float64`: diagnostic confidence score (0.0..1.0) produced by Root Cause Analysis prior to an approach shift.
-- `ADRPath string`: relative repository path to the architecture decision record documenting the approach shift rationale (e.g. `docs/decisions/0002-shift-to-rewrite.md`).
+The supervisor SHALL emit the metrics listed in
+`docs/designs/supervisor-fix-loop.md` §10 on every cycle. Metrics SHALL
+be persisted to `internal/controlplane` and SHALL be queryable via a
+new CLI subcommand `g8s supervisor metrics` (read-only). Concern C
+ingests these metrics via that subcommand.
 
-`WriteReceipt` SHALL include an optional `SupervisorMeta *SupervisorMeta` field.
-`IssueReceipt` SHALL accept functional options `opts ...IssueOption`, including
-`WithSupervisorMeta(*SupervisorMeta)`. If no metadata is passed or the pointer
-is nil, `SupervisorMeta` SHALL be omitted (nil).
+#### Scenario: metrics are queryable
+- After a cycle, `./bin/g8s supervisor metrics --task-id sup-X` returns
+  JSON with all eight fields listed in §10.
 
-#### Scenario: receipt issued with supervisor metadata preserves all four fields
-- Caller invokes `IssueReceipt(..., WithSupervisorMeta(&SupervisorMeta{ApproachIdx: 1, AttemptIdx: 2, RCAConfidence: 0.85, ADRPath: "docs/decisions/0002-rewrite.md"}))`.
-- Persisted receipt row contains all four values; read back struct matches input.
+#### Scenario: metrics persist across supervisor restarts
+- A cycle runs, supervisor exits. Restart supervisor. Metrics for the
+  prior cycle are still queryable.
 
-#### Scenario: receipt issued without options preserves nil SupervisorMeta
-- Caller invokes `IssueReceipt(issuer, paths, ttl)` without options.
-- Persisted receipt row contains SQL NULL for all four columns; read back struct has `SupervisorMeta == nil`.
+**Implementation Status**: IMPLEMENTING (T020)
 
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+### Requirement: AIC contract defines automated review surface via orchestrate-aic (§ADDED 18.1)
 
-### Requirement: B.2 Idempotent receipt schema migration via table_info scan
+`g8s orchestrate-aic` SHALL accept `--pr <number>` (required, positive integer)
+and `--intent <text>` (required, non-empty text), along with optional flags
+`--model` (defaults to `gemini-3.7-flash-high`) and `--json` (defaults to `true`).
+The wrapper SHALL fetch the PR diff via `gh pr diff <number>`, compose the diff
+with user intent, and delegate execution to `g8s orchestrate --from-intent`.
+The command SHALL emit the structured JSON envelope to stdout for automated
+review ingestion.
 
-`internal/receipt` SHALL maintain a schema version gate (`PRAGMA user_version = 2`).
-On startup, `NewReceiptManager` SHALL inspect existing columns in `write_receipts`
-via `PRAGMA table_info(write_receipts)` and execute idempotent `ALTER TABLE write_receipts ADD COLUMN`
-statements only for columns that are absent:
-- `approach_idx INTEGER`
-- `attempt_idx INTEGER`
-- `rca_confidence REAL`
-- `adr_path TEXT`
+#### Scenario: AIC dispatches PR review via orchestrate-aic
+- Operator or CI runs `g8s orchestrate-aic --pr 100 --intent "review security changes" --json`.
+- `gh pr diff 100` diff is captured and concatenated with intent prompt.
+- `g8s orchestrate --from-intent` runs and emits JSON envelope containing `supervisor_task_id`, `outcome`, `sub_tasks`, and `receipt_summary`.
 
-The migration SHALL NOT fail if columns already exist, and multiple consecutive
-migration runs SHALL be idempotent no-ops. Unsupported schema versions (`version < 0`
-or `version > 2`) SHALL be rejected with a typed error.
+#### Scenario: missing PR or intent exits with usage error
+- `g8s orchestrate-aic --pr 0` or missing `--intent` exits with code 2 and usage diagnostic.
 
-#### Scenario: migrating pre-v2 database upgrades schema without data loss
-- An existing database on v1 schema (7 columns) is opened with `NewReceiptManager`.
-- Migration adds the four new columns and bumps `user_version` to 2. Existing rows remain intact.
+**Implementation Status**: IMPLEMENTED (T022/DELTA-18)
 
-#### Scenario: idempotent re-migration is a no-op
-- Migration is invoked on an already migrated database (v2).
-- Zero ALTER TABLE statements are executed; initialization succeeds without error.
+### Requirement: Orchestration from intent maps free-text to FanOut sub-tasks (§ADDED 18.2)
 
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+`g8s orchestrate` SHALL accept `--from-intent <text>` or `--from-file <path>` as
+alternative entry points to `--self-test`. The intent text SHALL be split into
+sub-tasks by comma (`,`) and newline (`\n`) delimiters without requiring LLM
+model inference. Each parsed sub-task SHALL be mapped to an `orchestrator.TaskSpec`
+with `role=collector` and `permission=read_only`. The supervisor fix loop and
+`orchestrator.FanOut` SHALL execute the plan and output a JSON envelope
+containing:
+- `supervisor_task_id`: unique identifier for the orchestration run
+- `outcome`: terminal outcome status (`SUCCEEDED`, `FAILED`, `ESCALATED`)
+- `verdict`: reviewer verdict string
+- `sub_tasks`: array of `{task_id, task, status, commit_sha, files_modified, duration_seconds}`
+- `receipt_summary`: summary object with `{total_runs, succeeded, failed, total_duration_seconds, files_modified}`
 
-### Requirement: B.3 NULL tolerance contract for backward-compatible verification
+#### Scenario: multi-line intent splits into sub-tasks
+- Given an intent with 3 lines or comma-separated tasks, `g8s orchestrate --from-intent` constructs 3 `TaskSpec`s and runs them through the orchestrator.
+- Output JSON envelope contains `sub_tasks` with length 3 and matching receipt summary.
 
-Pre-migration receipts (already on disk from v0.2.0 production) MUST continue to
-verify. All new columns SHALL be nullable with no DEFAULT value, representing the
-factual absence of supervisor metadata on pre-migration records.
+#### Scenario: intent read from file
+- Given `--from-file <path>`, `g8s orchestrate` reads intent from `<path>` and executes the orchestration loop.
 
-`VerifyReceipt(receiptID string) (*WriteReceipt, error)` and read paths
-(`ValidateAndConsume`, `ListActiveReceipts`) SHALL treat NULL column values as absent
-metadata (`SupervisorMeta == nil`). Missing supervisor metadata SHALL NOT cause
-verification errors, zero-value struct pollution, or false rejections.
+#### Scenario: empty intent rejected
+- Empty string for `--from-intent` or empty file for `--from-file` exits with status 2 and usage error.
 
-#### Scenario: v1 receipt verifies cleanly on v2 manager
-- A receipt created under v1 schema is verified via `VerifyReceipt`.
-- Verification succeeds (returns OK), with `SupervisorMeta == nil`.
-
-#### Scenario: explicit NULL columns deserialize as absent metadata
-- A receipt with explicitly NULL supervisor columns is read via `VerifyReceipt` or `ValidateAndConsume`.
-- Returns `SupervisorMeta == nil`, preserving Go struct zero values only where intended.
-
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
-
-### Requirement: C.1 Read-only query layer contract for meta-optimizer insights
-
-`internal/supervisor` SHALL expose a read-only query and aggregation layer over
-`supervisor_tasks` and `supervisor_metrics`:
-- `Aggregate(store *controlplane.Store, ctx context.Context, opts AggregateOptions) (AggregateMetrics, error)`
-- `StreamMetrics(store *controlplane.Store, ctx context.Context, opts AggregateOptions, fn func(item TaskMetricsItem) error) error`
-
-The query layer SHALL NOT perform any write, update, delete, or schema mutations on
-`supervisor_*` or `tasks` tables. It SHALL NOT alter supervisor configurations or perform
-automated hyperparameter auto-tuning in this phase (concern C read-only contract).
-
-`AggregateOptions` SHALL accept:
-- `TimeRange time.Duration`: relative duration filter from clock/now (e.g. 1h, 24h).
-- `Since time.Time` / `Until time.Time`: absolute timestamp bounds.
-- `WorkerName string`: worker identifier filter.
-- `Clock func() time.Time`: injectable clock for deterministic time calculations.
-
-#### Scenario: read-only query execution preserves database integrity
-- Query layer executes `Aggregate` and `StreamMetrics` across existing supervisor tables.
-- Database remains untouched; zero writes, updates, or deletions are executed.
-
-#### Scenario: deterministic filtering by time range and worker name
-- Caller supplies `TimeRange = 1 * time.Hour` and `WorkerName = "agy"`.
-- Aggregation includes only supervisor tasks matching both filters.
-
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
-
-### Requirement: C.2 Aggregate metrics computation and filtering
-
-The supervisor query layer SHALL compute aggregate telemetry across the eight per-cycle
-metrics defined in §10:
-1. `envelope_score`: average planner envelope quality score.
-2. `first_attempt_success`: rate of cycles succeeding on attempt 1 (`FirstAttemptSuccessRate`).
-3. `attempts_to_success`: average attempts required for successful cycles (`AvgAttemptsToSuccess`).
-4. `approaches_to_success`: average approaches required for successful cycles (`AvgApproachesToSuccess`).
-5. `rca_confidence_avg`: average RCA confidence score across failure shifts.
-6. `cycle_duration_seconds`: average wall-clock duration of cycles (`AvgCycleSeconds`).
-7. `escalation_count`: rate of cycles terminating in HITL escalation (`EscalationRate`).
-8. `false_escalation_rate`: fraction of escalations classified as false alarms.
-
-When `TotalRuns == 0` (empty store or no matching records), `Aggregate` SHALL return a
-zero-value `AggregateMetrics` struct and `nil` error without dividing by zero.
-
-The CLI surface (`g8s supervisor-metrics`) SHALL support:
-- `--task-id <id>`: single task metrics.
-- `--aggregate`: aggregate metrics across tasks.
-- `--json-stream`: NDJSON / JSON-stream output emitting one JSON object per supervisor task.
-- `--time-range <duration>`: time window filter.
-- `--worker-name <name>`: worker name filter.
-
-#### Scenario: aggregate over empty database returns zero values without error
-- Caller runs `Aggregate` against a database with 0 supervisor tasks.
-- Returns `AggregateMetrics{TotalRuns: 0, ...}` and `nil` error.
-
-#### Scenario: streaming output emits one valid JSON record per task
-- Caller runs `g8s supervisor-metrics --json-stream`.
-- Each matching supervisor task emits a complete, newline-delimited JSON object to stdout.
-
-**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+**Implementation Status**: IMPLEMENTED (T022/DELTA-18)
 
 ## MODIFIED Requirements
 
@@ -297,8 +232,6 @@ None.
   for the supervisor's behavior.
 - `docs/decisions/0001-supervisor-driven-fix-loop.md` — ADR-0001, the
   decision to adopt this architecture over prompt-injection dispatch.
-- `docs/decisions/0002-receipt-evolution-for-supervisor.md` — ADR-0002,
-  receipt evolution for supervisor provenance and backward-compatible migration.
 - `docs/goals/g8s-mvp-oss/goal.md` — Phase 6 milestone.
 
 ## Out of scope
@@ -311,13 +244,12 @@ None.
 ## Transition log
 
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
-- 2026-08-29: Concern B promoted DRAFT → ACCEPTED (T021). §ADDED B.1-B.3 (SupervisorMeta, idempotent migration, NULL tolerance) marked IMPLEMENTING.
-- 2026-08-29: Concern C promoted DRAFT → ACCEPTED (T021). §ADDED C.1-C.2 (read-only query contract, aggregate metrics list) marked IMPLEMENTING.
+- 2026-08-29: DELTA-18 AIC integration and from-intent orchestration added (§ADDED 18.1, 18.2). Marked IMPLEMENTED (T022).
 
 ## Change log
 
 - **v0.1.0-draft** (2026-08-28): Initial delta from Concern A/B/C
   design doc.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
-- **v1.1.0-ACCEPTED** (2026-08-29): Added §ADDED B.1-B.3 for Concern B receipt evolution (SupervisorMeta, idempotent schema migration, NULL tolerance contract). Status ACCEPTED + IMPLEMENTING.
-- **v1.2.0-ACCEPTED** (2026-08-29): Added §ADDED C.1-C.2 for Concern C read-only meta-optimizer query layer and CLI streaming surface. Status ACCEPTED + IMPLEMENTING.
+- **v1.1.0-ACCEPTED** (2026-08-29): Added DELTA-18 requirements for AIC automated review integration (`g8s orchestrate-aic`) and `--from-intent` / `--from-file` sub-task FanOut orchestration (§ADDED 18.1, §ADDED 18.2). Marked IMPLEMENTED.
+

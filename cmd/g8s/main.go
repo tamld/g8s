@@ -107,6 +107,8 @@ func main() {
 		}
 	case "orchestrate":
 		runOrchestrate(os.Args[2:])
+	case "orchestrate-aic":
+		runOrchestrateAIC(os.Args[2:])
 	case "supervisor-metrics":
 		runSupervisorMetrics(os.Args[2:])
 	case "brief-issue":
@@ -847,6 +849,7 @@ func printUsage() {
 	fmt.Println("  analyze      Quantify code blast radius and recommend write scopes (g8s analyze ...)")
 	fmt.Println("  vault        Manage decoupled Tri-Anchor knowledge records (store/query/list)")
 	fmt.Println("  orchestrate  Run the supervisor self-test loop against the real agy worker")
+	fmt.Println("  orchestrate-aic  Run AIC automated PR review orchestrator (g8s orchestrate-aic --pr <num> --intent <text>)")
 	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
 	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")

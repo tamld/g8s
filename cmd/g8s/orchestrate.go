@@ -1,15 +1,18 @@
 // Package main — orchestrate.go runs the supervisor self-test (Concern A)
-// against a real agy worker. The flag-parsing surface mirrors the
-// runSubmit / runResume conventions so operators can drive a single
-// deterministic end-to-end fix loop from the terminal.
+// and natural-language intent orchestration (DELTA-18) against agy workers.
+// The flag-parsing surface mirrors the runSubmit / runResume conventions so
+// operators and automation (AIC) can drive deterministic end-to-end fix loops
+// and fan-out collections from the terminal.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
@@ -17,9 +20,29 @@ import (
 	"github.com/tamld/g8s/internal/supervisor"
 )
 
+// subTaskEnvelope represents the execution status and evidence for one
+// sub-task derived from intent.
+type subTaskEnvelope struct {
+	TaskID          string   `json:"task_id,omitempty"`
+	Task            string   `json:"task"`
+	Status          string   `json:"status"`
+	CommitSHA       string   `json:"commit_sha,omitempty"`
+	FilesModified   []string `json:"files_modified,omitempty"`
+	DurationSeconds float64  `json:"duration_seconds,omitempty"`
+}
+
+// receiptSummary aggregates metrics and file modifications across all sub-tasks.
+type receiptSummary struct {
+	TotalRuns            int      `json:"total_runs"`
+	Succeeded            int      `json:"succeeded"`
+	Failed               int      `json:"failed"`
+	TotalDurationSeconds float64  `json:"total_duration_seconds"`
+	FilesModified        []string `json:"files_modified,omitempty"`
+}
+
 // orchestrateResultJSON is the public machine-readable contract produced by
-// the self-test mode. The `approaches_tried` and `total_attempts` keys are
-// load-bearing: the supervisor regression suite greps for them.
+// orchestrate and self-test modes. The `approaches_tried` and `total_attempts`
+// keys are load-bearing: the supervisor regression suite greps for them.
 type orchestrateResultJSON struct {
 	SupervisorTaskID string                 `json:"supervisor_task_id"`
 	Outcome          string                 `json:"outcome"`
@@ -28,58 +51,211 @@ type orchestrateResultJSON struct {
 	TotalAttempts    int                    `json:"total_attempts"`
 	Escalated        bool                   `json:"escalated"`
 	Escalation       *supervisor.Escalation `json:"escalation,omitempty"`
+	SubTasks         []subTaskEnvelope      `json:"sub_tasks,omitempty"`
+	ReceiptSummary   *receiptSummary        `json:"receipt_summary,omitempty"`
 }
 
-// runOrchestrate is the entry point invoked by the top-level dispatcher.
-// When --self-test is set it drives an in-process supervisor loop with the
-// real AgyWorker so the operator can dogfood the end-to-end fix cycle
-// without a separate worker process.
-func runOrchestrate(args []string) {
-	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
-	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
-	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
-	role := fs.String("role", "collector", "worker role contract")
-	permission := fs.String("permission", "read_only", "permission profile")
-	taskDesc := fs.String("task", "scan ./src for MCP server candidate implementations", "task description handed to the supervisor")
-	parentID := fs.String("parent-task-id", "", "optional parent supervisor task id")
-	maxAttempts := fs.Int("max-attempts", 3, "attempts per approach")
-	maxApproaches := fs.Int("max-approaches", 3, "approach budget before escalation")
-	timeout := fs.Duration("timeout", 5*time.Minute, "per-attempt execution window")
-	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true for this command)")
-	failIf(fs.Parse(args))
+// parseIntentSubtasks splits a natural language intent string into sub-tasks
+// by splitting on commas and newlines, trimming whitespace, and filtering empty items.
+func parseIntentSubtasks(intent string) []string {
+	var tasks []string
+	lines := strings.Split(intent, "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, ",")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				tasks = append(tasks, trimmed)
+			}
+		}
+	}
+	return tasks
+}
 
-	if !*selfTest {
-		fmt.Fprintln(os.Stderr, "usage: g8s orchestrate --self-test [--task <text>] [--json] [--add-dir <path> ...]")
-		os.Exit(2)
+// orchestratorWorkerCtor is the worker factory seam for orchestrate runs.
+var orchestratorWorkerCtor = func() orchestrator.Worker { return orchestrator.NewAgyWorker() }
+
+// orchestrateOptions carries dependencies and configuration for orchestration runs.
+type orchestrateOptions struct {
+	Store         supervisor.Persistence
+	Worker        orchestrator.Worker
+	Reviewer      supervisor.Reviewer
+	Pool          *orchestrator.Pool
+	Registry      *orchestrator.Registry
+	MaxAttempts   int
+	MaxApproaches int
+	Timeout       time.Duration
+	Model         string
+	Role          string
+	Permission    string
+	AddDirs       []string
+	ParentTaskID  *string
+	SelfTest      bool
+}
+
+// executeOrchestration drives the supervisor fix loop and sub-task fan-out
+// according to the provided intent.
+func executeOrchestration(ctx context.Context, intent string, opts orchestrateOptions) (orchestrateResultJSON, error) {
+	subtasks := parseIntentSubtasks(intent)
+	if len(subtasks) == 0 {
+		return orchestrateResultJSON{}, errors.New("orchestrate: empty intent")
 	}
 
-	dbPath, err := databasePath()
-	failIf(err)
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
-	defer store.Close()
+	worker := opts.Worker
+	if worker == nil {
+		worker = orchestrator.NewAgyWorker()
+	}
+	reviewer := opts.Reviewer
+	if reviewer == nil {
+		reviewer = supervisor.NewStubReviewer()
+	}
 
-	sup := supervisor.NewSelfTestSupervisor(store, orchestrator.NewAgyWorker(), supervisor.NewStubReviewer())
-	sup.Config.MaxAttemptsPerApproach = *maxAttempts
-	sup.Config.MaxApproaches = *maxApproaches
+	sup := supervisor.NewSelfTestSupervisor(opts.Store, worker, reviewer)
+	sup.Config.MaxAttemptsPerApproach = opts.MaxAttempts
+	sup.Config.MaxApproaches = opts.MaxApproaches
 	sup.Config.SelfTestMode = true
 
-	req := supervisor.RunRequest{
-		TaskDescription: *taskDesc,
-		Role:            *role,
-		Permission:      *permission,
-		Model:           *model,
-		SelfTestMode:    true,
-		Timeout:         *timeout,
+	role := opts.Role
+	if role == "" {
+		role = "collector"
 	}
-	if *parentID != "" {
-		pid := *parentID
-		req.ParentTaskID = &pid
+	perm := opts.Permission
+	if perm == "" {
+		perm = "read_only"
+	}
+	model := opts.Model
+	if model == "" {
+		model = "gemini-3.7-flash-high"
+	}
+	timeout := opts.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	addDirs := opts.AddDirs
+	if len(addDirs) == 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return orchestrateResultJSON{}, fmt.Errorf("getwd: %w", err)
+		}
+		addDirs = []string{cwd}
 	}
 
-	res, runErr := sup.Run(context.Background(), req)
+	req := supervisor.RunRequest{
+		TaskDescription: intent,
+		Role:            role,
+		Permission:      perm,
+		Model:           model,
+		AddDirs:         addDirs,
+		SelfTestMode:    true,
+		Timeout:         timeout,
+		ParentTaskID:    opts.ParentTaskID,
+	}
+
+	res, runErr := sup.Run(ctx, req)
 	if runErr != nil {
-		failIf(runErr)
+		return orchestrateResultJSON{}, fmt.Errorf("supervisor run: %w", runErr)
+	}
+
+	plan := make([]orchestrator.TaskSpec, len(subtasks))
+	for i, taskPrompt := range subtasks {
+		taskID := fmt.Sprintf("%s-sub-%d", res.SupervisorTaskID, i+1)
+		plan[i] = orchestrator.TaskSpec{
+			TaskID:         taskID,
+			OrchestratorID: res.SupervisorTaskID,
+			WorkerName:     worker.Name(),
+			Iter:           0,
+			Task: orchestrator.Task{
+				ID:         taskID,
+				ParentID:   res.SupervisorTaskID,
+				Prompt:     taskPrompt,
+				Role:       "collector",
+				Permission: "read_only",
+				Model:      model,
+				Timeout:    timeout,
+			},
+		}
+	}
+
+	registry := opts.Registry
+	if registry == nil && opts.Pool != nil {
+		reg := orchestrator.NewRegistry()
+		_ = reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
+		registry = reg
+	}
+
+	var receipts []orchestrator.Receipt
+	if registry != nil && opts.Pool != nil {
+		fanReceipts, fanErr := orchestrator.FanOut(ctx, plan, orchestrator.FanOutOptions{
+			Registry:    registry,
+			Pool:        opts.Pool,
+			MaxParallel: len(plan),
+		})
+		if fanErr == nil {
+			receipts = fanReceipts
+		}
+	}
+
+	// Fallback to direct worker dispatch when Pool is not available (e.g. self-test / stub / non-git)
+	if len(receipts) == 0 {
+		receipts = make([]orchestrator.Receipt, len(plan))
+		for i, spec := range plan {
+			handle, spawnErr := worker.Spawn(ctx, spec.Task)
+			if spawnErr != nil {
+				receipts[i] = orchestrator.Receipt{
+					TaskID:         spec.TaskID,
+					OrchestratorID: spec.OrchestratorID,
+					WorkerName:     worker.Name(),
+					OK:             false,
+					Stderr:         spawnErr.Error(),
+				}
+				continue
+			}
+			r, waitErr := handle.Wait(ctx)
+			if waitErr != nil && r.TaskID == "" {
+				r.TaskID = spec.TaskID
+				r.OK = false
+				r.Stderr = waitErr.Error()
+			}
+			if r.OrchestratorID == "" {
+				r.OrchestratorID = spec.OrchestratorID
+			}
+			if r.TaskID == "" {
+				r.TaskID = spec.TaskID
+			}
+			receipts[i] = r
+		}
+	}
+
+	subTaskResults := make([]subTaskEnvelope, len(plan))
+	summary := receiptSummary{
+		TotalRuns: len(plan),
+	}
+	for i, spec := range plan {
+		subTaskResults[i] = subTaskEnvelope{
+			TaskID: spec.TaskID,
+			Task:   spec.Task.Prompt,
+			Status: "succeeded",
+		}
+		if i < len(receipts) {
+			r := receipts[i]
+			subTaskResults[i].CommitSHA = r.CommitSHA
+			subTaskResults[i].FilesModified = r.FilesModified
+			subTaskResults[i].DurationSeconds = r.DurationSeconds
+			summary.TotalDurationSeconds += r.DurationSeconds
+			if len(r.FilesModified) > 0 {
+				summary.FilesModified = append(summary.FilesModified, r.FilesModified...)
+			}
+			if r.OK {
+				subTaskResults[i].Status = "succeeded"
+				summary.Succeeded++
+			} else {
+				subTaskResults[i].Status = "failed"
+				summary.Failed++
+			}
+		} else {
+			subTaskResults[i].Status = "failed"
+			summary.Failed++
+		}
 	}
 
 	out := orchestrateResultJSON{
@@ -89,9 +265,138 @@ func runOrchestrate(args []string) {
 		ApproachesTried:  res.ApproachCount,
 		TotalAttempts:    res.AttemptCount,
 		Escalated:        res.Escalated,
+		Escalation:       res.Escalation,
+		SubTasks:         subTaskResults,
+		ReceiptSummary:   &summary,
 	}
-	if res.Escalation != nil {
-		out.Escalation = res.Escalation
+
+	return out, nil
+}
+
+// runOrchestrate is the entry point invoked by the top-level dispatcher.
+// When --self-test is set it drives an in-process supervisor loop with the
+// real AgyWorker so the operator can dogfood the end-to-end fix cycle
+// without a separate worker process. When --from-intent or --from-file is set,
+// it parses the natural language intent into collector sub-tasks and runs
+// them via FanOut.
+func runOrchestrate(args []string) {
+	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
+	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
+	fromIntent := fs.String("from-intent", "", "free-text natural language intent")
+	fromFile := fs.String("from-file", "", "path to file containing natural language intent")
+	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
+	role := fs.String("role", "collector", "worker role contract")
+	permission := fs.String("permission", "read_only", "permission profile")
+	taskDesc := fs.String("task", "scan ./src for MCP server candidate implementations", "task description handed to the supervisor")
+	parentID := fs.String("parent-task-id", "", "optional parent supervisor task id")
+	maxAttempts := fs.Int("max-attempts", 3, "attempts per approach")
+	maxApproaches := fs.Int("max-approaches", 3, "approach budget before escalation")
+	timeout := fs.Duration("timeout", 5*time.Minute, "per-attempt execution window")
+	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true for this command)")
+	var addDirs pathFlags
+	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
+	failIf(fs.Parse(args))
+
+	if !*selfTest && *fromIntent == "" && *fromFile == "" {
+		fmt.Fprintln(os.Stderr, "usage: g8s orchestrate [--from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]")
+		os.Exit(2)
+	}
+
+	var intentText string
+	if *fromFile != "" {
+		raw, err := os.ReadFile(*fromFile)
+		failIf(err)
+		intentText = strings.TrimSpace(string(raw))
+		if intentText == "" {
+			fmt.Fprintln(os.Stderr, "usage: g8s orchestrate: empty intent from file")
+			os.Exit(2)
+		}
+	} else if *fromIntent != "" {
+		intentText = strings.TrimSpace(*fromIntent)
+		if intentText == "" {
+			fmt.Fprintln(os.Stderr, "usage: g8s orchestrate: empty intent")
+			os.Exit(2)
+		}
+	}
+
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer store.Close()
+
+	cwd, err := os.Getwd()
+	failIf(err)
+	dirs := []string(addDirs)
+	if len(dirs) == 0 {
+		dirs = []string{cwd}
+	}
+
+	var parentIDPtr *string
+	if *parentID != "" {
+		parentIDPtr = parentID
+	}
+
+	var out orchestrateResultJSON
+	if intentText != "" {
+		var pool *orchestrator.Pool
+		p, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd})
+		if poolErr == nil {
+			pool = p
+		}
+		worker := orchestratorWorkerCtor()
+		reg := orchestrator.NewRegistry()
+		_ = reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
+
+		opts := orchestrateOptions{
+			Store:         store,
+			Worker:        worker,
+			Reviewer:      supervisor.NewStubReviewer(),
+			Pool:          pool,
+			Registry:      reg,
+			MaxAttempts:   *maxAttempts,
+			MaxApproaches: *maxApproaches,
+			Timeout:       *timeout,
+			Model:         *model,
+			Role:          *role,
+			Permission:    *permission,
+			AddDirs:       dirs,
+			ParentTaskID:  parentIDPtr,
+			SelfTest:      *selfTest,
+		}
+		res, err := executeOrchestration(context.Background(), intentText, opts)
+		failIf(err)
+		out = res
+	} else {
+		// Self-test legacy mode
+		sup := supervisor.NewSelfTestSupervisor(store, orchestratorWorkerCtor(), supervisor.NewStubReviewer())
+		sup.Config.MaxAttemptsPerApproach = *maxAttempts
+		sup.Config.MaxApproaches = *maxApproaches
+		sup.Config.SelfTestMode = true
+
+		req := supervisor.RunRequest{
+			TaskDescription: *taskDesc,
+			Role:            *role,
+			Permission:      *permission,
+			Model:           *model,
+			AddDirs:         dirs,
+			SelfTestMode:    true,
+			Timeout:         *timeout,
+			ParentTaskID:    parentIDPtr,
+		}
+
+		res, runErr := sup.Run(context.Background(), req)
+		failIf(runErr)
+
+		out = orchestrateResultJSON{
+			SupervisorTaskID: res.SupervisorTaskID,
+			Outcome:          res.Outcome.String(),
+			Verdict:          res.Verdict,
+			ApproachesTried:  res.ApproachCount,
+			TotalAttempts:    res.AttemptCount,
+			Escalated:        res.Escalated,
+			Escalation:       res.Escalation,
+		}
 	}
 
 	if *jsonMode {
@@ -103,4 +408,10 @@ func runOrchestrate(args []string) {
 
 	fmt.Fprintf(os.Stdout, "supervisor task: %s\noutcome: %s\napproaches_tried: %d\ntotal_attempts: %d\nescalated: %t\n",
 		out.SupervisorTaskID, out.Outcome, out.ApproachesTried, out.TotalAttempts, out.Escalated)
+	if len(out.SubTasks) > 0 {
+		fmt.Fprintf(os.Stdout, "sub-tasks: %d\n", len(out.SubTasks))
+		for _, st := range out.SubTasks {
+			fmt.Fprintf(os.Stdout, "  - [%s] %s\n", st.Status, st.Task)
+		}
+	}
 }
