@@ -67,24 +67,31 @@ func (m *mockSupervisorGitRunner) WorktreePrune(ctx context.Context, repoDir str
 func (m *mockSupervisorGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
 	return nil
 }
+
 func (m *mockSupervisorGitRunner) MergedBranches(ctx context.Context, repoDir string) ([]string, error) {
 	return nil, nil
 }
+
 func (m *mockSupervisorGitRunner) RemoteBranches(ctx context.Context, repoDir string) ([]string, error) {
 	return nil, nil
 }
+
 func (m *mockSupervisorGitRunner) DeleteBranch(ctx context.Context, repoDir, branch string, force bool) error {
 	return nil
 }
+
 func (m *mockSupervisorGitRunner) ClosedPRBranches(ctx context.Context, repoDir string) ([]string, error) {
 	return nil, nil
 }
+
 func (m *mockSupervisorGitRunner) LocalTags(ctx context.Context, repoDir string) ([]cleanup.TagInfo, error) {
 	return nil, nil
 }
+
 func (m *mockSupervisorGitRunner) RemoteTags(ctx context.Context, repoDir string) ([]string, error) {
 	return nil, nil
 }
+
 func (m *mockSupervisorGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
 	return nil
 }
