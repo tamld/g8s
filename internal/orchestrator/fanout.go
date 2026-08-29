@@ -50,11 +50,13 @@ func FanOut(ctx context.Context, plan []TaskSpec, opts FanOutOptions) ([]Receipt
 				errs[i] = fmt.Errorf("acquire worktree: %w", err)
 				return
 			}
+			defer func() {
+				_ = opts.Pool.Release(ctx, wt, results[i].OK)
+			}()
 			task := spec.Task
 			task.Worktree = wt
 			handle, err := worker.Spawn(ctx, task)
 			if err != nil {
-				_ = opts.Pool.Release(ctx, wt, false)
 				errs[i] = fmt.Errorf("spawn worker: %w", err)
 				return
 			}

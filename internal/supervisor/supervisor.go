@@ -601,4 +601,3 @@ func (s *Supervisor) runAutoCleanup(ctx context.Context, isEscalated bool) {
 		}
 	}
 }
-

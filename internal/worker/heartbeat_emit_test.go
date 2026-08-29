@@ -136,15 +136,21 @@ func TestStartHeartbeat_CPUTransitionsRunningToIdleAndBack(t *testing.T) {
 
 	store := heartbeat.NewStore(tempDir, clock)
 
-	// Wait for at least one tick
-	time.Sleep(60 * time.Millisecond)
-
-	hb, err := store.Status("sess-cpu")
-	if err != nil {
-		t.Fatalf("read heartbeat: %v", err)
+	// Wait for transition to idle
+	deadline := time.Now().Add(2 * time.Second)
+	var (
+		hb  *heartbeat.Heartbeat
+		err error
+	)
+	for time.Now().Before(deadline) {
+		hb, err = store.Status("sess-cpu")
+		if err == nil && hb.Status == heartbeat.StatusIdle {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if hb.Status != heartbeat.StatusIdle {
-		t.Errorf("expected status %s for CPU < 1%%, got %s", heartbeat.StatusIdle, hb.Status)
+	if hb == nil || hb.Status != heartbeat.StatusIdle {
+		t.Fatalf("expected status %s for CPU < 1%%, got %+v", heartbeat.StatusIdle, hb)
 	}
 
 	// Now set CPU to 50% (> 1%) -> should transition to running
@@ -152,14 +158,16 @@ func TestStartHeartbeat_CPUTransitionsRunningToIdleAndBack(t *testing.T) {
 	currentCPU = 50.0
 	mu.Unlock()
 
-	time.Sleep(60 * time.Millisecond)
-
-	hb, err = store.Status("sess-cpu")
-	if err != nil {
-		t.Fatalf("read heartbeat: %v", err)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		hb, err = store.Status("sess-cpu")
+		if err == nil && hb.Status == heartbeat.StatusRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if hb.Status != heartbeat.StatusRunning {
-		t.Errorf("expected status %s for CPU >= 1%%, got %s", heartbeat.StatusRunning, hb.Status)
+	if hb == nil || hb.Status != heartbeat.StatusRunning {
+		t.Fatalf("expected status %s for CPU >= 1%%, got %+v", heartbeat.StatusRunning, hb)
 	}
 }
 
