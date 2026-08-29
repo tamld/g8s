@@ -175,49 +175,9 @@ jobs:
             exit 1
           }
 
-      - name: Dogfooding CI Gate (Brief Issue & Consume Roundtrip)
+      - name: Dogfooding CI Gate (Self-Dogfooding Diagnostics Report)
         shell: bash
-        run: |
-          DB_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-$$.db"
-          PAYLOAD_FILE="${RUNNER_TEMP:-/tmp}/ci-payload-$$.md"
-          DOD_FILE="${RUNNER_TEMP:-/tmp}/ci-dod-$$.md"
-          BIN_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-bin"
-
-          trap 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm" "$PAYLOAD_FILE" "$DOD_FILE" "$BIN_PATH"' EXIT
-
-          echo "# CI Dogfooding Task" > "$PAYLOAD_FILE"
-          echo "- [x] Self-dogfooding brief dispatch validated" > "$DOD_FILE"
-
-          go build -o "$BIN_PATH" ./cmd/g8s
-
-          # 1. Issue brief
-          ISSUE_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-issue \
-            --title "ci-self-dogfood" \
-            --payload-file "$PAYLOAD_FILE" \
-            --dod-file "$DOD_FILE" \
-            --issued-by ci-bot \
-            --ttl 1h)
-
-          printf 'Brief issue output:\n%s\n' "$ISSUE_OUT"
-
-          BRIEF_ID=$(printf '%s\n' "$ISSUE_OUT" | jq -r '.id // empty')
-          if [ -z "$BRIEF_ID" ] || [ "$BRIEF_ID" = "null" ]; then
-            echo "::error::Failed to capture brief ID from brief-issue output"
-            exit 1
-          fi
-
-          # 2. Consume brief
-          CONSUME_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-consume --id "$BRIEF_ID")
-
-          printf 'Brief consume output:\n%s\n' "$CONSUME_OUT"
-
-          STATUS=$(printf '%s\n' "$CONSUME_OUT" | jq -r '.status // empty')
-          if [ "$STATUS" != "consumed" ]; then
-            echo "::error::Expected status 'consumed', got '$STATUS'"
-            exit 1
-          fi
-
-          echo "Dogfooding CI gate passed: Brief $BRIEF_ID verified consumed."
+        run: bash tools/dogfood_report.sh
 
       - name: Upload coverage artifact
         if: always()

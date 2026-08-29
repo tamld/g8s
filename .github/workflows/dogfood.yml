@@ -1,0 +1,91 @@
+# dogfood.yml — Weekly g8s Self-Dogfooding Diagnostic Cycle
+# Part of DEBT-27 (Issue #114) — Automated gap discovery via dogfooding cycle.
+#
+# Runs every Monday at 09:00 UTC to exercise all core workflows:
+#   1. make dogfood (brief-issue -> brief-consume roundtrip)
+#   2. g8s cleanup-worktrees --older-than 24h --dry-run
+#   3. g8s brief-list --expired
+#   4. g8s brief-list --consumed
+#
+# If any check fails, automatically creates a GitHub tracking issue.
+
+name: Dogfood
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/dogfood_report.sh'
+      - 'cmd/g8s/self_audit.go'
+      - '.github/workflows/dogfood.yml'
+      - 'docs/DOGFOODING.md'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  self-audit:
+    name: Weekly Self-Dogfooding Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+
+      - name: Build g8s
+        run: go build -o /tmp/g8s ./cmd/g8s
+
+      - name: Run Self-Audit
+        id: audit
+        run: |
+          set -o pipefail
+          /tmp/g8s self-audit 2>&1 | tee /tmp/dogfood-audit.log
+        env:
+          CGO_ENABLED: '0'
+
+      - name: Upload Dogfood Audit Log
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: dogfood-audit-log
+          path: /tmp/dogfood-audit.log
+
+      - name: Create Tracking Issue on Failure
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          LOG_SNIPPET=$(tail -n 40 /tmp/dogfood-audit.log 2>/dev/null || echo "No log captured")
+          gh issue create \
+            --title "🚨 [Dogfood Alert] Weekly self-dogfood audit failed (Run #${{ github.run_id }})" \
+            --body "### Dogfood Failure Report
+            
+**Workflow Run**: [${{ github.run_id }}](${RUN_URL})
+**Trigger**: \`${{ github.event_name }}\`
+**Commit**: \`${{ github.sha }}\`
+**Timestamp**: \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\`
+
+#### Log Output
+\`\`\`text
+${LOG_SNIPPET}
+\`\`\`
+
+#### Immediate Actions
+1. Inspect the full workflow run logs: [View Run](${RUN_URL})
+2. Reproduce locally: \`g8s self-audit\` or \`bash tools/dogfood_report.sh\`
+3. Verify SQLite state integrity and recent changes in \`internal/brief\` or \`cmd/g8s\`." \
+            --label "bug" || {
+              # Fallback if label 'bug' does not exist
+              gh issue create \
+                --title "🚨 [Dogfood Alert] Weekly self-dogfood audit failed (Run #${{ github.run_id }})" \
+                --body "Dogfood audit failed in workflow run: ${RUN_URL}"
+            }

@@ -284,4 +284,51 @@ func TestBriefStoreErrors(t *testing.T) {
 	if _, err := ListActive(store); err == nil {
 		t.Errorf("ListActive on closed store should error")
 	}
+	if _, err := List(store, "all"); err == nil {
+		t.Errorf("List on closed store should error")
+	}
+	if _, err := List(nil, "all"); err == nil {
+		t.Errorf("List with nil store should error")
+	}
+}
+
+func TestBriefListByStatus(t *testing.T) {
+	now := time.Now()
+	store := setupTestStore(t, func() time.Time { return now })
+
+	b1, err := Issue(store, "Task 1", "Payload 1", "DoD 1", "user", 2*time.Hour)
+	if err != nil {
+		t.Fatalf("Issue 1: %v", err)
+	}
+	b2, err := Issue(store, "Task 2", "Payload 2", "DoD 2", "user", 2*time.Hour)
+	if err != nil {
+		t.Fatalf("Issue 2: %v", err)
+	}
+	if _, err := Consume(store, b2.ID); err != nil {
+		t.Fatalf("Consume 2: %v", err)
+	}
+
+	all, err := List(store, "all")
+	if err != nil {
+		t.Fatalf("List all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("len(all) = %d, want 2", len(all))
+	}
+
+	active, err := List(store, "active")
+	if err != nil {
+		t.Fatalf("List active: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != b1.ID {
+		t.Errorf("List active = %v, want [%s]", active, b1.ID)
+	}
+
+	consumed, err := List(store, "consumed")
+	if err != nil {
+		t.Fatalf("List consumed: %v", err)
+	}
+	if len(consumed) != 1 || consumed[0].ID != b2.ID {
+		t.Errorf("List consumed = %v, want [%s]", consumed, b2.ID)
+	}
 }

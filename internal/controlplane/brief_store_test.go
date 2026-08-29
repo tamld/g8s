@@ -205,3 +205,78 @@ func TestBriefStoreMigrationIdempotent(t *testing.T) {
 		t.Fatalf("migrateBriefsSchema rerun failed: %v", err)
 	}
 }
+
+func TestBriefStoreListBriefs(t *testing.T) {
+	now := time.Now()
+	store := newTestControlPlane(t, func() time.Time { return now })
+	ctx := context.Background()
+
+	b1 := BriefRow{
+		ID:        "b-act",
+		Title:     "Active Brief",
+		PayloadMD: "Payload",
+		DodMD:     "DoD",
+		IssuedBy:  "alice",
+		IssuedAt:  now,
+		ExpiresAt: now.Add(time.Hour),
+		Status:    "active",
+	}
+	b2 := BriefRow{
+		ID:        "b-con",
+		Title:     "Consumed Brief",
+		PayloadMD: "Payload",
+		DodMD:     "DoD",
+		IssuedBy:  "bob",
+		IssuedAt:  now.Add(time.Minute),
+		ExpiresAt: now.Add(time.Hour),
+		Status:    "consumed",
+	}
+	b3 := BriefRow{
+		ID:        "b-exp",
+		Title:     "Expired Brief",
+		PayloadMD: "Payload",
+		DodMD:     "DoD",
+		IssuedBy:  "carol",
+		IssuedAt:  now.Add(2 * time.Minute),
+		ExpiresAt: now.Add(time.Hour),
+		Status:    "expired",
+	}
+
+	for _, b := range []BriefRow{b1, b2, b3} {
+		if err := store.CreateBrief(ctx, b); err != nil {
+			t.Fatalf("create brief %s: %v", b.ID, err)
+		}
+	}
+
+	all, err := store.ListBriefs(ctx, "all")
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("len(all) = %d, want 3", len(all))
+	}
+
+	active, err := store.ListBriefs(ctx, "active")
+	if err != nil {
+		t.Fatalf("list active: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != "b-act" {
+		t.Errorf("active = %v, want [b-act]", active)
+	}
+
+	consumed, err := store.ListBriefs(ctx, "consumed")
+	if err != nil {
+		t.Fatalf("list consumed: %v", err)
+	}
+	if len(consumed) != 1 || consumed[0].ID != "b-con" {
+		t.Errorf("consumed = %v, want [b-con]", consumed)
+	}
+
+	expired, err := store.ListBriefs(ctx, "expired")
+	if err != nil {
+		t.Fatalf("list expired: %v", err)
+	}
+	if len(expired) != 1 || expired[0].ID != "b-exp" {
+		t.Errorf("expired = %v, want [b-exp]", expired)
+	}
+}

@@ -115,6 +115,12 @@ func main() {
 		runBriefIssue(os.Args[2:])
 	case "brief-consume":
 		runBriefConsume(os.Args[2:])
+	case "brief-list":
+		runBriefList(os.Args[2:])
+	case "cleanup-worktrees":
+		runCleanupWorktrees(os.Args[2:])
+	case "self-audit":
+		runSelfAudit(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -853,6 +859,9 @@ func printUsage() {
 	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
 	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
+	fmt.Println("  brief-list   List active, consumed, or expired task briefs (g8s brief-list [--expired|--consumed])")
+	fmt.Println("  cleanup-worktrees  Identify and remove stale subagent worktrees (g8s cleanup-worktrees [--dry-run])")
+	fmt.Println("  self-audit   Run self-dogfooding diagnostic audit suite (g8s self-audit [--json])")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")

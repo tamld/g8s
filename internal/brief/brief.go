@@ -122,19 +122,29 @@ func Consume(store *controlplane.Store, id string) (Brief, error) {
 
 // ListActive returns all unconsumed, unexpired briefs ordered chronologically by issued_at ASC.
 func ListActive(store *controlplane.Store) ([]Brief, error) {
+	return List(store, StatusActive)
+}
+
+// List returns briefs filtered by status ('active', 'consumed', 'expired', or 'all'/empty for all)
+// ordered chronologically by issued_at ASC.
+func List(store *controlplane.Store, status string) ([]Brief, error) {
 	if store == nil {
 		return nil, errors.New("brief: store is required")
 	}
-	rows, err := store.ListActiveBriefs(context.Background())
+	status = strings.TrimSpace(strings.ToLower(status))
+	rows, err := store.ListBriefs(context.Background(), status)
 	if err != nil {
-		return nil, fmt.Errorf("list active briefs: %w", err)
+		return nil, fmt.Errorf("list briefs: %w", err)
 	}
 	now := store.Clock()
 	out := make([]Brief, 0, len(rows))
 	for _, r := range rows {
-		if now.After(r.ExpiresAt) {
+		if r.Status == StatusActive && now.After(r.ExpiresAt) {
 			_ = store.UpdateBriefStatus(context.Background(), r.ID, StatusExpired)
-			continue
+			r.Status = StatusExpired
+			if status == StatusActive {
+				continue
+			}
 		}
 		out = append(out, fromRow(r))
 	}

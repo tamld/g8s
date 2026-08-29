@@ -63,12 +63,29 @@ func (s *Store) GetBrief(ctx context.Context, id string) (BriefRow, error) {
 
 // ListActiveBriefs returns all briefs with status = 'active' ordered chronologically by issued_at ASC.
 func (s *Store) ListActiveBriefs(ctx context.Context) ([]BriefRow, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, payload_md, dod_md, issued_by, issued_at, expires_at, status
-		 FROM briefs WHERE status = 'active' ORDER BY issued_at ASC`,
+	return s.ListBriefs(ctx, "active")
+}
+
+// ListBriefs returns all briefs matching status ('active', 'consumed', 'expired', or empty/all for all)
+// ordered chronologically by issued_at ASC.
+func (s *Store) ListBriefs(ctx context.Context, status string) ([]BriefRow, error) {
+	status = strings.TrimSpace(strings.ToLower(status))
+	var (
+		query string
+		args  []any
 	)
+	if status == "" || status == "all" {
+		query = `SELECT id, title, payload_md, dod_md, issued_by, issued_at, expires_at, status
+		 FROM briefs ORDER BY issued_at ASC`
+	} else {
+		query = `SELECT id, title, payload_md, dod_md, issued_by, issued_at, expires_at, status
+		 FROM briefs WHERE status = ? ORDER BY issued_at ASC`
+		args = append(args, status)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: list active briefs: %w", err)
+		return nil, fmt.Errorf("controlplane: list briefs: %w", err)
 	}
 	defer rows.Close()
 
@@ -81,7 +98,7 @@ func (s *Store) ListActiveBriefs(ctx context.Context) ([]BriefRow, error) {
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("controlplane: iterate active briefs: %w", err)
+		return nil, fmt.Errorf("controlplane: iterate briefs: %w", err)
 	}
 	return out, nil
 }
