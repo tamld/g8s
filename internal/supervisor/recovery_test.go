@@ -23,12 +23,15 @@ type leaseExpiringPersistence struct {
 func (p *leaseExpiringPersistence) CreateSupervisorTask(ctx context.Context, st controlplane.SupervisorTaskRow) error {
 	return p.base.CreateSupervisorTask(ctx, st)
 }
+
 func (p *leaseExpiringPersistence) AppendDecision(ctx context.Context, dec controlplane.SupervisorDecisionRow) error {
 	return p.base.AppendDecision(ctx, dec)
 }
+
 func (p *leaseExpiringPersistence) UpdateSupervisorTask(ctx context.Context, st controlplane.SupervisorTaskRow) error {
 	return p.base.UpdateSupervisorTask(ctx, st)
 }
+
 func (p *leaseExpiringPersistence) GetSupervisorTask(ctx context.Context, id string) (controlplane.SupervisorTaskRow, error) {
 	if id == p.taskID && !p.reaped && time.Now().After(p.expireAt) {
 		p.reaped = true
@@ -37,6 +40,7 @@ func (p *leaseExpiringPersistence) GetSupervisorTask(ctx context.Context, id str
 	}
 	return p.base.GetSupervisorTask(ctx, id)
 }
+
 func (p *leaseExpiringPersistence) ListSupervisorTasks(ctx context.Context) ([]controlplane.SupervisorTaskRow, error) {
 	return p.base.ListSupervisorTasks(ctx)
 }
