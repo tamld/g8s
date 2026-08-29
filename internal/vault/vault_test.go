@@ -429,3 +429,22 @@ func TestVaultSearchCodeSymbolDecomposition(t *testing.T) {
 		t.Fatalf("expected match for sub-token 'blast', got 0")
 	}
 }
+
+var sink []string
+
+func BenchmarkTokenizeCodeSymbols(b *testing.B) {
+	cases := []string{
+		"CalculateBlastRadius",
+		"write_receipt_id",
+		"XMLParser",
+		"internal/worker/proc_windows.go:killProcessGroup",
+		"ThisIsAVeryLongCamelCaseStringThatShouldTakeSomeTimeToTokenizeProperlyAndTestOurOptimizationEfforts",
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		for _, c := range cases {
+			sink = TokenizeCodeSymbols(c)
+		}
+	}
+}
