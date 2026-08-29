@@ -72,7 +72,7 @@ homebrew_casks:
       owner: tamld
       name: homebrew-tap
       branch: main
-      token: "{{ if index .Env \"HOMEBREW_TAP_GITHUB_TOKEN\" }}{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}{{ else }}{{ .Env.GITHUB_TOKEN }}{{ end }}"
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
