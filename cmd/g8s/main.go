@@ -1383,13 +1383,6 @@ func runVault(args []string) {
 	}
 }
 
-func failIf(err error) {
-	if err != nil {
-		reportError(err, os.Stderr)
-		os.Exit(1)
-	}
-}
-
 // reportError renders a failure through pterm on the provided writer so tests
 // can assert where diagnostics land.
 func reportError(err error, w io.Writer) {

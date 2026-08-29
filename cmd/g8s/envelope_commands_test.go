@@ -397,9 +397,9 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 	})
 
 	t.Run("cleanup envelope", func(t *testing.T) {
-		clEnv, clCode, _ := runCmd("cleanup", "--json")
+		clEnv, clCode, clRaw := runCmd("cleanup", "--target", "stale-receipt", "--dry-run", "--json")
 		if clCode != 0 {
-			t.Fatalf("cleanup exit code = %d, want 0", clCode)
+			t.Fatalf("cleanup exit code = %d, want 0; raw: %s", clCode, clRaw)
 		}
 		if clEnv.V != 1 || clEnv.Kind != "cleanup_report" || clEnv.Command != "cleanup" {
 			t.Errorf("cleanup headers: %+v", clEnv)
