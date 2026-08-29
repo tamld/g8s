@@ -171,6 +171,53 @@ ingests these metrics via that subcommand.
 
 **Implementation Status**: IMPLEMENTING (T020)
 
+### Requirement: AIC contract defines automated review surface via orchestrate-aic (§ADDED 18.1)
+
+`g8s orchestrate-aic` SHALL accept `--pr <number>` (required, positive integer)
+and `--intent <text>` (required, non-empty text), along with optional flags
+`--model` (defaults to `gemini-3.7-flash-high`) and `--json` (defaults to `true`).
+The wrapper SHALL fetch the PR diff via `gh pr diff <number>`, compose the diff
+with user intent, and delegate execution to `g8s orchestrate --from-intent`.
+The command SHALL emit the structured JSON envelope to stdout for automated
+review ingestion.
+
+#### Scenario: AIC dispatches PR review via orchestrate-aic
+- Operator or CI runs `g8s orchestrate-aic --pr 100 --intent "review security changes" --json`.
+- `gh pr diff 100` diff is captured and concatenated with intent prompt.
+- `g8s orchestrate --from-intent` runs and emits JSON envelope containing `supervisor_task_id`, `outcome`, `sub_tasks`, and `receipt_summary`.
+
+#### Scenario: missing PR or intent exits with usage error
+- `g8s orchestrate-aic --pr 0` or missing `--intent` exits with code 2 and usage diagnostic.
+
+**Implementation Status**: IMPLEMENTED (T022/DELTA-18)
+
+### Requirement: Orchestration from intent maps free-text to FanOut sub-tasks (§ADDED 18.2)
+
+`g8s orchestrate` SHALL accept `--from-intent <text>` or `--from-file <path>` as
+alternative entry points to `--self-test`. The intent text SHALL be split into
+sub-tasks by comma (`,`) and newline (`\n`) delimiters without requiring LLM
+model inference. Each parsed sub-task SHALL be mapped to an `orchestrator.TaskSpec`
+with `role=collector` and `permission=read_only`. The supervisor fix loop and
+`orchestrator.FanOut` SHALL execute the plan and output a JSON envelope
+containing:
+- `supervisor_task_id`: unique identifier for the orchestration run
+- `outcome`: terminal outcome status (`SUCCEEDED`, `FAILED`, `ESCALATED`)
+- `verdict`: reviewer verdict string
+- `sub_tasks`: array of `{task_id, task, status, commit_sha, files_modified, duration_seconds}`
+- `receipt_summary`: summary object with `{total_runs, succeeded, failed, total_duration_seconds, files_modified}`
+
+#### Scenario: multi-line intent splits into sub-tasks
+- Given an intent with 3 lines or comma-separated tasks, `g8s orchestrate --from-intent` constructs 3 `TaskSpec`s and runs them through the orchestrator.
+- Output JSON envelope contains `sub_tasks` with length 3 and matching receipt summary.
+
+#### Scenario: intent read from file
+- Given `--from-file <path>`, `g8s orchestrate` reads intent from `<path>` and executes the orchestration loop.
+
+#### Scenario: empty intent rejected
+- Empty string for `--from-intent` or empty file for `--from-file` exits with status 2 and usage error.
+
+**Implementation Status**: IMPLEMENTED (T022/DELTA-18)
+
 ## MODIFIED Requirements
 
 None. This delta adds new code without modifying existing specs.
@@ -197,9 +244,12 @@ None.
 ## Transition log
 
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
+- 2026-08-29: DELTA-18 AIC integration and from-intent orchestration added (§ADDED 18.1, 18.2). Marked IMPLEMENTED (T022).
 
 ## Change log
 
 - **v0.1.0-draft** (2026-08-28): Initial delta from Concern A/B/C
   design doc.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
+- **v1.1.0-ACCEPTED** (2026-08-29): Added DELTA-18 requirements for AIC automated review integration (`g8s orchestrate-aic`) and `--from-intent` / `--from-file` sub-task FanOut orchestration (§ADDED 18.1, §ADDED 18.2). Marked IMPLEMENTED.
+
