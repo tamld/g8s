@@ -13,35 +13,30 @@ import (
 	"os"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/supervisor"
 )
 
 // supervisorMetricsOutput is the JSON envelope printed by the CLI. Either
 // Metrics or Aggregate is populated based on the flag combination; the
 // caller can tell which one via the top-level "mode" key.
 type supervisorMetricsOutput struct {
-	Mode      string                      `json:"mode"`
-	Metrics   *controlplane.MetricsRow    `json:"metrics,omitempty"`
-	Aggregate *supervisorMetricsAggregate `json:"aggregate,omitempty"`
-}
-
-type supervisorMetricsAggregate struct {
-	TotalRuns               int     `json:"total_runs"`
-	FirstAttemptSuccessRate float64 `json:"first_attempt_success_rate"`
-	AvgAttemptsToSuccess    float64 `json:"avg_attempts_to_success"`
-	AvgApproachesToSuccess  float64 `json:"avg_approaches_to_success"`
-	EscalationRate          float64 `json:"escalation_rate"`
-	AvgCycleSeconds         float64 `json:"avg_cycle_duration_seconds"`
+	Mode      string                       `json:"mode"`
+	Metrics   *controlplane.MetricsRow     `json:"metrics,omitempty"`
+	Aggregate *supervisor.AggregateMetrics `json:"aggregate,omitempty"`
 }
 
 func runSupervisorMetrics(args []string) {
 	fs := flag.NewFlagSet("supervisor-metrics", flag.ExitOnError)
 	taskID := fs.String("task-id", "", "supervisor task id (returns single-run metrics)")
 	aggregate := fs.Bool("aggregate", false, "aggregate metrics across every persisted run")
+	jsonStream := fs.Bool("json-stream", false, "emit one JSON object per supervisor task as it queries")
+	timeRange := fs.Duration("time-range", 0, "filter metrics by time window (e.g. 1h, 24h)")
+	workerName := fs.String("worker-name", "", "filter metrics by worker name")
 	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true)")
 	failIf(fs.Parse(args))
 
-	if *taskID == "" && !*aggregate {
-		fmt.Fprintln(os.Stderr, "usage: g8s supervisor-metrics --task-id <id> | --aggregate [--json]")
+	if *taskID == "" && !*aggregate && !*jsonStream {
+		fmt.Fprintln(os.Stderr, "usage: g8s supervisor-metrics --task-id <id> | --aggregate | --json-stream [--time-range <dur>] [--worker-name <name>] [--json]")
 		os.Exit(2)
 	}
 
@@ -51,7 +46,12 @@ func runSupervisorMetrics(args []string) {
 	failIf(err)
 	defer store.Close()
 
-	executeSupervisorMetrics(*taskID, *aggregate, *jsonMode, store)
+	opts := supervisor.AggregateOptions{
+		TimeRange:  *timeRange,
+		WorkerName: *workerName,
+	}
+
+	executeSupervisorMetrics(*taskID, *aggregate, *jsonStream, *jsonMode, opts, store)
 }
 
 // executeSupervisorMetrics is the testable core of runSupervisorMetrics.
@@ -59,23 +59,39 @@ func runSupervisorMetrics(args []string) {
 // themselves; tests can inject an already-open store so a single TempDir can
 // host both the seeding and the reporting without a second Open() racing for
 // the SQLite WAL lock on Windows.
-func executeSupervisorMetrics(taskID string, aggregate, jsonMode bool, store *controlplane.Store) {
+func executeSupervisorMetrics(
+	taskID string,
+	aggregate, jsonStream, jsonMode bool,
+	opts supervisor.AggregateOptions,
+	store *controlplane.Store,
+) {
+	ctx := context.Background()
+
+	if jsonStream {
+		enc := json.NewEncoder(os.Stdout)
+		err := supervisor.StreamMetrics(store, ctx, opts, func(item supervisor.TaskMetricsItem) error {
+			return enc.Encode(item)
+		})
+		failIf(err)
+		return
+	}
+
 	out := supervisorMetricsOutput{}
 
 	if taskID != "" {
-		m, err := store.GetMetrics(context.Background(), taskID)
+		m, err := store.GetMetrics(ctx, taskID)
 		if err != nil {
 			failIf(err)
 		}
 		out.Mode = "single"
 		out.Metrics = &m
 	} else {
-		agg, err := aggregateSupervisorMetrics(context.Background(), store)
+		agg, err := supervisor.Aggregate(store, ctx, opts)
 		if err != nil {
 			failIf(err)
 		}
 		out.Mode = "aggregate"
-		out.Aggregate = agg
+		out.Aggregate = &agg
 	}
 
 	if jsonMode {
@@ -95,42 +111,4 @@ func executeSupervisorMetrics(taskID string, aggregate, jsonMode bool, store *co
 		fmt.Printf("total_runs=%d first_attempt_success_rate=%.2f avg_attempts=%.2f avg_approaches=%.2f escalation_rate=%.2f avg_cycle=%.3fs\n",
 			a.TotalRuns, a.FirstAttemptSuccessRate, a.AvgAttemptsToSuccess, a.AvgApproachesToSuccess, a.EscalationRate, a.AvgCycleSeconds)
 	}
-}
-
-// aggregateSupervisorMetrics scans supervisor_metrics rows via ListTasks +
-// per-row GetMetrics. The controlplane package does not yet expose a
-// "ListAllMetrics" surface so we use a one-shot scan keyed on the known
-// supervisor_tasks table.
-func aggregateSupervisorMetrics(ctx context.Context, store *controlplane.Store) (*supervisorMetricsAggregate, error) {
-	tasks, err := store.ListSupervisorTasks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list supervisor tasks: %w", err)
-	}
-	agg := &supervisorMetricsAggregate{}
-	for _, t := range tasks {
-		m, err := store.GetMetrics(ctx, t.ID)
-		if err != nil {
-			continue
-		}
-		agg.TotalRuns++
-		if m.FirstAttemptSuccess {
-			agg.FirstAttemptSuccessRate++
-		}
-		agg.AvgAttemptsToSuccess += float64(m.AttemptsToSuccess)
-		agg.AvgApproachesToSuccess += float64(m.ApproachesToSuccess)
-		if m.EscalationCount > 0 {
-			agg.EscalationRate++
-		}
-		agg.AvgCycleSeconds += m.CycleDurationSeconds
-	}
-	if agg.TotalRuns == 0 {
-		return agg, nil
-	}
-	denom := float64(agg.TotalRuns)
-	agg.FirstAttemptSuccessRate /= denom
-	agg.AvgAttemptsToSuccess /= denom
-	agg.AvgApproachesToSuccess /= denom
-	agg.EscalationRate /= denom
-	agg.AvgCycleSeconds /= denom
-	return agg, nil
 }
