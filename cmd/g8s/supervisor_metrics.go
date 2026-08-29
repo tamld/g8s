@@ -51,10 +51,19 @@ func runSupervisorMetrics(args []string) {
 	failIf(err)
 	defer func() { _ = store.Close() }()
 
+	executeSupervisorMetrics(*taskID, *aggregate, *jsonMode, store)
+}
+
+// executeSupervisorMetrics is the testable core of runSupervisorMetrics.
+// Production callers (the CLI dispatcher) open + close the *controlplane.Store
+// themselves; tests can inject an already-open store so a single TempDir can
+// host both the seeding and the reporting without a second Open() racing for
+// the SQLite WAL lock on Windows.
+func executeSupervisorMetrics(taskID string, aggregate, jsonMode bool, store *controlplane.Store) {
 	out := supervisorMetricsOutput{}
 
-	if *taskID != "" {
-		m, err := store.GetMetrics(context.Background(), *taskID)
+	if taskID != "" {
+		m, err := store.GetMetrics(context.Background(), taskID)
 		if err != nil {
 			failIf(err)
 		}
@@ -69,7 +78,7 @@ func runSupervisorMetrics(args []string) {
 		out.Aggregate = agg
 	}
 
-	if *jsonMode {
+	if jsonMode {
 		encoded, encErr := json.MarshalIndent(out, "", "  ")
 		failIf(encErr)
 		fmt.Println(string(encoded))

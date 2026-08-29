@@ -21,9 +21,11 @@ func withTempDB(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if _, err := controlplane.NewControlPlane(dbPath, nil); err != nil {
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
 		t.Fatalf("new controlplane: %v", err)
 	}
+	_ = store.Close()
 	return dbPath
 }
 
@@ -53,11 +55,11 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestRunSupervisorMetricsAggregateEmpty(t *testing.T) {
-	dbPath := withTempDB(t)
-	withEnv(t, "G8S_DB", dbPath)
+	store, dbPath := newOpenStore(t)
+	_ = dbPath
 
 	out := captureStdout(t, func() {
-		runSupervisorMetrics([]string{"--aggregate", "--json"})
+		executeSupervisorMetrics("", true, true, store)
 	})
 
 	if !strings.Contains(out, `"mode": "aggregate"`) {
@@ -69,14 +71,7 @@ func TestRunSupervisorMetricsAggregateEmpty(t *testing.T) {
 }
 
 func TestRunSupervisorMetricsSingleTaskID(t *testing.T) {
-	dbPath := withTempDB(t)
-	withEnv(t, "G8S_DB", dbPath)
-
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store, _ := newOpenStore(t)
 	const supID = "sup-test-single"
 	now := time.Now()
 	if err := store.CreateSupervisorTask(context.Background(), controlplane.SupervisorTaskRow{
@@ -102,7 +97,7 @@ func TestRunSupervisorMetricsSingleTaskID(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runSupervisorMetrics([]string{"--task-id", supID, "--json"})
+		executeSupervisorMetrics(supID, false, true, store)
 	})
 
 	if !strings.Contains(out, supID) {
@@ -117,14 +112,7 @@ func TestRunSupervisorMetricsSingleTaskID(t *testing.T) {
 }
 
 func TestRunSupervisorMetricsSingleTaskIDPlainText(t *testing.T) {
-	dbPath := withTempDB(t)
-	withEnv(t, "G8S_DB", dbPath)
-
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store, _ := newOpenStore(t)
 	const supID = "sup-test-plain"
 	now := time.Now()
 	if err := store.CreateSupervisorTask(context.Background(), controlplane.SupervisorTaskRow{
@@ -150,7 +138,7 @@ func TestRunSupervisorMetricsSingleTaskIDPlainText(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runSupervisorMetrics([]string{"--task-id", supID, "--json=false"})
+		executeSupervisorMetrics(supID, false, false, store)
 	})
 
 	if !strings.Contains(out, "task_id="+supID) {
@@ -159,6 +147,18 @@ func TestRunSupervisorMetricsSingleTaskIDPlainText(t *testing.T) {
 	if !strings.Contains(out, "attempts_to_success=4") {
 		t.Fatalf("expected attempts_to_success=4, got %s", out)
 	}
+}
+
+func newOpenStore(t *testing.T) (*controlplane.Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := dir + "/test.db"
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("new controlplane: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store, dbPath
 }
 
 func TestOrchestrateResultJSONRoundtrip(t *testing.T) {
