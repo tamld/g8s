@@ -151,7 +151,77 @@ authoritative inputs to the reviewer module.
 This requirement belongs to Concern B (receipt evolution). It is
 documented here because the supervisor's correctness depends on it.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T020, T021)
+
+### Requirement: B.1 Additive receipt columns for supervisor provenance (SupervisorMeta)
+
+`internal/receipt` SHALL define an exported struct `SupervisorMeta` carrying
+four decision-provenance fields:
+- `ApproachIdx int`: the 0-indexed approach attempt (0..2), identifying the high-level strategy pursued.
+- `AttemptIdx int`: the 0-indexed attempt within the current approach (0..2), tracking retry count.
+- `RCAConfidence float64`: diagnostic confidence score (0.0..1.0) produced by Root Cause Analysis prior to an approach shift.
+- `ADRPath string`: relative repository path to the architecture decision record documenting the approach shift rationale (e.g. `docs/decisions/0002-shift-to-rewrite.md`).
+
+`WriteReceipt` SHALL include an optional `SupervisorMeta *SupervisorMeta` field.
+`IssueReceipt` SHALL accept functional options `opts ...IssueOption`, including
+`WithSupervisorMeta(*SupervisorMeta)`. If no metadata is passed or the pointer
+is nil, `SupervisorMeta` SHALL be omitted (nil).
+
+#### Scenario: receipt issued with supervisor metadata preserves all four fields
+- Caller invokes `IssueReceipt(..., WithSupervisorMeta(&SupervisorMeta{ApproachIdx: 1, AttemptIdx: 2, RCAConfidence: 0.85, ADRPath: "docs/decisions/0002-rewrite.md"}))`.
+- Persisted receipt row contains all four values; read back struct matches input.
+
+#### Scenario: receipt issued without options preserves nil SupervisorMeta
+- Caller invokes `IssueReceipt(issuer, paths, ttl)` without options.
+- Persisted receipt row contains SQL NULL for all four columns; read back struct has `SupervisorMeta == nil`.
+
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+
+### Requirement: B.2 Idempotent receipt schema migration via table_info scan
+
+`internal/receipt` SHALL maintain a schema version gate (`PRAGMA user_version = 2`).
+On startup, `NewReceiptManager` SHALL inspect existing columns in `write_receipts`
+via `PRAGMA table_info(write_receipts)` and execute idempotent `ALTER TABLE write_receipts ADD COLUMN`
+statements only for columns that are absent:
+- `approach_idx INTEGER`
+- `attempt_idx INTEGER`
+- `rca_confidence REAL`
+- `adr_path TEXT`
+
+The migration SHALL NOT fail if columns already exist, and multiple consecutive
+migration runs SHALL be idempotent no-ops. Unsupported schema versions (`version < 0`
+or `version > 2`) SHALL be rejected with a typed error.
+
+#### Scenario: migrating pre-v2 database upgrades schema without data loss
+- An existing database on v1 schema (7 columns) is opened with `NewReceiptManager`.
+- Migration adds the four new columns and bumps `user_version` to 2. Existing rows remain intact.
+
+#### Scenario: idempotent re-migration is a no-op
+- Migration is invoked on an already migrated database (v2).
+- Zero ALTER TABLE statements are executed; initialization succeeds without error.
+
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+
+### Requirement: B.3 NULL tolerance contract for backward-compatible verification
+
+Pre-migration receipts (already on disk from v0.2.0 production) MUST continue to
+verify. All new columns SHALL be nullable with no DEFAULT value, representing the
+factual absence of supervisor metadata on pre-migration records.
+
+`VerifyReceipt(receiptID string) (*WriteReceipt, error)` and read paths
+(`ValidateAndConsume`, `ListActiveReceipts`) SHALL treat NULL column values as absent
+metadata (`SupervisorMeta == nil`). Missing supervisor metadata SHALL NOT cause
+verification errors, zero-value struct pollution, or false rejections.
+
+#### Scenario: v1 receipt verifies cleanly on v2 manager
+- A receipt created under v1 schema is verified via `VerifyReceipt`.
+- Verification succeeds (returns OK), with `SupervisorMeta == nil`.
+
+#### Scenario: explicit NULL columns deserialize as absent metadata
+- A receipt with explicitly NULL supervisor columns is read via `VerifyReceipt` or `ValidateAndConsume`.
+- Returns `SupervisorMeta == nil`, preserving Go struct zero values only where intended.
+
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
 
 ### Requirement: Meta-optimizer (Concern C) consumes per-cycle metrics
 
@@ -185,6 +255,8 @@ None.
   for the supervisor's behavior.
 - `docs/decisions/0001-supervisor-driven-fix-loop.md` — ADR-0001, the
   decision to adopt this architecture over prompt-injection dispatch.
+- `docs/decisions/0002-receipt-evolution-for-supervisor.md` — ADR-0002,
+  receipt evolution for supervisor provenance and backward-compatible migration.
 - `docs/goals/g8s-mvp-oss/goal.md` — Phase 6 milestone.
 
 ## Out of scope
@@ -197,9 +269,11 @@ None.
 ## Transition log
 
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
+- 2026-08-29: Concern B promoted DRAFT → ACCEPTED (T021). §ADDED B.1-B.3 (SupervisorMeta, idempotent migration, NULL tolerance) marked IMPLEMENTING.
 
 ## Change log
 
 - **v0.1.0-draft** (2026-08-28): Initial delta from Concern A/B/C
   design doc.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
+- **v1.1.0-ACCEPTED** (2026-08-29): Added §ADDED B.1-B.3 for Concern B receipt evolution (SupervisorMeta, idempotent schema migration, NULL tolerance contract). Status ACCEPTED + IMPLEMENTING.

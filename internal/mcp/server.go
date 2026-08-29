@@ -81,7 +81,7 @@ type ControlPlaneAPI interface {
 
 // ReceiptIssuer is the slice of internal/receipt the MCP server needs.
 type ReceiptIssuer interface {
-	IssueReceipt(issuer string, allowedPaths []string, ttl time.Duration) (*receipt.WriteReceipt, error)
+	IssueReceipt(issuer string, allowedPaths []string, ttl time.Duration, opts ...receipt.IssueOption) (*receipt.WriteReceipt, error)
 }
 
 // ProviderSource is the slice of internal/provider the MCP server needs.
