@@ -38,7 +38,7 @@ func openRawDB(t *testing.T, path string) *sql.DB {
 	return db
 }
 
-const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT"
+const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER"
 
 func TestFreshDatabaseSchemaExact(t *testing.T) {
 	_, path := newTestStore(t)
@@ -61,7 +61,7 @@ func TestFreshDatabaseSchemaExact(t *testing.T) {
 		t.Fatalf("iterate sqlite_master: %v", err)
 	}
 
-	for _, want := range []string{"tasks", "task_events", "idx_tasks_claim", "idx_task_events_task"} {
+	for _, want := range []string{"tasks", "task_events", "idx_tasks_claim", "idx_task_events_task", "idx_tasks_orchestrator_iter"} {
 		if _, ok := objects[want]; !ok {
 			t.Errorf("missing object %q in schema", want)
 		}
@@ -183,7 +183,7 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
-	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 4") {
+	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 5") {
 		t.Errorf("error mismatch: %v", err)
 	}
 }

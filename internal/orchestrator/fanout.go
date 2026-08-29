@@ -61,6 +61,29 @@ func FanOut(ctx context.Context, plan []TaskSpec, opts FanOutOptions) ([]Receipt
 			receipt, werr := handle.Wait(ctx)
 			receipt.FilesModified, receipt.CommitSHA = gitDiffNameOnly(opts.Pool.repo, wt.BaseSHA)
 			receipt.ScopeViolations = diffScope(receipt.FilesModified, task.AllowedFiles)
+
+			if spec.OrchestratorID != "" {
+				receipt.OrchestratorID = spec.OrchestratorID
+			}
+			if spec.WorktreeID != "" {
+				receipt.WorktreeID = spec.WorktreeID
+			} else if receipt.WorktreeID == "" && wt.ID != "" {
+				receipt.WorktreeID = wt.ID
+			}
+			if spec.WorkerName != "" {
+				receipt.WorkerName = spec.WorkerName
+			} else if receipt.WorkerName == "" && worker != nil {
+				receipt.WorkerName = worker.Name()
+			}
+			if spec.Iter != 0 {
+				receipt.Iter = spec.Iter
+			} else if receipt.Iter == 0 && spec.Task.Iter != 0 {
+				receipt.Iter = spec.Task.Iter
+			}
+			if receipt.TaskID == "" {
+				receipt.TaskID = spec.TaskID
+			}
+
 			results[i] = receipt
 			errs[i] = werr
 		}(i, spec)
@@ -89,11 +112,4 @@ type FanOutOptions struct {
 	Registry    *Registry
 	Pool        *Pool
 	MaxParallel int
-}
-
-// TaskSpec is one slice of the plan: the task description plus an ID
-// the orchestrator uses to key receipts and worktree leases.
-type TaskSpec struct {
-	TaskID string
-	Task   Task
 }

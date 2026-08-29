@@ -36,7 +36,7 @@ func (f *FSM) Drive(ctx context.Context, plan []TaskSpec, opts FanOutOptions) (R
 	result := RunResult{}
 
 	// --- PLAN phase ---
-	// FSM starts in StatePlan. Validate inputs.
+	// FSM starts in StatePlan. Validate inputs and assign field mappings on entry.
 	if len(plan) == 0 {
 		if _, err := f.Next(StateCancel, "empty plan"); err != nil {
 			return result, fmt.Errorf("fsm: cancel on empty plan: %w", err)
@@ -44,6 +44,22 @@ func (f *FSM) Drive(ctx context.Context, plan []TaskSpec, opts FanOutOptions) (R
 		result.FinalState = f.Current()
 		result.Transitions = f.History()
 		return result, nil
+	}
+
+	for i := range plan {
+		if plan[i].TaskID == "" && plan[i].Task.ID != "" {
+			plan[i].TaskID = plan[i].Task.ID
+		} else if plan[i].Task.ID == "" && plan[i].TaskID != "" {
+			plan[i].Task.ID = plan[i].TaskID
+		}
+		if plan[i].Iter == 0 && plan[i].Task.Iter != 0 {
+			plan[i].Iter = plan[i].Task.Iter
+		} else if plan[i].Task.Iter == 0 && plan[i].Iter != 0 {
+			plan[i].Task.Iter = plan[i].Iter
+		}
+		if plan[i].WorktreeID == "" && plan[i].Task.Worktree.ID != "" {
+			plan[i].WorktreeID = plan[i].Task.Worktree.ID
+		}
 	}
 
 	// Check context before proceeding.

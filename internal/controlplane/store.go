@@ -103,6 +103,10 @@ func (s *Store) initialize() error {
 		rollbackInit(conn)
 		return err
 	}
+	if err := migrateReceiptLake(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
 
 	if _, err := conn.ExecContext(context.Background(),
 		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
@@ -121,7 +125,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 3 && version != SchemaVersion) {
+	if version < 0 || (version > 4 && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -150,7 +154,11 @@ func applyBaseSchema(conn *sql.Conn) error {
 			created_at REAL NOT NULL,
 			updated_at REAL NOT NULL,
 			completed_at REAL,
-			last_error TEXT
+			last_error TEXT,
+			orchestrator_id TEXT,
+			worktree_id TEXT,
+			worker_name TEXT,
+			iter INTEGER DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_claim
 			ON tasks(state, priority DESC, created_at ASC)`,
@@ -317,6 +325,57 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 	return nil
 }
 
+// migrateReceiptLake is the idempotent migration for DELTA-17 (receipt lake
+// wiring). It inspects tasks columns via PRAGMA table_info and adds any missing
+// column with ALTER TABLE ADD COLUMN. It also creates idx_tasks_orchestrator_iter.
+func migrateReceiptLake(conn *sql.Conn) error {
+	expected := map[string]string{
+		"orchestrator_id": "TEXT",
+		"worktree_id":     "TEXT",
+		"worker_name":     "TEXT",
+		"iter":            "INTEGER DEFAULT 0",
+	}
+	present := map[string]struct{}{}
+	rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(tasks)")
+	if err != nil {
+		return fmt.Errorf("inspect tasks columns for receipt lake: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan tasks columns: %w", err)
+		}
+		present[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate tasks columns: %w", err)
+	}
+
+	cols := []string{"orchestrator_id", "worktree_id", "worker_name", "iter"}
+	for _, col := range cols {
+		if _, ok := present[col]; ok {
+			continue
+		}
+		colDef := expected[col]
+		if _, err := conn.ExecContext(context.Background(),
+			fmt.Sprintf("ALTER TABLE tasks ADD COLUMN %s %s", col, colDef)); err != nil {
+			return fmt.Errorf("migrate tasks.%s: %w", col, err)
+		}
+	}
+
+	if _, err := conn.ExecContext(context.Background(),
+		"CREATE INDEX IF NOT EXISTS idx_tasks_orchestrator_iter ON tasks(orchestrator_id, iter)"); err != nil {
+		return fmt.Errorf("create idx_tasks_orchestrator_iter: %w", err)
+	}
+
+	return nil
+}
+
 func rollbackInit(conn *sql.Conn) {
 	_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 }
@@ -343,7 +402,8 @@ func insertTaskEvent(tx *sql.Tx, taskID string, eventType string, actor string, 
 const taskColumns = `task_id, parent_task_id, idempotency_key, schema_version, state, priority,
 	request_json, request_hash, result_json, result_hash, receipt_hash,
 	attempts, max_attempts, lease_owner, lease_token, lease_expires_at,
-	cancel_requested, created_at, updated_at, completed_at, last_error`
+	cancel_requested, created_at, updated_at, completed_at, last_error,
+	orchestrator_id, worktree_id, worker_name, iter`
 
 // scanTask decodes one tasks row into a Task pointer, translating JSON text
 // columns and integer booleans exactly like _decode_task in the baseline.
@@ -357,6 +417,7 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 		&requestJSON, &t.RequestHash, &resultJSON, &t.ResultHash, &t.ReceiptHash,
 		&t.Attempts, &t.MaxAttempts, &t.LeaseOwner, &t.LeaseToken, &t.LeaseExpiresAt,
 		&cancelRequested, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt, &t.LastError,
+		&t.OrchestratorID, &t.WorktreeID, &t.WorkerName, &t.Iter,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -457,7 +518,8 @@ func (s *Store) ListChildTasks(ctx context.Context, parentTaskID string) ([]*Tas
 const taskColumnsPrefixed = `t.task_id, t.parent_task_id, t.idempotency_key, t.schema_version, t.state, t.priority,
 	t.request_json, t.request_hash, t.result_json, t.result_hash, t.receipt_hash,
 	t.attempts, t.max_attempts, t.lease_owner, t.lease_token, t.lease_expires_at,
-	t.cancel_requested, t.created_at, t.updated_at, t.completed_at, t.last_error`
+	t.cancel_requested, t.created_at, t.updated_at, t.completed_at, t.last_error,
+	t.orchestrator_id, t.worktree_id, t.worker_name, t.iter`
 
 // GetTaskLineage returns the full ancestry chain of a task up to the root parent,
 // starting with the root task and ending with the requested task.
@@ -599,10 +661,12 @@ func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, reque
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks(
 			task_id, parent_task_id, idempotency_key, schema_version, state, priority,
-			request_json, request_hash, max_attempts, created_at, updated_at
-		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)`,
+			request_json, request_hash, max_attempts, created_at, updated_at,
+			orchestrator_id, worktree_id, worker_name, iter
+		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, req.ParentTaskID, req.IdempotencyKey, TaskSchemaVersion,
-		req.Priority, requestJSON, requestHash, req.MaxAttempts, now, now)
+		req.Priority, requestJSON, requestHash, req.MaxAttempts, now, now,
+		req.OrchestratorID, req.WorktreeID, req.WorkerName, req.Iter)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
 	}
@@ -612,6 +676,18 @@ func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, reque
 	}
 	if req.ParentTaskID != nil {
 		details["parent_task_id"] = *req.ParentTaskID
+	}
+	if req.OrchestratorID != nil {
+		details["orchestrator_id"] = *req.OrchestratorID
+	}
+	if req.WorktreeID != nil {
+		details["worktree_id"] = *req.WorktreeID
+	}
+	if req.WorkerName != nil {
+		details["worker_name"] = *req.WorkerName
+	}
+	if req.Iter != 0 {
+		details["iter"] = req.Iter
 	}
 	if err := insertTaskEvent(tx, taskID, "task_submitted", "orchestrator", details, now); err != nil {
 		return nil, err

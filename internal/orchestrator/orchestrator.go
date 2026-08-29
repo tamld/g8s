@@ -66,28 +66,6 @@ type Worktree struct {
 	BaseSHA string
 }
 
-// Receipt is the worker-emitted result plus orchestrator-side metadata.
-// Persisted into the controlplane evidence lake by the orchestrator after
-// validation.
-type Receipt struct {
-	OK              bool
-	WorkerName      string
-	TaskID          string
-	WorktreeID      string
-	Branch          string
-	CommitSHA       string
-	ReturnCode      int
-	HarnessCode     int
-	DurationSeconds float64
-	Stdout          string
-	Stderr          string
-	Violations      []string
-	FilesModified   []string
-	ScopeViolations []string
-	StartedAt       time.Time
-	FinishedAt      time.Time
-}
-
 // ErrWorkerUnavailable is returned by Worker.Spawn when Available was nil
 // at registration time but the binary disappeared since.
 var ErrWorkerUnavailable = errors.New("worker binary unavailable")
