@@ -282,6 +282,12 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 func runOrchestrate(args []string) {
 	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
 	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
+	briefFile := fs.String("brief-file", "", "path to brief markdown file to issue and dispatch")
+	dispatchID := fs.String("dispatch", "", "stored brief ID to re-issue and dispatch")
+	issuedBy := fs.String("issued-by", "sisyphus", "issuer identity for brief")
+	ttlStr := fs.String("ttl", "2h", "time-to-live duration for brief (e.g. 2h, 30m)")
+	title := fs.String("title", "", "optional title for brief (overrides title in file)")
+	dod := fs.String("dod", "", "optional DoD for brief (overrides DoD in file)")
 	fromIntent := fs.String("from-intent", "", "free-text natural language intent")
 	fromFile := fs.String("from-file", "", "path to file containing natural language intent")
 	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
@@ -297,9 +303,34 @@ func runOrchestrate(args []string) {
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
 	failIf(fs.Parse(args))
 
-	if !*selfTest && *fromIntent == "" && *fromFile == "" {
-		fmt.Fprintln(os.Stderr, "usage: g8s orchestrate [--from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]")
+	var jsonExplicit bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "json" {
+			jsonExplicit = true
+		}
+	})
+
+	if !*selfTest && *fromIntent == "" && *fromFile == "" && *briefFile == "" && *dispatchID == "" {
+		fmt.Fprintln(os.Stderr, "usage: g8s orchestrate [--brief-file <path> | --dispatch <id> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]")
 		os.Exit(2)
+	}
+
+	dbPath, err := databasePath()
+	failIf(err)
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	failIf(err)
+	defer store.Close()
+
+	if *briefFile != "" {
+		_, err := executeOrchestrateBriefFile(os.Stdout, store, *briefFile, *issuedBy, *ttlStr, *title, *dod, jsonExplicit && *jsonMode)
+		failIf(err)
+		return
+	}
+
+	if *dispatchID != "" {
+		_, err := executeOrchestrateDispatch(os.Stdout, store, *dispatchID, *issuedBy, *ttlStr, jsonExplicit && *jsonMode)
+		failIf(err)
+		return
 	}
 
 	var intentText string
@@ -318,12 +349,6 @@ func runOrchestrate(args []string) {
 			os.Exit(2)
 		}
 	}
-
-	dbPath, err := databasePath()
-	failIf(err)
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
-	defer store.Close()
 
 	cwd, err := os.Getwd()
 	failIf(err)

@@ -91,4 +91,73 @@ func TestDogfoodE2E(t *testing.T) {
 	if consumed.Status != "consumed" {
 		t.Fatalf("expected status 'consumed', got %q", consumed.Status)
 	}
+
+	// 3. orchestrate --brief-file
+	briefFilePath := filepath.Join(tempDir, "dogfood-brief.md")
+	briefMD := "# E2E Dogfood Task\nTask payload for dogfood.\n## DoD\n- [x] DoD item 1\n"
+	if err := os.WriteFile(briefFilePath, []byte(briefMD), 0o600); err != nil {
+		t.Fatalf("write brief file: %v", err)
+	}
+
+	orchCmd := exec.Command(binPath, "orchestrate",
+		"--brief-file", briefFilePath,
+		"--issued-by", "sisyphus",
+		"--ttl", "1h",
+	)
+	orchCmd.Env = append(os.Environ(), "G8S_DB="+dbPath)
+	orchOut, err := orchCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("orchestrate --brief-file failed: %v\nOutput: %s", err, string(orchOut))
+	}
+
+	orchBriefID := strings.TrimSpace(string(orchOut))
+	if !strings.HasPrefix(orchBriefID, "brief-") {
+		t.Fatalf("expected brief ID prefix 'brief-', got %q", orchBriefID)
+	}
+
+	// 4. orchestrate --dispatch
+	dispatchCmd := exec.Command(binPath, "orchestrate",
+		"--dispatch", orchBriefID,
+		"--ttl", "1h",
+	)
+	dispatchCmd.Env = append(os.Environ(), "G8S_DB="+dbPath)
+	dispatchOut, err := dispatchCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("orchestrate --dispatch failed: %v\nOutput: %s", err, string(dispatchOut))
+	}
+
+	dispatchedID := strings.TrimSpace(string(dispatchOut))
+	if !strings.HasPrefix(dispatchedID, "brief-") {
+		t.Fatalf("expected reissued brief ID prefix 'brief-', got %q", dispatchedID)
+	}
+	if dispatchedID == orchBriefID {
+		t.Fatalf("expected new brief ID from dispatch, got identical %q", dispatchedID)
+	}
+
+	// 5. brief-consume on dispatched brief
+	consumeDispatchedCmd := exec.Command(binPath, "brief-consume", "--id", dispatchedID)
+	consumeDispatchedCmd.Env = append(os.Environ(), "G8S_DB="+dbPath)
+	consumeDispatchedOut, err := consumeDispatchedCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("brief-consume dispatched failed: %v\nOutput: %s", err, string(consumeDispatchedOut))
+	}
+
+	var consumedDispatched struct {
+		ID        string `json:"id"`
+		Status    string `json:"status"`
+		PayloadMD string `json:"payload_md"`
+	}
+	if err := json.Unmarshal(consumeDispatchedOut, &consumedDispatched); err != nil {
+		t.Fatalf("unmarshal consumed dispatched output: %v\nOutput: %s", err, string(consumeDispatchedOut))
+	}
+
+	if consumedDispatched.ID != dispatchedID {
+		t.Fatalf("consumed dispatched ID = %q, want %q", consumedDispatched.ID, dispatchedID)
+	}
+	if consumedDispatched.Status != "consumed" {
+		t.Fatalf("expected status 'consumed', got %q", consumedDispatched.Status)
+	}
+	if !strings.Contains(consumedDispatched.PayloadMD, "Task payload for dogfood.") {
+		t.Fatalf("consumed dispatched payload missing expected content: %q", consumedDispatched.PayloadMD)
+	}
 }
