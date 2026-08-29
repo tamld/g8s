@@ -20,7 +20,7 @@ func TestFanOutReceiptPropagation(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register("agy", func() Worker { return worker })
 
-	pool, err := NewPool(PoolOptions{Repo: dir})
+	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}

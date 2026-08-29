@@ -156,7 +156,7 @@ func confirmForceMissing(r io.Reader, w io.Writer) bool {
 		w = os.Stdout
 	}
 	pterm.Warning.WithWriter(w).Println("WARNING: Terminating processes without heartbeat files may kill foreign or unrelated binaries.")
-	fmt.Fprint(w, "Are you sure you want to proceed with terminating processes with no heartbeats? [y/N]: ")
+	_, _ = fmt.Fprint(w, "Are you sure you want to proceed with terminating processes with no heartbeats? [y/N]: ")
 	var resp string
 	_, err := fmt.Fscanln(r, &resp)
 	if err != nil {
