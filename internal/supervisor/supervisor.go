@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tamld/g8s/internal/cleanup"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/orchestrator"
 )
@@ -72,11 +73,18 @@ type RunResult struct {
 }
 
 // SupervisorConfig caps the run-loop. Defaults: 3 attempts per approach,
-// 3 approaches, self-test off.
+// 3 approaches, self-test off, auto-cleanup on.
 type SupervisorConfig struct {
 	MaxAttemptsPerApproach int
 	MaxApproaches          int
 	SelfTestMode           bool
+	AutoCleanup            bool
+	CleanupOnEscalate      bool
+	RepoDir                string
+	HeartbeatDir           string
+	DBPath                 string
+	ProcessManager         cleanup.ProcessManager
+	GitRunner              cleanup.CleanupGitRunner
 }
 
 // defaultSupervisorConfig returns the safe defaults called out in the spec.
@@ -85,6 +93,8 @@ func defaultSupervisorConfig() SupervisorConfig {
 		MaxAttemptsPerApproach: 3,
 		MaxApproaches:          3,
 		SelfTestMode:           false,
+		AutoCleanup:            true,
+		CleanupOnEscalate:      false,
 	}
 }
 
@@ -215,6 +225,7 @@ outcomeLoop:
 			switch record.ReviewVerdict {
 			case VerdictPass:
 				res := s.buildSuccess(ctx, supTaskID, attempts, startWall)
+				s.runAutoCleanup(ctx, false)
 				return res, nil
 			case VerdictFail:
 				// Failures still consume the attempt budget — RCA may attribute
@@ -265,6 +276,7 @@ outcomeLoop:
 				Escalation:       &esc,
 				Outcome:          RunEscalated,
 			}
+			s.runAutoCleanup(ctx, true)
 			return res, nil
 		}
 
@@ -563,3 +575,30 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+func (s *Supervisor) runAutoCleanup(ctx context.Context, isEscalated bool) {
+	if !s.Config.AutoCleanup {
+		return
+	}
+	targets := []string{cleanup.TargetOrphanWT, cleanup.TargetOrphanDir}
+	if isEscalated && s.Config.CleanupOnEscalate {
+		targets = append(targets, cleanup.TargetGhostProcess)
+	}
+
+	opts := orchestrator.CleanupHookOptions{
+		Targets:        targets,
+		RepoDir:        s.Config.RepoDir,
+		HeartbeatDir:   s.Config.HeartbeatDir,
+		DBPath:         s.Config.DBPath,
+		Clock:          s.Clock,
+		Logger:         s.Logger,
+		ProcessManager: s.Config.ProcessManager,
+		GitRunner:      s.Config.GitRunner,
+	}
+	if err := orchestrator.RunCleanupHook(ctx, opts); err != nil {
+		if s.Logger != nil {
+			s.Logger.Printf("auto-cleanup: %v", err)
+		}
+	}
+}
+

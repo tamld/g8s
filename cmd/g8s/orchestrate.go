@@ -91,6 +91,7 @@ type orchestrateOptions struct {
 	AddDirs       []string
 	ParentTaskID  *string
 	SelfTest      bool
+	AutoCleanup   bool
 }
 
 // executeOrchestration drives the supervisor fix loop and sub-task fan-out
@@ -114,6 +115,7 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 	sup.Config.MaxAttemptsPerApproach = opts.MaxAttempts
 	sup.Config.MaxApproaches = opts.MaxApproaches
 	sup.Config.SelfTestMode = true
+	sup.Config.AutoCleanup = opts.AutoCleanup
 
 	role := opts.Role
 	if role == "" {
@@ -298,6 +300,7 @@ func runOrchestrate(args []string) {
 	maxAttempts := fs.Int("max-attempts", 3, "attempts per approach")
 	maxApproaches := fs.Int("max-approaches", 3, "approach budget before escalation")
 	timeout := fs.Duration("timeout", 5*time.Minute, "per-attempt execution window")
+	autoCleanup := fs.Bool("auto-cleanup", true, "automatically clean up orphan worktrees and dirs after run")
 	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true for this command)")
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
@@ -388,6 +391,7 @@ func runOrchestrate(args []string) {
 			AddDirs:       dirs,
 			ParentTaskID:  parentIDPtr,
 			SelfTest:      *selfTest,
+			AutoCleanup:   *autoCleanup,
 		}
 		res, err := executeOrchestration(context.Background(), intentText, opts)
 		failIf(err)
@@ -398,6 +402,9 @@ func runOrchestrate(args []string) {
 		sup.Config.MaxAttemptsPerApproach = *maxAttempts
 		sup.Config.MaxApproaches = *maxApproaches
 		sup.Config.SelfTestMode = true
+		sup.Config.AutoCleanup = *autoCleanup
+		sup.Config.RepoDir = cwd
+		sup.Config.DBPath = dbPath
 
 		req := supervisor.RunRequest{
 			TaskDescription: *taskDesc,
