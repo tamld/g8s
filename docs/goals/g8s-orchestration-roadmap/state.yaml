@@ -1,0 +1,239 @@
+# GoalBuddy v2 state.yaml
+# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+
+version: 2
+
+goal:
+  title: "g8s Orchestration Roadmap — Phase 6: Supervisor-Driven Fix Loop"
+  slug: "g8s-orchestration-roadmap"
+  kind: existing_plan
+  tranche: "Sequential execution: Concern A (supervisor fix loop) -> Concern B (receipt evolution) -> Concern C (meta-optimizer). Each concern produces one bounded vertical slice with its own OpenSpec delta section, ADR, and green dual-pass gate. C cannot be evaluated without A's metrics; B's new fields are pointless until A writes them."
+  status: in_progress
+  oracle:
+    signal: "In Docker golang:1.25: CGO_ENABLED=0 go vet ./... && go test ./... fully green AND CGO_ENABLED=1 go test -race ./... green with zero reports AND Concern A: internal/supervisor/ exists + ./bin/g8s orchestrate 'self-test' runs end-to-end emitting iteration/RCA/escalation events per docs/designs/supervisor-fix-loop.md §6+§9 AND Concern B: receipt.IssueReceipt records approach_idx/attempt_idx/rca_confidence/adr_path; receipts issued before migration still verify AND Concern C: ./bin/g8s supervisor metrics --task-id sup-X returns the eight metrics listed in §10."
+    cadence: "after each concern slice and at final audit"
+    final_proof: "receipts for every concern slice + oracle run output + final Judge audit mapping receipts to the three concerns with full_outcome_complete: true"
+  intake:
+    original_request: "Owner (2026-08-28, Vietnamese, intent preserved): 'Tiếp tục hoàn thiện g8s. Brainstorm + Plan high-level design cho 7 orchestration requirements: (1) AGY opens issues, (2) AGY fixes code, (3) user reviews code/behavior/results, (4) judgment board continuous evaluation, (5) supervisor strategy + worker behavior via receipts, (6) review optimizer for supervisor thinking, (7) review optimizer for worker execution. AGY chỉ là worker, supervisor là g8s orchestrate. High-level design doc, không code.'"
+    interpreted_outcome: "g8s lands the three-concern orchestration roadmap wrapping existing internal/orchestrator + internal/harness + internal/receipt with a supervisor-driven fix loop: Concern A internal/supervisor + g8s orchestrate CLI; Concern B receipt evolution with backward-compat migration; Concern C read-only meta-optimizer consuming Concern A metrics."
+    input_shape: existing_plan
+    audience: "repo owner tamld (reviews at concern boundaries only)"
+    authority: approved
+    proof_type: metric
+    completion_proof: "dual-pass gate green + internal/supervisor package exists + ./bin/g8s orchestrate 'self-test' runs end-to-end + receipt migration backward-compat test green + ./bin/g8s supervisor metrics returns eight §10 fields + audit maps receipts to all three concerns"
+    likely_misfire: "dumping 7 requirements into one mega-package; treating AGY as the supervisor; binding internal/orchestrator.Worker interface (which must stay unchanged); gold-plating Concern C before Concern A ships; breaking receipt backward compatibility in Concern B"
+    blind_spots_considered:
+      - "internal/orchestrator.Worker interface is frozen — supervisor must speak existing types, not extend them"
+      - "Receipt schema today only carries worker-side proof; Concern B needs supervisor-side fields without breaking existing receipt verification"
+      - "Concern C cannot be evaluated without first producing Concern A metrics; sequential ordering enforced by this charter"
+      - "RCA confidence is heuristic until Concern C tunes it; the < 0.6 safety valve must be honored even with noisy output"
+      - "DELTA-11 spec currently DRAFT; concerns produce ACCEPTED -> IMPLEMENTING -> APPLIED transitions per concern, not one global transition"
+      - "Concern B migration must include a backward-compat test proving pre-migration receipts still verify"
+    existing_plan_facts:
+      - "internal/orchestrator/ ships Worker interface, AgyWorker, FanOut, scope-violation detection"
+      - "internal/harness/ ships Role, Permission, ValidateRequest, BuildContractPromptWithReceipt"
+      - "internal/receipt/ ships IssueReceipt, ValidateAndConsume, RevokeReceipt, ListActiveReceipts + write_receipts SQLite WAL table"
+      - "cmd/g8s/main.go exists; g8s orchestrate subcommand is a stub and must be wired to internal/supervisor.Run"
+      - "spec/openspec/11-orchestration-roadmap-spec.md is DRAFT — this goal ACCEPTs it incrementally per concern"
+      - "docs/designs/supervisor-fix-loop.md v0.1.0-draft is the design SSoT (this goal promotes it to ACCEPTED at T020)"
+      - "docs/decisions/0001-supervisor-driven-fix-loop.md ADR-0001 Proposed (this goal promotes to ACCEPTED at T020)"
+      - "Prior goal g8s-mvp-oss closed with full_outcome_complete: true (Phases 1-5 landed); Phase 6 = this goal"
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  exact_human_approval_can_terminal_wait: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  # OpenCode harness: dedicated GoalBuddy agent files are not installed here.
+  # PM executes Scout/Judge/Worker roles directly and may delegate heavy
+  # exploration/review to OpenCode subagents (task()) as needed.
+  scout: missing
+  worker: missing
+  judge: missing
+
+visual_board:
+  # Owner waits at concern boundaries only; file board suffices. Local live board skipped by delegated-authority default.
+  selected: none
+  local:
+    status: not_requested
+    url: null
+    command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-orchestration-roadmap"
+
+active_task: null
+
+tasks:
+  - id: T020
+    type: worker
+    assignee: Worker
+    status: pending
+    reasoning_hint: default
+    objective: "Concern A vertical slice per docs/designs/supervisor-fix-loop.md + ADR-0001 + DELTA-11 §ADDED A.1-A.5: (1) promote spec section DELTA-11 §ADDED A.1-A.5 from DRAFT to ACCEPTED + IMPLEMENTING; (2) promote docs/designs/supervisor-fix-loop.md v0.1.0-draft to v1.0.0-ACCEPTED with changelog entry; (3) promote ADR-0001 Proposed to Accepted with ratification date; (4) author internal/supervisor package (planner.go, enforcer.go, reviewer.go, rca.go, escalator.go, supervisor.go wiring the loop, metrics.go emitting the eight §10 metrics, persist.go writing supervisor_tasks + supervisor_decisions tables into internal/controlplane, optimizer_stub.go empty until T022); (5) wire cmd/g8s/main.go + cmd/g8s/orchestrate.go so `./bin/g8s orchestrate 'self-test'` runs the full loop on a synthetic failing task and emits the §9 HITL escalation JSON to stdout (exit non-zero) — the 'self-test' task MUST exhaust all 9 attempts to prove the loop closes; (6) add `g8s supervisor metrics --task-id sup-X` subcommand reading the eight §10 metrics from supervisor_tasks; (7) add internal/supervisor/supervisor_test.go covering: FanOut with len(plan)==1+MaxParallel==1, no direct AGY/codex/gemini/claude imports, envelope selection with EnvelopeHints nil vs set, 3x3=9 iteration cap enforcement, RCA confidence<0.6 -> NEEDS_INFO pause, scope violation on receipt always rejects, metrics persistence across restarts, HITL escalation JSON shape, DETERMINISTIC FAIL TEST using an in-process Worker stub that returns Receipt{OK: false, ScopeViolations: [...]} so all 9 attempts reliably fail (no flakiness), CONCURRENT SUPERVISORS TEST using two goroutines writing to the same supervisor_tasks task_id under -race, PROVE_RAISE_FAILURES_FIRST (an approach-shift returns approach+1, attempt=0); (8) register new supervisor_* tables in internal/controlplane migrations; (9) commit with message 'feat(supervisor): DELTA-11 Concern A — supervisor-driven fix loop'; (10) deliver a self-test run log showing the full 9-attempt cycle."
+    inputs:
+      - "spec/openspec/11-orchestration-roadmap-spec.md (DRAFT, sections A.1-A.5 to be promoted)"
+      - "docs/designs/supervisor-fix-loop.md (v0.1.0-draft to be promoted to v1.0.0-ACCEPTED)"
+      - "docs/decisions/0001-supervisor-driven-fix-loop.md (Proposed to Accepted)"
+      - "internal/orchestrator/orchestrator.go (Worker interface — frozen, do not modify)"
+      - "internal/harness/harness.go (Role, Permission, ValidateRequest, BuildContractPromptWithReceipt)"
+      - "internal/receipt/receipt.go (IssueReceipt, ValidateAndConsume, RevokeReceipt, ListActiveReceipts)"
+      - "internal/controlplane/store.go (migrations pattern + DSN pragmas + user_version gate)"
+      - "cmd/g8s/main.go (existing CLI topology)"
+    constraints:
+      - "Frozen Worker interface: internal/orchestrator.Worker MUST NOT change. Speak existing surface only."
+      - "No imports of AGY, codex, gemini, claude, or any worker binary in internal/supervisor. Enforce with: go list -deps ./internal/supervisor | grep -E 'codex|agy|gemini|claude' must return empty."
+      - "Injectable clock for iteration timing (no time.Now() direct calls)."
+      - "supervisor_metrics must persist to internal/controlplane SQLite WAL (existing store pattern), not new persistence layer."
+      - "Self-test mode: 'self-test' prompt MUST cause all 9 attempts to fail so escalation fires; use a synthetic task that the orchestrator stub deliberately rejects."
+      - "100% English in code, comments, commits, error messages, ADRs."
+      - "All code runs in Docker golang:1.25; dual-pass gate required (CGO_ENABLED=0 plain + CGO_ENABLED=1 race)."
+      - "Never touch files outside project scope/folder."
+    allowed_files:
+      - "spec/openspec/11-orchestration-roadmap-spec.md"
+      - "docs/designs/supervisor-fix-loop.md"
+      - "docs/decisions/0001-supervisor-driven-fix-loop.md"
+      - "internal/supervisor/planner.go"
+      - "internal/supervisor/planner_test.go"
+      - "internal/supervisor/enforcer.go"
+      - "internal/supervisor/enforcer_test.go"
+      - "internal/supervisor/reviewer.go"
+      - "internal/supervisor/reviewer_test.go"
+      - "internal/supervisor/rca.go"
+      - "internal/supervisor/rca_test.go"
+      - "internal/supervisor/escalator.go"
+      - "internal/supervisor/escalator_test.go"
+      - "internal/supervisor/supervisor.go"
+      - "internal/supervisor/supervisor_test.go"
+      - "internal/supervisor/metrics.go"
+      - "internal/supervisor/metrics_test.go"
+      - "internal/supervisor/persist.go"
+      - "internal/supervisor/persist_test.go"
+      - "internal/supervisor/optimizer_stub.go"
+      - "cmd/g8s/main.go"
+      - "cmd/g8s/orchestrate.go"
+      - "cmd/g8s/supervisor_metrics.go"
+      - "cmd/g8s/orchestrate_test.go"
+      - "internal/controlplane/store.go"
+      - "internal/controlplane/model.go"
+      - "internal/controlplane/lifecycle.go"
+      - "internal/controlplane/controlplane_test.go"
+      - "go.mod"
+      - "go.sum"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l . ; go vet ./... && go test -count=1 ./...'"
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -race -count=1 ./...'"
+      - "go build -o bin/g8s ./cmd/g8s"
+      - "./bin/g8s orchestrate 'self-test' 2>&1 | tee /tmp/t020-selftest.log ; rc=${PIPESTATUS[0]} ; test $rc -ne 0 ; grep -c 'escalation' /tmp/t020-selftest.log ; grep -q 'approaches_tried\":3' /tmp/t020-selftest.log ; grep -q 'total_attempts\":9' /tmp/t020-selftest.log"
+      - "go list -deps ./internal/supervisor | grep -E 'codex|agy|gemini|claude' | wc -l ; test $(go list -deps ./internal/supervisor | grep -E 'codex|agy|gemini|claude' | wc -l) -eq 0"
+      - "./bin/g8s supervisor metrics --task-id sup-selftest | jq -e '.envelope_score, .first_attempt_success, .attempts_to_success, .approaches_to_success, .rca_confidence_avg, .cycle_duration_seconds, .escalation_count, .false_escalation_rate'"
+      - "Concurrent supervisor test: two goroutines spawning supervisor.Run on the same synthetic task under -race must not produce data race (CGO_ENABLED=1 go test -race ./internal/supervisor/...)"
+      - "Deterministic fail test: a unit test using an in-process Worker stub that returns Receipt{OK:false, ScopeViolations:[\"out-of-scope-write\"]} MUST fire HITL escalation within 9 attempts (no timing-dependent flake)"
+      - "Enforcement: set -o pipefail must be active in the verify shell (NOT rely on $? after a pipeline)"
+    stop_if:
+      - "Need to modify internal/orchestrator.Worker interface (frozen)."
+      - "Need files outside allowed_files (other than go.mod/go.sum which are accepted)."
+      - "Verification fails twice (count must include the failure output in receipt)."
+      - "Need to import AGY/codex/gemini/claude binaries into internal/supervisor."
+      - "Self-test cannot deterministically reach the 9-attempt escalation (timing-dependent flake)."
+    receipt:
+      result: pending
+      notes_file: notes/T020-concern-a-supervisor.md
+  - id: T021
+    type: worker
+    assignee: Worker
+    status: pending
+    reasoning_hint: default
+    objective: "Concern B vertical slice per docs/designs/supervisor-fix-loop.md + DELTA-11 §ADDED B.1-B.3: (1) promote spec section DELTA-11 §ADDED B.1-B.3 from DRAFT to ACCEPTED + IMPLEMENTING (these sections may not yet exist in the draft — author them per the receipt-evolution design: B.1 additive receipt columns approach_idx/attempt_idx/rca_confidence/adr_path; B.2 backward-compat migration via PRAGMA table_info check + ALTER TABLE add-column-if-missing; B.3 receipt.IssueReceipt signature extension with SupervisorMeta struct + VerifyReceipt() reads new columns but tolerates absence); (2) author ADR-0002 'Receipt evolution for supervisor' under docs/decisions/0002-receipt-evolution-for-supervisor.md with Status=Proposed → Accepted at end of task, referencing ADR-0001 + DELTA-11 §ADDED B; (3) extend internal/receipt/receipt.go: add SupervisorMeta struct, extend IssueReceipt to accept optional SupervisorMeta (nil-safe), extend VerifyReceipt/read paths to read new columns when present, add column-existence helper, add migration runner that adds missing columns via ALTER TABLE (idempotent); (4) extend internal/receipt/receipt_test.go with backward-compat test: insert a receipt using OLD IssueReceipt signature (no SupervisorMeta) and verify VerifyReceipt still returns OK; with migration test: insert using new signature after migration, verify new columns read back; NULL HANDLING TEST: insert receipt with new columns populated to NULL, verify VerifyReceipt treats NULL as absent (not zero, not error); (5) commit 'feat(receipt): DELTA-11 Concern B — receipt evolution with backward-compat migration'."
+    inputs:
+      - "spec/openspec/11-orchestration-roadmap-spec.md (DRAFT, sections B.1-B.3 to be promoted/authored)"
+      - "internal/receipt/receipt.go (IssueReceipt, ValidateAndConsume, RevokeReceipt, ListActiveReceipts, write_receipts SQLite WAL table)"
+      - "internal/receipt/receipt_test.go (existing 87% coverage tests — must keep passing)"
+      - "docs/decisions/0001-supervisor-driven-fix-loop.md (ADR-0001 Accepted after T020)"
+    constraints:
+      - "Backward compatibility mandatory: receipts issued before the migration MUST still verify. A backward-compat test is REQUIRED in the test file."
+      - "Migration must be idempotent: ALTER TABLE add-column-if-missing via PRAGMA table_info scan (same pattern as internal/controlplane parent_task_id migration)."
+      - "IssueReceipt signature must remain backward-compatible: optional SupervisorMeta arg (nil-safe) preferred over breaking change."
+      - "Schema version bump via PRAGMA user_version inside internal/receipt; reject unsupported versions like internal/controlplane does."
+      - "Zero-CGO maintained: modernc.org/sqlite only."
+      - "100% English code/comments/commits/error messages."
+      - "Dual-pass gate required (CGO_ENABLED=0 plain + CGO_ENABLED=1 race)."
+      - "Never touch files outside project scope/folder."
+    allowed_files:
+      - "spec/openspec/11-orchestration-roadmap-spec.md"
+      - "docs/decisions/0002-receipt-evolution-for-supervisor.md"
+      - "internal/receipt/receipt.go"
+      - "internal/receipt/receipt_test.go"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/receipt/ ; go vet ./internal/receipt/... && go test -count=1 ./internal/receipt/...'"
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/receipt/... && go test -race -count=1 ./internal/receipt/...'"
+      - "Backward-compat test explicit: grep -c 'TestReceiptBackwardCompatibility' internal/receipt/receipt_test.go  ; test $(grep -c 'TestReceiptBackwardCompatibility' internal/receipt/receipt_test.go) -ge 1"
+      - "Repo-wide dual-pass gate (Concern A wiring must keep working): docker run ... golang:1.25 sh -c 'go vet ./... && go test -count=1 ./... && go test -race -count=1 ./...'"
+    stop_if:
+      - "Need to break existing IssueReceipt callers — instead add optional SupervisorMeta arg (nil-safe)."
+      - "Migration non-idempotent (would break re-runs)."
+      - "Backward-compat test cannot prove old receipts still verify."
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+    receipt:
+      result: pending
+      notes_file: notes/T021-concern-b-receipt.md
+  - id: T022
+    type: worker
+    assignee: Worker
+    status: pending
+    reasoning_hint: default
+    objective: "Concern C vertical slice per docs/designs/supervisor-fix-loop.md + DELTA-11 §ADDED C.1-C.2: (1) promote spec section DELTA-11 §ADDED C.1-C.2 from DRAFT to ACCEPTED + IMPLEMENTING (these sections may not yet exist — author them: C.1 read-only metrics consumer exposing `envelope_score_avg`, `first_attempt_success_rate`, `attempts_to_success_avg`, `approaches_to_success_avg`, `rca_confidence_avg`, `cycle_duration_seconds_avg`, `escalation_rate`, `false_escalation_rate` aggregated across N supervisor_tasks; C.2 hooks for tuning — stub optimizer that consumes Concern A metrics and proposes suggested bounds without applying them; Concern C is READ-ONLY for this tranche, writes go in a later tranche); (2) author ADR-0003 'Meta-optimizer read-only ingestion' under docs/decisions/0003-meta-optimizer-read-only.md with Status=Proposed → Accepted, referencing ADR-0001 + ADR-0002 + DELTA-11 §ADDED C; (3) replace internal/supervisor/optimizer_stub.go with internal/supervisor/optimizer.go: read-only query over supervisor_tasks table exposing aggregate metrics; (4) wire `./bin/g8s supervisor metrics --aggregate` flag that returns the Concern C aggregate view (defaults to per-task view from T020); (5) add internal/supervisor/optimizer_test.go covering: aggregate over empty table (zeros), aggregate over N tasks, no writes happen (READ-ONLY ASSERTION: snapshot row-counts of ALL SIX tables before and after — supervisor_tasks, supervisor_decisions, write_receipts, tasks, task_events, control_plane_maintenance — and assert equality), schema/version mismatch returns typed error, --aggregate vs --task-id FLAG COLLISION test (using both flags must produce a typed usage error); (6) commit 'feat(supervisor): DELTA-11 Concern C — read-only meta-optimizer'."
+    inputs:
+      - "spec/openspec/11-orchestration-roadmap-spec.md (DRAFT, sections C.1-C.2 to be promoted/authored)"
+      - "docs/designs/supervisor-fix-loop.md §10 (eight metrics list)"
+      - "internal/supervisor/metrics.go + persist.go (T020 deliverable: supervisor_tasks + supervisor_decisions tables + per-task metrics query)"
+      - "internal/supervisor/optimizer_stub.go (T020 deliverable: empty stub to replace)"
+      - "docs/decisions/0001-supervisor-driven-fix-loop.md (ADR-0001 Accepted)"
+      - "docs/decisions/0002-receipt-evolution-for-supervisor.md (ADR-0002 Accepted after T021)"
+    constraints:
+      - "Concern C is READ-ONLY in this tranche. The optimizer MUST NOT write to supervisor_tasks, supervisor_decisions, or any other table. Asserted via row-count before/after in tests."
+      - "Proposed bounds are output only — no auto-tuning in this tranche. Concern C may propose, but only Concern A (or future tranches) applies."
+      - "Aggregate metrics query must be SQL-level (no in-memory scan of all rows) for predictable performance at scale."
+      - "100% English code/comments/commits/error messages."
+      - "Dual-pass gate required (CGO_ENABLED=0 plain + CGO_ENABLED=1 race)."
+      - "Never touch files outside project scope/folder."
+    allowed_files:
+      - "spec/openspec/11-orchestration-roadmap-spec.md"
+      - "docs/decisions/0003-meta-optimizer-read-only.md"
+      - "internal/supervisor/optimizer.go"
+      - "internal/supervisor/optimizer_test.go"
+      - "internal/supervisor/optimizer_stub.go"
+      - "cmd/g8s/supervisor_metrics.go"
+      - "cmd/g8s/supervisor_metrics_test.go"
+    verify:
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'gofmt -l internal/supervisor/ cmd/g8s/ ; go vet ./internal/supervisor/... ./cmd/g8s/... && go test -count=1 ./internal/supervisor/... ./cmd/g8s/...'"
+      - "docker run --rm -v $PWD:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=1 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./internal/supervisor/... ./cmd/g8s/... && go test -race -count=1 ./internal/supervisor/... ./cmd/g8s/...'"
+      - "go build -o bin/g8s ./cmd/g8s"
+      - "Read-only assertion (all six tables): row-counts of supervisor_tasks, supervisor_decisions, write_receipts, tasks, task_events, control_plane_maintenance snapshotted before and after `./bin/g8s supervisor metrics --aggregate` MUST be identical (test asserts equality for all six)."
+      - "Flag collision: `./bin/g8s supervisor metrics --aggregate --task-id sup-X` MUST return typed usage error (not panic, not silent override)."
+      - "Repo-wide dual-pass gate: docker run ... golang:1.25 sh -c 'go vet ./... && go test -count=1 ./... && go test -race -count=1 ./...'"
+      - "End-to-end self-test still escalates: set -o pipefail ; ./bin/g8s orchestrate 'self-test' 2>&1 | grep -q 'total_attempts\":9'"
+    stop_if:
+      - "Concern C needs to write to any table (read-only violation; check via six-table snapshot)."
+      - "Auto-tuning proposed bounds applied without separate owner approval (out of scope this tranche)."
+      - "Need files outside allowed_files."
+      - "Verification fails twice."
+      - "--aggregate and --task-id flags do not produce a typed usage error when combined."
+    receipt:
+      result: pending
+      notes_file: notes/T022-concern-c-optimizer.md

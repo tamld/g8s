@@ -142,7 +142,7 @@ func (s *Store) SaveMetrics(ctx context.Context, supervisorTaskID string, m Metr
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO supervisor_metrics(
 			supervisor_task_id, envelope_score, first_attempt_success,
-			attempts_to_success, approaches_to_success, rca_confence_avg,
+			attempts_to_success, approaches_to_success, rca_confidence_avg,
 			cycle_duration_seconds, escalation_count, false_escalation_rate
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		supervisorTaskID, m.EnvelopeScore, firstAttempt,
