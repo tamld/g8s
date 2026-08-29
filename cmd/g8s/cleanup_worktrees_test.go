@@ -468,22 +468,34 @@ func TestCleanupWorktrees_RealGitIntegration(t *testing.T) {
 		t.Fatalf("expected wt1 removed, got %+v", report.Removed)
 	}
 
-	// Verify wt1 is removed from worktrees
-	wtList := filepath.ToSlash(runGit(repoDir, "worktree", "list"))
-	if strings.Contains(wtList, filepath.ToSlash(wt1)) {
-		t.Fatalf("wt1 still present in git worktree list: %s", wtList)
+	// Verify wt1 is removed and wt2, wt3, main are preserved
+	entriesAfter := parseWorktreeListPorcelain(runGit(repoDir, "worktree", "list", "--porcelain"))
+	hasWT1, hasWT2, hasWT3, hasMain := false, false, false, false
+	for _, e := range entriesAfter {
+		if samePath(e.Path, wt1) {
+			hasWT1 = true
+		}
+		if samePath(e.Path, wt2) {
+			hasWT2 = true
+		}
+		if samePath(e.Path, wt3) {
+			hasWT3 = true
+		}
+		if samePath(e.Path, repoDir) {
+			hasMain = true
+		}
 	}
-	// Verify dirty wt2 is preserved
-	if !strings.Contains(wtList, filepath.ToSlash(wt2)) {
-		t.Fatalf("wt2 should be preserved in git worktree list: %s", wtList)
+	if hasWT1 {
+		t.Fatalf("wt1 still present in git worktree list")
 	}
-	// Verify feat wt3 is preserved
-	if !strings.Contains(wtList, filepath.ToSlash(wt3)) {
-		t.Fatalf("wt3 should be preserved in git worktree list: %s", wtList)
+	if !hasWT2 {
+		t.Fatalf("wt2 should be preserved in git worktree list")
 	}
-	// Verify main repo is preserved
-	if !strings.Contains(wtList, filepath.ToSlash(repoDir)) {
-		t.Fatalf("main repo should be preserved in git worktree list: %s", wtList)
+	if !hasWT3 {
+		t.Fatalf("wt3 should be preserved in git worktree list")
+	}
+	if !hasMain {
+		t.Fatalf("main repo should be preserved in git worktree list")
 	}
 }
 
