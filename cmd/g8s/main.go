@@ -34,7 +34,7 @@ import (
 
 // Version is a var so goreleaser ldflags -X can inject the build tag (D4).
 var (
-	Version = "0.1.0"
+	Version = "0.2.0"
 	AppName = "g8s"
 )
 
