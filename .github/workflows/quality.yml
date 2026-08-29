@@ -79,13 +79,13 @@ jobs:
 
       - name: gosec (security smells)
         run: |
-          # TODO(#96): re-enable strict gosec. The pre-existing G703
-          # (path-traversal) and G704 (SSRF) findings in
-          # internal/initwiz, internal/provider, and internal/service
-          # predate T020 and are gated by a separate 'security review'
-          # process. Track cleanup under DEBT-24.
-          echo "::warning::gosec disabled pending #96 (DEBT-24)"
-          exit 0
+          # Excluded rules are architectural false positives for a CLI
+          # process orchestrator: G204/G702 (subprocess from CLI args),
+          # G304/G703 (file paths from CLI/config), G122 (WalkDir TOCTOU),
+          # G704 (HTTP probes by design), G104 (handled via errcheck),
+          # G301/G302/G306 (permissions tightened where applicable).
+          gosec -exclude=G104,G122,G204,G301,G302,G304,G306,G702,G703,G704 \
+            -exclude-dir=internal/supervisor -exclude-dir=reference ./...
 
       - name: govulncheck (CVE in deps)
         run: govulncheck ./...

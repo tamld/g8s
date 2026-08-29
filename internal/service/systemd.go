@@ -86,7 +86,7 @@ WantedBy=default.target
 // Install writes the systemd unit and reloads systemd user daemon.
 func (s *SystemdManager) Install() error {
 	unitFile := s.unitPath()
-	if err := os.MkdirAll(filepath.Dir(unitFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(unitFile), 0o750); err != nil {
 		return fmt.Errorf("create systemd dir: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(s.cfg.StdoutLogPath), 0o700); err != nil {
@@ -94,7 +94,7 @@ func (s *SystemdManager) Install() error {
 	}
 
 	content := s.GenerateUnit()
-	if err := os.WriteFile(unitFile, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(unitFile, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 

@@ -327,7 +327,7 @@ func (m *Manager) Install() error {
 			_ = os.Remove(m.cfg.PlistPath)
 			return
 		}
-		_ = os.WriteFile(m.cfg.PlistPath, previous, 0o644)
+		_ = os.WriteFile(m.cfg.PlistPath, previous, 0o600)
 	}
 	if m.guard != nil {
 		if _, err := m.guard.BeginMaintenance("g8s-service", DefaultTTL); err != nil {
@@ -341,7 +341,7 @@ func (m *Manager) Install() error {
 			return serr("bootout existing service before reinstall: %v", err)
 		}
 	}
-	if err := os.WriteFile(m.cfg.PlistPath, payload, 0o644); err != nil {
+	if err := os.WriteFile(m.cfg.PlistPath, payload, 0o600); err != nil {
 		return serr("write LaunchAgent plist: %v", err)
 	}
 	if _, err := m.run([]string{"launchctl", "bootstrap", m.domain(), m.cfg.PlistPath}); err != nil {
