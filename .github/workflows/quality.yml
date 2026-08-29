@@ -195,14 +195,28 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          cov=$(go test -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | grep -oE 'coverage: [0-9.]+%' | awk '{print $2}' | tr -d '%' | head -1)
-          if [ -z "$cov" ]; then
+          # Sum the per-package coverage reported by 'go test -cover' and
+          # check the aggregate against the 80% threshold. The previous
+          # implementation grabbed the first package's coverage which is
+          # almost always the smallest (e.g. cmd/g8s at ~9%) and gated
+          # every push.
+          total=0
+          count=0
+          while IFS= read -r line; do
+            pct=$(echo "$line" | grep -oE 'coverage: [0-9.]+%' | awk '{print $2}' | tr -d '%')
+            if [ -n "$pct" ]; then
+              total=$(awk -v t="$total" -v p="$pct" 'BEGIN { printf "%.4f", t + p }')
+              count=$((count + 1))
+            fi
+          done < <(go test -cover ./... 2>&1 | grep -E 'coverage: [0-9.]+%')
+          if [ "$count" -eq 0 ]; then
             echo "::error::coverage extraction failed"
             exit 1
           fi
-          echo "Coverage: ${cov}%"
-          awk -v c="$cov" 'BEGIN { if (c+0 < 80) { exit 1 } else { exit 0 } }' || {
-            echo "::error::Coverage ${cov}% is below 80% threshold"
+          avg=$(awk -v t="$total" -v c="$count" 'BEGIN { printf "%.2f", t / c }')
+          echo "Aggregate coverage: ${avg}% across ${count} packages"
+          awk -v a="$avg" 'BEGIN { if (a+0 < 80) { exit 1 } else { exit 0 } }' || {
+            echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
             exit 1
           }
 
