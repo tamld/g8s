@@ -630,7 +630,7 @@ func requestDoc(t *testing.T, task *Task) map[string]any {
 
 func TestFinishAttemptSucceedsRedactsPromptAndSealsReceipt(t *testing.T) {
 	s, _ := newTestStore(t)
-	task := mustSubmit(t, s, submitReq("finish-and-seal"))
+	_ = mustSubmit(t, s, submitReq("finish-and-seal"))
 	task, token := mustClaimStart(t, s, "worker-1")
 
 	finished, err := s.FinishAttempt(task.TaskID, "worker-1", token, FinishAttemptParams{
@@ -731,7 +731,7 @@ func TestRetryableFinishKeepsPromptWhileQueued(t *testing.T) {
 
 func TestFinishAttemptRejectsStaleLeaseOwnership(t *testing.T) {
 	s, _ := newTestStore(t)
-	task := mustSubmit(t, s, submitReq("stale-finish"))
+	_ = mustSubmit(t, s, submitReq("stale-finish"))
 	task, token := mustClaimStart(t, s, "worker-1")
 
 	if _, err := s.FinishAttempt(task.TaskID, "worker-impostor", token, FinishAttemptParams{Success: true}); err == nil ||
@@ -746,8 +746,8 @@ func TestFinishAttemptRejectsStaleLeaseOwnership(t *testing.T) {
 
 func TestSpecWrappersAdoptCurrentLease(t *testing.T) {
 	s, _ := newTestStore(t)
-	ok := mustSubmit(t, s, submitReq("wrapper-complete"))
-	ok, _ = mustClaimStart(t, s, "worker-1")
+	_ = mustSubmit(t, s, submitReq("wrapper-complete"))
+	ok, _ := mustClaimStart(t, s, "worker-1")
 	if err := s.CompleteTask(context.Background(), ok.TaskID, TaskResult{Result: json.RawMessage(`{"done":1}`)}); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
@@ -791,7 +791,7 @@ func TestCancelQueuedTaskIsTerminalWithReceipt(t *testing.T) {
 
 func TestCancelRunningTaskRequestsCooperativeStop(t *testing.T) {
 	s, _ := newTestStore(t)
-	task := mustSubmit(t, s, submitReq("cooperative-cancel"))
+	_ = mustSubmit(t, s, submitReq("cooperative-cancel"))
 	task, token := mustClaimStart(t, s, "worker-1")
 
 	if err := s.CancelTask(context.Background(), task.TaskID, "shutdown"); err != nil {

@@ -440,11 +440,12 @@ func runDoctor(args []string) {
 	td = append(td, []string{"Check", "Status", "Message", "Details"})
 	for _, chk := range report.Checks {
 		statusStr := chk.Status
-		if chk.Status == "OK" {
+		switch chk.Status {
+		case "OK":
 			statusStr = pterm.Green(chk.Status)
-		} else if chk.Status == "WARN" {
+		case "WARN":
 			statusStr = pterm.Yellow(chk.Status)
-		} else {
+		default:
 			statusStr = pterm.Red(chk.Status)
 		}
 		td = append(td, []string{chk.Name, statusStr, chk.Message, chk.Details})
@@ -850,18 +851,6 @@ func printUsage() {
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
 }
-
-// sliceFlags collects repeated occurrences of one flag into a slice,
-// enabling repeatable -add-dir scope roots on the submit command.
-type sliceFlags []string
-
-func (s *sliceFlags) String() string { return strings.Join(*s, ",") }
-
-func (s *sliceFlags) Set(v string) error {
-	*s = append(*s, v)
-	return nil
-}
-
 // runWorker runs the supervisor loop claiming tasks from the queue,
 // resolving provider command templates from providers.json when present
 // (DELTA-10 phase-2 registry-to-worker bridge).

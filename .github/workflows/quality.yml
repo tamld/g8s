@@ -52,6 +52,7 @@ jobs:
       - name: gofumpt strict
         run: |
           unformatted=$(gofumpt -l . 2>/dev/null | grep -v '^reference/' || true)
+          echo "gofumpt found: '$unformatted'"
           if [ -n "$unformatted" ]; then
             echo "::error::Files not gofumpt-clean:"
             echo "$unformatted"
