@@ -46,7 +46,7 @@ func TestRunSupervisorMetricsAggregateEmpty(t *testing.T) {
 	_ = dbPath
 
 	out := captureStdout(t, func() {
-		executeSupervisorMetrics("", true, true, store)
+		executeSupervisorMetrics("", true, false, true, supervisor.AggregateOptions{}, store)
 	})
 
 	if !strings.Contains(out, `"mode": "aggregate"`) {
@@ -84,7 +84,7 @@ func TestRunSupervisorMetricsSingleTaskID(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		executeSupervisorMetrics(supID, false, true, store)
+		executeSupervisorMetrics(supID, false, false, true, supervisor.AggregateOptions{}, store)
 	})
 
 	if !strings.Contains(out, supID) {
@@ -125,7 +125,7 @@ func TestRunSupervisorMetricsSingleTaskIDPlainText(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		executeSupervisorMetrics(supID, false, false, store)
+		executeSupervisorMetrics(supID, false, false, false, supervisor.AggregateOptions{}, store)
 	})
 
 	if !strings.Contains(out, "task_id="+supID) {
@@ -133,6 +133,44 @@ func TestRunSupervisorMetricsSingleTaskIDPlainText(t *testing.T) {
 	}
 	if !strings.Contains(out, "attempts_to_success=4") {
 		t.Fatalf("expected attempts_to_success=4, got %s", out)
+	}
+}
+
+func TestRunSupervisorMetricsJSONStream(t *testing.T) {
+	store, _ := newOpenStore(t)
+	const supID = "sup-test-stream"
+	now := time.Now()
+	if err := store.CreateSupervisorTask(context.Background(), controlplane.SupervisorTaskRow{
+		ID:        supID,
+		State:     "succeeded",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := store.SaveMetrics(context.Background(), supID, controlplane.MetricsRow{
+		SupervisorTaskID:     supID,
+		EnvelopeScore:        0.9,
+		FirstAttemptSuccess:  true,
+		AttemptsToSuccess:    1,
+		ApproachesToSuccess:  1,
+		RCAConfidenceAvg:     0.99,
+		CycleDurationSeconds: 4.2,
+		EscalationCount:      0,
+		FalseEscalationRate:  0,
+	}); err != nil {
+		t.Fatalf("save metrics: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		executeSupervisorMetrics("", false, true, true, supervisor.AggregateOptions{}, store)
+	})
+
+	if !strings.Contains(out, `"supervisor_task_id":"sup-test-stream"`) {
+		t.Fatalf("expected streamed json object containing supervisor_task_id, got %s", out)
+	}
+	if !strings.Contains(out, `"first_attempt_success":true`) {
+		t.Fatalf("expected first_attempt_success:true in stream, got %s", out)
 	}
 }
 
@@ -232,7 +270,7 @@ func TestAggregateSupervisorMetricsWithRows(t *testing.T) {
 		}
 	}
 
-	agg, err := aggregateSupervisorMetrics(ctx, store)
+	agg, err := supervisor.Aggregate(store, ctx, supervisor.AggregateOptions{})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}

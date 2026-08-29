@@ -114,8 +114,8 @@ func TestReceiptLakeMigrationFromV4(t *testing.T) {
 	if err := check.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 5 {
-		t.Errorf("user_version = %d, want 5 after migration", version)
+	if version != SchemaVersion {
+		t.Errorf("user_version = %d, want %d after migration", version, SchemaVersion)
 	}
 
 	// Verify columns were added back
@@ -924,19 +924,19 @@ func TestStoreAdditionalCoverage(t *testing.T) {
 	}
 	defer conn.Close()
 
-	for v := 0; v <= 5; v++ {
+	for v := 0; v <= SchemaVersion; v++ {
 		_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", v))
 		if err := checkSchemaVersion(conn); err != nil {
 			t.Errorf("checkSchemaVersion(%d) should succeed, got %v", v, err)
 		}
 	}
-	_, _ = conn.ExecContext(ctx, "PRAGMA user_version = 6")
+	_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion+1))
 	if err := checkSchemaVersion(conn); err == nil {
-		t.Errorf("checkSchemaVersion(6) should fail")
+		t.Errorf("checkSchemaVersion(%d) should fail", SchemaVersion+1)
 	}
 
 	// Restore version
-	_, _ = conn.ExecContext(ctx, "PRAGMA user_version = 5")
+	_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion))
 
 	// 3. Normal retryable ReconcileExpired (requeues task)
 	now := float64(time.Now().UnixNano()) / 1e9

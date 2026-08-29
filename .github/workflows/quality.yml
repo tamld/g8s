@@ -123,45 +123,13 @@ jobs:
             echo "$high"
           fi
 
-      - name: No AI anti-patterns (grep)
+      - name: AI anti-pattern self-test
         shell: bash
-        run: |
-          # Forbid type-safety bypass markers
-          forbidden_patterns=(
-            'as any'
-            '@ts-ignore'
-            '@ts-expect-error'
-            '//nolint'
-            '// nolint'
-            '//nolint:'
-            '// nolint:'
-          )
-          for pat in "${forbidden_patterns[@]}"; do
-            hits=$(grep -rn "$pat" --include='*.go' . 2>/dev/null | grep -v '^reference/' | grep -v '_test.go' || true)
-            if [ -n "$hits" ]; then
-              echo "::error::Forbidden pattern '$pat' found:"
-              echo "$hits"
-              exit 1
-            fi
-          done
+        run: bash tools/ai_lint_test.sh
 
-      - name: No panic-as-bypass
+      - name: AI anti-pattern gate
         shell: bash
-        run: |
-          # Forbid `panic("..."` outside test files
-          panic_hits=$(grep -rn 'panic("' --include='*.go' . 2>/dev/null | grep -v '_test.go' | grep -v 'panic("recovered")' || true)
-          if [ -n "$panic_hits" ]; then
-            echo "::error::panic() with string literal in non-test code:"
-            echo "$panic_hits"
-            exit 1
-          fi
-          # Forbid t.Skip() outside _test.go
-          skip_hits=$(grep -rn 't\.Skip(' --include='*.go' . 2>/dev/null | grep -v '_test.go' || true)
-          if [ -n "$skip_hits" ]; then
-            echo "::error::t.Skip() in non-test code:"
-            echo "$skip_hits"
-            exit 1
-          fi
+        run: bash tools/ai_lint.sh
 
       - name: No debug prints in library code
         shell: bash
@@ -171,16 +139,6 @@ jobs:
             echo "::warning::fmt.Println() in library code (CLI cmd/g8s exempt):"
             echo "$debug_hits"
             # warning-only, not blocking — but visible in PR
-          fi
-
-      - name: No TODO/FIXME debt in committed code
-        shell: bash
-        run: |
-          todo_hits=$(grep -rn '// TODO\|// FIXME\|// XXX' --include='*.go' . 2>/dev/null | grep -v '_test.go' || true)
-          if [ -n "$todo_hits" ]; then
-            echo "::error::TODO/FIXME/XXX debt in committed code:"
-            echo "$todo_hits"
-            exit 1
           fi
 
       - name: Coverage threshold >= 80%
@@ -216,6 +174,50 @@ jobs:
             echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
             exit 1
           }
+
+      - name: Dogfooding CI Gate (Brief Issue & Consume Roundtrip)
+        shell: bash
+        run: |
+          DB_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-$$.db"
+          PAYLOAD_FILE="${RUNNER_TEMP:-/tmp}/ci-payload-$$.md"
+          DOD_FILE="${RUNNER_TEMP:-/tmp}/ci-dod-$$.md"
+          BIN_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-bin"
+
+          trap 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm" "$PAYLOAD_FILE" "$DOD_FILE" "$BIN_PATH"' EXIT
+
+          echo "# CI Dogfooding Task" > "$PAYLOAD_FILE"
+          echo "- [x] Self-dogfooding brief dispatch validated" > "$DOD_FILE"
+
+          go build -o "$BIN_PATH" ./cmd/g8s
+
+          # 1. Issue brief
+          ISSUE_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-issue \
+            --title "ci-self-dogfood" \
+            --payload-file "$PAYLOAD_FILE" \
+            --dod-file "$DOD_FILE" \
+            --issued-by ci-bot \
+            --ttl 1h)
+
+          printf 'Brief issue output:\n%s\n' "$ISSUE_OUT"
+
+          BRIEF_ID=$(printf '%s\n' "$ISSUE_OUT" | jq -r '.id // empty')
+          if [ -z "$BRIEF_ID" ] || [ "$BRIEF_ID" = "null" ]; then
+            echo "::error::Failed to capture brief ID from brief-issue output"
+            exit 1
+          fi
+
+          # 2. Consume brief
+          CONSUME_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-consume --id "$BRIEF_ID")
+
+          printf 'Brief consume output:\n%s\n' "$CONSUME_OUT"
+
+          STATUS=$(printf '%s\n' "$CONSUME_OUT" | jq -r '.status // empty')
+          if [ "$STATUS" != "consumed" ]; then
+            echo "::error::Expected status 'consumed', got '$STATUS'"
+            exit 1
+          fi
+
+          echo "Dogfooding CI gate passed: Brief $BRIEF_ID verified consumed."
 
       - name: Upload coverage artifact
         if: always()
