@@ -66,7 +66,7 @@ func TestDriveFullLifecycleHappyPath(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register("stub", func() Worker { return worker })
 
-	pool, err := NewPool(PoolOptions{Repo: dir})
+	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestDriveEscalationOnFailedReceipt(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register("fail-stub", func() Worker { return worker })
 
-	pool, err := NewPool(PoolOptions{Repo: dir})
+	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDriveMultipleWorkersAllOK(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register("multi", func() Worker { return worker })
 
-	pool, err := NewPool(PoolOptions{Repo: dir})
+	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}

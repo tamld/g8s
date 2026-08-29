@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tamld/g8s/internal/process"
 	_ "modernc.org/sqlite"
 )
 
@@ -62,12 +63,13 @@ type FullCleanupReport struct {
 
 // ProcessInfo represents a running process evaluated by the ghost process detector.
 type ProcessInfo struct {
-	PID         int       `json:"pid"`
-	Binary      string    `json:"binary"`
-	CommandLine string    `json:"command_line"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	LastUpdate  time.Time `json:"last_update,omitempty"`
-	Reason      string    `json:"reason"`
+	PID          int       `json:"pid"`
+	Binary       string    `json:"binary"`
+	CommandLine  string    `json:"command_line"`
+	StartedAt    time.Time `json:"started_at,omitempty"`
+	LastUpdate   time.Time `json:"last_update,omitempty"`
+	Reason       string    `json:"reason"`
+	HasHeartbeat bool      `json:"has_heartbeat"`
 }
 
 // TagInfo represents a local git tag and its timestamp.
@@ -110,68 +112,69 @@ type CleanupGitRunner interface {
 	DeleteTag(ctx context.Context, repoDir, tag string) error
 }
 
-// DefaultProcessManager is the production implementation of ProcessManager using OS primitives.
-type DefaultProcessManager struct{}
+// DefaultProcessManager is the production implementation of ProcessManager using OS primitives and ProcessLister.
+type DefaultProcessManager struct {
+	Lister process.ProcessLister
+}
+
+func (d *DefaultProcessManager) getLister() process.ProcessLister {
+	if d.Lister != nil {
+		return d.Lister
+	}
+	return process.NewLister()
+}
 
 // FindGhostProcesses inspects host processes matching agy or claude and cross-references heartbeats.
 func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbeatDir string, maxAge time.Duration, clock func() time.Time) ([]ProcessInfo, error) {
-	cmd := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,command=")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("list processes via ps: %w", err)
+	if clock == nil {
+		clock = time.Now
 	}
 
-	lines := strings.Split(string(out), "\n")
-	var ghosts []ProcessInfo
+	l := d.getLister()
+	procs, err := l.List()
+	if err != nil {
+		return nil, fmt.Errorf("list processes: %w", err)
+	}
 
+	var ghosts []ProcessInfo
 	selfPID := os.Getpid()
 	parentPID := os.Getppid()
 
 	// Load all known heartbeats
 	heartbeats := LoadHeartbeats(heartbeatDir)
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid <= 0 {
+	for _, p := range procs {
+		pid := p.PID
+		if pid <= 0 || pid == selfPID || pid == parentPID {
 			continue
 		}
 
-		if pid == selfPID || pid == parentPID {
-			continue
-		}
-
-		cmdLine := strings.Join(fields[1:], " ")
-		binName := filepath.Base(fields[1])
+		cmdLine := p.CommandLine
+		binName := filepath.Base(p.Binary)
+		binName = strings.TrimSuffix(binName, ".exe")
 
 		// Ignore grep / test / g8s self invocations
-		if strings.Contains(cmdLine, "grep") || strings.Contains(cmdLine, "g8s cleanup") {
+		if strings.Contains(cmdLine, "grep") || strings.Contains(cmdLine, "g8s cleanup") || strings.Contains(cmdLine, "go test") {
 			continue
 		}
 
-		isAgy := strings.EqualFold(binName, "agy") || strings.HasPrefix(binName, "agy")
-		isClaude := strings.EqualFold(binName, "claude") || strings.HasPrefix(binName, "claude")
+		isAgy := strings.EqualFold(binName, "agy") || strings.HasPrefix(strings.ToLower(binName), "agy")
+		isClaude := strings.EqualFold(binName, "claude") || strings.HasPrefix(strings.ToLower(binName), "claude")
 		if !isAgy && !isClaude {
 			continue
 		}
 
-		// Cross-reference with heartbeat
+		// Cross-reference with heartbeat by PID
 		hb, found := heartbeats[pid]
 		now := clock()
 
 		if !found {
 			ghosts = append(ghosts, ProcessInfo{
-				PID:         pid,
-				Binary:      binName,
-				CommandLine: cmdLine,
-				Reason:      "no live heartbeat file",
+				PID:          pid,
+				Binary:       binName,
+				CommandLine:  cmdLine,
+				Reason:       "no live heartbeat file",
+				HasHeartbeat: false,
 			})
 			continue
 		}
@@ -179,21 +182,23 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		lastUpdate, parseErr := time.Parse(time.RFC3339, hb.LastUpdate)
 		if parseErr != nil {
 			ghosts = append(ghosts, ProcessInfo{
-				PID:         pid,
-				Binary:      binName,
-				CommandLine: cmdLine,
-				Reason:      "invalid heartbeat timestamp",
+				PID:          pid,
+				Binary:       binName,
+				CommandLine:  cmdLine,
+				Reason:       "invalid heartbeat timestamp",
+				HasHeartbeat: true,
 			})
 			continue
 		}
 
 		if now.Sub(lastUpdate) > maxAge {
 			ghosts = append(ghosts, ProcessInfo{
-				PID:         pid,
-				Binary:      binName,
-				CommandLine: cmdLine,
-				LastUpdate:  lastUpdate,
-				Reason:      fmt.Sprintf("heartbeat stale (last update %s ago > %s)", now.Sub(lastUpdate).Round(time.Second), maxAge),
+				PID:          pid,
+				Binary:       binName,
+				CommandLine:  cmdLine,
+				LastUpdate:   lastUpdate,
+				Reason:       fmt.Sprintf("heartbeat stale (last update %s ago > %s)", now.Sub(lastUpdate).Round(time.Second), maxAge),
+				HasHeartbeat: true,
 			})
 		}
 	}
@@ -230,7 +235,15 @@ func LoadHeartbeats(baseDir string) map[int]HeartbeatData {
 			}
 			var hb HeartbeatData
 			if err := json.Unmarshal(data, &hb); err == nil && hb.PID > 0 {
-				res[hb.PID] = hb
+				if existing, exists := res[hb.PID]; exists {
+					tExisting, err1 := time.Parse(time.RFC3339, existing.LastUpdate)
+					tNew, err2 := time.Parse(time.RFC3339, hb.LastUpdate)
+					if err1 == nil && err2 == nil && tNew.After(tExisting) {
+						res[hb.PID] = hb
+					}
+				} else {
+					res[hb.PID] = hb
+				}
 			}
 		}
 	}
@@ -238,23 +251,18 @@ func LoadHeartbeats(baseDir string) map[int]HeartbeatData {
 	return res
 }
 
-// KillProcess sends the specified signal to the process.
+// KillProcess sends the specified signal to the process or uses ProcessLister.
 func (d *DefaultProcessManager) KillProcess(pid int, sig syscall.Signal) error {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
+	l := d.getLister()
+	if sig == syscall.SIGKILL {
+		return l.KillForce(pid)
 	}
-	return proc.Signal(sig)
+	return l.Kill(pid)
 }
 
 // IsProcessAlive checks whether the process is alive.
 func (d *DefaultProcessManager) IsProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	return d.getLister().IsAlive(pid)
 }
 
 // DefaultCleanupGitRunner is the production implementation of CleanupGitRunner using git/gh CLI.
@@ -440,6 +448,7 @@ type CleanupConfig struct {
 	WorktreeBaseDir string
 	Targets         []string
 	DryRun          bool
+	ForceMissing    bool
 	GracePeriod     time.Duration
 	Clock           func() time.Time
 	GitRunner       CleanupGitRunner
@@ -583,6 +592,17 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 				ID:     idStr,
 				Detail: detail,
 				Action: "would_kill",
+			})
+			continue
+		}
+
+		// Safety rule: If process has no heartbeat file and ForceMissing is false, report and skip (never kill)
+		if !proc.HasHeartbeat && !cfg.ForceMissing {
+			items = append(items, CleanupItem{
+				Target: TargetGhostProcess,
+				ID:     idStr,
+				Detail: fmt.Sprintf("%s (no heartbeat file, requires --force-missing to kill): %s", proc.Binary, proc.CommandLine),
+				Action: "skipped",
 			})
 			continue
 		}

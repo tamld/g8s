@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -128,17 +129,19 @@ func TestGhostProcessCleanup(t *testing.T) {
 
 	ghosts := []ProcessInfo{
 		{
-			PID:         1001,
-			Binary:      "agy",
-			CommandLine: "agy -p test",
-			Reason:      "no live heartbeat file",
+			PID:          1001,
+			Binary:       "agy",
+			CommandLine:  "agy -p test",
+			Reason:       "no live heartbeat file",
+			HasHeartbeat: false,
 		},
 		{
-			PID:         1002,
-			Binary:      "claude",
-			CommandLine: "claude --resume test",
-			LastUpdate:  now.Add(-10 * time.Minute),
-			Reason:      "heartbeat stale (>5m)",
+			PID:          1002,
+			Binary:       "claude",
+			CommandLine:  "claude --resume test",
+			LastUpdate:   now.Add(-10 * time.Minute),
+			Reason:       "heartbeat stale (>5m)",
+			HasHeartbeat: true,
 		},
 	}
 
@@ -169,11 +172,49 @@ func TestGhostProcessCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("force mode sends SIGTERM and SIGKILL if necessary", func(t *testing.T) {
+	t.Run("force mode without force-missing skips missing heartbeats and kills stale", func(t *testing.T) {
 		procMgr := NewMockProcessManager(ghosts)
 		cfg := CleanupConfig{
 			Targets:        []string{TargetGhostProcess},
 			DryRun:         false,
+			ForceMissing:   false,
+			GracePeriod:    100 * time.Millisecond,
+			Clock:          clock,
+			ProcessManager: procMgr,
+		}
+
+		report, err := RunCleanupSweep(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Items) != 2 {
+			t.Fatalf("expected 2 items, got %d", len(report.Items))
+		}
+
+		// 1001 (missing heartbeat) must be skipped
+		if report.Items[0].ID != "1001" || report.Items[0].Action != "skipped" {
+			t.Errorf("expected 1001 skipped without --force-missing, got %+v", report.Items[0])
+		}
+		if len(procMgr.killedWith[1001]) != 0 {
+			t.Errorf("expected 1001 NOT killed without --force-missing, got %v", procMgr.killedWith[1001])
+		}
+
+		// 1002 (stale heartbeat) must be killed
+		if report.Items[1].ID != "1002" || report.Items[1].Action != "killed" {
+			t.Errorf("expected 1002 killed, got %+v", report.Items[1])
+		}
+		if len(procMgr.killedWith[1002]) == 0 || procMgr.killedWith[1002][0] != syscall.SIGTERM {
+			t.Errorf("expected SIGTERM sent to 1002, got %v", procMgr.killedWith[1002])
+		}
+	})
+
+	t.Run("force mode with force-missing kills both", func(t *testing.T) {
+		procMgr := NewMockProcessManager(ghosts)
+		cfg := CleanupConfig{
+			Targets:        []string{TargetGhostProcess},
+			DryRun:         false,
+			ForceMissing:   true,
 			GracePeriod:    100 * time.Millisecond,
 			Clock:          clock,
 			ProcessManager: procMgr,
@@ -193,14 +234,38 @@ func TestGhostProcessCleanup(t *testing.T) {
 			}
 		}
 
-		// Verify signals sent
 		if len(procMgr.killedWith[1001]) == 0 || procMgr.killedWith[1001][0] != syscall.SIGTERM {
-			t.Errorf("expected SIGTERM sent to 1001, got %v", procMgr.killedWith[1001])
+			t.Errorf("expected SIGTERM sent to 1001 with --force-missing, got %v", procMgr.killedWith[1001])
 		}
 		if len(procMgr.killedWith[1002]) == 0 || procMgr.killedWith[1002][0] != syscall.SIGTERM {
-			t.Errorf("expected SIGTERM sent to 1002, got %v", procMgr.killedWith[1002])
+			t.Errorf("expected SIGTERM sent to 1002 with --force-missing, got %v", procMgr.killedWith[1002])
 		}
 	})
+}
+
+func TestConfirmForceMissing(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"y\n", true},
+		{"Y\n", true},
+		{"yes\n", true},
+		{"YES\n", true},
+		{"n\n", false},
+		{"no\n", false},
+		{"\n", false},
+		{"invalid\n", false},
+	}
+
+	for _, tt := range tests {
+		in := strings.NewReader(tt.input)
+		out := new(bytes.Buffer)
+		got := confirmForceMissing(in, out)
+		if got != tt.want {
+			t.Errorf("confirmForceMissing(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
 }
 
 func TestOrphanWorktreeCleanup(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,8 @@ func runCleanup(args []string) {
 	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
 	dryRunFlag := fs.Bool("dry-run", true, "show resources that would be cleaned up without removing them")
 	forceFlag := fs.Bool("force", false, "apply cleanup and remove detected ghost/orphan resources")
+	forceMissingFlag := fs.Bool("force-missing", false, "allow killing ghost processes that have no heartbeat file (requires confirmation)")
+	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-missing")
 	jsonFlag := fs.Bool("json", false, "output cleanup report as machine-readable JSON")
 	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
@@ -59,6 +62,13 @@ func runCleanup(args []string) {
 	dryRun := *dryRunFlag
 	if *forceFlag {
 		dryRun = false
+	}
+
+	if *forceFlag && *forceMissingFlag && !dryRun && !*yesFlag {
+		if !confirmForceMissing(os.Stdin, os.Stdout) {
+			pterm.Warning.Println("Aborted --force-missing ghost process termination.")
+			return
+		}
 	}
 
 	var targets []string
@@ -79,6 +89,7 @@ func runCleanup(args []string) {
 		DBPath:         dbPath,
 		Targets:        targets,
 		DryRun:         dryRun,
+		ForceMissing:   *forceMissingFlag,
 		GracePeriod:    *gracePeriod,
 		Clock:          time.Now,
 		GitRunner:      &DefaultCleanupGitRunner{},
@@ -135,4 +146,22 @@ func renderCleanupReport(report *FullCleanupReport) {
 	for target, count := range report.Summary {
 		fmt.Printf("  • %s: %d item(s)\n", target, count)
 	}
+}
+
+func confirmForceMissing(r io.Reader, w io.Writer) bool {
+	if r == nil {
+		r = os.Stdin
+	}
+	if w == nil {
+		w = os.Stdout
+	}
+	pterm.Warning.WithWriter(w).Println("WARNING: Terminating processes without heartbeat files may kill foreign or unrelated binaries.")
+	_, _ = fmt.Fprint(w, "Are you sure you want to proceed with terminating processes with no heartbeats? [y/N]: ")
+	var resp string
+	_, err := fmt.Fscanln(r, &resp)
+	if err != nil {
+		return false
+	}
+	resp = strings.ToLower(strings.TrimSpace(resp))
+	return resp == "y" || resp == "yes"
 }

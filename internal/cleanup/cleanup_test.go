@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tamld/g8s/internal/process"
 	_ "modernc.org/sqlite"
 )
 
@@ -127,17 +128,19 @@ func TestGhostProcessCleanup(t *testing.T) {
 
 	ghosts := []ProcessInfo{
 		{
-			PID:         1001,
-			Binary:      "agy",
-			CommandLine: "agy -p test",
-			Reason:      "no live heartbeat file",
+			PID:          1001,
+			Binary:       "agy",
+			CommandLine:  "agy -p test",
+			Reason:       "no live heartbeat file",
+			HasHeartbeat: false,
 		},
 		{
-			PID:         1002,
-			Binary:      "claude",
-			CommandLine: "claude --resume test",
-			LastUpdate:  now.Add(-10 * time.Minute),
-			Reason:      "heartbeat stale (>5m)",
+			PID:          1002,
+			Binary:       "claude",
+			CommandLine:  "claude --resume test",
+			LastUpdate:   now.Add(-10 * time.Minute),
+			Reason:       "heartbeat stale (>5m)",
+			HasHeartbeat: true,
 		},
 	}
 
@@ -168,11 +171,49 @@ func TestGhostProcessCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("force mode sends SIGTERM and SIGKILL if necessary", func(t *testing.T) {
+	t.Run("force mode without force-missing skips missing heartbeats and kills stale", func(t *testing.T) {
 		procMgr := NewMockProcessManager(ghosts)
 		cfg := CleanupConfig{
 			Targets:        []string{TargetGhostProcess},
 			DryRun:         false,
+			ForceMissing:   false,
+			GracePeriod:    100 * time.Millisecond,
+			Clock:          clock,
+			ProcessManager: procMgr,
+		}
+
+		report, err := RunCleanupSweep(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(report.Items) != 2 {
+			t.Fatalf("expected 2 items, got %d", len(report.Items))
+		}
+
+		// 1001 has no heartbeat and ForceMissing=false -> skipped
+		if report.Items[0].ID != "1001" || report.Items[0].Action != "skipped" {
+			t.Errorf("expected 1001 skipped without --force-missing, got %+v", report.Items[0])
+		}
+		if len(procMgr.killedWith[1001]) != 0 {
+			t.Errorf("expected 1001 NOT killed without --force-missing, got %v", procMgr.killedWith[1001])
+		}
+
+		// 1002 has stale heartbeat -> killed
+		if report.Items[1].ID != "1002" || report.Items[1].Action != "killed" {
+			t.Errorf("expected 1002 killed, got %+v", report.Items[1])
+		}
+		if len(procMgr.killedWith[1002]) == 0 || procMgr.killedWith[1002][0] != syscall.SIGTERM {
+			t.Errorf("expected SIGTERM sent to 1002, got %v", procMgr.killedWith[1002])
+		}
+	})
+
+	t.Run("force mode with force-missing kills both stale and missing heartbeats", func(t *testing.T) {
+		procMgr := NewMockProcessManager(ghosts)
+		cfg := CleanupConfig{
+			Targets:        []string{TargetGhostProcess},
+			DryRun:         false,
+			ForceMissing:   true,
 			GracePeriod:    100 * time.Millisecond,
 			Clock:          clock,
 			ProcessManager: procMgr,
@@ -192,12 +233,11 @@ func TestGhostProcessCleanup(t *testing.T) {
 			}
 		}
 
-		// Verify signals sent
 		if len(procMgr.killedWith[1001]) == 0 || procMgr.killedWith[1001][0] != syscall.SIGTERM {
-			t.Errorf("expected SIGTERM sent to 1001, got %v", procMgr.killedWith[1001])
+			t.Errorf("expected SIGTERM sent to 1001 with --force-missing, got %v", procMgr.killedWith[1001])
 		}
 		if len(procMgr.killedWith[1002]) == 0 || procMgr.killedWith[1002][0] != syscall.SIGTERM {
-			t.Errorf("expected SIGTERM sent to 1002, got %v", procMgr.killedWith[1002])
+			t.Errorf("expected SIGTERM sent to 1002 with --force-missing, got %v", procMgr.killedWith[1002])
 		}
 	})
 }
@@ -665,5 +705,103 @@ func TestLoadHeartbeats(t *testing.T) {
 	}
 	if hbs[1234].SessionID != "sess-1" {
 		t.Errorf("expected sess-1, got %s", hbs[1234].SessionID)
+	}
+}
+
+type mockCleanupProcessLister struct {
+	processes []process.ProcessInfo
+}
+
+func (m *mockCleanupProcessLister) List() ([]process.ProcessInfo, error) {
+	return m.processes, nil
+}
+func (m *mockCleanupProcessLister) Kill(pid int) error        { return nil }
+func (m *mockCleanupProcessLister) KillForce(pid int) error   { return nil }
+func (m *mockCleanupProcessLister) IsAlive(pid int) bool      { return true }
+func (m *mockCleanupProcessLister) ResolveCWD(pid int) string { return "" }
+
+func TestFindGhostProcesses_HeartbeatPIDMapping(t *testing.T) {
+	tempDir := t.TempDir()
+	agyDir := filepath.Join(tempDir, "agy")
+	_ = os.MkdirAll(agyDir, 0o755)
+
+	now := time.Date(2026, 8, 30, 1, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	// Write heartbeat for PID 5001 (Active, session UUID "sess-active-uuid")
+	hbActive := HeartbeatData{
+		SessionID:   "sess-active-uuid",
+		PID:         5001,
+		Binary:      "agy",
+		CommandLine: "agy worker --task=1",
+		StartedAt:   now.Add(-10 * time.Minute).Format(time.RFC3339),
+		LastUpdate:  now.Add(-10 * time.Second).Format(time.RFC3339),
+		Status:      "running",
+	}
+	activeData, _ := json.Marshal(hbActive)
+	_ = os.WriteFile(filepath.Join(agyDir, "sess-active-uuid.json"), activeData, 0o644)
+
+	// Write heartbeat for PID 5002 (Stale, session UUID "sess-stale-uuid")
+	hbStale := HeartbeatData{
+		SessionID:   "sess-stale-uuid",
+		PID:         5002,
+		Binary:      "agy",
+		CommandLine: "agy worker --task=2",
+		StartedAt:   now.Add(-20 * time.Minute).Format(time.RFC3339),
+		LastUpdate:  now.Add(-10 * time.Minute).Format(time.RFC3339), // 10 min > 5 min
+		Status:      "running",
+	}
+	staleData, _ := json.Marshal(hbStale)
+	_ = os.WriteFile(filepath.Join(agyDir, "sess-stale-uuid.json"), staleData, 0o644)
+
+	// Processes reported by ProcessLister:
+	// 5001: agy (active heartbeat file by PID -> not a ghost)
+	// 5002: agy.exe (stale heartbeat file by PID -> ghost with HasHeartbeat=true)
+	// 5003: agy (NO heartbeat file -> ghost with HasHeartbeat=false)
+	// 5004: other-editor (not agy/claude -> ignored)
+	lister := &mockCleanupProcessLister{
+		processes: []process.ProcessInfo{
+			{PID: 5001, Binary: "agy", CommandLine: "agy worker --task=1"},
+			{PID: 5002, Binary: "agy.exe", CommandLine: "agy.exe worker --task=2"},
+			{PID: 5003, Binary: "agy", CommandLine: "agy worker --task=3"},
+			{PID: 5004, Binary: "vim", CommandLine: "vim file.txt"},
+		},
+	}
+
+	pm := &DefaultProcessManager{
+		Lister: lister,
+	}
+
+	ghosts, err := pm.FindGhostProcesses(context.Background(), tempDir, 5*time.Minute, clock)
+	if err != nil {
+		t.Fatalf("FindGhostProcesses failed: %v", err)
+	}
+
+	if len(ghosts) != 2 {
+		t.Fatalf("expected 2 ghosts (5002 stale, 5003 missing), got %d: %+v", len(ghosts), ghosts)
+	}
+
+	ghostMap := make(map[int]ProcessInfo)
+	for _, g := range ghosts {
+		ghostMap[g.PID] = g
+	}
+
+	// 5001 must NOT be in ghosts
+	if _, found := ghostMap[5001]; found {
+		t.Errorf("expected PID 5001 (active heartbeat) to NOT be identified as ghost")
+	}
+
+	// 5002 must be ghost with HasHeartbeat=true
+	if g2, found := ghostMap[5002]; !found {
+		t.Errorf("expected PID 5002 in ghosts")
+	} else if !g2.HasHeartbeat {
+		t.Errorf("expected PID 5002 to have HasHeartbeat=true")
+	}
+
+	// 5003 must be ghost with HasHeartbeat=false
+	if g3, found := ghostMap[5003]; !found {
+		t.Errorf("expected PID 5003 in ghosts")
+	} else if g3.HasHeartbeat {
+		t.Errorf("expected PID 5003 to have HasHeartbeat=false")
 	}
 }

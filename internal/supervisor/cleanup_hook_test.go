@@ -139,7 +139,7 @@ func TestSupervisorAutoCleanup_OnEscalateWithGhostProcesses(t *testing.T) {
 	gitRunner := &mockSupervisorGitRunner{}
 	procMgr := &mockSupervisorProcessManager{
 		ghosts: []cleanup.ProcessInfo{
-			{PID: 9999, Binary: "agy", CommandLine: "agy stale", Reason: "dead"},
+			{PID: 9999, Binary: "agy", CommandLine: "agy stale", Reason: "stale heartbeat (>5m)", HasHeartbeat: true},
 		},
 	}
 
