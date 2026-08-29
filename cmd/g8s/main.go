@@ -851,6 +851,7 @@ func printUsage() {
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
 }
+
 // runWorker runs the supervisor loop claiming tasks from the queue,
 // resolving provider command templates from providers.json when present
 // (DELTA-10 phase-2 registry-to-worker bridge).
