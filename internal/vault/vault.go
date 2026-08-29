@@ -106,7 +106,7 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 		clock: clock,
 	}
 	if err := v.initSchema(); err != nil {
-		_ = db.Close()
+		db.Close()
 		return nil, fmt.Errorf("init vault schema: %w", err)
 	}
 	return v, nil

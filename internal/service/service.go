@@ -333,7 +333,11 @@ func (m *Manager) Install() error {
 		if _, err := m.guard.BeginMaintenance("g8s-service", DefaultTTL); err != nil {
 			return serr("open maintenance window: %v", err)
 		}
-		defer func() { _, _ = m.guard.EndMaintenance("g8s-service") }()
+		defer func() {
+			if ok, err := m.guard.EndMaintenance("g8s-service"); !ok || err != nil {
+				return
+			}
+		}()
 	}
 	wasLoaded := m.isLoaded()
 	if wasLoaded {
@@ -407,9 +411,9 @@ func (m *Manager) Status() (*ServiceStatus, error) {
 				return nil, serr("cannot inspect control-plane state: %v", err)
 			}
 			header := make([]byte, len(sqliteHeader))
-			read, _ := f.Read(header)
-			_ = f.Close()
-			if read != len(sqliteHeader) || string(header[:read]) != sqliteHeader {
+			read, err := f.Read(header)
+			f.Close()
+			if err != nil || read != len(sqliteHeader) || string(header[:read]) != sqliteHeader {
 				return nil, serr("cannot inspect control-plane state: database header invalid")
 			}
 		}
