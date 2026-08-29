@@ -1,4 +1,3 @@
-# GoReleaser Configuration for g8s
 version: 2
 
 project_name: g8s
@@ -35,18 +34,16 @@ universal_binaries:
 
 archives:
   - id: default
-    formats:
-      - tar.gz
+    formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     files:
       - README.md
       - LICENSE
       - docs/*
       - spec/constitution.md
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"
@@ -70,7 +67,7 @@ nfpms:
       - rpm
       - apk
 
-homebrew_casks:
+brews:
   - repository:
       owner: tamld
       name: homebrew-tap
@@ -82,5 +79,5 @@ homebrew_casks:
     homepage: "https://github.com/tamld/g8s"
     description: "Zero-CGO pure-Go harness orchestrating AI subagents"
     license: "MIT"
-
-
+    casks:
+      - g8s
