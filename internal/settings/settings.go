@@ -131,7 +131,7 @@ func (m *Manager) Unset(key string) error {
 }
 
 func (m *Manager) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(m.configPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(m.configPath), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func (m *Manager) saveLocked() error {
 	}
 
 	tmpPath := m.configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("write temporary config: %w", err)
 	}
 

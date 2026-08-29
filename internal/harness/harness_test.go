@@ -249,7 +249,7 @@ func TestLegacyPathOnlyPromptUnchangedByRefactor(t *testing.T) {
 func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
 	tempDir := t.TempDir()
 	fakeSSH := filepath.Join(tempDir, ".ssh")
-	if err := os.MkdirAll(fakeSSH, 0700); err != nil {
+	if err := os.MkdirAll(fakeSSH, 0o700); err != nil {
 		t.Fatalf("create fake .ssh: %v", err)
 	}
 	symlinkPath := filepath.Join(tempDir, "innocent_symlink")

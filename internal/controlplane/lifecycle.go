@@ -263,7 +263,6 @@ func determineNextState(task *Task, params FinishAttemptParams) string {
 // budget -> QUEUED (prompt retained), otherwise FAILED. Final states get
 // prompt redaction and an unsigned receipt hash.
 func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params FinishAttemptParams) (*Task, error) {
-
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return nil, err
@@ -401,7 +400,6 @@ func (s *Store) FailTask(ctx context.Context, taskID, reason string, exitCode in
 // running with cancel_requested set so workers observe ExecutionSignal and
 // stop cooperatively.
 func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
-
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err

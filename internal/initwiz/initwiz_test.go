@@ -12,7 +12,7 @@ func TestDetectAndConfigureMCP(t *testing.T) {
 
 	// 1. Pre-create Cursor config dir with existing config
 	cursorDir := filepath.Join(tempHome, ".cursor")
-	if err := os.MkdirAll(cursorDir, 0700); err != nil {
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
 		t.Fatalf("mkdir cursor: %v", err)
 	}
 	existingConfig := map[string]any{
@@ -25,7 +25,7 @@ func TestDetectAndConfigureMCP(t *testing.T) {
 	}
 	raw, _ := json.Marshal(existingConfig)
 	cursorFile := filepath.Join(cursorDir, "mcp.json")
-	if err := os.WriteFile(cursorFile, raw, 0600); err != nil {
+	if err := os.WriteFile(cursorFile, raw, 0o600); err != nil {
 		t.Fatalf("write cursor config: %v", err)
 	}
 

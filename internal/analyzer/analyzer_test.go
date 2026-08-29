@@ -12,7 +12,7 @@ func createSampleProject(t *testing.T) string {
 
 	// pkgA/foo.go
 	pkgADir := filepath.Join(dir, "pkgA")
-	if err := os.MkdirAll(pkgADir, 0755); err != nil {
+	if err := os.MkdirAll(pkgADir, 0o755); err != nil {
 		t.Fatalf("mkdir pkgA: %v", err)
 	}
 	fooCode := `package pkgA
@@ -21,13 +21,13 @@ func CalculateTotal(a, b int) int {
 	return a + b
 }
 `
-	if err := os.WriteFile(filepath.Join(pkgADir, "foo.go"), []byte(fooCode), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgADir, "foo.go"), []byte(fooCode), 0o644); err != nil {
 		t.Fatalf("write foo.go: %v", err)
 	}
 
 	// pkgB/bar.go (calls CalculateTotal)
 	pkgBDir := filepath.Join(dir, "pkgB")
-	if err := os.MkdirAll(pkgBDir, 0755); err != nil {
+	if err := os.MkdirAll(pkgBDir, 0o755); err != nil {
 		t.Fatalf("mkdir pkgB: %v", err)
 	}
 	barCode := `package pkgB
@@ -38,7 +38,7 @@ func ProcessOrder() int {
 	return pkgA.CalculateTotal(10, 20)
 }
 `
-	if err := os.WriteFile(filepath.Join(pkgBDir, "bar.go"), []byte(barCode), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(pkgBDir, "bar.go"), []byte(barCode), 0o644); err != nil {
 		t.Fatalf("write bar.go: %v", err)
 	}
 

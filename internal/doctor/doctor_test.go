@@ -43,10 +43,10 @@ func TestRunDiagnosticsWithAutoFixPermissions(t *testing.T) {
 	dbPath := filepath.Join(dir, "g8s.db")
 
 	// Pre-create database file with loose permissions 0644
-	if err := os.WriteFile(dbPath, []byte("fake db content"), 0644); err != nil {
+	if err := os.WriteFile(dbPath, []byte("fake db content"), 0o644); err != nil {
 		t.Fatalf("write fake db: %v", err)
 	}
-	_ = os.Chmod(dbPath, 0644)
+	_ = os.Chmod(dbPath, 0o644)
 
 	// 1. Diagnostics without fix reports WARN for permissions
 	report := RunDiagnosticsWithFix(context.Background(), dbPath, false)
@@ -74,7 +74,7 @@ func TestRunDiagnosticsWithAutoFixPermissions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat fixed db: %v", err)
 		}
-		if info.Mode().Perm() != 0600 {
+		if info.Mode().Perm() != 0o600 {
 			t.Fatalf("expected 0600 permissions, got %#o", info.Mode().Perm())
 		}
 	}

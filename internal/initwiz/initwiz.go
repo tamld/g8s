@@ -126,7 +126,7 @@ func ConfigureMCP(configPath, binaryPath string) error {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
@@ -156,7 +156,7 @@ func ConfigureMCP(configPath, binaryPath string) error {
 
 	// Write atomically via temp file
 	tmpPath := configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, formatted, 0600); err != nil {
+	if err := os.WriteFile(tmpPath, formatted, 0o600); err != nil {
 		return fmt.Errorf("write temporary config: %w", err)
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
@@ -198,7 +198,7 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 
 	for _, dir := range []string{stateDir, evidenceDir} {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			if err := os.MkdirAll(dir, 0700); err != nil {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
 				return nil, fmt.Errorf("create directory %s: %w", dir, err)
 			}
 			result.CreatedDirs = append(result.CreatedDirs, dir)
@@ -212,7 +212,7 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		configDir = filepath.Join(xdg, "g8s")
 	}
-	_ = os.MkdirAll(configDir, 0700)
+	_ = os.MkdirAll(configDir, 0o700)
 	providersPath := filepath.Join(configDir, "providers.json")
 	if _, err := os.Stat(providersPath); os.IsNotExist(err) {
 		defaultConfig := map[string]any{
@@ -235,7 +235,7 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 			},
 		}
 		if data, err := json.MarshalIndent(defaultConfig, "", "  "); err == nil {
-			_ = os.WriteFile(providersPath, data, 0600)
+			_ = os.WriteFile(providersPath, data, 0o600)
 			result.ProvidersConfig = providersPath
 		}
 	}

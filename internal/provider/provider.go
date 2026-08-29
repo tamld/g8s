@@ -18,14 +18,14 @@ package provider
 import (
 	"context"
 	"fmt"
-
-	"github.com/tamld/g8s/internal/config"
 	"net/http"
 	"os"
 	"os/exec"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/config"
 )
 
 // ProviderStatus reports the outcome of the most recent health check.

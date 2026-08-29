@@ -611,6 +611,7 @@ func TestClampDuration(t *testing.T) {
 		})
 	}
 }
+
 func TestStdbuf(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -652,6 +653,7 @@ func TestStdbuf(t *testing.T) {
 		})
 	}
 }
+
 func TestFirstOf(t *testing.T) {
 	cases := []struct {
 		name string
@@ -672,6 +674,7 @@ func TestFirstOf(t *testing.T) {
 		})
 	}
 }
+
 func TestDerefString(t *testing.T) {
 	if got := derefString(nil); got != "" {
 		t.Errorf("derefString(nil) = %q, want %q", got, "")
@@ -682,6 +685,7 @@ func TestDerefString(t *testing.T) {
 		t.Errorf("derefString(&val) = %q, want %q", got, "hello")
 	}
 }
+
 func TestMaybePause(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -821,7 +825,7 @@ func TestExportReceiptCentralizedEvidenceLake(t *testing.T) {
 	task := submitTask(t, env, "test-evidence-lake", 3, nil)
 
 	runDir := filepath.Join(env.runDir, "attempt-1")
-	if err := os.MkdirAll(runDir, 0700); err != nil {
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		t.Fatalf("mkdir runDir: %v", err)
 	}
 

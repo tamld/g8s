@@ -55,12 +55,12 @@ func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *Do
 		evidenceDir := filepath.Join(stateDir, "evidence")
 		for _, dir := range []string{stateDir, evidenceDir} {
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				if err := os.MkdirAll(dir, 0700); err == nil {
+				if err := os.MkdirAll(dir, 0o700); err == nil {
 					appliedFixes = append(appliedFixes, fmt.Sprintf("Created directory %s (mode 0700)", dir))
 				}
 			} else if runtime.GOOS != "windows" {
-				if info, err := os.Stat(dir); err == nil && info.Mode().Perm() != 0700 {
-					if err := os.Chmod(dir, 0700); err == nil {
+				if info, err := os.Stat(dir); err == nil && info.Mode().Perm() != 0o700 {
+					if err := os.Chmod(dir, 0o700); err == nil {
 						appliedFixes = append(appliedFixes, fmt.Sprintf("Fixed permissions on %s (0700)", dir))
 					}
 				}
@@ -70,8 +70,8 @@ func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *Do
 		// 2. Ensure database files have mode 0600 on POSIX
 		if runtime.GOOS != "windows" {
 			for _, file := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
-				if info, err := os.Stat(file); err == nil && info.Mode().Perm() != 0600 {
-					if err := os.Chmod(file, 0600); err == nil {
+				if info, err := os.Stat(file); err == nil && info.Mode().Perm() != 0o600 {
+					if err := os.Chmod(file, 0o600); err == nil {
 						appliedFixes = append(appliedFixes, fmt.Sprintf("Fixed permissions on %s (0600)", file))
 					}
 				}
@@ -133,7 +133,7 @@ func checkDatabase(dbPath string) DiagnosticResult {
 	// Check POSIX permissions
 	if runtime.GOOS != "windows" {
 		mode := info.Mode().Perm()
-		if mode != 0600 {
+		if mode != 0o600 {
 			return DiagnosticResult{
 				Name:    "Database Permissions",
 				Status:  "WARN",

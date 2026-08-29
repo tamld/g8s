@@ -90,7 +90,7 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 	if clock == nil {
 		clock = time.Now
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create vault directory: %w", err)
 	}
 

@@ -263,7 +263,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		return nil, err
 	}
 	_ = os.WriteFile(filepath.Join(opts.RunDir, "child.pid"),
-		[]byte(strconv.Itoa(cmd.Process.Pid)), 0600)
+		[]byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
 	return newProcessChild(cmd), nil
 }
 
@@ -293,7 +293,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 
 	runDir := filepath.Join(s.runRoot, task.TaskID, fmt.Sprintf("attempt-%d", task.Attempts))
-	if mkErr := os.MkdirAll(runDir, 0700); mkErr != nil {
+	if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
 		return nil, fmt.Errorf("create run dir: %w", mkErr)
 	}
 	promptPath := filepath.Join(runDir, "prompt.txt")
@@ -301,17 +301,17 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	stdoutPath := filepath.Join(runDir, "worker.stdout")
 	stderrPath := filepath.Join(runDir, "worker.stderr")
 
-	if werr := os.WriteFile(promptPath, []byte(req.Prompt), 0600); werr != nil {
+	if werr := os.WriteFile(promptPath, []byte(req.Prompt), 0o600); werr != nil {
 		return nil, fmt.Errorf("write prompt: %w", werr)
 	}
 	defer os.Remove(promptPath) // prompt.txt never survives an attempt.
 
-	outFile, oerr := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	outFile, oerr := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if oerr != nil {
 		return nil, fmt.Errorf("open stdout capture: %w", oerr)
 	}
 	defer outFile.Close()
-	errFile, eerr := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	errFile, eerr := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if eerr != nil {
 		return nil, fmt.Errorf("open stderr capture: %w", eerr)
 	}
@@ -605,15 +605,15 @@ func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(runDir, "receipt.json"), data, 0600)
+	_ = os.WriteFile(filepath.Join(runDir, "receipt.json"), data, 0o600)
 
 	// Centralized Evidence Lake export
 	if s.evidenceDir != "" {
 		taskEvidenceDir := filepath.Join(s.evidenceDir, taskID)
-		if err := os.MkdirAll(taskEvidenceDir, 0700); err == nil {
-			_ = os.WriteFile(filepath.Join(taskEvidenceDir, "receipt.json"), data, 0600)
+		if err := os.MkdirAll(taskEvidenceDir, 0o700); err == nil {
+			_ = os.WriteFile(filepath.Join(taskEvidenceDir, "receipt.json"), data, 0o600)
 			if snap.Attempts > 0 {
-				_ = os.WriteFile(filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts)), data, 0600)
+				_ = os.WriteFile(filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts)), data, 0o600)
 			}
 		}
 	}

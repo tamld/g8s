@@ -94,7 +94,7 @@ func TestSupervisorWithStreamCallbackIntegration(t *testing.T) {
 			if opts.Stderr != nil {
 				fmt.Fprintln(opts.Stderr, "warn: non-fatal diagnostic warning")
 			}
-			_ = os.WriteFile(opts.ResultPath, []byte(`{"ok":true,"status":"succeeded"}`), 0600)
+			_ = os.WriteFile(opts.ResultPath, []byte(`{"ok":true,"status":"succeeded"}`), 0o600)
 			close(child.done)
 		}()
 		return child

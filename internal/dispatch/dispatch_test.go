@@ -569,6 +569,7 @@ func TestHomeFallbacks(t *testing.T) {
 		})
 	}
 }
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -655,6 +656,7 @@ func TestCommandPreview(t *testing.T) {
 		})
 	}
 }
+
 func TestExpandUser(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -709,6 +711,7 @@ func TestExpandUser(t *testing.T) {
 		})
 	}
 }
+
 func TestShellQuoteEdgeCases(t *testing.T) {
 	tests := []struct {
 		input string
@@ -743,6 +746,7 @@ func TestShellQuoteEdgeCases(t *testing.T) {
 		})
 	}
 }
+
 func TestValidateGate(t *testing.T) {
 	tests := []struct {
 		name        string
