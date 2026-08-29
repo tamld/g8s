@@ -115,7 +115,7 @@ func TestAggregateMetricsEmpty(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	agg, err := aggregateSupervisorMetrics(context.Background(), store)
+	agg, err := supervisor.Aggregate(store, context.Background(), supervisor.AggregateOptions{})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}

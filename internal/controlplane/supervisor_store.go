@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -225,4 +226,127 @@ func unixFloat(f float64) time.Time {
 	sec := int64(f)
 	nsec := int64((f - float64(sec)) * 1e9)
 	return time.Unix(sec, nsec)
+}
+
+// ListSupervisorDecisions returns every decision row for taskID ordered by created_at ASC.
+func (s *Store) ListSupervisorDecisions(ctx context.Context, taskID string) ([]SupervisorDecisionRow, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return nil, errors.New("controlplane: task_id is required")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, task_id, kind, payload_json, created_at
+		 FROM supervisor_decisions WHERE task_id = ? ORDER BY created_at ASC`, taskID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: list supervisor decisions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SupervisorDecisionRow
+	for rows.Next() {
+		var (
+			dec       SupervisorDecisionRow
+			createdAt float64
+		)
+		if err := rows.Scan(&dec.ID, &dec.TaskID, &dec.Kind, &dec.PayloadJSON, &createdAt); err != nil {
+			return nil, fmt.Errorf("controlplane: scan supervisor decision: %w", err)
+		}
+		dec.CreatedAt = unixFloat(createdAt)
+		out = append(out, dec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("controlplane: iterate supervisor decisions: %w", err)
+	}
+	return out, nil
+}
+
+// GetSupervisorTaskWorker resolves the worker name associated with a supervisor task ID,
+// inspecting the tasks table (by task_id, parent_task_id, or orchestrator_id),
+// supervisor_decisions payload JSON, or supervisor_tasks envelope JSON.
+func (s *Store) GetSupervisorTaskWorker(ctx context.Context, supervisorTaskID string) (string, error) {
+	if strings.TrimSpace(supervisorTaskID) == "" {
+		return "", errors.New("controlplane: supervisor_task_id is required")
+	}
+
+	// 1. Check tasks table
+	var workerName sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT worker_name FROM tasks
+		 WHERE (task_id = ? OR parent_task_id = ? OR orchestrator_id = ? OR task_id LIKE ? || '%')
+		   AND worker_name IS NOT NULL AND worker_name != ''
+		 LIMIT 1`,
+		supervisorTaskID, supervisorTaskID, supervisorTaskID, supervisorTaskID,
+	).Scan(&workerName)
+	if err == nil && workerName.Valid && workerName.String != "" {
+		return workerName.String, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("controlplane: query worker name from tasks: %w", err)
+	}
+
+	// 2. Check supervisor_decisions payload JSON
+	decRows, err := s.db.QueryContext(ctx,
+		`SELECT payload_json FROM supervisor_decisions WHERE task_id = ? ORDER BY created_at ASC`,
+		supervisorTaskID,
+	)
+	if err == nil {
+		defer decRows.Close()
+		for decRows.Next() {
+			var payload string
+			if scanErr := decRows.Scan(&payload); scanErr == nil && payload != "" {
+				if wn := extractWorkerNameFromJSON(payload); wn != "" {
+					return wn, nil
+				}
+			}
+		}
+	}
+
+	// 3. Check supervisor_tasks envelope JSON
+	var envJSON string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT envelope_json FROM supervisor_tasks WHERE id = ?`, supervisorTaskID,
+	).Scan(&envJSON)
+	if err == nil && envJSON != "" {
+		if wn := extractWorkerNameFromJSON(envJSON); wn != "" {
+			return wn, nil
+		}
+	}
+
+	return "", nil
+}
+
+func extractWorkerNameFromJSON(jsonStr string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+		return ""
+	}
+	if v, ok := m["worker_name"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := m["WorkerName"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := m["worker"].(string); ok && v != "" {
+		return v
+	}
+	if r, ok := m["receipt"].(map[string]any); ok {
+		if v, ok := r["worker_name"].(string); ok && v != "" {
+			return v
+		}
+		if v, ok := r["WorkerName"].(string); ok && v != "" {
+			return v
+		}
+	}
+	if req, ok := m["request"].(map[string]any); ok {
+		if v, ok := req["worker_name"].(string); ok && v != "" {
+			return v
+		}
+		if v, ok := req["WorkerName"].(string); ok && v != "" {
+			return v
+		}
+		if v, ok := req["worker"].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }

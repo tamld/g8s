@@ -223,23 +223,65 @@ verification errors, zero-value struct pollution, or false rejections.
 
 **Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
 
-### Requirement: Meta-optimizer (Concern C) consumes per-cycle metrics
+### Requirement: C.1 Read-only query layer contract for meta-optimizer insights
 
-The supervisor SHALL emit the metrics listed in
-`docs/designs/supervisor-fix-loop.md` §10 on every cycle. Metrics SHALL
-be persisted to `internal/controlplane` and SHALL be queryable via a
-new CLI subcommand `g8s supervisor metrics` (read-only). Concern C
-ingests these metrics via that subcommand.
+`internal/supervisor` SHALL expose a read-only query and aggregation layer over
+`supervisor_tasks` and `supervisor_metrics`:
+- `Aggregate(store *controlplane.Store, ctx context.Context, opts AggregateOptions) (AggregateMetrics, error)`
+- `StreamMetrics(store *controlplane.Store, ctx context.Context, opts AggregateOptions, fn func(item TaskMetricsItem) error) error`
 
-#### Scenario: metrics are queryable
-- After a cycle, `./bin/g8s supervisor metrics --task-id sup-X` returns
-  JSON with all eight fields listed in §10.
+The query layer SHALL NOT perform any write, update, delete, or schema mutations on
+`supervisor_*` or `tasks` tables. It SHALL NOT alter supervisor configurations or perform
+automated hyperparameter auto-tuning in this phase (concern C read-only contract).
 
-#### Scenario: metrics persist across supervisor restarts
-- A cycle runs, supervisor exits. Restart supervisor. Metrics for the
-  prior cycle are still queryable.
+`AggregateOptions` SHALL accept:
+- `TimeRange time.Duration`: relative duration filter from clock/now (e.g. 1h, 24h).
+- `Since time.Time` / `Until time.Time`: absolute timestamp bounds.
+- `WorkerName string`: worker identifier filter.
+- `Clock func() time.Time`: injectable clock for deterministic time calculations.
 
-**Implementation Status**: IMPLEMENTING (T020)
+#### Scenario: read-only query execution preserves database integrity
+- Query layer executes `Aggregate` and `StreamMetrics` across existing supervisor tables.
+- Database remains untouched; zero writes, updates, or deletions are executed.
+
+#### Scenario: deterministic filtering by time range and worker name
+- Caller supplies `TimeRange = 1 * time.Hour` and `WorkerName = "agy"`.
+- Aggregation includes only supervisor tasks matching both filters.
+
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
+
+### Requirement: C.2 Aggregate metrics computation and filtering
+
+The supervisor query layer SHALL compute aggregate telemetry across the eight per-cycle
+metrics defined in §10:
+1. `envelope_score`: average planner envelope quality score.
+2. `first_attempt_success`: rate of cycles succeeding on attempt 1 (`FirstAttemptSuccessRate`).
+3. `attempts_to_success`: average attempts required for successful cycles (`AvgAttemptsToSuccess`).
+4. `approaches_to_success`: average approaches required for successful cycles (`AvgApproachesToSuccess`).
+5. `rca_confidence_avg`: average RCA confidence score across failure shifts.
+6. `cycle_duration_seconds`: average wall-clock duration of cycles (`AvgCycleSeconds`).
+7. `escalation_count`: rate of cycles terminating in HITL escalation (`EscalationRate`).
+8. `false_escalation_rate`: fraction of escalations classified as false alarms.
+
+When `TotalRuns == 0` (empty store or no matching records), `Aggregate` SHALL return a
+zero-value `AggregateMetrics` struct and `nil` error without dividing by zero.
+
+The CLI surface (`g8s supervisor-metrics`) SHALL support:
+- `--task-id <id>`: single task metrics.
+- `--aggregate`: aggregate metrics across tasks.
+- `--json-stream`: NDJSON / JSON-stream output emitting one JSON object per supervisor task.
+- `--time-range <duration>`: time window filter.
+- `--worker-name <name>`: worker name filter.
+
+#### Scenario: aggregate over empty database returns zero values without error
+- Caller runs `Aggregate` against a database with 0 supervisor tasks.
+- Returns `AggregateMetrics{TotalRuns: 0, ...}` and `nil` error.
+
+#### Scenario: streaming output emits one valid JSON record per task
+- Caller runs `g8s supervisor-metrics --json-stream`.
+- Each matching supervisor task emits a complete, newline-delimited JSON object to stdout.
+
+**Implementation Status**: ACCEPTED + IMPLEMENTING (T021)
 
 ## MODIFIED Requirements
 
@@ -270,6 +312,7 @@ None.
 
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
 - 2026-08-29: Concern B promoted DRAFT → ACCEPTED (T021). §ADDED B.1-B.3 (SupervisorMeta, idempotent migration, NULL tolerance) marked IMPLEMENTING.
+- 2026-08-29: Concern C promoted DRAFT → ACCEPTED (T021). §ADDED C.1-C.2 (read-only query contract, aggregate metrics list) marked IMPLEMENTING.
 
 ## Change log
 
@@ -277,3 +320,4 @@ None.
   design doc.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
 - **v1.1.0-ACCEPTED** (2026-08-29): Added §ADDED B.1-B.3 for Concern B receipt evolution (SupervisorMeta, idempotent schema migration, NULL tolerance contract). Status ACCEPTED + IMPLEMENTING.
+- **v1.2.0-ACCEPTED** (2026-08-29): Added §ADDED C.1-C.2 for Concern C read-only meta-optimizer query layer and CLI streaming surface. Status ACCEPTED + IMPLEMENTING.
