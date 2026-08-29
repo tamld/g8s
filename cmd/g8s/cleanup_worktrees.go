@@ -28,9 +28,6 @@ type (
 var (
 	CleanupWorktrees           = cleanup.CleanupWorktrees
 	parseWorktreeListPorcelain = cleanup.ParseWorktreeListPorcelain
-	isMainWorktree             = cleanup.IsMainWorktree
-	checkWorktreeAge           = cleanup.CheckWorktreeAge
-	hasUncommittedChanges      = cleanup.HasUncommittedChanges
 )
 
 func runCleanupWorktrees(args []string) {
