@@ -52,3 +52,47 @@ Thumbs.db
 .env
 .env.*
 .sisyphus/
+
+# Worker / orchestration runtime state (never index)
+.agy/
+agy-*.log
+agy-*.brief
+agy-*.brief.md
+/var/folders/**/wt-*
+/var/folders/**/g8s-worktrees/
+/tmp/agy-*.md
+/tmp/agy-*.log
+/tmp/g8s-*.brief
+/tmp/g8s-*.brief.md
+
+# CWD / worktree / scratch directories (per session lifecycle)
+cwd/
+worktree/
+worktrees/
+wt-*/
+*.worktree
+.worktree.lock
+
+# Internal/orchestrator scratch (CWD bindings)
+internal/orchestrator/cwd/
+internal/orchestrator/worktree/
+internal/orchestrator/scratch/
+
+# Brief / receipt / handoff scratch
+briefs/
+receipts/
+handoffs/
+.claude/scratch/
+
+# Local coverage + diagnostic
+cover.out
+coverage.out
+*.cover
+*.test
+*.out
+
+# Heartbeat & status files
+.heartbeat/
+.heartbeat.lock
+.status/
+.status.lock
