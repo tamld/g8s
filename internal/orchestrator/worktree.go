@@ -94,6 +94,7 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 	wtPath := filepath.Join(p.root, id)
 	branch := fmt.Sprintf("%s/%s", p.prefix, taskID)
 
+	_ = os.RemoveAll(wtPath)
 	if err := gitAddWorktree(p.repo, wtPath, branch, p.base); err != nil {
 		p.mu.Unlock()
 		return Worktree{}, fmt.Errorf("git worktree add: %w", err)
