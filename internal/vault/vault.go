@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -428,23 +429,34 @@ func TokenizeCodeSymbols(s string) []string {
 		if len(word) == 0 {
 			continue
 		}
-		var current strings.Builder
-		runes := []rune(word)
-		for i := 0; i < len(runes); i++ {
-			r := runes[i]
+
+		start := 0
+		var prev rune
+
+		i := 0
+		for i < len(word) {
+			r, size := utf8.DecodeRuneInString(word[i:])
+
 			if i > 0 && unicode.IsUpper(r) {
-				prev := runes[i-1]
-				if unicode.IsLower(prev) || (i+1 < len(runes) && unicode.IsLower(runes[i+1]) && unicode.IsUpper(prev)) {
-					if current.Len() > 0 {
-						tokens = append(tokens, strings.ToLower(current.String()))
-						current.Reset()
+				// Peek next rune to handle consecutive uppercase correctly (e.g. XMLParser -> XML, Parser)
+				var next rune
+				if i+size < len(word) {
+					next, _ = utf8.DecodeRuneInString(word[i+size:])
+				}
+
+				if unicode.IsLower(prev) || (i+size < len(word) && unicode.IsLower(next) && unicode.IsUpper(prev)) {
+					if start < i {
+						tokens = append(tokens, strings.ToLower(word[start:i]))
+						start = i
 					}
 				}
 			}
-			current.WriteRune(r)
+			prev = r
+			i += size
 		}
-		if current.Len() > 0 {
-			tokens = append(tokens, strings.ToLower(current.String()))
+
+		if start < len(word) {
+			tokens = append(tokens, strings.ToLower(word[start:]))
 		}
 	}
 	return tokens
