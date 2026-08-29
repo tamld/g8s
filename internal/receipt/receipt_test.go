@@ -8,6 +8,7 @@ package receipt
 // for the full mapping ledger.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -634,6 +635,10 @@ func TestFreshDatabaseSchemaColumnTypesExact(t *testing.T) {
 		"consumed":           "INTEGER",
 		"consumer_task_id":   "TEXT",
 		"created_at":         "REAL",
+		"approach_idx":       "INTEGER",
+		"attempt_idx":        "INTEGER",
+		"rca_confidence":     "REAL",
+		"adr_path":           "TEXT",
 	}
 
 	raw := openRawDB(t, dbPath)
@@ -1197,5 +1202,521 @@ func TestValidateAndConsumeReportsTamperedJSON(t *testing.T) {
 	var reused *AlreadyConsumedError
 	if !errors.As(err, &reused) {
 		t.Errorf("retry after corrupted commit must report AlreadyConsumedError, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Concern B (T021) — Receipt evolution for supervisor & backward compatibility
+// ---------------------------------------------------------------------------
+
+func TestReceiptBackwardCompatibility(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "v1_legacy.sqlite3")
+
+	// 1. Create a legacy v1 database without SupervisorMeta columns.
+	raw := openRawDB(t, dbPath)
+	legacySchema := `
+	CREATE TABLE write_receipts (
+		receipt_id         TEXT PRIMARY KEY,
+		issuer             TEXT NOT NULL,
+		allowed_paths_json TEXT NOT NULL,
+		expires_at         REAL NOT NULL,
+		consumed           INTEGER NOT NULL DEFAULT 0,
+		consumer_task_id   TEXT,
+		created_at         REAL NOT NULL
+	);`
+	if _, err := raw.Exec(legacySchema); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	if _, err := raw.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatalf("set legacy user_version: %v", err)
+	}
+
+	// 2. Insert a v1 receipt (no supervisor metadata).
+	v1ID := uuid.NewString()
+	pathsJSON, _ := json.Marshal([]string{"src/**", "pkg/**"})
+	now := time.Now().UTC()
+	expiry := now.Add(time.Hour)
+	if _, err := raw.Exec(
+		`INSERT INTO write_receipts
+			(receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at)
+		 VALUES (?, ?, ?, ?, 0, NULL, ?)`,
+		v1ID, "legacy-brain", string(pathsJSON), timeToUnix(expiry), timeToUnix(now),
+	); err != nil {
+		t.Fatalf("insert legacy receipt: %v", err)
+	}
+	_ = raw.Close()
+
+	// 3. Open with NewReceiptManager — should auto-migrate to v2.
+	m, err := NewReceiptManager(dbPath, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewReceiptManager on v1 db: %v", err)
+	}
+	defer m.Close()
+
+	// 4. Verify user_version is bumped to 2.
+	rawVerify := openRawDB(t, dbPath)
+	var version int
+	if err := rawVerify.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != SchemaVersion {
+		t.Errorf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	_ = rawVerify.Close()
+
+	// 5. Verify receipt via VerifyReceipt: MUST succeed and have SupervisorMeta == nil.
+	vr, err := m.VerifyReceipt(v1ID)
+	if err != nil {
+		t.Fatalf("VerifyReceipt on pre-migration receipt failed: %v", err)
+	}
+	if vr.ReceiptID != v1ID {
+		t.Errorf("ReceiptID = %q, want %q", vr.ReceiptID, v1ID)
+	}
+	if vr.Issuer != "legacy-brain" {
+		t.Errorf("Issuer = %q, want %q", vr.Issuer, "legacy-brain")
+	}
+	if len(vr.AllowedPaths) != 2 || vr.AllowedPaths[0] != "src/**" {
+		t.Errorf("AllowedPaths mismatch: %v", vr.AllowedPaths)
+	}
+	if vr.SupervisorMeta != nil {
+		t.Errorf("SupervisorMeta on v1 receipt must be nil, got: %+v", vr.SupervisorMeta)
+	}
+	if vr.Consumed {
+		t.Error("v1 receipt must not be marked consumed")
+	}
+
+	// 6. ValidateAndConsume on legacy receipt: MUST succeed and maintain nil SupervisorMeta.
+	consumed, err := m.ValidateAndConsume(v1ID, "worker-migrated")
+	if err != nil {
+		t.Fatalf("ValidateAndConsume on pre-migration receipt failed: %v", err)
+	}
+	if !consumed.Consumed || consumed.ConsumerTaskID == nil || *consumed.ConsumerTaskID != "worker-migrated" {
+		t.Errorf("unexpected consumed state: %+v", consumed)
+	}
+	if consumed.SupervisorMeta != nil {
+		t.Errorf("consumed v1 receipt SupervisorMeta must be nil, got: %+v", consumed.SupervisorMeta)
+	}
+}
+
+func TestReceiptNullHandling(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "nulls.sqlite3")
+	now := time.Now().UTC()
+	m, err := NewReceiptManager(dbPath, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	defer m.Close()
+
+	// Insert row with explicit NULL in all four supervisor columns.
+	raw := openRawDB(t, dbPath)
+	nullRcID := uuid.NewString()
+	pathsJSON, _ := json.Marshal([]string{"null-test/**"})
+	if _, err := raw.Exec(
+		`INSERT INTO write_receipts
+			(receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at,
+			 approach_idx, attempt_idx, rca_confidence, adr_path)
+		 VALUES (?, ?, ?, ?, 0, NULL, ?, NULL, NULL, NULL, NULL)`,
+		nullRcID, "null-issuer", string(pathsJSON), timeToUnix(now.Add(time.Hour)), timeToUnix(now),
+	); err != nil {
+		t.Fatalf("insert explicit NULL row: %v", err)
+	}
+	_ = raw.Close()
+
+	// VerifyReceipt must treat NULLs as absent (SupervisorMeta == nil).
+	vr, err := m.VerifyReceipt(nullRcID)
+	if err != nil {
+		t.Fatalf("VerifyReceipt on explicit NULL row failed: %v", err)
+	}
+	if vr.SupervisorMeta != nil {
+		t.Errorf("SupervisorMeta must be nil for NULL columns, got %+v", vr.SupervisorMeta)
+	}
+
+	// ListActiveReceipts must also yield SupervisorMeta == nil.
+	active, err := m.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("ListActiveReceipts: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active count = %d, want 1", len(active))
+	}
+	if active[0].SupervisorMeta != nil {
+		t.Errorf("active receipt SupervisorMeta must be nil for NULL columns, got %+v", active[0].SupervisorMeta)
+	}
+
+	// ValidateAndConsume must also succeed and yield SupervisorMeta == nil.
+	consumed, err := m.ValidateAndConsume(nullRcID, "w-null")
+	if err != nil {
+		t.Fatalf("ValidateAndConsume on explicit NULL row failed: %v", err)
+	}
+	if consumed.SupervisorMeta != nil {
+		t.Errorf("consumed receipt SupervisorMeta must be nil for NULL columns, got %+v", consumed.SupervisorMeta)
+	}
+}
+
+func TestReceiptMigrationIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "idempotent.sqlite3")
+
+	// 1. Initial manager creates DB and migrates to v2.
+	m1, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+
+	// Issue a receipt with SupervisorMeta.
+	meta := &SupervisorMeta{
+		ApproachIdx:   0,
+		AttemptIdx:    1,
+		RCAConfidence: 0.75,
+		ADRPath:       "docs/decisions/0002-test.md",
+	}
+	r1, err := m1.IssueReceipt("brain", []string{"app/**"}, time.Minute, WithSupervisorMeta(meta))
+	if err != nil {
+		t.Fatalf("issue receipt on m1: %v", err)
+	}
+	if err := m1.Close(); err != nil {
+		t.Fatalf("close m1: %v", err)
+	}
+
+	// 2. Re-open same DB with a second manager instance — migration runs again as no-op.
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	defer m2.Close()
+
+	// Verify the receipt issued under m1 verifies cleanly under m2.
+	vr, err := m2.VerifyReceipt(r1.ReceiptID)
+	if err != nil {
+		t.Fatalf("VerifyReceipt on m2: %v", err)
+	}
+	if vr.SupervisorMeta == nil {
+		t.Fatal("SupervisorMeta must be preserved after re-open")
+	}
+	if vr.SupervisorMeta.ApproachIdx != 0 || vr.SupervisorMeta.AttemptIdx != 1 ||
+		vr.SupervisorMeta.RCAConfidence != 0.75 || vr.SupervisorMeta.ADRPath != "docs/decisions/0002-test.md" {
+		t.Errorf("SupervisorMeta mismatch on m2: %+v", vr.SupervisorMeta)
+	}
+
+	// 3. Directly invoke migrateSupervisorSchema on a raw connection to prove idempotency under forced invocation.
+	raw := openRawDB(t, dbPath)
+	conn, err := raw.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("pin raw conn: %v", err)
+	}
+	defer conn.Close()
+
+	for i := 0; i < 3; i++ {
+		if err := migrateSupervisorSchema(conn); err != nil {
+			t.Fatalf("forced migrateSupervisorSchema iteration #%d failed: %v", i, err)
+		}
+	}
+}
+
+func TestReceiptSupervisorMetaRoundTrip(t *testing.T) {
+	m := newTestManager(t)
+
+	meta := &SupervisorMeta{
+		ApproachIdx:   2,
+		AttemptIdx:    0,
+		RCAConfidence: 0.92,
+		ADRPath:       "docs/decisions/0002-receipt-evolution-for-supervisor.md",
+	}
+
+	// 1. Issue receipt with WithSupervisorMeta.
+	r, err := m.IssueReceipt(validIssuer, []string{"src/**", "tests/**"}, time.Hour, WithSupervisorMeta(meta))
+	if err != nil {
+		t.Fatalf("IssueReceipt with SupervisorMeta: %v", err)
+	}
+	if r.SupervisorMeta == nil {
+		t.Fatal("expected non-nil SupervisorMeta on issued receipt")
+	}
+	if *r.SupervisorMeta != *meta {
+		t.Errorf("issued SupervisorMeta = %+v, want %+v", *r.SupervisorMeta, *meta)
+	}
+
+	// 2. Verify receipt without consuming via VerifyReceipt.
+	vr, err := m.VerifyReceipt(r.ReceiptID)
+	if err != nil {
+		t.Fatalf("VerifyReceipt: %v", err)
+	}
+	if vr.SupervisorMeta == nil {
+		t.Fatal("expected non-nil SupervisorMeta on verified receipt")
+	}
+	if *vr.SupervisorMeta != *meta {
+		t.Errorf("verified SupervisorMeta = %+v, want %+v", *vr.SupervisorMeta, *meta)
+	}
+
+	// 3. ListActiveReceipts includes SupervisorMeta.
+	active, err := m.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("ListActiveReceipts: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("active count = %d, want 1", len(active))
+	}
+	if active[0].SupervisorMeta == nil {
+		t.Fatal("expected non-nil SupervisorMeta in active listing")
+	}
+	if *active[0].SupervisorMeta != *meta {
+		t.Errorf("listed SupervisorMeta = %+v, want %+v", *active[0].SupervisorMeta, *meta)
+	}
+
+	// 4. ValidateAndConsume preserves SupervisorMeta.
+	consumed, err := m.ValidateAndConsume(r.ReceiptID, "worker-prov")
+	if err != nil {
+		t.Fatalf("ValidateAndConsume: %v", err)
+	}
+	if consumed.SupervisorMeta == nil {
+		t.Fatal("expected non-nil SupervisorMeta on consumed receipt")
+	}
+	if *consumed.SupervisorMeta != *meta {
+		t.Errorf("consumed SupervisorMeta = %+v, want %+v", *consumed.SupervisorMeta, *meta)
+	}
+
+	// 5. VerifyReceipt on consumed receipt still preserves SupervisorMeta and reflects Consumed=true.
+	vConsumed, err := m.VerifyReceipt(r.ReceiptID)
+	if err != nil {
+		t.Fatalf("VerifyReceipt on consumed receipt: %v", err)
+	}
+	if !vConsumed.Consumed {
+		t.Error("VerifyReceipt must reflect consumed=true")
+	}
+	if vConsumed.SupervisorMeta == nil || *vConsumed.SupervisorMeta != *meta {
+		t.Errorf("post-consume verified SupervisorMeta = %+v, want %+v", vConsumed.SupervisorMeta, *meta)
+	}
+}
+
+func TestVerifyReceiptExpired(t *testing.T) {
+	base := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	m := newTestManagerWithClock(t, clock.Now)
+
+	r, err := m.IssueReceipt("brain", []string{"exp/**"}, 30*time.Second)
+	if err != nil {
+		t.Fatalf("issue receipt: %v", err)
+	}
+
+	// Before expiry -> verification OK.
+	if _, err := m.VerifyReceipt(r.ReceiptID); err != nil {
+		t.Fatalf("verify before expiry failed: %v", err)
+	}
+
+	// Advance clock past TTL.
+	clock.Advance(31 * time.Second)
+
+	// After expiry -> VerifyReceipt returns ExpiredError.
+	_, err = m.VerifyReceipt(r.ReceiptID)
+	var expErr *ExpiredError
+	if !errors.As(err, &expErr) {
+		t.Fatalf("expected ExpiredError, got: %v", err)
+	}
+	if expErr.ReceiptID != r.ReceiptID {
+		t.Errorf("ExpiredError.ReceiptID = %q, want %q", expErr.ReceiptID, r.ReceiptID)
+	}
+}
+
+func TestVerifyReceiptNotFound(t *testing.T) {
+	m := newTestManager(t)
+
+	// Empty ID.
+	if _, err := m.VerifyReceipt(""); err == nil {
+		t.Error("VerifyReceipt('') must return error")
+	} else {
+		var notFound *NotFoundError
+		if !errors.As(err, &notFound) {
+			t.Errorf("expected NotFoundError, got %v", err)
+		}
+	}
+
+	// Non-existent ID.
+	missingID := uuid.NewString()
+	if _, err := m.VerifyReceipt(missingID); err == nil {
+		t.Error("VerifyReceipt(missingID) must return error")
+	} else {
+		var notFound *NotFoundError
+		if !errors.As(err, &notFound) {
+			t.Errorf("expected NotFoundError, got %v", err)
+		}
+	}
+}
+
+func TestVerifyReceiptTamperedJSON(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "verify-tamper.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"z/**"}, time.Minute)
+	_ = m.Close()
+
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(
+		"UPDATE write_receipts SET allowed_paths_json = ? WHERE receipt_id = ?",
+		"{corrupt-json", rc.ReceiptID,
+	); err != nil {
+		t.Fatalf("tamper exec: %v", err)
+	}
+	_ = raw.Close()
+
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer m2.Close()
+
+	if _, err := m2.VerifyReceipt(rc.ReceiptID); err == nil {
+		t.Fatal("VerifyReceipt must return error on corrupted JSON")
+	}
+}
+
+func TestReceiptSchemaVersionRejectsUnsupported(t *testing.T) {
+	cases := []struct {
+		name    string
+		version int
+	}{
+		{"future_version_99", 99},
+		{"negative_version", -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), tc.name+".sqlite3")
+			raw := openRawDB(t, dbPath)
+			if _, err := raw.Exec(fmt.Sprintf("PRAGMA user_version = %d", tc.version)); err != nil {
+				t.Fatalf("set user_version: %v", err)
+			}
+			_ = raw.Close()
+
+			_, err := NewReceiptManager(dbPath, nil)
+			if err == nil {
+				t.Fatalf("expected error for user_version %d, got nil", tc.version)
+			}
+			if !strings.Contains(err.Error(), "unsupported receipt schema version") {
+				t.Errorf("error %q must mention 'unsupported receipt schema version'", err.Error())
+			}
+		})
+	}
+}
+
+func TestReceiptErrorBranchesOnClosedDB(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "closed.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	r := mustIssue(t, m, validIssuer, []string{"closed/**"}, time.Minute)
+
+	// Close the underlying DB to simulate database errors.
+	_ = m.Close()
+
+	if _, err := m.IssueReceipt("brain", []string{"x/**"}, time.Minute); err == nil {
+		t.Error("IssueReceipt on closed DB must return error")
+	}
+	if _, err := m.ValidateAndConsume(r.ReceiptID, "w"); err == nil {
+		t.Error("ValidateAndConsume on closed DB must return error")
+	}
+	if _, err := m.RevokeReceipt(r.ReceiptID); err == nil {
+		t.Error("RevokeReceipt on closed DB must return error")
+	}
+	if _, err := m.ListActiveReceipts(); err == nil {
+		t.Error("ListActiveReceipts on closed DB must return error")
+	}
+	if _, err := m.VerifyReceipt(r.ReceiptID); err == nil {
+		t.Error("VerifyReceipt on closed DB must return error")
+	}
+}
+
+func TestNewReceiptManagerInvalidPath(t *testing.T) {
+	// An invalid path that cannot be initialized or permission-restricted.
+	invalidPath := "/dev/null/impossible/path/db.sqlite3"
+	if _, err := NewReceiptManager(invalidPath, nil); err == nil {
+		t.Error("NewReceiptManager with invalid path must return error")
+	}
+
+	// In-memory path fails os.Chmod.
+	if _, err := NewReceiptManager(":memory:", nil); err == nil {
+		t.Error("NewReceiptManager(':memory:') must return error on chmod")
+	}
+}
+
+func TestMigrateSupervisorSchemaOnViewFails(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "view.sqlite3")
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec("CREATE VIEW write_receipts AS SELECT 1 AS receipt_id"); err != nil {
+		t.Fatalf("create view: %v", err)
+	}
+	_ = raw.Close()
+
+	// NewReceiptManager fails when migrateSupervisorSchema fails on a view.
+	if _, err := NewReceiptManager(dbPath, nil); err == nil {
+		t.Error("NewReceiptManager on view must fail schema migration")
+	}
+}
+
+func TestInternalMigrationErrorBranches(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "internal_errors.sqlite3")
+	raw := openRawDB(t, dbPath)
+	conn, err := raw.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("pin conn: %v", err)
+	}
+	// Close connection to force query errors.
+	_ = conn.Close()
+
+	if err := checkSchemaVersion(conn); err == nil {
+		t.Error("checkSchemaVersion on closed conn must error")
+	}
+	if err := migrateSupervisorSchema(conn); err == nil {
+		t.Error("migrateSupervisorSchema on closed conn must error")
+	}
+	rollbackInit(conn)
+
+	// Test initialize on closed manager
+	m := &Manager{db: raw, clock: time.Now}
+	_ = raw.Close()
+	if err := m.initialize(); err == nil {
+		t.Error("initialize on closed DB must return error")
+	}
+}
+
+func TestPartialSupervisorSchemaMigration(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "partial.sqlite3")
+	raw := openRawDB(t, dbPath)
+
+	// Schema with only 2 of the 4 supervisor columns.
+	partialSchema := `
+	CREATE TABLE write_receipts (
+		receipt_id         TEXT PRIMARY KEY,
+		issuer             TEXT NOT NULL,
+		allowed_paths_json TEXT NOT NULL,
+		expires_at         REAL NOT NULL,
+		consumed           INTEGER NOT NULL DEFAULT 0,
+		consumer_task_id   TEXT,
+		created_at         REAL NOT NULL,
+		approach_idx       INTEGER,
+		attempt_idx        INTEGER
+	);`
+	if _, err := raw.Exec(partialSchema); err != nil {
+		t.Fatalf("create partial schema: %v", err)
+	}
+	_ = raw.Close()
+
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager on partial schema: %v", err)
+	}
+	defer m.Close()
+
+	// Verify all 4 columns are present now.
+	r, err := m.IssueReceipt("brain", []string{"p/**"}, time.Minute, nil, WithSupervisorMeta(&SupervisorMeta{
+		ApproachIdx:   0,
+		AttemptIdx:    0,
+		RCAConfidence: 0.8,
+		ADRPath:       "docs/decisions/0002-test.md",
+	}))
+	if err != nil {
+		t.Fatalf("IssueReceipt on migrated partial db: %v", err)
+	}
+	if r.SupervisorMeta.RCAConfidence != 0.8 {
+		t.Errorf("RCAConfidence = %f, want 0.8", r.SupervisorMeta.RCAConfidence)
 	}
 }

@@ -75,7 +75,7 @@ type fakeIssuer struct {
 	err    error
 }
 
-func (f *fakeIssuer) IssueReceipt(issuer string, allowedPaths []string, ttl time.Duration) (*receipt.WriteReceipt, error) {
+func (f *fakeIssuer) IssueReceipt(issuer string, allowedPaths []string, ttl time.Duration, opts ...receipt.IssueOption) (*receipt.WriteReceipt, error) {
 	f.issuer = issuer
 	f.paths = allowedPaths
 	f.ttl = ttl
