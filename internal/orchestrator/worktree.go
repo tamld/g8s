@@ -54,7 +54,7 @@ func NewPool(opts PoolOptions) (*Pool, error) {
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "g8s-worktrees")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o750); err != nil {
 		return nil, fmt.Errorf("orchestrator: mkdir pool root: %w", err)
 	}
 	base := opts.Base

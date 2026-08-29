@@ -152,8 +152,8 @@ func TestInstallIssuesBootstrapThenKickstartWithHardenedFiles(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(env.manager.cfg.PlistPath)
-		if err != nil || info.Mode().Perm() != 0o644 {
-			t.Fatalf("plist mode = %v err=%v, want 0644", info.Mode().Perm(), err)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("plist mode = %v err=%v, want 0600", info.Mode().Perm(), err)
 		}
 		logInfo, err := os.Stat(env.manager.cfg.StdoutLogPath)
 		if err != nil || logInfo.Mode().Perm() != 0o600 {

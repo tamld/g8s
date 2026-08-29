@@ -18,7 +18,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
@@ -194,7 +193,6 @@ type RunOptions struct {
 type processChild struct {
 	cmd  *exec.Cmd
 	done chan struct{}
-	once sync.Once
 	code int
 }
 

@@ -179,7 +179,7 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 	if err != nil {
 		return nil, fmt.Errorf("begin consume transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	row := tx.QueryRow(
 		`SELECT issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at

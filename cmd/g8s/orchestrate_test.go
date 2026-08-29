@@ -29,19 +29,6 @@ func withTempDB(t *testing.T) string {
 	return dbPath
 }
 
-func withEnv(t *testing.T, key, value string) {
-	t.Helper()
-	old, ok := os.LookupEnv(key)
-	os.Setenv(key, value)
-	t.Cleanup(func() {
-		if ok {
-			os.Setenv(key, old)
-		} else {
-			os.Unsetenv(key)
-		}
-	})
-}
-
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	oldStdout := os.Stdout

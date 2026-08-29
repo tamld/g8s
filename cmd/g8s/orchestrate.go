@@ -57,7 +57,7 @@ func runOrchestrate(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	sup := supervisor.NewSelfTestSupervisor(store, orchestrator.NewAgyWorker(), supervisor.NewStubReviewer())
 	sup.Config.MaxAttemptsPerApproach = *maxAttempts
