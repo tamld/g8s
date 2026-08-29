@@ -7,11 +7,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/supervisor"
 )
@@ -26,24 +26,30 @@ type supervisorMetricsOutput struct {
 }
 
 func runSupervisorMetrics(args []string) {
-	fs := flag.NewFlagSet("supervisor-metrics", flag.ExitOnError)
+	fs := flag.NewFlagSet("supervisor-metrics", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
 	taskID := fs.String("task-id", "", "supervisor task id (returns single-run metrics)")
 	aggregate := fs.Bool("aggregate", false, "aggregate metrics across every persisted run")
 	jsonStream := fs.Bool("json-stream", false, "emit one JSON object per supervisor task as it queries")
 	timeRange := fs.Duration("time-range", 0, "filter metrics by time window (e.g. 1h, 24h)")
 	workerName := fs.String("worker-name", "", "filter metrics by worker name")
-	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true)")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("supervisor-metrics", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	if *taskID == "" && !*aggregate && !*jsonStream {
-		fmt.Fprintln(os.Stderr, "usage: g8s supervisor-metrics --task-id <id> | --aggregate | --json-stream [--time-range <dur>] [--worker-name <name>] [--json]")
-		os.Exit(2)
+		exitUsage("supervisor-metrics", "", *traceID, "usage: g8s supervisor-metrics --task-id <id> | --aggregate | --json-stream [--time-range <dur>] [--worker-name <name>] [--json]", "Specify --task-id, --aggregate, or --json-stream", *jsonl)
 	}
 
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("supervisor-metrics", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("supervisor-metrics", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
 	opts := supervisor.AggregateOptions{
@@ -51,7 +57,7 @@ func runSupervisorMetrics(args []string) {
 		WorkerName: *workerName,
 	}
 
-	executeSupervisorMetrics(*taskID, *aggregate, *jsonStream, *jsonMode, opts, store)
+	executeSupervisorMetrics(*taskID, *aggregate, *jsonStream, *jsonMode, opts, store, *traceID, *jsonl)
 }
 
 // executeSupervisorMetrics is the testable core of runSupervisorMetrics.
@@ -64,15 +70,32 @@ func executeSupervisorMetrics(
 	aggregate, jsonStream, jsonMode bool,
 	opts supervisor.AggregateOptions,
 	store *controlplane.Store,
+	extra ...any,
 ) {
+	traceID := cli.GenerateTraceID()
+	jsonl := false
+	if len(extra) > 0 {
+		if t, ok := extra[0].(string); ok && t != "" {
+			traceID = t
+		}
+	}
+	if len(extra) > 1 {
+		if j, ok := extra[1].(bool); ok {
+			jsonl = j
+		}
+	}
+
 	ctx := context.Background()
 
 	if jsonStream {
-		enc := json.NewEncoder(os.Stdout)
 		err := supervisor.StreamMetrics(store, ctx, opts, func(item supervisor.TaskMetricsItem) error {
-			return enc.Encode(item)
+			env := cli.NewEnvelope("supervisor_metrics_item", "supervisor-metrics", "stream", item)
+			env.TraceID = traceID
+			return cli.WriteJSONL(os.Stdout, env)
 		})
-		failIf(err)
+		if err != nil {
+			exitRuntime("supervisor-metrics", "stream", traceID, cli.CodeRuntime, err, "", jsonl)
+		}
 		return
 	}
 
@@ -81,23 +104,25 @@ func executeSupervisorMetrics(
 	if taskID != "" {
 		m, err := store.GetMetrics(ctx, taskID)
 		if err != nil {
-			failIf(err)
+			exitRuntime("supervisor-metrics", "", traceID, cli.CodeNotFound, err, "", jsonl)
 		}
 		out.Mode = "single"
 		out.Metrics = &m
 	} else {
 		agg, err := supervisor.Aggregate(store, ctx, opts)
 		if err != nil {
-			failIf(err)
+			exitRuntime("supervisor-metrics", "", traceID, cli.CodeRuntime, err, "", jsonl)
 		}
 		out.Mode = "aggregate"
 		out.Aggregate = &agg
 	}
 
-	if jsonMode {
-		encoded, encErr := json.MarshalIndent(out, "", "  ")
-		failIf(encErr)
-		fmt.Println(string(encoded))
+	if jsonMode || jsonl {
+		env := cli.NewEnvelope("supervisor_metrics", "supervisor-metrics", "", out)
+		env.TraceID = traceID
+		if err := cli.WriteResponse(os.Stdout, env, jsonl); err != nil {
+			exitRuntime("supervisor-metrics", "", traceID, cli.CodeIO, err, "", jsonl)
+		}
 		return
 	}
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/pterm/pterm"
 	"github.com/tamld/g8s/internal/cleanup"
+	"github.com/tamld/g8s/internal/cli"
+	_ "modernc.org/sqlite"
 )
 
 // Supported cleanup target identifiers aliased from internal/cleanup.
@@ -48,16 +49,19 @@ var (
 )
 
 func runCleanup(args []string) {
-	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
+	fs := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 	dryRunFlag := fs.Bool("dry-run", true, "show resources that would be cleaned up without removing them")
 	forceFlag := fs.Bool("force", false, "apply cleanup and remove detected ghost/orphan resources")
 	forceMissingFlag := fs.Bool("force-missing", false, "allow killing ghost processes that have no heartbeat file (requires confirmation)")
 	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-missing")
-	jsonFlag := fs.Bool("json", false, "output cleanup report as machine-readable JSON")
 	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("cleanup", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	dryRun := *dryRunFlag
 	if *forceFlag {
@@ -98,12 +102,14 @@ func runCleanup(args []string) {
 	}
 
 	report, err := RunCleanupSweep(context.Background(), cfg)
-	failIf(err)
+	if err != nil {
+		exitRuntime("cleanup", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	if *jsonFlag {
-		out, err := json.MarshalIndent(report, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("cleanup_report", "cleanup", "", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}
 

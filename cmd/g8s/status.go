@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pterm/pterm"
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/heartbeat"
 )
 
@@ -50,29 +50,34 @@ type StatusOptions struct {
 }
 
 func runStatus(args []string) {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 	workerFlag := fs.Bool("worker", false, "display worker heartbeat and lifecycle status")
 	sessionFlag := fs.String("session", "", "filter by specific session ID")
-	jsonFlag := fs.Bool("json", false, "output status as machine-readable JSON")
 	dirFlag := fs.String("heartbeat-dir", "", "override heartbeat storage directory")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("status", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	opts := StatusOptions{
 		HeartbeatDir: *dirFlag,
 		SessionID:    *sessionFlag,
 		WorkerMode:   *workerFlag,
-		JSONMode:     *jsonFlag,
+		JSONMode:     *jsonMode || *jsonl,
 		Clock:        time.Now,
 		Writer:       os.Stdout,
 	}
 
 	report, err := GenerateStatusReport(context.Background(), opts)
-	failIf(err)
+	if err != nil {
+		exitRuntime("status", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	if opts.JSONMode {
-		out, err := json.MarshalIndent(report, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("status_report", "status", "", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}
 

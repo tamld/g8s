@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/pterm/pterm"
 	"github.com/tamld/g8s/internal/cleanup"
+	"github.com/tamld/g8s/internal/cli"
 )
 
 var SubagentBranchPattern = cleanup.SubagentBranchPattern
@@ -31,30 +31,37 @@ var (
 )
 
 func runCleanupWorktrees(args []string) {
-	fs := flag.NewFlagSet("cleanup-worktrees", flag.ExitOnError)
+	fs := flag.NewFlagSet("cleanup-worktrees", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 	olderThanStr := fs.String("older-than", "1h", "remove worktrees older than duration (e.g. 1h, 24h, 30m)")
 	dryRun := fs.Bool("dry-run", false, "show worktrees that would be removed without removing them")
-	jsonFlag := fs.Bool("json", false, "output report as JSON")
 	repoDir := fs.String("repo", ".", "target git repository directory")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("cleanup-worktrees", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	olderThan, err := time.ParseDuration(*olderThanStr)
-	failIf(err)
+	if err != nil {
+		exitRuntime("cleanup-worktrees", "", *traceID, cli.CodeInvalid, err, "Use valid duration format (e.g. 1h, 24h)", *jsonl)
+	}
 	if olderThan < 0 {
-		failIf(fmt.Errorf("--older-than duration must be non-negative"))
+		exitUsage("cleanup-worktrees", "", *traceID, "--older-than duration must be non-negative", "", *jsonl)
 	}
 
 	var w io.Writer = os.Stdout
-	if *jsonFlag {
+	if *jsonMode || *jsonl {
 		w = io.Discard
 	}
 	report, err := executeCleanupWorktrees(w, &DefaultGitRunner{}, time.Now, *repoDir, olderThan, *dryRun)
-	failIf(err)
+	if err != nil {
+		exitRuntime("cleanup-worktrees", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	if *jsonFlag {
-		out, err := json.MarshalIndent(report, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("cleanup_report", "cleanup-worktrees", "", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}
 
