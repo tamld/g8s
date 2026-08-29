@@ -115,6 +115,8 @@ func main() {
 		runBriefIssue(os.Args[2:])
 	case "brief-consume":
 		runBriefConsume(os.Args[2:])
+	case "cleanup-worktrees":
+		runCleanupWorktrees(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -853,6 +855,7 @@ func printUsage() {
 	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
 	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
+	fmt.Println("  cleanup-worktrees Clean up stale agy subagent git worktrees (g8s cleanup-worktrees --older-than 1h [--dry-run])")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
