@@ -109,6 +109,10 @@ func main() {
 		runOrchestrate(os.Args[2:])
 	case "supervisor-metrics":
 		runSupervisorMetrics(os.Args[2:])
+	case "brief-issue":
+		runBriefIssue(os.Args[2:])
+	case "brief-consume":
+		runBriefConsume(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -844,6 +848,8 @@ func printUsage() {
 	fmt.Println("  vault        Manage decoupled Tri-Anchor knowledge records (store/query/list)")
 	fmt.Println("  orchestrate  Run the supervisor self-test loop against the real agy worker")
 	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
+	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
+	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")

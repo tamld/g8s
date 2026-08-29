@@ -107,6 +107,14 @@ func (s *Store) initialize() error {
 		rollbackInit(conn)
 		return err
 	}
+	if err := applyBriefsSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateBriefsSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
 
 	if _, err := conn.ExecContext(context.Background(),
 		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
@@ -125,7 +133,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 4 && version != SchemaVersion) {
+	if version < 0 || (version > 5 && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -374,6 +382,78 @@ func migrateReceiptLake(conn *sql.Conn) error {
 	}
 
 	return nil
+}
+
+// applyBriefsSchema creates the briefs persistence table with idempotent CREATE TABLE IF NOT EXISTS.
+func applyBriefsSchema(conn *sql.Conn) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS briefs (
+			id         TEXT PRIMARY KEY,
+			title      TEXT NOT NULL,
+			payload_md TEXT NOT NULL,
+			dod_md     TEXT NOT NULL,
+			issued_by  TEXT NOT NULL,
+			issued_at  REAL NOT NULL,
+			expires_at REAL NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'active'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_briefs_status ON briefs(status)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("apply briefs schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateBriefsSchema is the defensive upgrade for pre-v6 databases.
+func migrateBriefsSchema(conn *sql.Conn) error {
+	expected := map[string]string{
+		"id":         "TEXT",
+		"title":      "TEXT",
+		"payload_md": "TEXT",
+		"dod_md":     "TEXT",
+		"issued_by":  "TEXT",
+		"issued_at":  "REAL",
+		"expires_at": "REAL",
+		"status":     "TEXT DEFAULT 'active'",
+	}
+	present := map[string]struct{}{}
+	rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(briefs)")
+	if err != nil {
+		return fmt.Errorf("inspect briefs columns: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan briefs columns: %w", err)
+		}
+		present[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate briefs columns: %w", err)
+	}
+	for col, colDef := range expected {
+		if _, ok := present[col]; ok {
+			continue
+		}
+		if _, err := conn.ExecContext(context.Background(),
+			fmt.Sprintf("ALTER TABLE briefs ADD COLUMN %s %s", col, colDef)); err != nil {
+			return fmt.Errorf("migrate briefs.%s: %w", col, err)
+		}
+	}
+	return nil
+}
+
+// Clock returns the store's current time from its configured clock.
+func (s *Store) Clock() time.Time {
+	return s.clock()
 }
 
 func rollbackInit(conn *sql.Conn) {
