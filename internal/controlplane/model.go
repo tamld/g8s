@@ -31,7 +31,10 @@ import (
 //	v4 (WU3 supervisor migration): adds supervisor_tasks / supervisor_decisions
 //	    / supervisor_metrics for the internal/supervisor Concern A persistence
 //	    layer. All v3 tables are untouched.
-const SchemaVersion = 4
+//	v5 (DELTA-17 receipt lake wiring): adds orchestrator_id, worktree_id,
+//	    worker_name, iter columns and idx_tasks_orchestrator_iter index to
+//	    tasks table for evidence lake correlation.
+const SchemaVersion = 5
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
@@ -149,6 +152,10 @@ type Task struct {
 	UpdatedAt       float64         `json:"updated_at"`
 	CompletedAt     *float64        `json:"completed_at,omitempty"`
 	LastError       *string         `json:"last_error,omitempty"`
+	OrchestratorID  *string         `json:"orchestrator_id,omitempty"`
+	WorktreeID      *string         `json:"worktree_id,omitempty"`
+	WorkerName      *string         `json:"worker_name,omitempty"`
+	Iter            int             `json:"iter"`
 
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
@@ -170,6 +177,10 @@ type SubmitTaskRequest struct {
 	SkipPermissions bool            `json:"skip_permissions,omitempty"`
 	NoSandbox       bool            `json:"no_sandbox,omitempty"`
 	AgyBin          *string         `json:"agy_bin,omitempty"` // custom binary override is rejected in v0.1
+	OrchestratorID  *string         `json:"orchestrator_id,omitempty"`
+	WorktreeID      *string         `json:"worktree_id,omitempty"`
+	WorkerName      *string         `json:"worker_name,omitempty"`
+	Iter            int             `json:"iter,omitempty"`
 }
 
 // TaskResult carries the worker outcome recorded by CompleteTask.
