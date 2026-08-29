@@ -366,11 +366,17 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 
 	t.Run("service status envelope", func(t *testing.T) {
 		srvEnv, srvCode, _ := runCmd("service", "status", "--json")
-		if srvCode != 0 {
-			t.Fatalf("service status exit code = %d, want 0", srvCode)
-		}
-		if srvEnv.V != 1 || srvEnv.Kind != "service_status" || srvEnv.Command != "service" || srvEnv.Subcommand != "status" {
-			t.Errorf("service status headers: %+v", srvEnv)
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+			if srvCode != 0 {
+				t.Fatalf("service status exit code = %d, want 0", srvCode)
+			}
+			if srvEnv.V != 1 || srvEnv.Kind != "service_status" || srvEnv.Command != "service" || srvEnv.Subcommand != "status" {
+				t.Errorf("service status headers: %+v", srvEnv)
+			}
+		} else {
+			if srvEnv.V != 1 || srvEnv.Kind != "error" || srvEnv.Command != "service" {
+				t.Errorf("service status unsupported headers: %+v", srvEnv)
+			}
 		}
 	})
 
