@@ -60,13 +60,15 @@ type okHandle struct {
 	receipt Receipt
 }
 
-func (o *okHandle) PID() int { return 1 }
+func (o *okHandle) PID() int                                  { return 1 }
 func (o *okHandle) Wait(ctx context.Context) (Receipt, error) { return o.receipt, nil }
-func (o *okHandle) Cancel(ctx context.Context) error { return nil }
+func (o *okHandle) Cancel(ctx context.Context) error          { return nil }
 func (o *okHandle) StdoutStream() interface {
 	Read(p []byte) (int, error)
 	Close() error
-} { return nil }
+} {
+	return nil
+}
 
 func TestFanOutSuccess(t *testing.T) {
 	dir := t.TempDir()

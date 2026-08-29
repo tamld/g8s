@@ -30,9 +30,10 @@ func TestFunctionalOptions(t *testing.T) {
 
 func TestSubstituteTemplate(t *testing.T) {
 	tests := []struct {
-		tmpl            []string
-		prompt, model   string
-		timeout, want   string
+		tmpl          []string
+		prompt, model string
+		timeout       string
+		wantJoined    string
 	}{
 		{[]string{"echo", "{prompt}"}, "hello", "m1", "10s", "echo hello"},
 		{[]string{"run", "{model}"}, "hello", "m1", "10s", "run m1"},
@@ -43,16 +44,17 @@ func TestSubstituteTemplate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := substituteTemplate(tt.tmpl, tt.prompt, tt.model, tt.timeout)
-		if len(got) != len(tt.want) {
-			t.Errorf("substituteTemplate(%v) = %q, want %q", tt.tmpl, got, tt.want)
-			continue
+		joined := ""
+		for i, s := range got {
+			if i > 0 {
+				joined += " "
+			}
+			joined += s
 		}
-		if got == nil {
-			t.Errorf("expected non-nil for %v", tt.tmpl)
-			continue
+		if joined != tt.wantJoined {
+			t.Errorf("substituteTemplate(%v) joined=%q, want %q", tt.tmpl, joined, tt.wantJoined)
 		}
 	}
-	_ = tests
 }
 
 func TestExitCodeOf(t *testing.T) {
