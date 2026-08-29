@@ -21,7 +21,7 @@ type stubWorker struct {
 	calls    int
 }
 
-func (s *stubWorker) Name() string { return "stub" }
+func (s *stubWorker) Name() string                      { return "stub" }
 func (s *stubWorker) Available(_ context.Context) error { return nil }
 func (s *stubWorker) Spawn(_ context.Context, t orchestrator.Task) (orchestrator.Handle, error) {
 	if s.calls >= len(s.receipts) {
@@ -48,7 +48,9 @@ func (h *stubHandle) Cancel(_ context.Context) error { return nil }
 func (h *stubHandle) StdoutStream() interface {
 	Read(p []byte) (int, error)
 	Close() error
-} { return nil }
+} {
+	return nil
+}
 
 func TestRunOrchestrateSelfTestSmoke(t *testing.T) {
 	dir := t.TempDir()
