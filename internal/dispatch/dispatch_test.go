@@ -384,6 +384,15 @@ func TestCaptureInvalidUTF8Replaced(t *testing.T) {
 	}
 }
 
+func BenchmarkCaptureBounded(b *testing.B) {
+	raw := bytes.Repeat([]byte("a"), MaxCaptureBytes+1024*1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = CaptureBounded(raw, MaxCaptureBytes)
+	}
+}
+
 type recordingRunner struct {
 	commands [][]string
 	result   ExecResult
