@@ -9,7 +9,7 @@ import (
 
 func TestPoolAcquireEmptyTaskID(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create pool: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestPoolAcquireEmptyTaskID(t *testing.T) {
 
 func TestPoolAcquireIdempotent(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create pool: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestPoolAcquireIdempotent(t *testing.T) {
 
 func TestPoolReleaseKeepBranch(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create pool: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestPoolReleaseKeepBranch(t *testing.T) {
 
 func TestPoolReleaseNonExistentWorktree(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create pool: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestNewPoolEmptyRepo(t *testing.T) {
 
 func TestPoolActiveEmptyAfterRelease(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("failed to create pool: %v", err)
 	}
@@ -214,7 +214,7 @@ func (h fanOutHandle) StdoutStream() interface {
 
 func TestFanOutMaxParallelCaps(t *testing.T) {
 	repo := setupGitRepo(t)
-	pool, err := NewPool(PoolOptions{Repo: repo})
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
