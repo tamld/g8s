@@ -43,7 +43,7 @@ func TestRunCleanupHook(t *testing.T) {
 	t.Run("executes targets with process manager", func(t *testing.T) {
 		pm := &mockHookProcessManager{
 			ghosts: []cleanup.ProcessInfo{
-				{PID: 1234, Binary: "agy", CommandLine: "agy", Reason: "no live heartbeat"},
+				{PID: 1234, Binary: "agy", CommandLine: "agy", Reason: "stale heartbeat (>5m)", HasHeartbeat: true},
 			},
 		}
 
