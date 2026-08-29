@@ -151,11 +151,11 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	}
 	m := &Manager{db: db, clock: clock}
 	if err := m.initialize(); err != nil {
-		_ = db.Close()
+		db.Close()
 		return nil, fmt.Errorf("initialize receipt schema in %q: %w", dbPath, err)
 	}
 	if err := os.Chmod(dbPath, 0o600); err != nil {
-		_ = db.Close()
+		db.Close()
 		return nil, fmt.Errorf("restrict receipt database permissions %q: %w", dbPath, err)
 	}
 	return m, nil
@@ -238,6 +238,7 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("inspect write_receipts columns: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, colType string
@@ -245,16 +246,13 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 		var dflt sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			_ = rows.Close()
 			return fmt.Errorf("scan write_receipts column info: %w", err)
 		}
 		present[name] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return fmt.Errorf("iterate write_receipts column info: %w", err)
 	}
-	_ = rows.Close()
 
 	for col, colType := range expected {
 		if _, ok := present[col]; ok {

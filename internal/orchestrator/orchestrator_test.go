@@ -45,15 +45,14 @@ func TestRegistryPickSkipsUnavailable(t *testing.T) {
 	}
 }
 
-func TestRegistryPanicsOnDuplicate(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic on duplicate registration")
-		}
-	}()
+func TestRegistryErrorsOnDuplicate(t *testing.T) {
 	r := NewRegistry()
-	r.Register("agy", func() Worker { return fakeWorker{name: "agy"} })
-	r.Register("agy", func() Worker { return fakeWorker{name: "agy"} })
+	if err := r.Register("agy", func() Worker { return fakeWorker{name: "agy"} }); err != nil {
+		t.Fatalf("unexpected error on first registration: %v", err)
+	}
+	if err := r.Register("agy", func() Worker { return fakeWorker{name: "agy"} }); err == nil {
+		t.Fatalf("expected error on duplicate registration, got nil")
+	}
 }
 
 func TestRegistryNamesSorted(t *testing.T) {

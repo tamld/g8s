@@ -24,17 +24,18 @@ func NewRegistry() *Registry {
 	return &Registry{ctors: map[string]func() Worker{}}
 }
 
-// Register adds a backend. Names must be unique; duplicates panic so
-// config bugs surface at startup, not during fan-out.
-func (r *Registry) Register(name string, ctor func() Worker) {
+// Register adds a backend. Names must be unique; duplicates return an
+// error so configuration errors can be handled cleanly.
+func (r *Registry) Register(name string, ctor func() Worker) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, dup := r.ctors[name]; dup {
-		panic(fmt.Sprintf("orchestrator: worker %q already registered", name))
+		return fmt.Errorf("orchestrator: worker %q already registered", name)
 	}
 	r.ctors[name] = ctor
 	r.names = append(r.names, name)
 	sort.Strings(r.names)
+	return nil
 }
 
 // Names returns the sorted list of registered worker names.
@@ -82,6 +83,8 @@ func (r *Registry) Get(name string) (Worker, bool) {
 // supports today. New backends land here as they stabilize.
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
-	r.Register("agy", func() Worker { return NewAgyWorker() })
+	if err := r.Register("agy", func() Worker { return NewAgyWorker() }); err != nil {
+		return nil
+	}
 	return r
 }

@@ -347,10 +347,10 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	})
 
 	if spawnErr != nil {
-		_ = outWriter.Close()
-		_ = errWriter.Close()
-		_ = outFile.Close()
-		_ = errFile.Close()
+		outWriter.Close()
+		errWriter.Close()
+		outFile.Close()
+		errFile.Close()
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
@@ -365,20 +365,20 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 		child.Terminate(terminateGrace)
-		_ = outWriter.Close()
-		_ = errWriter.Close()
-		_ = outFile.Close()
-		_ = errFile.Close()
+		outWriter.Close()
+		errWriter.Close()
+		outFile.Close()
+		errFile.Close()
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
 
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
 	// Close capture handles before collect reads and removes the files; on
 	// Windows an open handle makes os.Remove fail with a sharing violation.
-	_ = outWriter.Close()
-	_ = errWriter.Close()
-	_ = outFile.Close()
-	_ = errFile.Close()
+	outWriter.Close()
+	errWriter.Close()
+	outFile.Close()
+	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
 		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode)
 }
