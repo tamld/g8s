@@ -1,0 +1,1031 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/pterm/pterm"
+	_ "modernc.org/sqlite"
+)
+
+// Supported cleanup target identifiers.
+const (
+	TargetGhostProcess   = "ghost-process"
+	TargetOrphanWT       = "orphan-wt"
+	TargetOrphanDir      = "orphan-dir"
+	TargetOrphanBranch   = "orphan-branch"
+	TargetStaleReceipt   = "stale-receipt"
+	TargetClosedPRBranch = "closed-pr-branch"
+	TargetOldTag         = "old-tag"
+)
+
+// AllCleanupTargets lists all available cleanup target flags.
+var AllCleanupTargets = []string{
+	TargetGhostProcess,
+	TargetOrphanWT,
+	TargetOrphanDir,
+	TargetOrphanBranch,
+	TargetStaleReceipt,
+	TargetClosedPRBranch,
+	TargetOldTag,
+}
+
+// CleanupItem describes an individual resource identified for or subjected to cleanup.
+type CleanupItem struct {
+	Target string `json:"target"`
+	ID     string `json:"id"`
+	Detail string `json:"detail"`
+	Action string `json:"action"` // would_kill, killed, would_remove, removed, would_prune, pruned, would_delete, deleted, skipped
+	Error  string `json:"error,omitempty"`
+}
+
+// FullCleanupReport aggregates all results from the cleanup sweep.
+type FullCleanupReport struct {
+	DryRun  bool           `json:"dry_run"`
+	Items   []CleanupItem  `json:"items"`
+	Summary map[string]int `json:"summary"`
+}
+
+// ProcessInfo represents a running process evaluated by the ghost process detector.
+type ProcessInfo struct {
+	PID         int       `json:"pid"`
+	Binary      string    `json:"binary"`
+	CommandLine string    `json:"command_line"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	LastUpdate  time.Time `json:"last_update,omitempty"`
+	Reason      string    `json:"reason"`
+}
+
+// TagInfo represents a local git tag and its timestamp.
+type TagInfo struct {
+	Name string    `json:"name"`
+	Date time.Time `json:"date"`
+}
+
+// HeartbeatData matches the JSON payload structure stored in .heartbeat/agy/<id>.json.
+type HeartbeatData struct {
+	SessionID   string         `json:"session_id"`
+	PID         int            `json:"pid"`
+	Binary      string         `json:"binary"`
+	CommandLine string         `json:"command_line"`
+	StartedAt   string         `json:"started_at"`
+	LastUpdate  string         `json:"last_update"`
+	Status      string         `json:"status"`
+	CurrentStep string         `json:"current_step,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// ProcessManager abstracts OS process inspection and signals for testing and production.
+type ProcessManager interface {
+	FindGhostProcesses(ctx context.Context, heartbeatDir string, maxAge time.Duration, clock func() time.Time) ([]ProcessInfo, error)
+	KillProcess(pid int, sig syscall.Signal) error
+	IsProcessAlive(pid int) bool
+}
+
+// CleanupGitRunner abstracts git and github CLI invocations for cleanup operations.
+type CleanupGitRunner interface {
+	WorktreeListPorcelain(ctx context.Context, repoDir string) (string, error)
+	WorktreePrune(ctx context.Context, repoDir string) (string, error)
+	WorktreeRemove(ctx context.Context, repoDir, wtPath string) error
+	MergedBranches(ctx context.Context, repoDir string) ([]string, error)
+	RemoteBranches(ctx context.Context, repoDir string) ([]string, error)
+	DeleteBranch(ctx context.Context, repoDir, branch string, force bool) error
+	ClosedPRBranches(ctx context.Context, repoDir string) ([]string, error)
+	LocalTags(ctx context.Context, repoDir string) ([]TagInfo, error)
+	RemoteTags(ctx context.Context, repoDir string) ([]string, error)
+	DeleteTag(ctx context.Context, repoDir, tag string) error
+}
+
+// DefaultProcessManager is the production implementation of ProcessManager using OS primitives.
+type DefaultProcessManager struct{}
+
+// FindGhostProcesses inspects host processes matching agy or claude and cross-references heartbeats.
+func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbeatDir string, maxAge time.Duration, clock func() time.Time) ([]ProcessInfo, error) {
+	cmd := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,command=")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list processes via ps: %w", err)
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var ghosts []ProcessInfo
+
+	selfPID := os.Getpid()
+	parentPID := os.Getppid()
+
+	// Load all known heartbeats
+	heartbeats := loadHeartbeats(heartbeatDir)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		if pid == selfPID || pid == parentPID {
+			continue
+		}
+
+		cmdLine := strings.Join(fields[1:], " ")
+		binName := filepath.Base(fields[1])
+
+		// Ignore grep / test / g8s self invocations
+		if strings.Contains(cmdLine, "grep") || strings.Contains(cmdLine, "g8s cleanup") {
+			continue
+		}
+
+		isAgy := strings.EqualFold(binName, "agy") || strings.HasPrefix(binName, "agy")
+		isClaude := strings.EqualFold(binName, "claude") || strings.HasPrefix(binName, "claude")
+		if !isAgy && !isClaude {
+			continue
+		}
+
+		// Cross-reference with heartbeat
+		hb, found := heartbeats[pid]
+		now := clock()
+
+		if !found {
+			ghosts = append(ghosts, ProcessInfo{
+				PID:         pid,
+				Binary:      binName,
+				CommandLine: cmdLine,
+				Reason:      "no live heartbeat file",
+			})
+			continue
+		}
+
+		lastUpdate, parseErr := time.Parse(time.RFC3339, hb.LastUpdate)
+		if parseErr != nil {
+			ghosts = append(ghosts, ProcessInfo{
+				PID:         pid,
+				Binary:      binName,
+				CommandLine: cmdLine,
+				Reason:      "invalid heartbeat timestamp",
+			})
+			continue
+		}
+
+		if now.Sub(lastUpdate) > maxAge {
+			ghosts = append(ghosts, ProcessInfo{
+				PID:         pid,
+				Binary:      binName,
+				CommandLine: cmdLine,
+				LastUpdate:  lastUpdate,
+				Reason:      fmt.Sprintf("heartbeat stale (last update %s ago > %s)", now.Sub(lastUpdate).Round(time.Second), maxAge),
+			})
+		}
+	}
+
+	return ghosts, nil
+}
+
+func loadHeartbeats(baseDir string) map[int]HeartbeatData {
+	res := make(map[int]HeartbeatData)
+	if baseDir == "" {
+		baseDir = ".heartbeat"
+	}
+
+	dirs := []string{
+		baseDir,
+		filepath.Join(baseDir, "agy"),
+		filepath.Join(baseDir, "claude"),
+	}
+
+	for _, d := range dirs {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(d, entry.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var hb HeartbeatData
+			if err := json.Unmarshal(data, &hb); err == nil && hb.PID > 0 {
+				res[hb.PID] = hb
+			}
+		}
+	}
+
+	return res
+}
+
+// KillProcess sends the specified signal to the process.
+func (d *DefaultProcessManager) KillProcess(pid int, sig syscall.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(sig)
+}
+
+// IsProcessAlive checks whether the process is alive.
+func (d *DefaultProcessManager) IsProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// DefaultCleanupGitRunner is the production implementation of CleanupGitRunner using git/gh CLI.
+type DefaultCleanupGitRunner struct{}
+
+func (g *DefaultCleanupGitRunner) WorktreeListPorcelain(ctx context.Context, repoDir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "list", "--porcelain")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git worktree list: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func (g *DefaultCleanupGitRunner) WorktreePrune(ctx context.Context, repoDir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "prune", "--expire=now", "--verbose")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git worktree prune: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func (g *DefaultCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", wtPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree remove: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (g *DefaultCleanupGitRunner) MergedBranches(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", "--merged", "main")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Fallback to plain git branch --merged if main ref differs
+		cmd = exec.CommandContext(ctx, "git", "-C", repoDir, "branch", "--merged")
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("git branch --merged: %w (%s)", err, strings.TrimSpace(string(out)))
+		}
+	}
+
+	var branches []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimPrefix(line, "+ ")
+		if line == "" || line == "main" || line == "master" {
+			continue
+		}
+		branches = append(branches, line)
+	}
+	return branches, nil
+}
+
+func (g *DefaultCleanupGitRunner) RemoteBranches(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-remote", "--heads", "origin")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-remote: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	var branches []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			ref := parts[1]
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			branches = append(branches, branch)
+		}
+	}
+	return branches, nil
+}
+
+func (g *DefaultCleanupGitRunner) DeleteBranch(ctx context.Context, repoDir, branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", flag, branch)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git branch %s %s: %w (%s)", flag, branch, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (g *DefaultCleanupGitRunner) ClosedPRBranches(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--state", "closed", "--limit", "100", "--json", "headRefName", "--jq", ".[].headRefName")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr list: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	var branches []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && line != "main" && line != "master" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
+}
+
+func (g *DefaultCleanupGitRunner) LocalTags(ctx context.Context, repoDir string) ([]TagInfo, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "-l", "--format=%(refname:short)|%(creatordate:iso8601)|%(authordate:iso8601)")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git tag list: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	var tags []TagInfo
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		name := parts[0]
+		dateStr := ""
+		if len(parts) > 1 && parts[1] != "" {
+			dateStr = parts[1]
+		} else if len(parts) > 2 && parts[2] != "" {
+			dateStr = parts[2]
+		}
+		var tagDate time.Time
+		if dateStr != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05 -0700", dateStr); err == nil {
+				tagDate = t
+			} else if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
+				tagDate = t
+			}
+		}
+		tags = append(tags, TagInfo{Name: name, Date: tagDate})
+	}
+	return tags, nil
+}
+
+func (g *DefaultCleanupGitRunner) RemoteTags(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-remote", "--tags", "origin")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-remote --tags: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	var tags []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasSuffix(line, "^{}") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			ref := parts[1]
+			tag := strings.TrimPrefix(ref, "refs/tags/")
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
+}
+
+func (g *DefaultCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "-d", tag)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git tag -d %s: %w (%s)", tag, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// CleanupConfig holds parameters and dependencies for executing a full cleanup sweep.
+type CleanupConfig struct {
+	RepoDir         string
+	HeartbeatDir    string
+	DBPath          string
+	WorktreeBaseDir string
+	Targets         []string
+	DryRun          bool
+	GracePeriod     time.Duration
+	Clock           func() time.Time
+	GitRunner       CleanupGitRunner
+	ProcessManager  ProcessManager
+	Writer          io.Writer
+}
+
+func runCleanup(args []string) {
+	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
+	dryRunFlag := fs.Bool("dry-run", true, "show resources that would be cleaned up without removing them")
+	forceFlag := fs.Bool("force", false, "apply cleanup and remove detected ghost/orphan resources")
+	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
+	repoDir := fs.String("repo", ".", "target git repository directory")
+	jsonMode := fs.Bool("json", false, "output report as machine-readable JSON")
+	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
+	failIf(fs.Parse(args))
+
+	dryRun := *dryRunFlag
+	if *forceFlag {
+		dryRun = false
+	}
+
+	var targets []string
+	if *targetFlag != "" {
+		for _, t := range strings.Split(*targetFlag, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				targets = append(targets, t)
+			}
+		}
+	}
+
+	dbPath, _ := databasePath()
+
+	cfg := CleanupConfig{
+		RepoDir:        *repoDir,
+		HeartbeatDir:   filepath.Join(*repoDir, ".heartbeat"),
+		DBPath:         dbPath,
+		Targets:        targets,
+		DryRun:         dryRun,
+		GracePeriod:    *gracePeriod,
+		Clock:          time.Now,
+		GitRunner:      &DefaultCleanupGitRunner{},
+		ProcessManager: &DefaultProcessManager{},
+		Writer:         os.Stdout,
+	}
+
+	report, err := RunCleanupSweep(context.Background(), cfg)
+	failIf(err)
+
+	if *jsonMode {
+		out, err := json.MarshalIndent(report, "", "  ")
+		failIf(err)
+		fmt.Println(string(out))
+		return
+	}
+
+	renderCleanupReport(report)
+}
+
+func renderCleanupReport(report *FullCleanupReport) {
+	pterm.DefaultHeader.WithFullWidth().Println("g8s Lifecycle Cleanup Sweep")
+
+	if report.DryRun {
+		pterm.Info.Println("Mode: DRY-RUN (no changes applied, use --force to execute)")
+	} else {
+		pterm.Success.Println("Mode: APPLY (active cleanup applied)")
+	}
+	fmt.Println()
+
+	if len(report.Items) == 0 {
+		pterm.Success.Println("System is clean! No ghost processes or orphan resources detected.")
+		return
+	}
+
+	var td pterm.TableData
+	td = append(td, []string{"Target", "Resource ID", "Action", "Detail"})
+	for _, item := range report.Items {
+		actionStr := item.Action
+		switch {
+		case strings.HasPrefix(actionStr, "would_"):
+			actionStr = pterm.Yellow(actionStr)
+		case actionStr == "killed" || actionStr == "removed" || actionStr == "deleted" || actionStr == "pruned":
+			actionStr = pterm.Green(actionStr)
+		default:
+			actionStr = pterm.Red(actionStr)
+		}
+		td = append(td, []string{item.Target, item.ID, actionStr, item.Detail})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+
+	fmt.Println()
+	pterm.DefaultSection.Println("Summary:")
+	for target, count := range report.Summary {
+		fmt.Printf("  • %s: %d item(s)\n", target, count)
+	}
+}
+
+// RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
+func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport, error) {
+	if cfg.Clock == nil {
+		cfg.Clock = time.Now
+	}
+	if cfg.GitRunner == nil {
+		cfg.GitRunner = &DefaultCleanupGitRunner{}
+	}
+	if cfg.ProcessManager == nil {
+		cfg.ProcessManager = &DefaultProcessManager{}
+	}
+	if cfg.Writer == nil {
+		cfg.Writer = io.Discard
+	}
+	if cfg.RepoDir == "" {
+		cfg.RepoDir = "."
+	}
+	if cfg.GracePeriod <= 0 {
+		cfg.GracePeriod = 10 * time.Second
+	}
+
+	targetSet := make(map[string]bool)
+	if len(cfg.Targets) == 0 {
+		for _, t := range AllCleanupTargets {
+			targetSet[t] = true
+		}
+	} else {
+		for _, t := range cfg.Targets {
+			targetSet[t] = true
+		}
+	}
+
+	report := &FullCleanupReport{
+		DryRun:  cfg.DryRun,
+		Items:   make([]CleanupItem, 0),
+		Summary: make(map[string]int),
+	}
+
+	// 1. Ghost processes
+	if targetSet[TargetGhostProcess] {
+		items, err := sweepGhostProcesses(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] ghost-process sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetGhostProcess] = len(items)
+		}
+	}
+
+	// 2. Orphan worktree refs
+	if targetSet[TargetOrphanWT] {
+		items, err := sweepOrphanWorktrees(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] orphan-wt sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetOrphanWT] = len(items)
+		}
+	}
+
+	// 3. Stale worktree dirs
+	if targetSet[TargetOrphanDir] {
+		items, err := sweepOrphanWorktreeDirs(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] orphan-dir sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetOrphanDir] = len(items)
+		}
+	}
+
+	// 4. Old agy-sup-* branches
+	if targetSet[TargetOrphanBranch] {
+		items, err := sweepOrphanBranches(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] orphan-branch sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetOrphanBranch] = len(items)
+		}
+	}
+
+	// 5. Stale receipts
+	if targetSet[TargetStaleReceipt] {
+		items, err := sweepStaleReceipts(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] stale-receipt sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetStaleReceipt] = len(items)
+		}
+	}
+
+	// 6. Closed PR branches
+	if targetSet[TargetClosedPRBranch] {
+		items, err := sweepClosedPRBranches(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] closed-pr-branch sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetClosedPRBranch] = len(items)
+		}
+	}
+
+	// 7. Old local tags
+	if targetSet[TargetOldTag] {
+		items, err := sweepOldTags(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] old-tag sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetOldTag] = len(items)
+		}
+	}
+
+	return report, nil
+}
+
+// 1. Ghost processes sweep
+func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	ghosts, err := cfg.ProcessManager.FindGhostProcesses(ctx, cfg.HeartbeatDir, 5*time.Minute, cfg.Clock)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []CleanupItem
+	for _, proc := range ghosts {
+		idStr := strconv.Itoa(proc.PID)
+		detail := fmt.Sprintf("%s (%s): %s", proc.Binary, proc.Reason, proc.CommandLine)
+
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetGhostProcess,
+				ID:     idStr,
+				Detail: detail,
+				Action: "would_kill",
+			})
+			continue
+		}
+
+		// Force mode: SIGTERM, grace period, then SIGKILL
+		_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGTERM)
+
+		// Wait up to grace period for process to exit
+		start := time.Now()
+		killed := false
+		for time.Since(start) < cfg.GracePeriod {
+			if !cfg.ProcessManager.IsProcessAlive(proc.PID) {
+				killed = true
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+
+		if !killed && cfg.ProcessManager.IsProcessAlive(proc.PID) {
+			_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGKILL)
+		}
+
+		items = append(items, CleanupItem{
+			Target: TargetGhostProcess,
+			ID:     idStr,
+			Detail: detail,
+			Action: "killed",
+		})
+	}
+	return items, nil
+}
+
+// 2. Orphan worktrees sweep
+func sweepOrphanWorktrees(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	porcelain, err := cfg.GitRunner.WorktreeListPorcelain(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := parseWorktreeListPorcelain(porcelain)
+	var items []CleanupItem
+
+	for _, entry := range entries {
+		if entry.IsMain || isMainWorktree(cfg.RepoDir, entry.Path) {
+			continue
+		}
+
+		// Check if directory exists on disk or if worktree is marked prunable
+		_, statErr := os.Stat(entry.Path)
+		isMissing := os.IsNotExist(statErr)
+
+		if entry.Prunable || isMissing {
+			if cfg.DryRun {
+				items = append(items, CleanupItem{
+					Target: TargetOrphanWT,
+					ID:     entry.Path,
+					Detail: fmt.Sprintf("branch: %s (prunable / missing dir)", entry.Branch),
+					Action: "would_prune",
+				})
+			} else {
+				items = append(items, CleanupItem{
+					Target: TargetOrphanWT,
+					ID:     entry.Path,
+					Detail: fmt.Sprintf("branch: %s", entry.Branch),
+					Action: "pruned",
+				})
+			}
+		}
+	}
+
+	if !cfg.DryRun && len(items) > 0 {
+		_, _ = cfg.GitRunner.WorktreePrune(ctx, cfg.RepoDir)
+	}
+
+	return items, nil
+}
+
+// 3. Stale worktree dirs sweep
+func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	porcelain, err := cfg.GitRunner.WorktreeListPorcelain(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	activeEntries := parseWorktreeListPorcelain(porcelain)
+	activeMap := make(map[string]bool)
+	for _, entry := range activeEntries {
+		clean := filepath.Clean(entry.Path)
+		activeMap[clean] = true
+		activeMap[strings.TrimPrefix(clean, "/private")] = true
+	}
+
+	// Determine directories to scan
+	var candidateDirs []string
+	if cfg.WorktreeBaseDir != "" {
+		candidateDirs = append(candidateDirs, cfg.WorktreeBaseDir)
+	} else {
+		tmp := os.TempDir()
+		candidateDirs = append(candidateDirs, filepath.Join(tmp, "g8s-worktrees"))
+		candidateDirs = append(candidateDirs, "/tmp/g8s-worktrees")
+	}
+
+	var items []CleanupItem
+	for _, baseDir := range candidateDirs {
+		entries, err := os.ReadDir(baseDir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dirPath := filepath.Join(baseDir, entry.Name())
+			cleanPath := filepath.Clean(dirPath)
+			trimmedPath := strings.TrimPrefix(cleanPath, "/private")
+
+			if !activeMap[cleanPath] && !activeMap[trimmedPath] {
+				if cfg.DryRun {
+					items = append(items, CleanupItem{
+						Target: TargetOrphanDir,
+						ID:     dirPath,
+						Detail: "unregistered worktree directory",
+						Action: "would_remove",
+					})
+				} else {
+					err := os.RemoveAll(dirPath)
+					action := "removed"
+					var errStr string
+					if err != nil {
+						action = "skipped"
+						errStr = err.Error()
+					}
+					items = append(items, CleanupItem{
+						Target: TargetOrphanDir,
+						ID:     dirPath,
+						Detail: "unregistered worktree directory",
+						Action: action,
+						Error:  errStr,
+					})
+				}
+			}
+		}
+	}
+
+	return items, nil
+}
+
+// 4. Old agy-sup-* branches sweep
+var agySupBranchPattern = regexp.MustCompile(`^(agy/sup-|agy-sup-).*`)
+
+func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	merged, err := cfg.GitRunner.MergedBranches(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	remote, err := cfg.GitRunner.RemoteBranches(ctx, cfg.RepoDir)
+	if err != nil {
+		// If remote ls-remote fails (e.g. offline/mock), assume empty remote
+		remote = []string{}
+	}
+
+	remoteMap := make(map[string]bool)
+	for _, b := range remote {
+		remoteMap[b] = true
+	}
+
+	var items []CleanupItem
+	for _, branch := range merged {
+		if !agySupBranchPattern.MatchString(branch) {
+			continue
+		}
+		if remoteMap[branch] {
+			continue
+		}
+
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetOrphanBranch,
+				ID:     branch,
+				Detail: "merged local branch not on remote",
+				Action: "would_delete",
+			})
+		} else {
+			delErr := cfg.GitRunner.DeleteBranch(ctx, cfg.RepoDir, branch, false)
+			action := "deleted"
+			var errStr string
+			if delErr != nil {
+				action = "skipped"
+				errStr = delErr.Error()
+			}
+			items = append(items, CleanupItem{
+				Target: TargetOrphanBranch,
+				ID:     branch,
+				Detail: "merged local branch not on remote",
+				Action: action,
+				Error:  errStr,
+			})
+		}
+	}
+
+	return items, nil
+}
+
+// 5. Stale receipts sweep
+func sweepStaleReceipts(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	if cfg.DBPath == "" {
+		return nil, nil
+	}
+
+	if _, err := os.Stat(cfg.DBPath); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", url.PathEscape(cfg.DBPath))
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open db for receipt cleanup: %w", err)
+	}
+	defer db.Close()
+
+	nowUnix := float64(cfg.Clock().Unix())
+	rows, err := db.QueryContext(ctx, "SELECT receipt_id, expires_at FROM write_receipts WHERE consumed = 0 AND expires_at < ?", nowUnix)
+	if err != nil {
+		// Table might not exist yet
+		return nil, nil
+	}
+	defer rows.Close()
+
+	var staleIDs []string
+	for rows.Next() {
+		var id string
+		var expiresAt float64
+		if err := rows.Scan(&id, &expiresAt); err == nil {
+			staleIDs = append(staleIDs, id)
+		}
+	}
+
+	var items []CleanupItem
+	for _, id := range staleIDs {
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetStaleReceipt,
+				ID:     id,
+				Detail: "unconsumed expired write receipt",
+				Action: "would_delete",
+			})
+		} else {
+			_, _ = db.ExecContext(ctx, "DELETE FROM write_receipts WHERE receipt_id = ?", id)
+			items = append(items, CleanupItem{
+				Target: TargetStaleReceipt,
+				ID:     id,
+				Detail: "unconsumed expired write receipt",
+				Action: "deleted",
+			})
+		}
+	}
+
+	return items, nil
+}
+
+// 6. Closed PR branches sweep
+func sweepClosedPRBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	closedBranches, err := cfg.GitRunner.ClosedPRBranches(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, nil
+	}
+
+	var items []CleanupItem
+	for _, branch := range closedBranches {
+		if branch == "main" || branch == "master" {
+			continue
+		}
+
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetClosedPRBranch,
+				ID:     branch,
+				Detail: "branch from closed GitHub pull request",
+				Action: "would_delete",
+			})
+		} else {
+			delErr := cfg.GitRunner.DeleteBranch(ctx, cfg.RepoDir, branch, true)
+			action := "deleted"
+			var errStr string
+			if delErr != nil {
+				action = "skipped"
+				errStr = delErr.Error()
+			}
+			items = append(items, CleanupItem{
+				Target: TargetClosedPRBranch,
+				ID:     branch,
+				Detail: "branch from closed GitHub pull request",
+				Action: action,
+				Error:  errStr,
+			})
+		}
+	}
+
+	return items, nil
+}
+
+// 7. Old local tags sweep
+func sweepOldTags(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	localTags, err := cfg.GitRunner.LocalTags(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	remoteTags, err := cfg.GitRunner.RemoteTags(ctx, cfg.RepoDir)
+	if err != nil {
+		remoteTags = []string{}
+	}
+
+	remoteMap := make(map[string]bool)
+	for _, t := range remoteTags {
+		remoteMap[t] = true
+	}
+
+	now := cfg.Clock()
+	threshold := 30 * 24 * time.Hour
+
+	var items []CleanupItem
+	for _, tag := range localTags {
+		if remoteMap[tag.Name] {
+			continue
+		}
+		if !tag.Date.IsZero() && now.Sub(tag.Date) > threshold {
+			if cfg.DryRun {
+				items = append(items, CleanupItem{
+					Target: TargetOldTag,
+					ID:     tag.Name,
+					Detail: fmt.Sprintf("local tag created %s ago (>30d), not on remote", now.Sub(tag.Date).Round(24*time.Hour)),
+					Action: "would_delete",
+				})
+			} else {
+				delErr := cfg.GitRunner.DeleteTag(ctx, cfg.RepoDir, tag.Name)
+				action := "deleted"
+				var errStr string
+				if delErr != nil {
+					action = "skipped"
+					errStr = delErr.Error()
+				}
+				items = append(items, CleanupItem{
+					Target: TargetOldTag,
+					ID:     tag.Name,
+					Detail: fmt.Sprintf("local tag created %s ago (>30d), not on remote", now.Sub(tag.Date).Round(24*time.Hour)),
+					Action: action,
+					Error:  errStr,
+				})
+			}
+		}
+	}
+
+	return items, nil
+}
