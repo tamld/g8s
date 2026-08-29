@@ -67,7 +67,7 @@ nfpms:
       - rpm
       - apk
 
-brews:
+homebrew_casks:
   - repository:
       owner: tamld
       name: homebrew-tap
@@ -79,5 +79,3 @@ brews:
     homepage: "https://github.com/tamld/g8s"
     description: "Zero-CGO pure-Go harness orchestrating AI subagents"
     license: "MIT"
-    casks:
-      - g8s
