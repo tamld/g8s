@@ -152,11 +152,11 @@ func runMCPServer() {
 
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	receipts, err := receipt.NewReceiptManager(dbPath, nil)
 	failIf(err)
-	defer func() { _ = receipts.Close() }()
+	defer receipts.Close()
 
 	registry := provider.NewRegistry(provider.DefaultConfigs(), nil, nil)
 	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry)
@@ -204,7 +204,7 @@ func runSubmit(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	payloadMap := map[string]any{
 		"prompt":     *prompt,
@@ -256,7 +256,7 @@ func runGet(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	task, err := store.GetTask(context.Background(), args[0])
 	failIf(err)
@@ -285,7 +285,7 @@ func runResume(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	var resumedPayload json.RawMessage
 	if *prompt != "" {
@@ -316,7 +316,7 @@ func runTasks(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	filter := controlplane.TaskFilter{Limit: *limit}
 	if *state != "" {
@@ -341,7 +341,7 @@ func runLineage(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	lineage, err := store.GetTaskLineage(context.Background(), args[0])
 	failIf(err)
@@ -364,7 +364,7 @@ func runChildren(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	children, err := store.ListChildTasks(context.Background(), args[0])
 	failIf(err)
@@ -395,7 +395,7 @@ func runReceipt(args []string) {
 	failIf(err)
 	receipts, err := receipt.NewReceiptManager(dbPath, nil)
 	failIf(err)
-	defer func() { _ = receipts.Close() }()
+	defer receipts.Close()
 
 	rc, err := receipts.IssueReceipt(*issuer, paths, time.Duration(*ttlSeconds)*time.Second)
 	failIf(err)
@@ -687,7 +687,7 @@ func runVault(args []string) {
 	failIf(err)
 	v, err := vault.NewVault(dbPath, nil)
 	failIf(err)
-	defer func() { _ = v.Close() }()
+	defer v.Close()
 
 	ctx := context.Background()
 

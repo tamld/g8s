@@ -1,0 +1,37 @@
+// Functions and methods whose returned errors are intentionally ignored.
+// Close on read-only resources, Rollback after committed transactions,
+// and best-effort cleanup are universally safe to ignore per Go convention.
+
+// database/sql — rows, connections, and transactions
+(*database/sql.Rows).Close
+(*database/sql.DB).Close
+(*database/sql.Conn).Close
+(*database/sql.Tx).Rollback
+
+// g8s control-plane store
+(*github.com/tamld/g8s/internal/controlplane.Store).Close
+
+// g8s receipt store
+(*github.com/tamld/g8s/internal/receipt.Manager).Close
+
+// g8s vault
+(*github.com/tamld/g8s/internal/vault.Vault).Close
+
+// net/http — response body (io.ReadCloser)
+(io.ReadCloser).Close
+(io.Closer).Close
+
+// os — best-effort file cleanup and close
+(*os.File).Close
+os.Remove
+
+// io — generic closers
+io.Closer.Close
+
+// fmt — stdout/stderr writes
+fmt.Fprintf
+fmt.Fprintln
+fmt.Println
+
+// pterm — terminal rendering
+(github.com/pterm/pterm.TablePrinter).Render

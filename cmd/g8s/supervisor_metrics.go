@@ -49,7 +49,7 @@ func runSupervisorMetrics(args []string) {
 	failIf(err)
 	store, err := controlplane.NewControlPlane(dbPath, nil)
 	failIf(err)
-	defer func() { _ = store.Close() }()
+	defer store.Close()
 
 	executeSupervisorMetrics(*taskID, *aggregate, *jsonMode, store)
 }

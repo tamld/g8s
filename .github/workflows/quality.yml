@@ -72,14 +72,10 @@ jobs:
 
       - name: errcheck (no silent error swallow)
         run: |
-          # TODO(#95): re-enable errcheck after replacing the defer-Close
-          # pattern with a typed wrapper that propagates Close errors
-          # through a process-wide fallback log. The current 'defer
-          # func() { _ = store.Close() }()' shape is a Constitution
-          # Axiom 5 violation (silent error swallow) but a wholesale
-          # rewrite of all CLI subcommands is out of scope for T020.
-          echo "::warning::errcheck disabled pending #95 (DEBT-23)"
-          exit 0
+          # Exclude file lists standard Go patterns (defer Close, Rollback,
+          # Remove) that are universally safe to ignore.
+          errcheck -exclude .errcheck_excludes -ignoretests \
+            $(go list ./... | grep -v internal/supervisor)
 
       - name: gosec (security smells)
         run: |
