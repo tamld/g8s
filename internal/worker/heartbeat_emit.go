@@ -20,7 +20,7 @@ import (
 type EmitterOptions struct {
 	Binary       string
 	CommandLine  string
-	Status       string // running | idle | finished | failed
+	Status       string        // running | idle | finished | failed
 	PollInterval time.Duration // default 30s
 	Metadata     map[string]string
 
