@@ -65,26 +65,29 @@ jobs:
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
           LOG_SNIPPET=$(tail -n 40 /tmp/dogfood-audit.log 2>/dev/null || echo "No log captured")
+          cat << EOF > /tmp/issue-body.md
+          ### Dogfood Failure Report
+
+          **Workflow Run**: [\${{ github.run_id }}](${RUN_URL})
+          **Trigger**: \`\${{ github.event_name }}\`
+          **Commit**: \`\${{ github.sha }}\`
+          **Timestamp**: \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\`
+
+          #### Log Output
+          \`\`\`text
+          ${LOG_SNIPPET}
+          \`\`\`
+
+          #### Immediate Actions
+          1. Inspect the full workflow run logs: [View Run](${RUN_URL})
+          2. Reproduce locally: \`g8s self-audit\` or \`bash tools/dogfood_report.sh\`
+          3. Verify SQLite state integrity and recent changes in \`internal/brief\` or \`cmd/g8s\`.
+          EOF
+
           gh issue create \
             --title "🚨 [Dogfood Alert] Weekly self-dogfood audit failed (Run #${{ github.run_id }})" \
-            --body "### Dogfood Failure Report
-            
-**Workflow Run**: [${{ github.run_id }}](${RUN_URL})
-**Trigger**: \`${{ github.event_name }}\`
-**Commit**: \`${{ github.sha }}\`
-**Timestamp**: \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\`
-
-#### Log Output
-\`\`\`text
-${LOG_SNIPPET}
-\`\`\`
-
-#### Immediate Actions
-1. Inspect the full workflow run logs: [View Run](${RUN_URL})
-2. Reproduce locally: \`g8s self-audit\` or \`bash tools/dogfood_report.sh\`
-3. Verify SQLite state integrity and recent changes in \`internal/brief\` or \`cmd/g8s\`." \
+            --body-file /tmp/issue-body.md \
             --label "bug" || {
-              # Fallback if label 'bug' does not exist
               gh issue create \
                 --title "🚨 [Dogfood Alert] Weekly self-dogfood audit failed (Run #${{ github.run_id }})" \
                 --body "Dogfood audit failed in workflow run: ${RUN_URL}"
