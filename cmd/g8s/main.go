@@ -105,7 +105,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
 			os.Exit(2)
 		}
-		case "orchestrate":
+	case "orchestrate":
 		runOrchestrate(os.Args[2:])
 	case "orchestrate-aic":
 		runOrchestrateAIC(os.Args[2:])
