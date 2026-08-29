@@ -119,6 +119,8 @@ func main() {
 		runCleanupWorktrees(os.Args[2:])
 	case "cleanup":
 		runCleanup(os.Args[2:])
+	case "status":
+		runStatus(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -859,6 +861,7 @@ func printUsage() {
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
 	fmt.Println("  cleanup-worktrees Clean up stale agy subagent git worktrees (g8s cleanup-worktrees --older-than 1h [--dry-run])")
 	fmt.Println("  cleanup      Run lifecycle sweep for ghost processes, orphan worktrees, branches, tags, receipts")
+	fmt.Println("  status       Display worker heartbeat and lifecycle observability status (--worker)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
