@@ -29,7 +29,6 @@ func withTempDB(t *testing.T) string {
 	return dbPath
 }
 
-
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	oldStdout := os.Stdout
