@@ -176,10 +176,17 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 		}
 	}
 
+	registry := opts.Registry
+	if registry == nil && opts.Pool != nil {
+		reg := orchestrator.NewRegistry()
+		reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
+		registry = reg
+	}
+
 	var receipts []orchestrator.Receipt
-	if opts.Registry != nil && opts.Pool != nil {
+	if registry != nil && opts.Pool != nil {
 		fanReceipts, fanErr := orchestrator.FanOut(ctx, plan, orchestrator.FanOutOptions{
-			Registry:    opts.Registry,
+			Registry:    registry,
 			Pool:        opts.Pool,
 			MaxParallel: len(plan),
 		})
@@ -337,12 +344,16 @@ func runOrchestrate(args []string) {
 		if poolErr == nil {
 			pool = p
 		}
+		worker := orchestratorWorkerCtor()
+		reg := orchestrator.NewRegistry()
+		reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
+
 		opts := orchestrateOptions{
 			Store:         store,
-			Worker:        orchestratorWorkerCtor(),
+			Worker:        worker,
 			Reviewer:      supervisor.NewStubReviewer(),
 			Pool:          pool,
-			Registry:      orchestrator.DefaultRegistry(),
+			Registry:      reg,
 			MaxAttempts:   *maxAttempts,
 			MaxApproaches: *maxApproaches,
 			Timeout:       *timeout,
