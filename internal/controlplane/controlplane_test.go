@@ -61,7 +61,7 @@ func TestFreshDatabaseSchemaExact(t *testing.T) {
 		t.Fatalf("iterate sqlite_master: %v", err)
 	}
 
-	for _, want := range []string{"tasks", "task_events", "idx_tasks_claim", "idx_task_events_task", "idx_tasks_orchestrator_iter"} {
+	for _, want := range []string{"tasks", "task_events", "idx_tasks_claim", "idx_task_events_task", "idx_tasks_orchestrator_iter", "briefs"} {
 		if _, ok := objects[want]; !ok {
 			t.Errorf("missing object %q in schema", want)
 		}
@@ -183,7 +183,7 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
-	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 5") {
+	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 6") {
 		t.Errorf("error mismatch: %v", err)
 	}
 }

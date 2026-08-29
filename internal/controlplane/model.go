@@ -34,11 +34,28 @@ import (
 //	v5 (DELTA-17 receipt lake wiring): adds orchestrator_id, worktree_id,
 //	    worker_name, iter columns and idx_tasks_orchestrator_iter index to
 //	    tasks table for evidence lake correlation.
-const SchemaVersion = 5
+//	v6 (DEBT-XX brief-issue & brief-consume): adds briefs table for
+//	    structured dispatch contracts and audit trail.
+const SchemaVersion = 6
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
 var ErrUnknownSupervisorTask = errors.New("controlplane: unknown supervisor task")
+
+// ErrUnknownBrief is returned when GetBrief or UpdateBriefStatus address a brief id that does not exist.
+var ErrUnknownBrief = errors.New("controlplane: unknown brief")
+
+// BriefRow is the durable row stored in the briefs table.
+type BriefRow struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	PayloadMD string    `json:"payload_md"`
+	DodMD     string    `json:"dod_md"`
+	IssuedBy  string    `json:"issued_by"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Status    string    `json:"status"`
+}
 
 // SupervisorTaskRow is the durable row written when a supervisor run starts
 // and updated when it ends. EnvelopeJSON holds the serialized TaskEnvelope
