@@ -439,7 +439,7 @@ func runDoctor(args []string) {
 	var td pterm.TableData
 	td = append(td, []string{"Check", "Status", "Message", "Details"})
 	for _, chk := range report.Checks {
-		statusStr := chk.Status
+		var statusStr string
 		switch chk.Status {
 		case "OK":
 			statusStr = pterm.Green(chk.Status)

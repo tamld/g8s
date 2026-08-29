@@ -808,7 +808,7 @@ func TestCancelRunningTaskRequestsCooperativeStop(t *testing.T) {
 
 func TestPauseValidatesStateOwnershipAndRedacts(t *testing.T) {
 	s, _ := newTestStore(t)
-	task := mustSubmit(t, s, submitReq("pause-evidence"))
+	_ = mustSubmit(t, s, submitReq("pause-evidence"))
 	task, token := mustClaimStart(t, s, "worker-1")
 
 	if _, err := s.PauseTask(task.TaskID, "worker-1", token, "FAILED", nil, "nope"); err == nil ||

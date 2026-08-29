@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -198,21 +197,5 @@ func (h *agyHandle) StdoutStream() interface {
 	Read(p []byte) (int, error)
 	Close() error
 } {
-	return nil
-}
-
-// execProbe returns nil if the binary runs. Kept for tests injecting a
-// fake availability probe.
-func execProbe(bin string) error {
-	if bin == "" {
-		return errors.New("empty binary path")
-	}
-	cmd := exec.Command(bin, "--version")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", strings.TrimSpace(out.String()), err)
-	}
 	return nil
 }

@@ -63,10 +63,6 @@ func TestExitCodeOf(t *testing.T) {
 	}
 }
 
-type fakeErrExit int
-
-func (e fakeErrExit) Error() string { return "fake err" }
-
 func TestExitCodeOfNonNil(t *testing.T) {
 	if got := exitCodeOf(assertErr("plain error")); got != -1 {
 		t.Errorf("expected -1 for non-exit-error, got %d", got)

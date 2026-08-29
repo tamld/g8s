@@ -321,12 +321,6 @@ func rollbackInit(conn *sql.Conn) {
 	_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 }
 
-// appendEvent inserts one immutable event row inside the caller's open
-// transaction. details may be nil; it is stored canonically as "{}".
-func (s *Store) appendEvent(tx *sql.Tx, taskID string, eventType string, actor string, details any, ts float64) error {
-	return insertTaskEvent(tx, taskID, eventType, actor, details, ts)
-}
-
 // insertTaskEvent is the package-level event writer shared by helpers that
 // operate on a bare *sql.Tx without a Store receiver.
 func insertTaskEvent(tx *sql.Tx, taskID string, eventType string, actor string, details any, ts float64) error {
