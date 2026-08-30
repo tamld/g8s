@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
 var (
@@ -17,6 +19,8 @@ var (
 
 // AllowedConfigKeys defines the valid configuration keys and their description.
 var AllowedConfigKeys = map[string]string{
+	"data_dir":        "Directory for g8s database and persistent storage",
+	"scope":           "Installation and execution scope (user or system)",
 	"evidence_dir":    "Centralized directory for exported task execution receipts and logs",
 	"default_timeout": "Default maximum execution duration for submitted tasks (e.g. 60s, 5m)",
 	"default_model":   "Default target model for dispatch executions",
@@ -26,6 +30,8 @@ var AllowedConfigKeys = map[string]string{
 
 // Config represents the loaded configuration values.
 type Config struct {
+	DataDir        string `json:"data_dir,omitempty"`
+	Scope          string `json:"scope,omitempty"`
 	EvidenceDir    string `json:"evidence_dir,omitempty"`
 	DefaultTimeout string `json:"default_timeout,omitempty"`
 	DefaultModel   string `json:"default_model,omitempty"`
@@ -43,14 +49,7 @@ type Manager struct {
 // NewManager initializes a configuration manager backed by the given configPath.
 func NewManager(configPath string) (*Manager, error) {
 	if configPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve user home: %w", err)
-		}
-		configDir := filepath.Join(home, ".config", "g8s")
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-			configDir = filepath.Join(xdg, "g8s")
-		}
+		configDir := pathutil.DefaultConfigDir()
 		configPath = filepath.Join(configDir, "config.json")
 	}
 
@@ -87,13 +86,27 @@ func (m *Manager) load() error {
 	return nil
 }
 
-// Get returns the value associated with key.
+// Get returns the value associated with key. If unset, canonical defaults for data_dir,
+// scope, and evidence_dir are resolved automatically.
 func (m *Manager) Get(key string) (any, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	val, ok := m.values[key]
-	return val, ok
+	if ok && val != nil {
+		return val, true
+	}
+
+	switch key {
+	case "data_dir":
+		return pathutil.DefaultDataDir(), true
+	case "scope":
+		return pathutil.ScopeUser, true
+	case "evidence_dir":
+		return pathutil.DefaultEvidenceDir(), true
+	default:
+		return nil, false
+	}
 }
 
 // List returns a copy of all active configuration keys and values.

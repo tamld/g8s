@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
 func TestReportErrorWritesToConfiguredWriter(t *testing.T) {
@@ -36,16 +38,11 @@ func TestDatabasePathHonorsEnvOverride(t *testing.T) {
 func TestDatabasePathDefaultsToHomeStateDirectory(t *testing.T) {
 	t.Setenv("G8S_DB", "")
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("os.UserHomeDir unavailable in this environment: %v", err)
-	}
-
 	got, err := databasePath()
 	if err != nil {
 		t.Fatalf("databasePath() error = %v", err)
 	}
-	want := filepath.Join(home, ".local", "state", "g8s", "g8s.db")
+	want := pathutil.DefaultDatabasePath()
 	if got != want {
 		t.Fatalf("databasePath() = %q, want %q", got, want)
 	}
@@ -102,7 +99,7 @@ func TestPrintUsageMentionsEveryLiveCommand(t *testing.T) {
 		"receipt", "doctor", "init", "config", "completion", "service",
 		"analyze", "vault", "worker", "mcp", "roles", "permissions",
 		"version", "orchestrate", "orchestrate-aic", "supervisor-metrics",
-		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "status",
+		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "migrate", "status",
 	}
 	for _, cmd := range commands {
 		if !strings.Contains(usage, cmd) {
