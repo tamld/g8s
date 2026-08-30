@@ -1,0 +1,52 @@
+name: Windows E2E
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Windows E2E Verification
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build g8s binary
+        run: go build -o g8s.exe ./cmd/g8s
+
+      - name: Run Windows Test Suite
+        run: go test -count=1 -tags=windows ./...
+        env:
+          CGO_ENABLED: '0'
+
+      - name: Verify PATH and CLI Execution
+        shell: pwsh
+        run: |
+          $installDir = "$env:LOCALAPPDATA\Programs\g8s\bin"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          Copy-Item -Path .\g8s.exe -Destination "$installDir\g8s.exe"
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          
+          # Test execution
+          .\g8s.exe version
+          .\g8s.exe doctor
+          .\g8s.exe cleanup --dry-run
+          .\g8s.exe config get data_dir
+
+      - name: Upload Logs on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-e2e-logs
+          path: |
+            *.log
+            .cleanup-audit.jsonl
