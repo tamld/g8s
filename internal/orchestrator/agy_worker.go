@@ -3,13 +3,17 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/harness"
 )
 
 // AgyWorker wraps the agy CLI behind the Worker interface. AGY is the
@@ -135,12 +139,25 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		timeout = 5 * time.Minute
 	}
 
+	var dirs []string
+	if t.Worktree.Path != "" {
+		dirs = []string{t.Worktree.Path}
+	}
+	if err := harness.ValidateRequest(t.Prompt, role, perm, dirs, perm == "automation_read", t.ReceiptID); err != nil {
+		return nil, fmt.Errorf("harness validation failed: %w", err)
+	}
+
+	contractPrompt, err := harness.BuildContractPromptWithReceipt(t.Prompt, role, perm, t.AllowedFiles, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build contract prompt: %w", err)
+	}
+
 	argv := dispatch.BuildCommand(dispatch.CommandOptions{
 		Binary:          w.binary,
-		Prompt:          t.Prompt,
+		Prompt:          contractPrompt,
 		Model:           model,
 		Timeout:         timeout.String(),
-		AddDirs:         []string{t.Worktree.Path},
+		AddDirs:         dirs,
 		SkipPermissions: perm == "automation_read",
 		NoSandbox:       perm == "workspace_write",
 		Home:            "",
@@ -199,6 +216,12 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	}
 	h.mu.Unlock()
 
+	var cancel context.CancelFunc
+	if h.timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+	}
+
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- h.cmd.Wait() }()
 
@@ -207,16 +230,21 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	case runErr = <-waitCh:
 	case <-ctx.Done():
 		_ = h.Cancel(context.Background())
-		runErr = ErrWorkerTimeout
+		<-waitCh
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			runErr = ErrWorkerTimeout
+		} else {
+			runErr = ErrWorkerCancelled
+		}
 	}
 
 	h.mu.Lock()
 	h.done = true
 	switch {
+	case errors.Is(runErr, ErrWorkerTimeout) || errors.Is(runErr, context.DeadlineExceeded):
+		h.waitErr = ErrWorkerTimeout
 	case h.cancelled:
 		h.waitErr = ErrWorkerCancelled
-	case errors.Is(runErr, context.DeadlineExceeded):
-		h.waitErr = ErrWorkerTimeout
 	default:
 		h.waitErr = runErr
 	}
@@ -236,6 +264,20 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 			err = fmt.Errorf("agy hook post-wait: %w", hookErr)
 		}
 	}
+
+	outPath := h.task.OutPath
+	if outPath == "" && h.task.ID != "" {
+		outPath = filepath.Join(".g8s", "receipts", fmt.Sprintf("%s.json", h.task.ID))
+	}
+	if outPath != "" {
+		if dir := filepath.Dir(outPath); dir != "" {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+		if data, err := json.MarshalIndent(receipt, "", "  "); err == nil {
+			_ = os.WriteFile(outPath, data, 0o600)
+		}
+	}
+
 	return receipt, err
 }
 
@@ -249,7 +291,7 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 		Stderr:          h.stderr.String(),
 		StartedAt:       h.startedAt,
 		FinishedAt:      h.clock(),
-		DurationSeconds: time.Since(h.startedAt).Seconds(),
+		DurationSeconds: h.clock().Sub(h.startedAt).Seconds(),
 	}
 
 	// Reject success theater if stdout is an error envelope
