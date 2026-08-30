@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Onboarding docs**: explicit guidance to pin g8s to a release
+  tag, not the local build, to avoid stale-binary drift (aegis
+  agent on 2026-08-30 reported 4 BUGs that were already fixed
+  in main but not yet in a release).
+
 ## [0.5.0] - 2026-08-30
 
 ### Added
