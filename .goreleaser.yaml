@@ -75,7 +75,6 @@ nfpms:
       - deb
       - rpm
       - apk
-      - msi
 
 homebrew_casks:
   - repository:
