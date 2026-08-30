@@ -72,14 +72,31 @@
 
 ## 📦 Quickstart
 
-### 1. Build from Source
+### 1. Windows Installation (NSIS Wizard / MSI / Portable ZIP)
+
+For Windows 10/11 x64 systems, pre-built packages are available on the [Releases](https://github.com/tamld/g8s/releases) page:
+
+* **NSIS Setup Wizard (`.exe`)**: GUI installer with automatic PATH setup, Start Menu shortcuts, and uninstaller.
+  ```cmd
+  :: Interactive or Silent Install
+  g8s_0.4.0_windows_amd64_installer.exe /S
+  ```
+* **Enterprise MSI (`.msi`)**: Corporate deployment package with GPO/SCCM/Intune support.
+  ```powershell
+  msiexec /i g8s_0.4.0_windows_amd64.msi /qn
+  ```
+* **Portable Standalone (`.zip`)**: Extract `g8s.exe` anywhere and run without administrator privileges.
+
+> 📖 For full setup instructions, silent options, and PATH troubleshooting, see the [Windows Installation Guide](docs/WINDOWS_INSTALL.md).
+
+### 2. Build from Source
 ```bash
 git clone https://github.com/tamld/g8s.git
 cd g8s
 go build -o bin/g8s ./cmd/g8s
 ```
 
-### 2. Submit a Read-Only Scout Task
+### 3. Submit a Read-Only Scout Task
 ```bash
 g8s submit \
   --idempotency-key scout-1 \
@@ -92,7 +109,7 @@ g8s submit \
 ```
 Workers claim queued tasks automatically; poll with `g8s get <task-id>`.
 
-### 3. Issue a Write Receipt (Brain-Only)
+### 4. Issue a Write Receipt (Brain-Only)
 ```bash
 g8s receipt-issue \
   -issuer "opus-session-01" \
@@ -103,7 +120,7 @@ The command prints a JSON receipt envelope (`receipt_id`, `allowed_paths`,
 `expires_at`). Pass the receipt fields to the worker payload so it can consume
 the receipt exactly once during its delegated-write run.
 
-### 4. Run a Delegated-Write Worker Task
+### 5. Run a Delegated-Write Worker Task
 Submit the task with `workspace_write` and embed the issued receipt in the
 worker payload; the worker validates and consumes it exactly once at runtime.
 
@@ -121,20 +138,20 @@ g8s submit \
 > Note: receipts cannot be carried through the MCP surface — they are consumed
 > by workers directly against the control plane.
 
-### 5. Orchestrate an Intent via Supervisor Fix Loop
+### 6. Orchestrate an Intent via Supervisor Fix Loop
 ```bash
 g8s orchestrate "Refactor auth middleware to use pure-Go context tokens" \
   --max-iterations 3 \
   --actor "brain-supervisor"
 ```
 
-### 6. Monitor Worker Heartbeat & Process Status
+### 7. Monitor Worker Heartbeat & Process Status
 ```bash
 # Check real-time heartbeat and worker liveness across active sessions
 g8s status --worker --json
 ```
 
-### 7. Run Lifecycle & Orphan Resource Cleanup
+### 8. Run Lifecycle & Orphan Resource Cleanup
 ```bash
 # Inspect and purge ghost worker processes, orphan worktrees, and stale artifacts
 g8s cleanup --dry-run
@@ -176,6 +193,7 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 ### User Guide & Integrations
 
 - [Quick Start](docs/quickstart.md) — zero to first delegated task.
+- [Windows Installation Guide](docs/WINDOWS_INSTALL.md) — NSIS setup wizard, enterprise MSI, and PATH troubleshooting.
 - [Operations Runbook](docs/OPERATIONS.md) — complete command matrix, maintenance, and daemon runbooks.
 - [Security & Verification Guide](docs/security/VERIFICATION_GUIDE.md) — checksum, pure-Go, and Cosign verification.
 - [CLI Reference](docs/user-guide/cli-reference.md) — every subcommand and flag.
