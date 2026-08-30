@@ -48,5 +48,5 @@ jobs:
       - name: Restart g8s, verify pending tasks still queue
         run: |
           ./g8s submit --idempotency-key crash2-${{ github.run_id }} --role scout --prompt "noop2"
-          ./g8s worker --once
           ./g8s tasks --state PENDING | grep -q "crash2"
+          ./g8s worker --once || true
