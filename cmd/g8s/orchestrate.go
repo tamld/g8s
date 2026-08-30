@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/supervisor"
@@ -282,11 +282,12 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 // it parses the natural language intent into collector sub-tasks and runs
 // them via FanOut.
 func runOrchestrate(args []string) {
-	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
+	fs := flag.NewFlagSet("orchestrate", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
 	briefFile := fs.String("brief-file", "", "path to brief markdown file to issue and dispatch")
 	dispatchID := fs.String("dispatch", "", "stored brief ID to re-issue and dispatch")
-	issuedBy := fs.String("issued-by", "sisyphus", "issuer identity for brief")
+	issuedBy := fs.String("issued-by", "", "issuer identity for brief (defaults to --actor)")
 	ttlStr := fs.String("ttl", "2h", "time-to-live duration for brief (e.g. 2h, 30m)")
 	title := fs.String("title", "", "optional title for brief (overrides title in file)")
 	dod := fs.String("dod", "", "optional DoD for brief (overrides DoD in file)")
@@ -301,60 +302,78 @@ func runOrchestrate(args []string) {
 	maxApproaches := fs.Int("max-approaches", 3, "approach budget before escalation")
 	timeout := fs.Duration("timeout", 5*time.Minute, "per-attempt execution window")
 	autoCleanup := fs.Bool("auto-cleanup", true, "automatically clean up orphan worktrees and dirs after run")
-	jsonMode := fs.Bool("json", true, "emit machine-readable JSON (default true for this command)")
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("orchestrate", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	var jsonExplicit bool
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "json" {
+		if f.Name == "json" || f.Name == "jsonl" {
 			jsonExplicit = true
 		}
 	})
 
 	if !*selfTest && *fromIntent == "" && *fromFile == "" && *briefFile == "" && *dispatchID == "" {
-		fmt.Fprintln(os.Stderr, "usage: g8s orchestrate [--brief-file <path> | --dispatch <id> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]")
-		os.Exit(2)
+		exitUsage("orchestrate", "", *traceID, "usage: g8s orchestrate [--brief-file <path> | --dispatch <id> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]", "", *jsonl)
 	}
 
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("orchestrate", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("orchestrate", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
+	effectiveIssuer := *issuedBy
+	if effectiveIssuer == "" {
+		effectiveIssuer = *actor
+	}
+	if effectiveIssuer == "" {
+		effectiveIssuer = "sisyphus"
+	}
+
 	if *briefFile != "" {
-		_, err := executeOrchestrateBriefFile(os.Stdout, store, *briefFile, *issuedBy, *ttlStr, *title, *dod, jsonExplicit && *jsonMode)
-		failIf(err)
+		_, err := executeOrchestrateBriefFile(os.Stdout, store, *briefFile, effectiveIssuer, *ttlStr, *title, *dod, jsonExplicit && (*jsonMode || *jsonl), *traceID, *jsonl)
+		if err != nil {
+			exitRuntime("orchestrate", "brief-file", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
 		return
 	}
 
 	if *dispatchID != "" {
-		_, err := executeOrchestrateDispatch(os.Stdout, store, *dispatchID, *issuedBy, *ttlStr, jsonExplicit && *jsonMode)
-		failIf(err)
+		_, err := executeOrchestrateDispatch(os.Stdout, store, *dispatchID, effectiveIssuer, *ttlStr, jsonExplicit && (*jsonMode || *jsonl), *traceID, *jsonl)
+		if err != nil {
+			exitRuntime("orchestrate", "dispatch", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
 		return
 	}
 
 	var intentText string
 	if *fromFile != "" {
 		raw, err := os.ReadFile(*fromFile)
-		failIf(err)
+		if err != nil {
+			exitRuntime("orchestrate", "from-file", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 		intentText = strings.TrimSpace(string(raw))
 		if intentText == "" {
-			fmt.Fprintln(os.Stderr, "usage: g8s orchestrate: empty intent from file")
-			os.Exit(2)
+			exitUsage("orchestrate", "from-file", *traceID, "usage: g8s orchestrate: empty intent from file", "", *jsonl)
 		}
 	} else if *fromIntent != "" {
 		intentText = strings.TrimSpace(*fromIntent)
 		if intentText == "" {
-			fmt.Fprintln(os.Stderr, "usage: g8s orchestrate: empty intent")
-			os.Exit(2)
+			exitUsage("orchestrate", "from-intent", *traceID, "usage: g8s orchestrate: empty intent", "", *jsonl)
 		}
 	}
 
 	cwd, err := os.Getwd()
-	failIf(err)
+	if err != nil {
+		exitRuntime("orchestrate", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	dirs := []string(addDirs)
 	if len(dirs) == 0 {
 		dirs = []string{cwd}
@@ -394,10 +413,11 @@ func runOrchestrate(args []string) {
 			AutoCleanup:   *autoCleanup,
 		}
 		res, err := executeOrchestration(context.Background(), intentText, opts)
-		failIf(err)
+		if err != nil {
+			exitRuntime("orchestrate", "intent", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
 		out = res
 	} else {
-		// Self-test legacy mode
 		sup := supervisor.NewSelfTestSupervisor(store, orchestratorWorkerCtor(), supervisor.NewStubReviewer())
 		sup.Config.MaxAttemptsPerApproach = *maxAttempts
 		sup.Config.MaxApproaches = *maxApproaches
@@ -418,7 +438,9 @@ func runOrchestrate(args []string) {
 		}
 
 		res, runErr := sup.Run(context.Background(), req)
-		failIf(runErr)
+		if runErr != nil {
+			exitRuntime("orchestrate", "self-test", *traceID, cli.CodeRuntime, runErr, "", *jsonl)
+		}
 
 		out = orchestrateResultJSON{
 			SupervisorTaskID: res.SupervisorTaskID,
@@ -431,10 +453,12 @@ func runOrchestrate(args []string) {
 		}
 	}
 
-	if *jsonMode {
-		encoded, encErr := json.MarshalIndent(out, "", "  ")
-		failIf(encErr)
-		fmt.Println(string(encoded))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("orchestrate_result", "orchestrate", "", out)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("orchestrate", "", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 		return
 	}
 

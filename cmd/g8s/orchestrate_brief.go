@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/brief"
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 )
 
@@ -72,7 +72,21 @@ func executeOrchestrateBriefFile(
 	store *controlplane.Store,
 	filePath, issuedBy, ttlStr, titleOverride, dodOverride string,
 	emitJSON bool,
+	extra ...any,
 ) (brief.Brief, error) {
+	traceID := cli.GenerateTraceID()
+	jsonl := false
+	if len(extra) > 0 {
+		if t, ok := extra[0].(string); ok && t != "" {
+			traceID = t
+		}
+	}
+	if len(extra) > 1 {
+		if j, ok := extra[1].(bool); ok {
+			jsonl = j
+		}
+	}
+
 	if strings.TrimSpace(filePath) == "" {
 		return brief.Brief{}, errors.New("orchestrate: brief-file path is required")
 	}
@@ -112,12 +126,12 @@ func executeOrchestrateBriefFile(
 		return brief.Brief{}, fmt.Errorf("orchestrate: issue brief: %w", err)
 	}
 
-	if emitJSON {
-		out, err := json.MarshalIndent(b, "", "  ")
-		if err != nil {
+	if emitJSON || jsonl {
+		env := cli.NewEnvelope("brief", "orchestrate", "brief-file", b)
+		env.TraceID = traceID
+		if err := cli.WriteResponse(w, env, jsonl); err != nil {
 			return brief.Brief{}, fmt.Errorf("orchestrate: marshal brief json: %w", err)
 		}
-		fmt.Fprintln(w, string(out))
 	} else {
 		fmt.Fprintln(w, b.ID)
 	}
@@ -132,7 +146,21 @@ func executeOrchestrateDispatch(
 	store *controlplane.Store,
 	dispatchID, issuedBy, ttlStr string,
 	emitJSON bool,
+	extra ...any,
 ) (brief.Brief, error) {
+	traceID := cli.GenerateTraceID()
+	jsonl := false
+	if len(extra) > 0 {
+		if t, ok := extra[0].(string); ok && t != "" {
+			traceID = t
+		}
+	}
+	if len(extra) > 1 {
+		if j, ok := extra[1].(bool); ok {
+			jsonl = j
+		}
+	}
+
 	if strings.TrimSpace(dispatchID) == "" {
 		return brief.Brief{}, errors.New("orchestrate: dispatch brief id is required")
 	}
@@ -168,12 +196,12 @@ func executeOrchestrateDispatch(
 		return brief.Brief{}, fmt.Errorf("orchestrate: re-issue brief: %w", err)
 	}
 
-	if emitJSON {
-		out, err := json.MarshalIndent(b, "", "  ")
-		if err != nil {
+	if emitJSON || jsonl {
+		env := cli.NewEnvelope("brief", "orchestrate", "dispatch", b)
+		env.TraceID = traceID
+		if err := cli.WriteResponse(w, env, jsonl); err != nil {
 			return brief.Brief{}, fmt.Errorf("orchestrate: marshal brief json: %w", err)
 		}
-		fmt.Fprintln(w, string(out))
 	} else {
 		fmt.Fprintln(w, b.ID)
 	}

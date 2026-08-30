@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/brief"
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 )
 
@@ -69,12 +70,21 @@ func TestBriefIssueAndConsumeE2E(t *testing.T) {
 	}
 
 	// Verify JSON shape printed to writer
-	var parsedIssue brief.Brief
-	if err := json.Unmarshal(issueBuf.Bytes(), &parsedIssue); err != nil {
+	var issueEnv struct {
+		V       int         `json:"v"`
+		Kind    string      `json:"kind"`
+		Command string      `json:"cmd"`
+		Data    brief.Brief `json:"data"`
+		TraceID string      `json:"trace_id"`
+	}
+	if err := json.Unmarshal(issueBuf.Bytes(), &issueEnv); err != nil {
 		t.Fatalf("unmarshal issued JSON: %v (raw: %s)", err, issueBuf.String())
 	}
-	if parsedIssue.ID != issuedBrief.ID || parsedIssue.Status != "active" {
-		t.Errorf("parsed JSON mismatch: %+v", parsedIssue)
+	if issueEnv.V != cli.CurrentEnvelopeVersion || issueEnv.Kind != "brief" || issueEnv.Command != "brief-issue" {
+		t.Errorf("unexpected envelope headers: %+v", issueEnv)
+	}
+	if issueEnv.Data.ID != issuedBrief.ID || issueEnv.Data.Status != "active" {
+		t.Errorf("parsed JSON mismatch: %+v", issueEnv.Data)
 	}
 
 	// 3. Consume brief via executeBriefConsume
@@ -92,12 +102,18 @@ func TestBriefIssueAndConsumeE2E(t *testing.T) {
 	}
 
 	// Verify JSON shape printed on consume
-	var parsedConsume brief.Brief
-	if err := json.Unmarshal(consumeBuf.Bytes(), &parsedConsume); err != nil {
+	var consumeEnv struct {
+		V       int         `json:"v"`
+		Kind    string      `json:"kind"`
+		Command string      `json:"cmd"`
+		Data    brief.Brief `json:"data"`
+		TraceID string      `json:"trace_id"`
+	}
+	if err := json.Unmarshal(consumeBuf.Bytes(), &consumeEnv); err != nil {
 		t.Fatalf("unmarshal consumed JSON: %v (raw: %s)", err, consumeBuf.String())
 	}
-	if parsedConsume.Status != "consumed" {
-		t.Errorf("parsed consume JSON status = %q, want 'consumed'", parsedConsume.Status)
+	if consumeEnv.Data.Status != "consumed" {
+		t.Errorf("parsed consume JSON status = %q, want 'consumed'", consumeEnv.Data.Status)
 	}
 
 	// 4. Subsequent consume should fail

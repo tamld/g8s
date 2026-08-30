@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Unified JSON Envelope v1** (`internal/cli`, Issue #120 / DEBT-30):
+  - Standardized `Envelope` schema with `v`, `kind`, `cmd`, `sub`, `data`, `error`, `trace_id`, and `at` across all 29 CLI subcommands.
+  - Correlation `trace_id` generation using UUID v7 (RFC 9562) with time ordering and v4 fallback.
+  - Common flag parser helper (`--actor`, `--trace-id`, `--jsonl`, `--json`) added across all subcommands.
+  - Single-line JSONL streaming mode (`--jsonl`) for streaming and log parsing pipelines.
+  - Standardized error envelopes on stdout with Feynman hints (`code`, `message`, `hint`, `cause`), using exit code 1 for runtime errors and 2 for usage errors.
+
 ## [0.1.0] - 2026-08-25
 
 ### Added

@@ -97,7 +97,14 @@ func TestPathFlagsAccumulatesRepeatedValuesInOrder(t *testing.T) {
 
 func TestPrintUsageMentionsEveryLiveCommand(t *testing.T) {
 	usage := captureUsage(t)
-	for _, cmd := range []string{"submit", "get", "resume", "tasks", "lineage", "children", "receipt", "doctor", "init", "config", "completion", "service", "analyze", "vault", "worker", "mcp", "roles", "permissions", "version", "brief-issue", "brief-consume", "cleanup-worktrees"} {
+	commands := []string{
+		"submit", "get", "resume", "tasks", "cancel", "lineage", "children",
+		"receipt", "doctor", "init", "config", "completion", "service",
+		"analyze", "vault", "worker", "mcp", "roles", "permissions",
+		"version", "orchestrate", "orchestrate-aic", "supervisor-metrics",
+		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "status",
+	}
+	for _, cmd := range commands {
 		if !strings.Contains(usage, cmd) {
 			t.Errorf("usage text missing live command %q", cmd)
 		}

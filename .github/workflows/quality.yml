@@ -201,7 +201,7 @@ jobs:
 
           printf 'Brief issue output:\n%s\n' "$ISSUE_OUT"
 
-          BRIEF_ID=$(printf '%s\n' "$ISSUE_OUT" | jq -r '.id // empty')
+          BRIEF_ID=$(printf '%s\n' "$ISSUE_OUT" | jq -r '.data.id // .id // empty')
           if [ -z "$BRIEF_ID" ] || [ "$BRIEF_ID" = "null" ]; then
             echo "::error::Failed to capture brief ID from brief-issue output"
             exit 1
@@ -212,7 +212,7 @@ jobs:
 
           printf 'Brief consume output:\n%s\n' "$CONSUME_OUT"
 
-          STATUS=$(printf '%s\n' "$CONSUME_OUT" | jq -r '.status // empty')
+          STATUS=$(printf '%s\n' "$CONSUME_OUT" | jq -r '.data.status // .status // empty')
           if [ "$STATUS" != "consumed" ]; then
             echo "::error::Expected status 'consumed', got '$STATUS'"
             exit 1
@@ -235,7 +235,7 @@ jobs:
 
           # 5. Consume dispatched brief
           CONSUME_DISPATCH_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-consume --id "$DISPATCH_ID")
-          DISPATCH_STATUS=$(printf '%s\n' "$CONSUME_DISPATCH_OUT" | jq -r '.status // empty')
+          DISPATCH_STATUS=$(printf '%s\n' "$CONSUME_DISPATCH_OUT" | jq -r '.data.status // .status // empty')
           if [ "$DISPATCH_STATUS" != "consumed" ]; then
             echo "::error::Expected dispatched brief status 'consumed', got '$DISPATCH_STATUS'"
             exit 1

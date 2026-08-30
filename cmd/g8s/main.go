@@ -17,6 +17,7 @@ import (
 	"github.com/pterm/pterm"
 
 	"github.com/tamld/g8s/internal/analyzer"
+	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -38,32 +39,45 @@ var (
 	AppName = "g8s"
 )
 
+func exitUsage(cmd, sub, traceID, msg, hint string, jsonl bool) {
+	if traceID == "" {
+		traceID = cli.GenerateTraceID()
+	}
+	env := cli.NewErrorEnvelope(cmd, sub, traceID, cli.CodeUsage, msg, hint, "")
+	_ = cli.WriteResponse(os.Stdout, env, jsonl)
+	os.Exit(2)
+}
+
+func exitRuntime(cmd, sub, traceID, code string, err error, hint string, jsonl bool) {
+	if traceID == "" {
+		traceID = cli.GenerateTraceID()
+	}
+	if code == "" {
+		code = cli.CodeRuntime
+	}
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	env := cli.NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, "")
+	_ = cli.WriteResponse(os.Stdout, env, jsonl)
+	os.Exit(1)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		os.Exit(2)
 	}
 
 	command := os.Args[1]
 	switch command {
 	case "version":
-		pterm.DefaultHeader.WithFullWidth().Println(fmt.Sprintf("%s v%s (The Gatekeepers - Zero-CGO, Pure Go)", AppName, Version))
+		runVersion(os.Args[2:])
 	case "roles":
-		var td pterm.TableData
-		td = append(td, []string{"Name", "Purpose"})
-		for _, name := range harness.RoleNames() {
-			r, _ := harness.GetRole(name)
-			td = append(td, []string{r.Name, r.Purpose})
-		}
-		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+		runRoles(os.Args[2:])
 	case "permissions":
-		var td pterm.TableData
-		td = append(td, []string{"Name", "Description", "Mutation Allowed"})
-		for _, name := range harness.PermissionNames() {
-			p, _ := harness.GetPermission(name)
-			td = append(td, []string{p.Name, p.Description, fmt.Sprintf("%t", p.MutationAllowed)})
-		}
-		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+		runPermissions(os.Args[2:])
 	case "mcp":
 		runMCPServer()
 	case "submit":
@@ -74,6 +88,8 @@ func main() {
 		runResume(os.Args[2:])
 	case "tasks":
 		runTasks(os.Args[2:])
+	case "cancel":
+		runCancel(os.Args[2:])
 	case "lineage":
 		runLineage(os.Args[2:])
 	case "children":
@@ -98,12 +114,10 @@ func main() {
 		runVault(os.Args[2:])
 	case "internal":
 		if len(os.Args) < 3 || os.Args[2] != "wrap-exec" {
-			fmt.Fprintf(os.Stderr, "%s: usage: g8s internal wrap-exec --out <path> -- <child argv>\n", AppName)
-			os.Exit(2)
+			exitUsage("internal", "", "", fmt.Sprintf("%s: usage: g8s internal wrap-exec --out <path> -- <child argv>", AppName), "", false)
 		}
 		if err := runWrapExec(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
-			os.Exit(2)
+			exitUsage("internal", "wrap-exec", "", err.Error(), "", false)
 		}
 	case "orchestrate":
 		runOrchestrate(os.Args[2:])
@@ -124,9 +138,7 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command '%s'\n\n", command)
-		printUsage()
-		os.Exit(1)
+		exitUsage(command, "", "", fmt.Sprintf("Unknown command '%s'", command), "Run 'g8s help' for available commands", false)
 	}
 }
 
@@ -157,28 +169,119 @@ func databasePath() (string, error) {
 	return dbPath, nil
 }
 
+// runVersion emits application build and version metadata.
+func runVersion(args []string) {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	if err := fs.Parse(args); err != nil {
+		exitUsage("version", "", *traceID, err.Error(), "", *jsonl)
+	}
+	if *jsonMode || *jsonl {
+		data := map[string]any{
+			"app":      AppName,
+			"version":  Version,
+			"zero_cgo": true,
+			"runtime":  "pure-go",
+			"actor":    *actor,
+		}
+		env := cli.NewEnvelope("version", "version", "", data)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	pterm.DefaultHeader.WithFullWidth().Println(fmt.Sprintf("%s v%s (The Gatekeepers - Zero-CGO, Pure Go)", AppName, Version))
+}
+
+// runRoles lists registered worker roles.
+func runRoles(args []string) {
+	fs := flag.NewFlagSet("roles", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		exitUsage("roles", "", *traceID, err.Error(), "", *jsonl)
+	}
+	var roles []harness.RoleProfile
+	for _, name := range harness.RoleNames() {
+		r, _ := harness.GetRole(name)
+		roles = append(roles, r)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("roles", "roles", "", roles)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	var td pterm.TableData
+	td = append(td, []string{"Name", "Purpose"})
+	for _, r := range roles {
+		td = append(td, []string{r.Name, r.Purpose})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+}
+
+// runPermissions lists registered permission profiles.
+func runPermissions(args []string) {
+	fs := flag.NewFlagSet("permissions", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		exitUsage("permissions", "", *traceID, err.Error(), "", *jsonl)
+	}
+	var perms []harness.PermissionProfile
+	for _, name := range harness.PermissionNames() {
+		p, _ := harness.GetPermission(name)
+		perms = append(perms, p)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("permissions", "permissions", "", perms)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	var td pterm.TableData
+	td = append(td, []string{"Name", "Description", "Mutation Allowed"})
+	for _, p := range perms {
+		td = append(td, []string{p.Name, p.Description, fmt.Sprintf("%t", p.MutationAllowed)})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+}
+
 // runMCPServer serves the stdio JSON-RPC MCP surface until stdin closes.
 func runMCPServer() {
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("mcp", "", "", cli.CodeIO, err, "", false)
+	}
 
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
+	}
 	defer store.Close()
 
-	receipts, err := receipt.NewReceiptManager(dbPath, nil)
-	failIf(err)
+	receiptDbPath, err := receiptDatabasePath()
+	if err != nil {
+		exitRuntime("mcp", "", "", cli.CodeIO, err, "", false)
+	}
+	receipts, err := receipt.NewReceiptManager(receiptDbPath, nil)
+	if err != nil {
+		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
+	}
 	defer receipts.Close()
 
 	registry := provider.NewRegistry(provider.DefaultConfigs(), nil, nil)
 	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry)
-	failIf(server.ServeStdio(context.Background()))
+	if err := server.ServeStdio(context.Background()); err != nil {
+		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
+	}
 }
 
 // runSubmit queues one durable task through the control plane after validating
 // it against the security harness.
 func runSubmit(args []string) {
-	fs := flag.NewFlagSet("submit", flag.ExitOnError)
+	fs := flag.NewFlagSet("submit", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
 	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
@@ -192,14 +295,17 @@ func runSubmit(args []string) {
 	skipPermissions := fs.Bool("skip-permissions", false, "bypass permission checks if permitted by profile")
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
+	}
 
 	if *key == "" || *prompt == "" {
-		fmt.Fprintln(os.Stderr, "submit requires --idempotency-key and --prompt")
-		os.Exit(2)
+		exitUsage("submit", "", *traceID, "submit requires --idempotency-key and --prompt", "Provide both --idempotency-key and --prompt", *jsonl)
 	}
 	cwd, err := os.Getwd()
-	failIf(err)
+	if err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to resolve working directory", *jsonl)
+	}
 
 	dirs := []string(addDirs)
 	if len(dirs) == 0 {
@@ -208,14 +314,17 @@ func runSubmit(args []string) {
 
 	// Validate request against security harness gatekeeper
 	if err := harness.ValidateRequest(*prompt, *role, *permission, dirs, *skipPermissions, *receiptID); err != nil {
-		pterm.Error.Println(fmt.Sprintf("harness validation failed: %v", err))
-		os.Exit(1)
+		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
 	}
 
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to resolve database path", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to open control plane database", *jsonl)
+	}
 	defer store.Close()
 
 	payloadMap := map[string]any{
@@ -224,6 +333,7 @@ func runSubmit(args []string) {
 		"permission": *permission,
 		"timeout":    *timeout,
 		"add_dirs":   dirs,
+		"actor":      *actor,
 	}
 	if *receiptID != "" {
 		payloadMap["receipt_id"] = *receiptID
@@ -232,7 +342,9 @@ func runSubmit(args []string) {
 		payloadMap["skip_permissions"] = true
 	}
 	payload, err := json.Marshal(payloadMap)
-	failIf(err)
+	if err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to serialize task payload", *jsonl)
+	}
 
 	var parentIDPtr *string
 	if *parentTaskID != "" {
@@ -251,83 +363,134 @@ func runSubmit(args []string) {
 		Timeout:        *timeout,
 		AddDirs:        dirs,
 	})
-	failIf(err)
+	if err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to submit task", *jsonl)
+	}
 
-	out, err := json.MarshalIndent(task, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	env := cli.NewEnvelope("task", "submit", "", task)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runGet prints the current durable view of one task.
 func runGet(args []string) {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: g8s get <task-id>")
-		os.Exit(2)
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
+	taskIDFlag := fs.String("task-id", "", "task ID to inspect")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("get", "", *traceID, err.Error(), "", *jsonl)
 	}
+	taskID := *taskIDFlag
+	if taskID == "" && fs.NArg() > 0 {
+		taskID = fs.Arg(0)
+	}
+	if taskID == "" {
+		exitUsage("get", "", *traceID, "usage: g8s get <task-id> or g8s get --task-id <id>", "Provide a task ID", *jsonl)
+	}
+
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("get", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("get", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
-	task, err := store.GetTask(context.Background(), args[0])
-	failIf(err)
-	if task == nil {
-		fmt.Fprintf(os.Stderr, "unknown task: %s\n", args[0])
-		os.Exit(1)
+	task, err := store.GetTask(context.Background(), taskID)
+	if err != nil {
+		exitRuntime("get", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
-	out, err := json.MarshalIndent(task, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	if task == nil {
+		exitRuntime("get", "", *traceID, cli.CodeNotFound, fmt.Errorf("unknown task: %s", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
+	}
+
+	env := cli.NewEnvelope("task", "get", "", task)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("get", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runResume moves a NEEDS_INFO or BLOCKED task back to QUEUED with optional clarifying prompt.
 func runResume(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: g8s resume <task-id> [--prompt <text>] [--reason <reason>]")
-		os.Exit(2)
-	}
-	taskID := args[0]
-	fs := flag.NewFlagSet("resume", flag.ExitOnError)
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = jsonMode
+	taskIDFlag := fs.String("task-id", "", "task ID to resume")
 	prompt := fs.String("prompt", "", "updated prompt or clarifying answer")
 	reason := fs.String("reason", "resumed via CLI", "reason for resuming")
-	failIf(fs.Parse(args[1:]))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("resume", "", *traceID, err.Error(), "", *jsonl)
+	}
+	taskID := *taskIDFlag
+	if taskID == "" && fs.NArg() > 0 {
+		taskID = fs.Arg(0)
+	}
+	if taskID == "" {
+		exitUsage("resume", "", *traceID, "usage: g8s resume <task-id> [--prompt <text>] [--reason <reason>]", "Provide a task ID", *jsonl)
+	}
 
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("resume", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("resume", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
 	var resumedPayload json.RawMessage
 	if *prompt != "" {
 		payloadMap := map[string]any{
 			"prompt": *prompt,
+			"actor":  *actor,
 		}
 		raw, err := json.Marshal(payloadMap)
-		failIf(err)
+		if err != nil {
+			exitRuntime("resume", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
 		resumedPayload = raw
 	}
 
 	task, err := store.ResumeTask(context.Background(), taskID, resumedPayload, *reason)
-	failIf(err)
+	if err != nil {
+		exitRuntime("resume", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	out, err := json.MarshalIndent(task, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	env := cli.NewEnvelope("task", "resume", "", task)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("resume", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runTasks lists durable tasks optionally filtered by state.
 func runTasks(args []string) {
-	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
+	fs := flag.NewFlagSet("tasks", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
 	state := fs.String("state", "", "filter by task state (QUEUED, LEASED, RUNNING, SUCCEEDED, FAILED, CANCELLED, NEEDS_INFO, BLOCKED)")
 	limit := fs.Int("limit", 50, "maximum number of tasks to return (1..200)")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("tasks", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("tasks", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("tasks", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
 	filter := controlplane.TaskFilter{Limit: *limit}
@@ -336,100 +499,329 @@ func runTasks(args []string) {
 		filter.State = &s
 	}
 	tasks, err := store.ListTasks(context.Background(), filter)
-	failIf(err)
+	if err != nil {
+		exitRuntime("tasks", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	out, err := json.MarshalIndent(tasks, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	env := cli.NewEnvelope("tasks", "tasks", "", tasks)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("tasks", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
+}
+
+// runCancel cancels an active or queued task.
+func runCancel(args []string) {
+	fs := flag.NewFlagSet("cancel", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
+	taskIDFlag := fs.String("task-id", "", "task ID to cancel")
+	reason := fs.String("reason", "cancelled via CLI", "reason for cancellation")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("cancel", "", *traceID, err.Error(), "", *jsonl)
+	}
+	taskID := *taskIDFlag
+	if taskID == "" && fs.NArg() > 0 {
+		taskID = fs.Arg(0)
+	}
+	if taskID == "" {
+		exitUsage("cancel", "", *traceID, "usage: g8s cancel <task-id> or g8s cancel --task-id <id> [--reason <reason>]", "Provide a task ID to cancel", *jsonl)
+	}
+
+	dbPath, err := databasePath()
+	if err != nil {
+		exitRuntime("cancel", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		exitRuntime("cancel", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.CancelTask(ctx, taskID, *reason); err != nil {
+		exitRuntime("cancel", "", *traceID, cli.CodeRuntime, err, "Failed to cancel task", *jsonl)
+	}
+
+	task, _ := store.GetTask(ctx, taskID)
+	data := map[string]any{
+		"task_id":   taskID,
+		"cancelled": true,
+		"reason":    *reason,
+		"task":      task,
+	}
+	env := cli.NewEnvelope("task", "cancel", "", data)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("cancel", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runLineage prints the full ancestry chain of a task up to the root.
 func runLineage(args []string) {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: g8s lineage <task-id>")
-		os.Exit(2)
+	fs := flag.NewFlagSet("lineage", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
+	taskIDFlag := fs.String("task-id", "", "task ID")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("lineage", "", *traceID, err.Error(), "", *jsonl)
 	}
+	taskID := *taskIDFlag
+	if taskID == "" && fs.NArg() > 0 {
+		taskID = fs.Arg(0)
+	}
+	if taskID == "" {
+		exitUsage("lineage", "", *traceID, "usage: g8s lineage <task-id> or g8s lineage --task-id <id>", "Provide a task ID", *jsonl)
+	}
+
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("lineage", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("lineage", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
-	lineage, err := store.GetTaskLineage(context.Background(), args[0])
-	failIf(err)
-	if len(lineage) == 0 {
-		fmt.Fprintf(os.Stderr, "unknown task: %s\n", args[0])
-		os.Exit(1)
+	lineage, err := store.GetTaskLineage(context.Background(), taskID)
+	if err != nil {
+		exitRuntime("lineage", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
-	out, err := json.MarshalIndent(lineage, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	if len(lineage) == 0 {
+		exitRuntime("lineage", "", *traceID, cli.CodeNotFound, fmt.Errorf("unknown task: %s", taskID), "", *jsonl)
+	}
+
+	env := cli.NewEnvelope("lineage", "lineage", "", lineage)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("lineage", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runChildren lists direct child subtasks for a parent task.
 func runChildren(args []string) {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: g8s children <parent-task-id>")
-		os.Exit(2)
+	fs := flag.NewFlagSet("children", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
+	parentIDFlag := fs.String("parent-task-id", "", "parent task ID")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("children", "", *traceID, err.Error(), "", *jsonl)
 	}
+	parentID := *parentIDFlag
+	if parentID == "" && fs.NArg() > 0 {
+		parentID = fs.Arg(0)
+	}
+	if parentID == "" {
+		exitUsage("children", "", *traceID, "usage: g8s children <parent-task-id> or g8s children --parent-task-id <id>", "Provide a parent task ID", *jsonl)
+	}
+
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("children", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 	store, err := controlplane.NewControlPlane(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("children", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 	defer store.Close()
 
-	children, err := store.ListChildTasks(context.Background(), args[0])
-	failIf(err)
-	out, err := json.MarshalIndent(children, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	children, err := store.ListChildTasks(context.Background(), parentID)
+	if err != nil {
+		exitRuntime("children", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+
+	env := cli.NewEnvelope("children", "children", "", children)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("children", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
-// runReceipt issues write-delegation receipts on behalf of the operator.
-func runReceipt(args []string) {
-	if len(args) == 0 || args[0] != "issue" {
-		fmt.Fprintln(os.Stderr, "usage: g8s receipt issue --issuer <name> --path <glob> [--ttl seconds]")
-		os.Exit(2)
-	}
-	fs := flag.NewFlagSet("receipt issue", flag.ExitOnError)
-	issuer := fs.String("issuer", "operator", "identity recorded on the receipt")
-	ttlSeconds := fs.Int("ttl", 600, "time-to-live in seconds (1..3600)")
-	var paths pathFlags
-	fs.Var(&paths, "path", "allowed path glob (repeatable)")
-	fs.Var(&paths, "allow", "allowed path glob (alias for --path)")
-	failIf(fs.Parse(args[1:]))
-
-	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "receipt issue requires at least one --path or --allow")
-		os.Exit(2)
-	}
+func receiptDatabasePath() (string, error) {
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(dbPath)
+	return filepath.Join(dir, "receipts.db"), nil
+}
+
+// runReceipt issues and inspects write-delegation receipts on behalf of the operator.
+func runReceipt(args []string) {
+	if len(args) == 0 {
+		exitUsage("receipt", "", "", "usage: g8s receipt <issue|show|verify|revoke|list> [options]", "Supported subcommands: issue, show, verify, revoke, list", false)
+	}
+
+	subcmd := args[0]
+	dbPath, err := receiptDatabasePath()
+	if err != nil {
+		exitRuntime("receipt", subcmd, "", cli.CodeIO, err, "", false)
+	}
 	receipts, err := receipt.NewReceiptManager(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("receipt", subcmd, "", cli.CodeRuntime, err, "", false)
+	}
 	defer receipts.Close()
 
-	rc, err := receipts.IssueReceipt(*issuer, paths, time.Duration(*ttlSeconds)*time.Second)
-	failIf(err)
-	out, err := json.MarshalIndent(rc, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	switch subcmd {
+	case "issue":
+		fs := flag.NewFlagSet("receipt issue", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = jsonMode
+		issuer := fs.String("issuer", "", "identity recorded on the receipt (defaults to --actor)")
+		ttlSeconds := fs.Int("ttl", 600, "time-to-live in seconds (1..3600)")
+		var paths pathFlags
+		fs.Var(&paths, "path", "allowed path glob (repeatable)")
+		fs.Var(&paths, "allow", "allowed path glob (alias for --path)")
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("receipt", "issue", *traceID, err.Error(), "", *jsonl)
+		}
+
+		if len(paths) == 0 {
+			exitUsage("receipt", "issue", *traceID, "receipt issue requires at least one --path or --allow", "Specify --path <glob>", *jsonl)
+		}
+		effectiveIssuer := *issuer
+		if effectiveIssuer == "" {
+			effectiveIssuer = *actor
+		}
+		rc, err := receipts.IssueReceipt(effectiveIssuer, paths, time.Duration(*ttlSeconds)*time.Second)
+		if err != nil {
+			exitRuntime("receipt", "issue", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("receipt", "receipt", "issue", rc)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("receipt", "issue", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+
+	case "show", "get":
+		fs := flag.NewFlagSet("receipt show", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
+		rcIDFlag := fs.String("receipt-id", "", "receipt ID to inspect")
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("receipt", subcmd, *traceID, err.Error(), "", *jsonl)
+		}
+		rcID := *rcIDFlag
+		if rcID == "" && fs.NArg() > 0 {
+			rcID = fs.Arg(0)
+		}
+		if rcID == "" {
+			exitUsage("receipt", subcmd, *traceID, fmt.Sprintf("usage: g8s receipt %s <receipt-id> or --receipt-id <id>", subcmd), "Specify receipt ID", *jsonl)
+		}
+		rc, err := receipts.VerifyReceipt(rcID)
+		if err != nil {
+			exitRuntime("receipt", subcmd, *traceID, cli.CodeNotFound, err, "Receipt not found or invalid", *jsonl)
+		}
+		env := cli.NewEnvelope("receipt", "receipt", subcmd, rc)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("receipt", subcmd, *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+
+	case "verify":
+		fs := flag.NewFlagSet("receipt verify", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
+		rcIDFlag := fs.String("receipt-id", "", "receipt ID to verify")
+		action := fs.String("action", "", "action to verify (e.g. write)")
+		path := fs.String("path", "", "path to verify")
+		_ = action
+		_ = path
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("receipt", "verify", *traceID, err.Error(), "", *jsonl)
+		}
+		rcID := *rcIDFlag
+		if rcID == "" && fs.NArg() > 0 {
+			rcID = fs.Arg(0)
+		}
+		if rcID == "" {
+			exitUsage("receipt", "verify", *traceID, "usage: g8s receipt verify <receipt-id> or --receipt-id <id>", "Specify receipt ID", *jsonl)
+		}
+		rc, err := receipts.VerifyReceipt(rcID)
+		if err != nil {
+			exitRuntime("receipt", "verify", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("receipt_verification", "receipt", "verify", rc)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("receipt", "verify", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+
+	case "revoke":
+		fs := flag.NewFlagSet("receipt revoke", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
+		rcIDFlag := fs.String("receipt-id", "", "receipt ID to revoke")
+		reason := fs.String("reason", "", "reason for revocation")
+		_ = reason
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("receipt", "revoke", *traceID, err.Error(), "", *jsonl)
+		}
+		rcID := *rcIDFlag
+		if rcID == "" && fs.NArg() > 0 {
+			rcID = fs.Arg(0)
+		}
+		if rcID == "" {
+			exitUsage("receipt", "revoke", *traceID, "usage: g8s receipt revoke <receipt-id> or --receipt-id <id>", "Specify receipt ID to revoke", *jsonl)
+		}
+		ok, err := receipts.RevokeReceipt(rcID)
+		if err != nil {
+			exitRuntime("receipt", "revoke", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("receipt", "receipt", "revoke", map[string]any{"receipt_id": rcID, "revoked": ok})
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("receipt", "revoke", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+
+	case "list":
+		fs := flag.NewFlagSet("receipt list", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("receipt", "list", *traceID, err.Error(), "", *jsonl)
+		}
+		list, err := receipts.ListActiveReceipts()
+		if err != nil {
+			exitRuntime("receipt", "list", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("receipts", "receipt", "list", list)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("receipt", "list", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+
+	default:
+		exitUsage("receipt", subcmd, "", fmt.Sprintf("unknown receipt subcommand %q", subcmd), "Supported: issue, show, verify, revoke, list", false)
+	}
 }
 
 // runDoctor executes diagnostic sanity checks for environment, permissions, and tools.
 func runDoctor(args []string) {
-	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	jsonMode := fs.Bool("json", false, "output diagnostics as machine-readable JSON")
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 	fixMode := fs.Bool("fix", false, "apply automatic self-healing remediations")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("doctor", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	dbPath, _ := databasePath()
 	report := doctor.RunDiagnosticsWithFix(context.Background(), dbPath, *fixMode)
 
-	if *jsonMode {
-		out, err := json.MarshalIndent(report, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("doctor_report", "doctor", "", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		if report.OverallStatus == "UNHEALTHY" {
 			os.Exit(1)
 		}
@@ -471,11 +863,14 @@ func runDoctor(args []string) {
 
 // runInit handles interactive and headless onboarding wizard.
 func runInit(args []string) {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 	agentMode := fs.Bool("agent", false, "run in non-interactive headless agent mode")
 	ideFlag := fs.String("ide", "", "target IDE to configure (cursor, claude, windsurf, antigravity, all)")
-	jsonMode := fs.Bool("json", false, "output result as machine-readable JSON")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("init", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	var targetIDEs []string
 	if *ideFlag != "" {
@@ -483,12 +878,14 @@ func runInit(args []string) {
 	}
 
 	res, err := initwiz.RunInit(targetIDEs, "", os.Args[0])
-	failIf(err)
+	if err != nil {
+		exitRuntime("init", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	if *jsonMode {
-		out, err := json.MarshalIndent(res, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("init_result", "init", "", res)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}
 
@@ -515,27 +912,46 @@ func runInit(args []string) {
 // runConfig manages atomic key-value configuration.
 func runConfig(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "%s: usage: g8s config <get|set|list|unset> [key] [value] [--json]\n", AppName)
-		os.Exit(2)
+		exitUsage("config", "", "", fmt.Sprintf("%s: usage: g8s config <get|set|list|unset> [key] [value] [--json]", AppName), "", false)
 	}
 
-	fs := flag.NewFlagSet("config", flag.ExitOnError)
-	jsonMode := fs.Bool("json", false, "output as machine-readable JSON")
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
 
-	subcmd := args[0]
-	failIf(fs.Parse(args[1:]))
-	extraArgs := fs.Args()
+	var nonFlags []string
+	var flagArgs []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			flagArgs = append(flagArgs, a)
+		} else {
+			nonFlags = append(nonFlags, a)
+		}
+	}
+
+	if err := fs.Parse(flagArgs); err != nil {
+		exitUsage("config", "", *traceID, err.Error(), "", *jsonl)
+	}
+
+	if len(nonFlags) == 0 {
+		exitUsage("config", "", *traceID, fmt.Sprintf("%s: usage: g8s config <get|set|list|unset> [key] [value] [--json]", AppName), "", *jsonl)
+	}
+
+	subcmd := nonFlags[0]
+	extraArgs := nonFlags[1:]
 
 	mgr, err := settings.NewManager("")
-	failIf(err)
+	if err != nil {
+		exitRuntime("config", subcmd, *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
 	switch subcmd {
 	case "list":
 		all := mgr.List()
-		if *jsonMode {
-			out, err := json.MarshalIndent(all, "", "  ")
-			failIf(err)
-			fmt.Println(string(out))
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("config", "config", "list", all)
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 			return
 		}
 		var td pterm.TableData
@@ -552,128 +968,208 @@ func runConfig(args []string) {
 
 	case "get":
 		if len(extraArgs) < 1 {
-			fmt.Fprintf(os.Stderr, "%s: usage: g8s config get <key> [--json]\n", AppName)
-			os.Exit(2)
+			exitUsage("config", "get", *traceID, fmt.Sprintf("%s: usage: g8s config get <key> [--json]", AppName), "Provide a configuration key", *jsonl)
 		}
 		key := extraArgs[0]
 		val, ok := mgr.Get(key)
 		if !ok || val == nil {
-			if *jsonMode {
-				fmt.Println("{}")
+			if *jsonMode || *jsonl {
+				exitRuntime("config", "get", *traceID, cli.CodeNotFound, fmt.Errorf("key %q is not set", key), "", *jsonl)
 			} else {
 				fmt.Fprintf(os.Stderr, "Key %q is not set\n", key)
+				os.Exit(1)
 			}
-			os.Exit(1)
 		}
-		if *jsonMode {
-			out, err := json.MarshalIndent(map[string]any{key: val}, "", "  ")
-			failIf(err)
-			fmt.Println(string(out))
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("config", "config", "get", map[string]any{key: val})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		} else {
 			fmt.Println(val)
 		}
 
 	case "set":
 		if len(extraArgs) < 2 {
-			fmt.Fprintf(os.Stderr, "%s: usage: g8s config set <key> <value>\n", AppName)
-			os.Exit(2)
+			exitUsage("config", "set", *traceID, fmt.Sprintf("%s: usage: g8s config set <key> <value>", AppName), "Provide both key and value", *jsonl)
 		}
 		key, value := extraArgs[0], extraArgs[1]
 		err := mgr.Set(key, value)
-		failIf(err)
-		pterm.Success.Printf("Configured %s = %s\n", key, value)
+		if err != nil {
+			exitRuntime("config", "set", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("config", "config", "set", map[string]any{"key": key, "value": value})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Printf("Configured %s = %s\n", key, value)
+		}
 
 	case "unset":
 		if len(extraArgs) < 1 {
-			fmt.Fprintf(os.Stderr, "%s: usage: g8s config unset <key>\n", AppName)
-			os.Exit(2)
+			exitUsage("config", "unset", *traceID, fmt.Sprintf("%s: usage: g8s config unset <key>", AppName), "Provide a key to unset", *jsonl)
 		}
 		key := extraArgs[0]
 		err := mgr.Unset(key)
-		failIf(err)
-		pterm.Success.Printf("Unset %s\n", key)
+		if err != nil {
+			exitRuntime("config", "unset", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("config", "config", "unset", map[string]any{"key": key, "unset": true})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Printf("Unset %s\n", key)
+		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown config subcommand %q (supported: get, set, list, unset)\n", subcmd)
-		os.Exit(2)
+		exitUsage("config", subcmd, *traceID, fmt.Sprintf("Unknown config subcommand %q (supported: get, set, list, unset)", subcmd), "", *jsonl)
 	}
 }
 
 // runCompletion emits shell autocompletion scripts.
 func runCompletion(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "%s: usage: g8s completion <bash|zsh|fish>\n", AppName)
-		os.Exit(2)
+		exitUsage("completion", "", "", fmt.Sprintf("%s: usage: g8s completion <bash|zsh|fish>", AppName), "", false)
 	}
-	script, err := completion.Generate(args[0])
-	failIf(err)
+	fs := flag.NewFlagSet("completion", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	_ = fs.Parse(args[1:])
+	shell := args[0]
+	script, err := completion.Generate(shell)
+	if err != nil {
+		exitRuntime("completion", shell, *traceID, cli.CodeInvalid, err, "", *jsonl)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("completion", "completion", shell, map[string]string{"shell": shell, "script": script})
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
 	fmt.Print(script)
 }
 
 // runService handles OS background daemon management (macOS launchd & Linux systemd).
 func runService(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: g8s service <install|start|stop|status|uninstall>")
-		os.Exit(2)
+		exitUsage("service", "", "", "usage: g8s service <install|start|stop|status|uninstall>", "", false)
 	}
 
 	subcmd := args[0]
+	fs := flag.NewFlagSet("service", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args[1:]); err != nil {
+		exitUsage("service", subcmd, *traceID, err.Error(), "", *jsonl)
+	}
+
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("service", subcmd, *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 
 	exePath, err := os.Executable()
-	failIf(err)
+	if err != nil {
+		exitRuntime("service", subcmd, *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 
 	mgr, err := service.NewPlatformServiceManager(service.Config{
 		BinaryPath:   exePath,
 		DatabasePath: dbPath,
 	}, nil, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("service", subcmd, *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
 	switch subcmd {
 	case "install":
-		failIf(mgr.Install())
-		pterm.Success.Println("g8s service unit installed successfully")
+		if err := mgr.Install(); err != nil {
+			exitRuntime("service", "install", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("service", "service", "install", map[string]any{"status": "installed"})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Println("g8s service unit installed successfully")
+		}
 	case "start":
-		failIf(mgr.Start())
-		pterm.Success.Println("g8s service daemon started")
+		if err := mgr.Start(); err != nil {
+			exitRuntime("service", "start", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("service", "service", "start", map[string]any{"status": "started"})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Println("g8s service daemon started")
+		}
 	case "stop":
-		failIf(mgr.Stop())
-		pterm.Success.Println("g8s service daemon stopped")
+		if err := mgr.Stop(); err != nil {
+			exitRuntime("service", "stop", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("service", "service", "stop", map[string]any{"status": "stopped"})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Println("g8s service daemon stopped")
+		}
 	case "uninstall":
-		failIf(mgr.Uninstall())
-		pterm.Success.Println("g8s service daemon uninstalled")
+		if err := mgr.Uninstall(); err != nil {
+			exitRuntime("service", "uninstall", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("service", "service", "uninstall", map[string]any{"status": "uninstalled"})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			pterm.Success.Println("g8s service daemon uninstalled")
+		}
 	case "status":
 		status, err := mgr.Status()
-		failIf(err)
-		out, err := json.MarshalIndent(status, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+		if err != nil {
+			exitRuntime("service", "status", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("service_status", "service", "status", status)
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			out, _ := json.MarshalIndent(status, "", "  ")
+			fmt.Println(string(out))
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown service subcommand %q\n", subcmd)
-		os.Exit(2)
+		exitUsage("service", subcmd, *traceID, fmt.Sprintf("unknown service subcommand %q", subcmd), "", *jsonl)
 	}
 }
 
 // runAnalyze computes Blast Radius Intelligence for a target file or symbol per DELTA-07.
 func runAnalyze(args []string) {
-	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
+	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+	_ = actor
+	_ = jsonMode
 	file := fs.String("file", "", "target file to analyze (required)")
 	symbol := fs.String("symbol", "", "target symbol identifier (optional)")
 	root := fs.String("root", "", "codebase root directory (defaults to cwd)")
-	failIf(fs.Parse(args))
+	if err := fs.Parse(args); err != nil {
+		exitUsage("analyze", "", *traceID, err.Error(), "", *jsonl)
+	}
 
 	if *file == "" {
 		if fs.NArg() > 0 {
 			*file = fs.Arg(0)
 		} else {
-			fmt.Fprintln(os.Stderr, "usage: g8s analyze --file <path> [--symbol <name>] [--root <dir>]")
-			os.Exit(2)
+			exitUsage("analyze", "", *traceID, "usage: g8s analyze --file <path> [--symbol <name>] [--root <dir>]", "Provide a target file path", *jsonl)
 		}
 	}
 
 	an, err := analyzer.NewAnalyzer(*root)
-	failIf(err)
+	if err != nil {
+		exitRuntime("analyze", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
 	var report *analyzer.BlastRadiusReport
 	if *symbol != "" {
@@ -681,31 +1177,42 @@ func runAnalyze(args []string) {
 	} else {
 		report, err = an.AnalyzeFileImpact(*file)
 	}
-	failIf(err)
+	if err != nil {
+		exitRuntime("analyze", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
 
-	out, err := json.MarshalIndent(report, "", "  ")
-	failIf(err)
-	fmt.Println(string(out))
+	env := cli.NewEnvelope("blast_radius_report", "analyze", "", report)
+	env.TraceID = *traceID
+	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+		exitRuntime("analyze", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
 }
 
 // runVault handles Tri-Anchor knowledge vault operations (store, query, list, get, delete).
 func runVault(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: g8s vault <store|query|list|get|delete> [options]")
-		os.Exit(2)
+		exitUsage("vault", "", "", "usage: g8s vault <store|query|list|get|delete> [options]", "", false)
 	}
 
+	subcmd := args[0]
 	dbPath, err := databasePath()
-	failIf(err)
+	if err != nil {
+		exitRuntime("vault", subcmd, "", cli.CodeIO, err, "", false)
+	}
 	v, err := vault.NewVault(dbPath, nil)
-	failIf(err)
+	if err != nil {
+		exitRuntime("vault", subcmd, "", cli.CodeRuntime, err, "", false)
+	}
 	defer v.Close()
 
 	ctx := context.Background()
 
-	switch args[0] {
+	switch subcmd {
 	case "store":
-		fs := flag.NewFlagSet("vault store", flag.ExitOnError)
+		fs := flag.NewFlagSet("vault store", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
 		id := fs.String("id", "", "distillation record id (e.g. DELTA-01-A)")
 		title := fs.String("title", "", "record title")
 		milestone := fs.String("milestone", "v0.3.0", "target milestone")
@@ -719,13 +1226,19 @@ func runVault(args []string) {
 		testFile := fs.String("test-file", "", "forensic verification test file")
 		testCase := fs.String("test-case", "", "forensic verification test case")
 		filePath := fs.String("from-file", "", "load complete record JSON from file")
-		failIf(fs.Parse(args[1:]))
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("vault", "store", *traceID, err.Error(), "", *jsonl)
+		}
 
 		var rec vault.DistillationRecord
 		if *filePath != "" {
 			data, err := os.ReadFile(*filePath)
-			failIf(err)
-			failIf(json.Unmarshal(data, &rec))
+			if err != nil {
+				exitRuntime("vault", "store", *traceID, cli.CodeIO, err, "Failed to read file", *jsonl)
+			}
+			if err := json.Unmarshal(data, &rec); err != nil {
+				exitRuntime("vault", "store", *traceID, cli.CodeInvalid, err, "Invalid record JSON", *jsonl)
+			}
 		} else {
 			rec = vault.DistillationRecord{
 				ID:        *id,
@@ -750,45 +1263,73 @@ func runVault(args []string) {
 		}
 
 		stored, err := v.Store(ctx, rec)
-		failIf(err)
-		out, err := json.MarshalIndent(stored, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+		if err != nil {
+			exitRuntime("vault", "store", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("vault_record", "vault", "store", stored)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("vault", "store", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 
 	case "query":
-		fs := flag.NewFlagSet("vault query", flag.ExitOnError)
+		fs := flag.NewFlagSet("vault query", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
 		limit := fs.Int("limit", 10, "maximum number of results")
-		failIf(fs.Parse(args[1:]))
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("vault", "query", *traceID, err.Error(), "", *jsonl)
+		}
 
 		if fs.NArg() == 0 {
-			fmt.Fprintln(os.Stderr, "usage: g8s vault query <search-term> [--limit 10]")
-			os.Exit(2)
+			exitUsage("vault", "query", *traceID, "usage: g8s vault query <search-term> [--limit 10]", "Provide search query", *jsonl)
 		}
 		q := strings.Join(fs.Args(), " ")
 		results, err := v.Query(ctx, q, *limit)
-		failIf(err)
-		out, err := json.MarshalIndent(results, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+		if err != nil {
+			exitRuntime("vault", "query", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("vault_records", "vault", "query", results)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("vault", "query", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 
 	case "get":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: g8s vault get <record-id>")
-			os.Exit(2)
+		fs := flag.NewFlagSet("vault get", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("vault", "get", *traceID, err.Error(), "", *jsonl)
 		}
-		rec, err := v.Get(ctx, args[1])
-		failIf(err)
-		out, err := json.MarshalIndent(rec, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+		if fs.NArg() < 1 {
+			exitUsage("vault", "get", *traceID, "usage: g8s vault get <record-id>", "Provide a record ID", *jsonl)
+		}
+		recID := fs.Arg(0)
+		rec, err := v.Get(ctx, recID)
+		if err != nil {
+			exitRuntime("vault", "get", *traceID, cli.CodeNotFound, err, "Record not found", *jsonl)
+		}
+		env := cli.NewEnvelope("vault_record", "vault", "get", rec)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("vault", "get", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 
 	case "list":
-		fs := flag.NewFlagSet("vault list", flag.ExitOnError)
+		fs := flag.NewFlagSet("vault list", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		_ = jsonMode
 		milestone := fs.String("milestone", "", "filter by milestone")
 		status := fs.String("status", "", "filter by status")
 		pkg := fs.String("package", "", "filter by package")
 		limit := fs.Int("limit", 50, "maximum records to return")
-		failIf(fs.Parse(args[1:]))
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("vault", "list", *traceID, err.Error(), "", *jsonl)
+		}
 
 		filter := vault.VaultFilter{Limit: *limit}
 		if *milestone != "" {
@@ -802,29 +1343,43 @@ func runVault(args []string) {
 		}
 
 		list, err := v.List(ctx, filter)
-		failIf(err)
-		out, err := json.MarshalIndent(list, "", "  ")
-		failIf(err)
-		fmt.Println(string(out))
+		if err != nil {
+			exitRuntime("vault", "list", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		env := cli.NewEnvelope("vault_records", "vault", "list", list)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("vault", "list", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
 
 	case "delete":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: g8s vault delete <record-id>")
-			os.Exit(2)
+		fs := flag.NewFlagSet("vault delete", flag.ContinueOnError)
+		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
+		_ = actor
+		idFlag := fs.String("id", "", "record ID to delete")
+		if err := fs.Parse(args[1:]); err != nil {
+			exitUsage("vault", "delete", *traceID, err.Error(), "", *jsonl)
 		}
-		failIf(v.Delete(ctx, args[1]))
-		fmt.Printf("Record %q deleted\n", args[1])
+		recID := *idFlag
+		if recID == "" && fs.NArg() > 0 {
+			recID = fs.Arg(0)
+		}
+		if recID == "" {
+			exitUsage("vault", "delete", *traceID, "usage: g8s vault delete <record-id> or --id <id>", "Provide a record ID to delete", *jsonl)
+		}
+		if err := v.Delete(ctx, recID); err != nil {
+			exitRuntime("vault", "delete", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("vault_delete", "vault", "delete", map[string]any{"id": recID, "deleted": true})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			fmt.Printf("Record %q deleted\n", recID)
+		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown vault subcommand %q\n", args[0])
-		os.Exit(2)
-	}
-}
-
-func failIf(err error) {
-	if err != nil {
-		reportError(err, os.Stderr)
-		os.Exit(1)
+		exitUsage("vault", subcmd, "", fmt.Sprintf("unknown vault subcommand %q", subcmd), "Supported: store, query, get, list, delete", false)
 	}
 }
 
@@ -843,6 +1398,7 @@ func printUsage() {
 	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
 	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
 	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
+	fmt.Println("  cancel       Cancel an active or queued task (g8s cancel <task-id> [--reason <text>])")
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
@@ -875,16 +1431,16 @@ func printUsage() {
 // (DELTA-10 phase-2 registry-to-worker bridge).
 func runWorker(args []string) {
 	fs := flag.NewFlagSet("worker", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	once := fs.Bool("once", true, "claim and execute a single task, then exit")
 	model := fs.String("model", "", "restrict to tasks targeting this model")
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
+		exitUsage("worker", "", *traceID, err.Error(), "", *jsonl)
 	}
 	dbPath, dbErr := databasePath()
 	if dbErr != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, dbErr)
-		os.Exit(1)
+		exitRuntime("worker", "", *traceID, cli.CodeIO, dbErr, "", *jsonl)
 	}
 
 	templates := map[string][]string{}
@@ -899,8 +1455,7 @@ func runWorker(args []string) {
 		if _, statErr := os.Stat(providersPath); statErr == nil {
 			cfgFile, loadErr := config.Load(providersPath)
 			if loadErr != nil {
-				fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, loadErr)
-				os.Exit(1)
+				exitRuntime("worker", "", *traceID, cli.CodeRuntime, loadErr, "", *jsonl)
 			}
 			for _, entry := range cfgFile.Providers {
 				if entry.Class != "platform_dispatch" || len(entry.Args) == 0 {
@@ -915,8 +1470,7 @@ func runWorker(args []string) {
 
 	store, cpErr := controlplane.NewControlPlane(dbPath, nil)
 	if cpErr != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, cpErr)
-		os.Exit(1)
+		exitRuntime("worker", "", *traceID, cli.CodeRuntime, cpErr, "", *jsonl)
 	}
 	defer store.Close()
 
@@ -945,16 +1499,27 @@ func runWorker(args []string) {
 
 	ctx := context.Background()
 	for {
-		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: "cli-worker", LeaseSeconds: *lease})
+		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: *actor, LeaseSeconds: *lease})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", AppName, err)
-			os.Exit(1)
+			exitRuntime("worker", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
 		if task == nil {
-			fmt.Println("queue drained")
+			if *jsonMode || *jsonl {
+				env := cli.NewEnvelope("worker_status", "worker", "", map[string]any{"status": "drained"})
+				env.TraceID = *traceID
+				_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			} else {
+				fmt.Println("queue drained")
+			}
 			return
 		}
-		fmt.Printf("%s %s\n", task.TaskID, task.State)
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("worker_task", "worker", "", map[string]any{"task_id": task.TaskID, "state": task.State})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			fmt.Printf("%s %s\n", task.TaskID, task.State)
+		}
 		if *model != "" && task.State != "SUCCEEDED" && task.State != "FAILED" {
 			// model filter is advisory; states printed per cycle
 			_ = model

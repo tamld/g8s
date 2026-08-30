@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/cli"
 )
 
 func TestDogfoodE2E(t *testing.T) {
@@ -47,18 +49,28 @@ func TestDogfoodE2E(t *testing.T) {
 		t.Fatalf("brief-issue failed: %v\nOutput: %s", err, string(issueOut))
 	}
 
-	var issued struct {
-		ID        string `json:"id"`
-		Title     string `json:"title"`
-		Status    string `json:"status"`
-		PayloadMD string `json:"payload_md"`
-		DodMD     string `json:"dod_md"`
-		IssuedBy  string `json:"issued_by"`
+	var issueEnv struct {
+		V       int    `json:"v"`
+		Kind    string `json:"kind"`
+		Command string `json:"cmd"`
+		Data    struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Status    string `json:"status"`
+			PayloadMD string `json:"payload_md"`
+			DodMD     string `json:"dod_md"`
+			IssuedBy  string `json:"issued_by"`
+		} `json:"data"`
+		TraceID string `json:"trace_id"`
 	}
-	if err := json.Unmarshal(issueOut, &issued); err != nil {
+	if err := json.Unmarshal(issueOut, &issueEnv); err != nil {
 		t.Fatalf("unmarshal brief-issue output: %v\nOutput: %s", err, string(issueOut))
 	}
 
+	if issueEnv.V != cli.CurrentEnvelopeVersion || issueEnv.Kind != "brief" || issueEnv.Command != "brief-issue" {
+		t.Errorf("unexpected envelope fields: %+v", issueEnv)
+	}
+	issued := issueEnv.Data
 	if issued.ID == "" || !strings.HasPrefix(issued.ID, "brief-") {
 		t.Fatalf("expected brief ID prefix 'brief-', got %q", issued.ID)
 	}
@@ -77,14 +89,21 @@ func TestDogfoodE2E(t *testing.T) {
 		t.Fatalf("brief-consume failed: %v\nOutput: %s", err, string(consumeOut))
 	}
 
-	var consumed struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
+	var consumeEnv struct {
+		V       int    `json:"v"`
+		Kind    string `json:"kind"`
+		Command string `json:"cmd"`
+		Data    struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"data"`
+		TraceID string `json:"trace_id"`
 	}
-	if err := json.Unmarshal(consumeOut, &consumed); err != nil {
+	if err := json.Unmarshal(consumeOut, &consumeEnv); err != nil {
 		t.Fatalf("unmarshal brief-consume output: %v\nOutput: %s", err, string(consumeOut))
 	}
 
+	consumed := consumeEnv.Data
 	if consumed.ID != issued.ID {
 		t.Fatalf("consumed ID = %q, want %q", consumed.ID, issued.ID)
 	}
@@ -142,15 +161,22 @@ func TestDogfoodE2E(t *testing.T) {
 		t.Fatalf("brief-consume dispatched failed: %v\nOutput: %s", err, string(consumeDispatchedOut))
 	}
 
-	var consumedDispatched struct {
-		ID        string `json:"id"`
-		Status    string `json:"status"`
-		PayloadMD string `json:"payload_md"`
+	var consumeDispatchedEnv struct {
+		V       int    `json:"v"`
+		Kind    string `json:"kind"`
+		Command string `json:"cmd"`
+		Data    struct {
+			ID        string `json:"id"`
+			Status    string `json:"status"`
+			PayloadMD string `json:"payload_md"`
+		} `json:"data"`
+		TraceID string `json:"trace_id"`
 	}
-	if err := json.Unmarshal(consumeDispatchedOut, &consumedDispatched); err != nil {
+	if err := json.Unmarshal(consumeDispatchedOut, &consumeDispatchedEnv); err != nil {
 		t.Fatalf("unmarshal consumed dispatched output: %v\nOutput: %s", err, string(consumeDispatchedOut))
 	}
 
+	consumedDispatched := consumeDispatchedEnv.Data
 	if consumedDispatched.ID != dispatchedID {
 		t.Fatalf("consumed dispatched ID = %q, want %q", consumedDispatched.ID, dispatchedID)
 	}

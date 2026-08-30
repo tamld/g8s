@@ -272,10 +272,17 @@ func TestOrchestrateBriefFileJSONMode(t *testing.T) {
 		t.Fatalf("executeOrchestrateBriefFile: %v", err)
 	}
 
-	var parsed brief.Brief
-	if err := json.Unmarshal(outBuf.Bytes(), &parsed); err != nil {
+	var env struct {
+		V       int         `json:"v"`
+		Kind    string      `json:"kind"`
+		Command string      `json:"cmd"`
+		Data    brief.Brief `json:"data"`
+		TraceID string      `json:"trace_id"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal json: %v\nOutput: %s", err, outBuf.String())
 	}
+	parsed := env.Data
 
 	if parsed.ID != b.ID {
 		t.Errorf("parsed ID = %q, want %q", parsed.ID, b.ID)
@@ -310,10 +317,17 @@ func TestOrchestrateDispatchJSONMode(t *testing.T) {
 		t.Fatalf("executeOrchestrateDispatch: %v", err)
 	}
 
-	var parsed brief.Brief
-	if err := json.Unmarshal(outBuf.Bytes(), &parsed); err != nil {
+	var env struct {
+		V       int         `json:"v"`
+		Kind    string      `json:"kind"`
+		Command string      `json:"cmd"`
+		Data    brief.Brief `json:"data"`
+		TraceID string      `json:"trace_id"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal json: %v\nOutput: %s", err, outBuf.String())
 	}
+	parsed := env.Data
 
 	if parsed.ID != reissued.ID {
 		t.Errorf("parsed ID = %q, want %q", parsed.ID, reissued.ID)
