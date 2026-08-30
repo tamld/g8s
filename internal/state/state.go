@@ -100,10 +100,10 @@ const (
 
 // Heartbeat events.
 const (
-	HeartbeatEventPause   Event = "pause"
-	HeartbeatEventResume  Event = "resume"
-	HeartbeatEventFinish  Event = "finish"
-	HeartbeatEventFail    Event = "fail"
+	HeartbeatEventPause  Event = "pause"
+	HeartbeatEventResume Event = "resume"
+	HeartbeatEventFinish Event = "finish"
+	HeartbeatEventFail   Event = "fail"
 )
 
 // Transition defines a valid state transition rule for a Subject.

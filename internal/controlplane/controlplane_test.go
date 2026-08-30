@@ -1177,4 +1177,3 @@ func TestEventLogMigrationFromV6(t *testing.T) {
 	}
 	check.Close()
 }
-
