@@ -1,0 +1,4 @@
+# CODEOWNERS for g8s repository
+# Sisyphus / TamLD is the default reviewer across the entire codebase
+
+* @tamld
