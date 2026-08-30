@@ -32,7 +32,7 @@ func NewAgyWorker() *AgyWorker {
 	return &AgyWorker{
 		binary: bin,
 		clock:  time.Now,
-		mounts: NewMountRegistry(),
+		mounts: DefaultMountRegistry(),
 	}
 }
 
@@ -97,8 +97,11 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		return nil, fmt.Errorf("agy skill inject: %w", err)
 	}
 
+	origPrompt := t.Prompt
 	spec := TaskSpec{
 		TaskID:     t.ID,
+		SessionID:  t.ID,
+		Prompt:     t.Prompt,
 		WorktreeID: t.Worktree.ID,
 		WorkerName: w.Name(),
 		Iter:       t.Iter,
@@ -109,6 +112,11 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		return nil, fmt.Errorf("agy hook pre-spawn: %w", err)
 	}
 	t = spec.Task
+	if spec.Task.Prompt != origPrompt {
+		t.Prompt = spec.Task.Prompt
+	} else if spec.Prompt != origPrompt {
+		t.Prompt = spec.Prompt
+	}
 
 	role := t.Role
 	if role == "" {

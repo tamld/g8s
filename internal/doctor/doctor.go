@@ -12,13 +12,28 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/tamld/g8s/internal/cleanup"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/heartbeat"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/registry"
 	_ "modernc.org/sqlite"
 )
+
+// AttentionCheckQuestion defines a self-reflection question and its detected or unknown answer.
+type AttentionCheckQuestion struct {
+	Number   int    `json:"number"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// AttentionCheckReport wraps the 5 self-reflection attention questions per DEBT-47.
+type AttentionCheckReport struct {
+	Questions []AttentionCheckQuestion `json:"questions"`
+}
 
 // DiagnosticResult summarizes the outcome of one environmental check.
 type DiagnosticResult struct {
@@ -487,4 +502,82 @@ func checkHarnessProfiles() DiagnosticResult {
 		Status:  "OK",
 		Message: fmt.Sprintf("%d roles, %d permissions active and validated", len(roles), len(perms)),
 	}
+}
+
+// RunAttentionCheck evaluates the 5 self-reflection questions for the active session.
+func (d *Doctor) RunAttentionCheck(ctx context.Context, actor string, heartbeatDir string) *AttentionCheckReport {
+	questions := []AttentionCheckQuestion{
+		{
+			Number:   1,
+			Question: "What 2-3 edge cases might your last task have missed?",
+			Answer:   "unknown",
+		},
+		{
+			Number:   2,
+			Question: "Run 'g8s cleanup --target ghost-process --dry-run' — does it list your own session? (it should NOT)",
+			Answer:   d.checkGhostProcesses(ctx, heartbeatDir),
+		},
+		{
+			Number:   3,
+			Question: "Are you running with --actor set to a unique identifier?",
+			Answer:   d.checkActor(actor),
+		},
+		{
+			Number:   4,
+			Question: "When was your last heartbeat update?",
+			Answer:   d.checkLastHeartbeat(heartbeatDir),
+		},
+		{
+			Number:   5,
+			Question: "What contract from your brief would you violate by accident?",
+			Answer:   "unknown",
+		},
+	}
+
+	return &AttentionCheckReport{
+		Questions: questions,
+	}
+}
+
+func (d *Doctor) checkGhostProcesses(ctx context.Context, heartbeatDir string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "unknown"
+	}
+	hbDir := heartbeatDir
+	if hbDir == "" {
+		hbDir = filepath.Join(cwd, heartbeat.DefaultHeartbeatDir)
+	}
+	pm := &cleanup.DefaultProcessManager{RepoDir: cwd}
+	ghosts, err := pm.FindGhostProcesses(ctx, hbDir, 5*time.Minute, time.Now)
+	if err != nil {
+		return "unknown"
+	}
+	if len(ghosts) == 0 {
+		return "clean (0 ghost processes detected; session is not listed)"
+	}
+	return fmt.Sprintf("%d ghost process(es) detected", len(ghosts))
+}
+
+func (d *Doctor) checkActor(actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" || actor == "default" {
+		return "unknown (actor is empty or default; recommend setting --actor <unique-id>)"
+	}
+	return fmt.Sprintf("yes (actor=%s)", actor)
+}
+
+func (d *Doctor) checkLastHeartbeat(heartbeatDir string) string {
+	hbStore := heartbeat.NewStore(heartbeatDir, time.Now)
+	list, err := hbStore.List()
+	if err != nil || len(list) == 0 {
+		return "unknown (no active heartbeat found)"
+	}
+	mostRecent := list[0]
+	ago := time.Since(mostRecent.LastUpdate).Truncate(time.Second)
+	return fmt.Sprintf("%s (%s ago for session %s)",
+		mostRecent.LastUpdate.UTC().Format(time.RFC3339),
+		ago,
+		mostRecent.SessionID,
+	)
 }

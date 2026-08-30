@@ -27,6 +27,13 @@ func NewMountRegistry() *MountRegistry {
 	}
 }
 
+// DefaultMountRegistry constructs a MountRegistry preloaded with default hooks (including AttentionerHook).
+func DefaultMountRegistry() *MountRegistry {
+	r := NewMountRegistry()
+	r.RegisterHook(&AttentionerHook{})
+	return r
+}
+
 // RegisterSkill registers a SkillMount to be executed in registration order.
 func (r *MountRegistry) RegisterSkill(s SkillMount) {
 	if s == nil {
@@ -245,8 +252,11 @@ func (mw *MountedWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		return nil, fmt.Errorf("skill mount inject: %w", err)
 	}
 
+	origPrompt := t.Prompt
 	spec := TaskSpec{
 		TaskID:     t.ID,
+		SessionID:  t.ID,
+		Prompt:     t.Prompt,
 		WorktreeID: t.Worktree.ID,
 		WorkerName: mw.Worker.Name(),
 		Iter:       t.Iter,
@@ -257,6 +267,11 @@ func (mw *MountedWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		return nil, fmt.Errorf("hook mount pre-spawn: %w", err)
 	}
 	t = spec.Task
+	if spec.Task.Prompt != origPrompt {
+		t.Prompt = spec.Task.Prompt
+	} else if spec.Prompt != origPrompt {
+		t.Prompt = spec.Prompt
+	}
 
 	handle, err := mw.Worker.Spawn(ctx, t)
 	if err != nil {

@@ -1,6 +1,7 @@
 package heartbeat
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -203,5 +204,75 @@ func TestExpiredNoUpdate(t *testing.T) {
 	f3, _ := store.Freshness("session-exp")
 	if f3 != FreshnessDead {
 		t.Errorf("expected dead (>300s), got %s", f3)
+	}
+}
+
+func TestRecordEventAndEmit(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	store := NewStore(tempDir, clock)
+
+	// 1. store.RecordEvent
+	evt := Event{
+		Kind:   "self_review_required",
+		Prompt: "What test failed?",
+	}
+	hb, err := store.RecordEvent("sess-event-1", evt)
+	if err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+	if hb.Metadata["event_kind"] != "self_review_required" {
+		t.Errorf("expected event_kind self_review_required, got %v", hb.Metadata["event_kind"])
+	}
+	if hb.CurrentStep != "What test failed?" {
+		t.Errorf("expected current_step 'What test failed?', got %q", hb.CurrentStep)
+	}
+
+	// 2. store.Record with *Event and extra RecordOption
+	hb2, err := store.Record("sess-event-2", &evt, WithPID(9999))
+	if err != nil {
+		t.Fatalf("Record with *Event failed: %v", err)
+	}
+	if hb2.PID != 9999 {
+		t.Errorf("expected PID 9999, got %d", hb2.PID)
+	}
+
+	// 3. store.Record with nil *Event
+	var nilEvt *Event
+	hb3, err := store.Record("sess-event-3", nilEvt)
+	if err != nil {
+		t.Fatalf("Record with nil *Event failed: %v", err)
+	}
+	if hb3.Status != StatusRunning {
+		t.Errorf("expected status running, got %s", hb3.Status)
+	}
+
+	// 4. store.Record with empty session error
+	_, err = store.Record("", evt)
+	if err == nil {
+		t.Errorf("expected error on empty session_id, got nil")
+	}
+
+	// 5. Default store helpers (RecordEvent, Emit, Record with Event)
+	defaultStore = store
+	hb4, err := RecordEvent("sess-pkg-1", evt)
+	if err != nil {
+		t.Fatalf("pkg RecordEvent failed: %v", err)
+	}
+	if hb4.SessionID != "sess-pkg-1" {
+		t.Errorf("expected sess-pkg-1, got %s", hb4.SessionID)
+	}
+
+	if err := Emit(context.Background(), "sess-pkg-2", evt); err != nil {
+		t.Fatalf("Emit failed: %v", err)
+	}
+
+	hb5, err := Record("sess-pkg-3", evt)
+	if err != nil {
+		t.Fatalf("Record failed: %v", err)
+	}
+	if hb5.SessionID != "sess-pkg-3" {
+		t.Errorf("expected sess-pkg-3, got %s", hb5.SessionID)
 	}
 }

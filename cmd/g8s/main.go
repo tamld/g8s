@@ -21,7 +21,6 @@ import (
 	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
-	"github.com/tamld/g8s/internal/doctor"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/initwiz"
 	"github.com/tamld/g8s/internal/mcp"
@@ -800,68 +799,6 @@ func runReceipt(args []string) {
 
 	default:
 		exitUsage("receipt", subcmd, "", fmt.Sprintf("unknown receipt subcommand %q", subcmd), "Supported: issue, show, verify, revoke, list", false)
-	}
-}
-
-// runDoctor executes diagnostic sanity checks for environment, permissions, and tools.
-func runDoctor(args []string) {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
-	_ = actor
-	fixMode := fs.Bool("fix", false, "apply automatic self-healing remediations")
-	scopeFlag := fs.String("scope", pathutil.ScopeUser, "installation and execution scope (user or system)")
-	detectPathsFlag := fs.Bool("detect-paths", false, "detect and enumerate all g8s profile paths on host")
-	if err := fs.Parse(args); err != nil {
-		exitUsage("doctor", "", *traceID, err.Error(), "", *jsonl)
-	}
-
-	dbPath, _ := databasePath()
-	doc := &doctor.Doctor{
-		Scope:       *scopeFlag,
-		DetectPaths: *detectPathsFlag,
-	}
-	report := doc.RunDiagnosticsWithFix(context.Background(), dbPath, *fixMode)
-
-	if *jsonMode || *jsonl {
-		env := cli.NewEnvelope("doctor_report", "doctor", "", report)
-		env.TraceID = *traceID
-		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-		if report.OverallStatus == "UNHEALTHY" {
-			os.Exit(1)
-		}
-		return
-	}
-
-	pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Diagnostics")
-	fmt.Printf("Platform: %s | Runtime: %s | Zero-CGO: %t | Status: %s\n\n",
-		report.Platform, report.GoRuntime, report.ZeroCGO, report.OverallStatus)
-
-	if len(report.AppliedFixes) > 0 {
-		pterm.Info.Println("Applied Self-Healing Fixes:")
-		for _, fix := range report.AppliedFixes {
-			pterm.Success.Printf("  • %s\n", fix)
-		}
-		fmt.Println()
-	}
-
-	var td pterm.TableData
-	td = append(td, []string{"Check", "Status", "Message", "Details"})
-	for _, chk := range report.Checks {
-		var statusStr string
-		switch chk.Status {
-		case "OK":
-			statusStr = pterm.Green(chk.Status)
-		case "WARN":
-			statusStr = pterm.Yellow(chk.Status)
-		default:
-			statusStr = pterm.Red(chk.Status)
-		}
-		td = append(td, []string{chk.Name, statusStr, chk.Message, chk.Details})
-	}
-	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
-
-	if report.OverallStatus == "UNHEALTHY" {
-		os.Exit(1)
 	}
 }
 

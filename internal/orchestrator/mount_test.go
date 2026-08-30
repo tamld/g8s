@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -588,10 +589,13 @@ func TestAgyWorkerDefaultsWithoutWithMounts(t *testing.T) {
 		t.Errorf("Inject() = %q, %v; want 'prompt', nil", injected, err)
 	}
 
-	taskSpec := TaskSpec{TaskID: "t1"}
+	taskSpec := TaskSpec{TaskID: "t1", Prompt: "prompt"}
 	pTask, err := w.PreSpawn(ctx, taskSpec)
 	if err != nil || pTask.TaskID != "t1" {
 		t.Errorf("PreSpawn() = %v, %v; want %v, nil", pTask, err, taskSpec)
+	}
+	if !strings.Contains(pTask.Prompt, "Before you start, take 30 seconds to answer:") || !strings.HasSuffix(pTask.Prompt, "prompt") {
+		t.Errorf("PreSpawn() prompt = %q, want Attentioner reflection prefix", pTask.Prompt)
 	}
 
 	if err := w.PostWait(ctx, taskSpec, Receipt{}); err != nil {
@@ -604,6 +608,44 @@ func TestAgyWorkerDefaultsWithoutWithMounts(t *testing.T) {
 	vars, err := w.Load(ctx, "s1")
 	if err != nil || vars["k"] != "v" {
 		t.Errorf("Load() = %v, %v; want map[k:v], nil", vars, err)
+	}
+}
+
+func TestDefaultOrchestratorIncludesAttentioner(t *testing.T) {
+	reg := DefaultRegistry()
+	if reg == nil {
+		t.Fatalf("DefaultRegistry returned nil")
+	}
+
+	w, ok := reg.Get("agy")
+	if !ok || w == nil {
+		t.Fatalf("expected 'agy' worker registered in DefaultRegistry")
+	}
+
+	agy, ok := w.(*AgyWorker)
+	if !ok {
+		t.Fatalf("expected *AgyWorker type, got %T", w)
+	}
+
+	if agy.Mounts() == nil {
+		t.Fatalf("expected non-nil MountRegistry on AgyWorker")
+	}
+
+	ctx := context.Background()
+	taskSpec := TaskSpec{
+		TaskID: "test-task",
+		Prompt: "Original prompt text",
+	}
+	res, err := agy.PreSpawn(ctx, taskSpec)
+	if err != nil {
+		t.Fatalf("PreSpawn failed: %v", err)
+	}
+
+	if !strings.Contains(res.Prompt, "Before you start, take 30 seconds to answer:") {
+		t.Errorf("expected PreSpawn to inject reflection prompt, got: %s", res.Prompt)
+	}
+	if !strings.HasSuffix(res.Prompt, "Original prompt text") {
+		t.Errorf("expected PreSpawn to preserve original prompt suffix, got: %s", res.Prompt)
 	}
 }
 

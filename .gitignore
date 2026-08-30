@@ -87,9 +87,9 @@ internal/orchestrator/worktree/
 internal/orchestrator/scratch/
 
 # Brief / receipt / handoff scratch
-briefs/
-receipts/
-handoffs/
+/briefs/
+/receipts/
+/handoffs/
 .claude/scratch/
 
 # Local coverage + diagnostic

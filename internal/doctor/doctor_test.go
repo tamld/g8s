@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/tamld/g8s/internal/heartbeat"
 	"github.com/tamld/g8s/internal/pathutil"
 	_ "modernc.org/sqlite"
 )
@@ -228,5 +231,61 @@ func TestDoctorWindowsDetection(t *testing.T) {
 		if len(checks) < 6 {
 			t.Fatalf("expected at least 6 windows checks on windows, got %d", len(checks))
 		}
+	}
+}
+
+func TestRunAttentionCheck(t *testing.T) {
+	tempDir := t.TempDir()
+	hbDir := filepath.Join(tempDir, ".heartbeat")
+
+	doc := New()
+	ctx := context.Background()
+
+	// 1. Run without active heartbeats or actor
+	rep1 := doc.RunAttentionCheck(ctx, "", hbDir)
+	if rep1 == nil || len(rep1.Questions) != 5 {
+		t.Fatalf("expected 5 questions in report, got %+v", rep1)
+	}
+
+	expectedQuestions := []string{
+		"What 2-3 edge cases might your last task have missed?",
+		"Run 'g8s cleanup --target ghost-process --dry-run' — does it list your own session? (it should NOT)",
+		"Are you running with --actor set to a unique identifier?",
+		"When was your last heartbeat update?",
+		"What contract from your brief would you violate by accident?",
+	}
+
+	for i, q := range expectedQuestions {
+		if rep1.Questions[i].Question != q {
+			t.Errorf("question %d mismatch: got %q, want %q", i+1, rep1.Questions[i].Question, q)
+		}
+		if rep1.Questions[i].Number != i+1 {
+			t.Errorf("question number mismatch: got %d, want %d", rep1.Questions[i].Number, i+1)
+		}
+	}
+
+	// 2. Run with active actor and heartbeat
+	hbStore := heartbeat.NewStore(hbDir, time.Now)
+	_, err := hbStore.Record("sess-attn-1", heartbeat.StatusRunning, nil,
+		heartbeat.WithPID(1234),
+		heartbeat.WithBinary("agy"),
+		heartbeat.WithLastUpdate(time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("failed to record test heartbeat: %v", err)
+	}
+
+	rep2 := doc.RunAttentionCheck(ctx, "agent-007", hbDir)
+	if rep2.Questions[2].Answer != "yes (actor=agent-007)" {
+		t.Errorf("expected actor answer 'yes (actor=agent-007)', got %q", rep2.Questions[2].Answer)
+	}
+	if !strings.Contains(rep2.Questions[3].Answer, "sess-attn-1") {
+		t.Errorf("expected heartbeat answer to mention sess-attn-1, got %q", rep2.Questions[3].Answer)
+	}
+
+	// 3. Run with default actor ("default" or empty)
+	rep3 := doc.RunAttentionCheck(ctx, "default", hbDir)
+	if !strings.Contains(rep3.Questions[2].Answer, "recommend setting --actor") {
+		t.Errorf("expected recommendation for default actor, got %q", rep3.Questions[2].Answer)
 	}
 }
