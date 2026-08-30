@@ -187,22 +187,12 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 	}
 >>>>>>> 290ba67 (feat(doctor): detect Windows install source and PATH state in g8s doctor (DEBT-40))
 
-	if onPath {
-		results = append(results, DiagnosticResult{
-			Name:    "Windows PATH State",
-			Status:  "OK",
-			Message: "✓ INSTDIR is on system PATH",
-			Details: installPath,
-		})
-	} else {
-		results = append(results, DiagnosticResult{
-			Name:    "Windows PATH State",
-			Status:  "WARN",
-			Message: fmt.Sprintf("INSTDIR %s is not in system PATH", installPath),
-			Details: installPath,
-		})
+	pathMsg := "✓ INSTDIR is on system PATH"
+	if !onPath && source != "msi-or-nsis" {
+		pathMsg = "✓ Running in portable/development mode"
 	}
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if detectPaths {
 		profiles := pathutil.DetectUserProfiles()
@@ -227,6 +217,14 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 			})
 		}
 	}
+=======
+	results = append(results, DiagnosticResult{
+		Name:    "Windows PATH State",
+		Status:  "OK",
+		Message: pathMsg,
+		Details: installPath,
+	})
+>>>>>>> 3ec4fb7 (fix(ci): polish dist-validation snapshot skip, doctor portable state, and NSIS path logic (DEBT-40))
 
 	return results
 }

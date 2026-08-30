@@ -24,7 +24,12 @@ Section "Install"
   WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s" "Publisher" "TamLD"
   WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s" "UninstallString" "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$INSTDIR;$ENV{Path}"
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  ${If} $0 == ""
+    WriteRegStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$INSTDIR"
+  ${Else}
+    WriteRegStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$INSTDIR;$0"
+  ${EndIf}
   CreateDirectory "$SMPROGRAMS\g8s (The Gatekeepers)"
   CreateShortcut "$SMPROGRAMS\g8s (The Gatekeepers)\g8s.lnk" "$INSTDIR\g8s.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
