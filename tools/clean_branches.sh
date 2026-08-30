@@ -5,8 +5,6 @@ set -euo pipefail
 # Safely bulk-deletes local orphan branches that are merged into main
 # and not present on remote. Enforces `git branch -d` (never -D).
 
-PATTERN="${1:-agy/*}"
-
 REPO_DIR="$(git rev-parse --show-toplevel)"
 cd "$REPO_DIR"
 
@@ -19,23 +17,22 @@ REMOTE_BRANCHES=$(git ls-remote --heads origin | awk '{print $2}' | sed 's#refs/
 # 3. Get active worktree branches to avoid deleting branches currently checked out
 ACTIVE_WT_BRANCHES=$(git worktree list --porcelain | awk '/^branch / {sub("refs/heads/", "", $2); print $2}')
 
-# 4. Find all local branches matching pattern
-LOCAL_BRANCHES=()
-while IFS= read -r b; do
-  [ -z "$b" ] && continue
-  LOCAL_BRANCHES+=("$b")
-done < <(git branch --list "$PATTERN" --format='%(refname:short)' 2>/dev/null || true)
+# 4. Determine target patterns (defaults to agy/*, agy-sup-*, and feat/*)
+PATTERNS=("$@")
+if [ ${#PATTERNS[@]} -eq 0 ]; then
+  PATTERNS=("agy/*" "agy-sup-*" "feat/*")
+fi
 
-# Also check agy-sup-* if default agy/*
-if [ "$PATTERN" = "agy/*" ]; then
+LOCAL_BRANCHES=()
+for pat in "${PATTERNS[@]}"; do
   while IFS= read -r b; do
     [ -z "$b" ] && continue
     LOCAL_BRANCHES+=("$b")
-  done < <(git branch --list 'agy-sup-*' --format='%(refname:short)' 2>/dev/null || true)
-fi
+  done < <(git branch --list "$pat" --format='%(refname:short)' 2>/dev/null || true)
+done
 
 if [ ${#LOCAL_BRANCHES[@]} -eq 0 ]; then
-  echo "No local branches found matching '$PATTERN'."
+  echo "No local branches found matching patterns: ${PATTERNS[*]}."
   exit 0
 fi
 
@@ -58,7 +55,7 @@ for b in "${LOCAL_BRANCHES[@]}"; do
 done
 
 if [ ${#CANDIDATES[@]} -eq 0 ]; then
-  echo "No orphan branches to clean for '$PATTERN'."
+  echo "No orphan branches to clean for patterns: ${PATTERNS[*]}."
   exit 0
 fi
 
