@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **DEBT-40: Windows NSIS & WiX MSI Installer Support** (`.goreleaser.yaml`, `packaging/windows`, `internal/registry`, `internal/doctor`, `docs/WINDOWS_INSTALL.md`, #153):
+  - Added NSIS setup wizard (`.exe`) with GUI installer, automatic System PATH registration, Start Menu group, Desktop shortcut, and uninstaller.
+  - Added WiX MSI enterprise installer (`.msi`) for corporate rollout, SCCM, Intune, and GPO distributions.
+  - Added `internal/registry` cross-platform wrapper using `golang.org/x/sys/windows` registry APIs with zero-CGO compatibility.
+  - Enhanced `g8s doctor` on Windows to detect installation source (`MSI/NSIS` vs `ZIP/Manual`), install path, and System PATH registration state.
+  - Added comprehensive Windows installation and troubleshooting guide in `docs/WINDOWS_INSTALL.md`.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added

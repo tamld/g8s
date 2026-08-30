@@ -15,13 +15,21 @@ builds:
     goos:
       - darwin
       - linux
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+  - id: g8s-windows
+    main: ./cmd/g8s
+    binary: g8s
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
@@ -66,6 +74,7 @@ nfpms:
       - deb
       - rpm
       - apk
+      - msi
 
 homebrew_casks:
   - repository:
