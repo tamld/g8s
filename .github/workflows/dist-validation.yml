@@ -13,6 +13,9 @@ on:
       - 'go.sum'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   goreleaser-check:
     name: GoReleaser Check & Snapshot
