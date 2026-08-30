@@ -31,6 +31,7 @@ func TestBuildWorkerArgv(t *testing.T) {
 		"--model", "gemini-3.7-flash-high",
 		"--add-dir", "/tmp/workspace",
 		"--dangerously-skip-permissions",
+		"--sandbox",
 		"--output-format", "stream-json",
 		"--print-timeout", "30m",
 	}
@@ -49,12 +50,57 @@ func TestBuildWorkerArgvDefaults(t *testing.T) {
 	want := []string{
 		"agy",
 		"--prompt", "explain the architecture",
+		"--sandbox",
 		"--output-format", "stream-json",
 		"--print-timeout", "30m",
 	}
 
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("BuildWorkerArgv() = %v\nwant: %v", argv, want)
+	}
+}
+
+func TestBuildWorkerArgvPermissionReadOnly(t *testing.T) {
+	opts := BuildWorkerArgvOptions{
+		Prompt:     "read only scan",
+		Permission: "read_only",
+	}
+	argv := BuildWorkerArgv(opts)
+	found := false
+	for _, a := range argv {
+		if a == "--sandbox" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --sandbox in argv for permission=read_only, got %v", argv)
+	}
+}
+
+func TestBuildWorkerArgvPermissionWorkspaceWrite(t *testing.T) {
+	opts := BuildWorkerArgvOptions{
+		Prompt:     "write allowed",
+		Permission: "workspace_write",
+	}
+	argv := BuildWorkerArgv(opts)
+	for _, a := range argv {
+		if a == "--sandbox" {
+			t.Fatalf("expected NO --sandbox in argv for permission=workspace_write, got %v", argv)
+		}
+	}
+}
+
+func TestBuildWorkerArgvNoSandbox(t *testing.T) {
+	opts := BuildWorkerArgvOptions{
+		Prompt:    "no sandbox flag",
+		NoSandbox: true,
+	}
+	argv := BuildWorkerArgv(opts)
+	for _, a := range argv {
+		if a == "--sandbox" {
+			t.Fatalf("expected NO --sandbox in argv when NoSandbox=true, got %v", argv)
+		}
 	}
 }
 
