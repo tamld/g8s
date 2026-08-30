@@ -252,8 +252,12 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	h.mu.Unlock()
 
 	receipt := h.synthesize(err)
+	verifier := &StdoutEnvelopeVerifier{}
+	_ = verifier.VerifyReceipt(ctx, &receipt)
 	if !receipt.OK && err == nil {
-		if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
+		if receipt.LastError != "" {
+			err = errors.New(receipt.LastError)
+		} else if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
 			err = envErr
 		} else {
 			err = errors.New("worker returned failure receipt")

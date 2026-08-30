@@ -61,6 +61,8 @@ func FanOut(ctx context.Context, plan []TaskSpec, opts FanOutOptions) ([]Receipt
 				return
 			}
 			receipt, werr := handle.Wait(ctx)
+			verifier := &StdoutEnvelopeVerifier{}
+			_ = verifier.VerifyReceipt(ctx, &receipt)
 			receipt.FilesModified, receipt.CommitSHA = gitDiffNameOnly(opts.Pool.repo, wt.BaseSHA)
 			receipt.ScopeViolations = diffScope(receipt.FilesModified, task.AllowedFiles)
 

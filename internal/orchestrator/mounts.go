@@ -293,6 +293,8 @@ type mountedHandle struct {
 
 func (h *mountedHandle) Wait(ctx context.Context) (Receipt, error) {
 	receipt, err := h.Handle.Wait(ctx)
+	verifier := &StdoutEnvelopeVerifier{}
+	_ = verifier.VerifyReceipt(ctx, &receipt)
 	if hookErr := h.mounts.Hooks().PostWait(ctx, h.spec, receipt); hookErr != nil {
 		if err == nil {
 			err = fmt.Errorf("hook mount post-wait: %w", hookErr)
