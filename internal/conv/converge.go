@@ -127,7 +127,7 @@ func Converge(solutions []*Solution) *ConvergedReport {
 		workers := headingToWorkers[normHead]
 		rawTitle := headingRawMap[normHead]
 		if rawTitle == "" {
-			rawTitle = strings.Title(normHead)
+			rawTitle = titleCase(normHead)
 		}
 
 		bodies := headingBodies[normHead]
@@ -345,9 +345,19 @@ func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) str
 	// Unified Specification Output
 	sb.WriteString("## 5. Unified Implementation Specification\n\n")
 	for normKey, content := range report.UnifiedSections {
-		sb.WriteString(fmt.Sprintf("### %s\n\n", strings.Title(normKey)))
+		sb.WriteString(fmt.Sprintf("### %s\n\n", titleCase(normKey)))
 		sb.WriteString(content + "\n\n")
 	}
 
 	return sb.String()
+}
+
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+	return strings.Join(words, " ")
 }
