@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tamld/g8s/internal/state"
 	_ "modernc.org/sqlite"
 )
 
@@ -115,6 +116,14 @@ func (s *Store) initialize() error {
 		rollbackInit(conn)
 		return err
 	}
+	if err := applyEventLogSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateEventLogSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
 
 	if _, err := conn.ExecContext(context.Background(),
 		fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
@@ -133,7 +142,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 5 && version != SchemaVersion) {
+	if version < 0 || (version > 6 && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -449,6 +458,50 @@ func migrateBriefsSchema(conn *sql.Conn) error {
 		}
 	}
 	return nil
+}
+
+// applyEventLogSchema creates the event_log persistence table with idempotent CREATE TABLE IF NOT EXISTS.
+func applyEventLogSchema(conn *sql.Conn) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS event_log (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			subject_id TEXT NOT NULL,
+			subject    TEXT NOT NULL DEFAULT '',
+			from_state TEXT NOT NULL,
+			to_state   TEXT NOT NULL,
+			event      TEXT NOT NULL,
+			actor      TEXT NOT NULL,
+			reason     TEXT NOT NULL,
+			ts         REAL NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_event_log_subject ON event_log(subject_id, id ASC)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("apply event log schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateEventLogSchema is the defensive upgrade for pre-v7 databases.
+func migrateEventLogSchema(conn *sql.Conn) error {
+	return applyEventLogSchema(conn)
+}
+
+// LogStateEvent appends an event record to the event_log table.
+func (s *Store) LogStateEvent(ctx context.Context, subjectID string, subject state.Subject, from, to state.State, event state.Event, actor, reason string) error {
+	return state.Log(ctx, s.db, subjectID, subject, from, to, event, actor, reason, s.clock())
+}
+
+// ReplayStateEvents returns all logged events for subjectID in ascending chronological order.
+func (s *Store) ReplayStateEvents(ctx context.Context, subjectID string) ([]state.EventRecord, error) {
+	return state.Replay(ctx, s.db, subjectID)
+}
+
+// ShowStateEvents returns the last N events for subjectID in chronological order.
+func (s *Store) ShowStateEvents(ctx context.Context, subjectID string, limit int) ([]state.EventRecord, error) {
+	return state.Show(ctx, s.db, subjectID, limit)
 }
 
 // Clock returns the store's current time from its configured clock.

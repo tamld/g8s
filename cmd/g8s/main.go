@@ -135,6 +135,8 @@ func main() {
 		runCleanup(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
+	case "state":
+		runState(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -1418,6 +1420,7 @@ func printUsage() {
 	fmt.Println("  cleanup-worktrees Clean up stale agy subagent git worktrees (g8s cleanup-worktrees --older-than 1h [--dry-run])")
 	fmt.Println("  cleanup      Run lifecycle sweep for ghost processes, orphan worktrees, branches, tags, receipts")
 	fmt.Println("  status       Display worker heartbeat and lifecycle observability status (--worker)")
+	fmt.Println("  state        Show state and replay event logs (g8s state show|replay <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
@@ -1529,3 +1532,152 @@ func runWorker(args []string) {
 		}
 	}
 }
+
+// runState handles state introspection and event log replay per DEBT-31.
+func runState(args []string) {
+	if len(args) == 0 {
+		exitUsage("state", "", "", "usage: g8s state <show|replay> <id> [flags]", "Use 'g8s state show <id>' or 'g8s state replay <id>'", false)
+	}
+	sub := args[0]
+	switch sub {
+	case "show":
+		runStateShow(args[1:])
+	case "replay":
+		runStateReplay(args[1:])
+	default:
+		exitUsage("state", sub, "", fmt.Sprintf("unknown state subcommand %q (valid: show, replay)", sub), "", false)
+	}
+}
+
+func runStateShow(args []string) {
+	fs := flag.NewFlagSet("state show", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	dbFlag := fs.String("db", "", "path to control-plane database")
+	limitFlag := fs.Int("limit", 20, "maximum number of events to show (default 20)")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("state", "show", *traceID, err.Error(), "", *jsonl)
+	}
+	if fs.NArg() == 0 {
+		exitUsage("state", "show", *traceID, "usage: g8s state show <id> [--limit 20] [--json]", "Provide a subject or task ID", *jsonl)
+	}
+	id := fs.Arg(0)
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		var err error
+		dbPath, err = databasePath()
+		if err != nil {
+			exitRuntime("state", "show", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		exitRuntime("state", "show", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	events, err := store.ShowStateEvents(ctx, id, *limitFlag)
+	if err != nil {
+		exitRuntime("state", "show", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+
+	// Resolve current state
+	currentState := ""
+	subjectType := ""
+	if task, tErr := store.GetTask(ctx, id); tErr == nil && task != nil {
+		currentState = task.State
+		subjectType = "task"
+	} else if brief, bErr := store.GetBrief(ctx, id); bErr == nil && brief.ID != "" {
+		currentState = brief.Status
+		subjectType = "brief"
+	} else if sup, sErr := store.GetSupervisorTask(ctx, id); sErr == nil && sup.ID != "" {
+		currentState = sup.State
+		subjectType = "orchestrator"
+	} else if len(events) > 0 {
+		currentState = string(events[len(events)-1].ToState)
+		subjectType = string(events[len(events)-1].Subject)
+	} else {
+		exitRuntime("state", "show", *traceID, cli.CodeNotFound, fmt.Errorf("subject %q not found", id), "Ensure the ID exists in the database", *jsonl)
+	}
+
+	data := map[string]any{
+		"id":            id,
+		"subject":       subjectType,
+		"current_state": currentState,
+		"events":        events,
+	}
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("state", "state", "show", data)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("state", "show", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		return
+	}
+
+	pterm.DefaultHeader.WithFullWidth().Println(fmt.Sprintf("State: %s (Subject: %s, ID: %s)", currentState, subjectType, id))
+	if len(events) > 0 {
+		var td pterm.TableData
+		td = append(td, []string{"Time", "From", "To", "Event", "Actor", "Reason"})
+		for _, ev := range events {
+			td = append(td, []string{
+				ev.Timestamp.Format(time.RFC3339),
+				string(ev.FromState),
+				string(ev.ToState),
+				string(ev.Event),
+				ev.Actor,
+				ev.Reason,
+			})
+		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+	} else {
+		fmt.Println("No transition events recorded in event_log.")
+	}
+}
+
+func runStateReplay(args []string) {
+	fs := flag.NewFlagSet("state replay", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	_ = jsonMode
+	dbFlag := fs.String("db", "", "path to control-plane database")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("state", "replay", *traceID, err.Error(), "", *jsonl)
+	}
+	if fs.NArg() == 0 {
+		exitUsage("state", "replay", *traceID, "usage: g8s state replay <id>", "Provide a subject or task ID", *jsonl)
+	}
+	id := fs.Arg(0)
+
+	dbPath := *dbFlag
+	if dbPath == "" {
+		var err error
+		dbPath, err = databasePath()
+		if err != nil {
+			exitRuntime("state", "replay", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		exitRuntime("state", "replay", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	events, err := store.ReplayStateEvents(ctx, id)
+	if err != nil {
+		exitRuntime("state", "replay", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+
+	for _, ev := range events {
+		line, mErr := json.Marshal(ev)
+		if mErr != nil {
+			continue
+		}
+		fmt.Println(string(line))
+	}
+}
+

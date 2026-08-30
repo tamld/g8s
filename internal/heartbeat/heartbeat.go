@@ -18,14 +18,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/state"
 )
 
 // Standard heartbeat execution status values.
 const (
-	StatusRunning  = "running"
-	StatusIdle     = "idle"
-	StatusFinished = "finished"
-	StatusFailed   = "failed"
+	StatusRunning  = string(state.HeartbeatStateRunning)
+	StatusIdle     = string(state.HeartbeatStateIdle)
+	StatusFinished = string(state.HeartbeatStateFinished)
+	StatusFailed   = string(state.HeartbeatStateFailed)
 )
 
 // Freshness thresholds.
