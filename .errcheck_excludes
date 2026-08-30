@@ -17,6 +17,9 @@
 // g8s vault
 (*github.com/tamld/g8s/internal/vault.Vault).Close
 
+// g8s registry
+(*github.com/tamld/g8s/internal/registry.Key).Close
+
 // net/http — response body (io.ReadCloser)
 (io.ReadCloser).Close
 (io.Closer).Close
