@@ -30,6 +30,8 @@ type Receipt struct {
 // the orchestrator uses to key receipts, worktree leases, and evidence correlation.
 type TaskSpec struct {
 	TaskID         string
+	SessionID      string
+	Prompt         string
 	OrchestratorID string
 	WorktreeID     string
 	WorkerName     string

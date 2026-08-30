@@ -7,6 +7,7 @@
 package heartbeat
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -136,11 +137,82 @@ func (s *Store) BaseDir() string {
 	return s.baseDir
 }
 
+// Event represents a structured event recorded into worker heartbeat metadata.
+type Event struct {
+	Kind   string `json:"kind"`
+	Prompt string `json:"prompt"`
+}
+
+// RecordEvent writes an Event for sessionID.
+func (s *Store) RecordEvent(sessionID string, evt Event) (*Heartbeat, error) {
+	meta := map[string]any{
+		"event_kind":   evt.Kind,
+		"event_prompt": evt.Prompt,
+	}
+	return s.Record(sessionID, StatusRunning, meta, WithCurrentStep(evt.Prompt))
+}
+
 // Record atomically writes the heartbeat for sessionID.
+// It accepts either a status string (with optional metadata and RecordOptions) or an Event struct.
 // It writes to a temporary file in the same directory and performs an atomic rename.
-func (s *Store) Record(sessionID, status string, metadata map[string]any, opts ...RecordOption) (*Heartbeat, error) {
+func (s *Store) Record(sessionID string, payload any, extra ...any) (*Heartbeat, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, errors.New("session_id must not be empty")
+	}
+
+	var (
+		status   string
+		metadata map[string]any
+		opts     []RecordOption
+	)
+
+	switch p := payload.(type) {
+	case Event:
+		status = StatusRunning
+		metadata = map[string]any{
+			"event_kind":   p.Kind,
+			"event_prompt": p.Prompt,
+		}
+		opts = append(opts, WithCurrentStep(p.Prompt))
+		for _, ext := range extra {
+			if opt, ok := ext.(RecordOption); ok {
+				opts = append(opts, opt)
+			}
+		}
+	case *Event:
+		status = StatusRunning
+		if p != nil {
+			metadata = map[string]any{
+				"event_kind":   p.Kind,
+				"event_prompt": p.Prompt,
+			}
+			opts = append(opts, WithCurrentStep(p.Prompt))
+		}
+		for _, ext := range extra {
+			if opt, ok := ext.(RecordOption); ok {
+				opts = append(opts, opt)
+			}
+		}
+	case string:
+		status = p
+		if len(extra) > 0 {
+			if m, ok := extra[0].(map[string]any); ok {
+				metadata = m
+				for _, ext := range extra[1:] {
+					if opt, ok := ext.(RecordOption); ok {
+						opts = append(opts, opt)
+					}
+				}
+			} else {
+				for _, ext := range extra {
+					if opt, ok := ext.(RecordOption); ok {
+						opts = append(opts, opt)
+					}
+				}
+			}
+		}
+	default:
+		status = StatusRunning
 	}
 
 	s.mu.Lock()
@@ -332,9 +404,21 @@ func (s *Store) List() ([]*Heartbeat, error) {
 
 var defaultStore = NewStore(DefaultHeartbeatDir, time.Now)
 
-// Record writes a heartbeat using default settings.
-func Record(sessionID, status string, metadata map[string]any, opts ...RecordOption) (*Heartbeat, error) {
-	return defaultStore.Record(sessionID, status, metadata, opts...)
+// Record writes a heartbeat or event using default settings.
+func Record(sessionID string, payload any, extra ...any) (*Heartbeat, error) {
+	return defaultStore.Record(sessionID, payload, extra...)
+}
+
+// RecordEvent writes an Event using default settings.
+func RecordEvent(sessionID string, evt Event) (*Heartbeat, error) {
+	return defaultStore.RecordEvent(sessionID, evt)
+}
+
+// Emit writes an Event using default settings.
+func Emit(ctx context.Context, sessionID string, evt Event) error {
+	_ = ctx
+	_, err := defaultStore.RecordEvent(sessionID, evt)
+	return err
 }
 
 // Status retrieves a heartbeat using default settings.
