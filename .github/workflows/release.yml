@@ -82,3 +82,39 @@ jobs:
         if: matrix.goos == 'windows-latest' && env.HAS_CERT != 'true'
         run: echo "No signing cert available; skipping"
 
+  notarize-macos:
+    runs-on: macos-latest
+    needs: build-darwin
+    if: ${{ env.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: g8s-darwin
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          for f in *.zip; do
+            ditto -xk --keepparent "$f" extracted
+            xcrun notarytool submit extracted/g8s \
+              --keychain-profile "notarytool-profile" \
+              --wait
+            xcrun stapler staple extracted/g8s
+            ditto -c --keepparent extracted "${f%.zip}-notarized.zip"
+            rm -rf extracted
+          done
+          mv *-notarized.zip g8s-darwin-notarized.zip
+      - uses: actions/upload-artifact@v5
+        with:
+          name: g8s-darwin-notarized
+          path: g8s-darwin-notarized.zip
+
+
