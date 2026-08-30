@@ -1,0 +1,48 @@
+name: Golden-Loop E2E
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily at 6am UTC
+  workflow_dispatch:    # manual trigger
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - '.github/workflows/golden-loop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  golden-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+      - name: Build g8s from this exact commit
+        run: go build -o /tmp/g8s ./cmd/g8s
+      - name: Install latest g8s release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(gh release view --repo tamld/g8s --json tagName --jq .tagName 2>/dev/null || echo "v0.5.0")
+          URL="https://github.com/tamld/g8s/releases/download/${VERSION}/g8s_${VERSION#v}_linux_amd64.tar.gz"
+          curl -sSL "$URL" | tar xz -C /tmp || true
+      - name: Submit a fixed task via latest release
+        run: /tmp/g8s submit --role scout --permission read_only --prompt "find ./internal/orchestrator/agy_worker.go" --idempotency-key golden-$(date +%s)
+      - name: Run worker once
+        run: /tmp/g8s worker --once || true
+      - name: Verify receipt state is FAILED if stdout is error envelope
+        run: |
+          TASK_ID=$(/tmp/g8s tasks --state SUCCEEDED --limit 1 --json | jq -r '.[0].id // empty' 2>/dev/null || true)
+          if [ -n "$TASK_ID" ]; then
+            /tmp/g8s get "$TASK_ID" | tee /tmp/receipt.json
+            STDOUT_KIND=$(jq -r '.data.stdout_kind // .stdout_kind // empty' /tmp/receipt.json)
+            STATE=$(jq -r '.data.state // .state // empty' /tmp/receipt.json)
+            if [ "$STDOUT_KIND" = "error" ] && [ "$STATE" = "SUCCEEDED" ]; then
+              echo "::error::GOLDEN LOOP REGRESSION: state=SUCCEEDED but stdout is error envelope"
+              exit 1
+            fi
+          fi
