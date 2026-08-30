@@ -50,6 +50,7 @@ func CheckTDDPitfalls(repoPath string) ([]TDDPitfall, error) {
 	}
 
 	packages := make(map[string]*pkgDef)
+	prodFilePaths := make(map[string][]string) // dir -> []prodFiles
 	testFilePaths := make(map[string][]string) // dir -> []testFiles
 
 	fset := token.NewFileSet()
@@ -74,6 +75,8 @@ func CheckTDDPitfalls(repoPath string) ([]TDDPitfall, error) {
 		dir := filepath.Dir(path)
 		if strings.HasSuffix(info.Name(), "_test.go") {
 			testFilePaths[dir] = append(testFilePaths[dir], path)
+		} else {
+			prodFilePaths[dir] = append(prodFilePaths[dir], path)
 		}
 		return nil
 	})
@@ -81,28 +84,23 @@ func CheckTDDPitfalls(repoPath string) ([]TDDPitfall, error) {
 		return nil, fmt.Errorf("tdd_trap: walk repo: %w", err)
 	}
 
-	// 2. Parse all production files per package directory
-	for dir := range testFilePaths {
-		pkgs, parseErr := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, parser.ParseComments)
-		if parseErr != nil {
-			continue
+	// 2. Parse all production files per package directory using parser.ParseFile
+	for dir, prodFiles := range prodFilePaths {
+		pDef := &pkgDef{
+			Types:     make(map[string]*typeDef),
+			Functions: make(map[string]bool),
+			VarsConst: make(map[string]bool),
 		}
 
-		for pkgName, pkgAst := range pkgs {
-			pDef := &pkgDef{
-				Name:      pkgName,
-				Types:     make(map[string]*typeDef),
-				Functions: make(map[string]bool),
-				VarsConst: make(map[string]bool),
+		for _, prodPath := range prodFiles {
+			fileAst, parseErr := parser.ParseFile(fset, prodPath, nil, parser.ParseComments)
+			if parseErr != nil {
+				continue
 			}
-
-			for _, file := range pkgAst.Files {
-				collectProdSymbols(file, pDef)
-			}
-			packages[dir] = pDef
+			pDef.Name = fileAst.Name.Name
+			collectProdSymbols(fileAst, pDef)
 		}
+		packages[dir] = pDef
 	}
 
 	// 3. Inspect test files for pitfalls
