@@ -13,6 +13,7 @@ import (
 	"github.com/pterm/pterm"
 	"github.com/tamld/g8s/internal/cleanup"
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/pathutil"
 	_ "modernc.org/sqlite"
 )
 
@@ -61,6 +62,7 @@ func runCleanup(args []string) {
 	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
+	userProfileFlag := fs.String("user-profile", "", "scope cleanup to a specific user profile (e.g. alice)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("cleanup", "", *traceID, err.Error(), "", *jsonl)
 	}
@@ -89,10 +91,21 @@ func runCleanup(args []string) {
 	}
 
 	dbPath, _ := databasePath()
+	hbDir := filepath.Join(*repoDir, ".heartbeat")
+
+	if *userProfileFlag != "" {
+		for _, p := range pathutil.DetectUserProfiles() {
+			if strings.EqualFold(p.Username, *userProfileFlag) {
+				dbPath = filepath.Join(p.DataDir, "g8s.db")
+				hbDir = filepath.Join(p.DataDir, ".heartbeat")
+				break
+			}
+		}
+	}
 
 	cfg := CleanupConfig{
 		RepoDir:        *repoDir,
-		HeartbeatDir:   filepath.Join(*repoDir, ".heartbeat"),
+		HeartbeatDir:   hbDir,
 		DBPath:         dbPath,
 		Targets:        targets,
 		DryRun:         dryRun,

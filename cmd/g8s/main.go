@@ -25,6 +25,7 @@ import (
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/initwiz"
 	"github.com/tamld/g8s/internal/mcp"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/service"
@@ -137,6 +138,8 @@ func main() {
 		runStatus(os.Args[2:])
 	case "state":
 		runState(os.Args[2:])
+	case "migrate":
+		runMigrate(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -154,17 +157,10 @@ func (p *pathFlags) Set(v string) error {
 }
 
 // databasePath resolves the shared SQLite database location. Operators may
-// override it via G8S_DB; the default lives under ~/.local/state/g8s per
+// override it via G8S_DB; the default lives under canonical state directory per
 // containment conventions (file permissions are enforced by each manager).
 func databasePath() (string, error) {
-	dbPath := os.Getenv("G8S_DB")
-	if dbPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		dbPath = filepath.Join(home, ".local", "state", "g8s", "g8s.db")
-	}
+	dbPath := pathutil.DefaultDatabasePath()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return "", fmt.Errorf("create state directory: %w", err)
 	}
@@ -813,12 +809,18 @@ func runDoctor(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	fixMode := fs.Bool("fix", false, "apply automatic self-healing remediations")
+	scopeFlag := fs.String("scope", pathutil.ScopeUser, "installation and execution scope (user or system)")
+	detectPathsFlag := fs.Bool("detect-paths", false, "detect and enumerate all g8s profile paths on host")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("doctor", "", *traceID, err.Error(), "", *jsonl)
 	}
 
 	dbPath, _ := databasePath()
-	report := doctor.RunDiagnosticsWithFix(context.Background(), dbPath, *fixMode)
+	doc := &doctor.Doctor{
+		Scope:       *scopeFlag,
+		DetectPaths: *detectPathsFlag,
+	}
+	report := doc.RunDiagnosticsWithFix(context.Background(), dbPath, *fixMode)
 
 	if *jsonMode || *jsonl {
 		env := cli.NewEnvelope("doctor_report", "doctor", "", report)
@@ -920,6 +922,7 @@ func runConfig(args []string) {
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
+	scopeFlag := fs.String("scope", "", "installation and execution scope (user or system)")
 
 	var nonFlags []string
 	var flagArgs []string
@@ -945,6 +948,15 @@ func runConfig(args []string) {
 	mgr, err := settings.NewManager("")
 	if err != nil {
 		exitRuntime("config", subcmd, *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+
+	if *scopeFlag != "" {
+		if *scopeFlag != pathutil.ScopeUser && *scopeFlag != pathutil.ScopeSystem {
+			exitUsage("config", "", *traceID, fmt.Sprintf("invalid scope %q (must be %q or %q)", *scopeFlag, pathutil.ScopeUser, pathutil.ScopeSystem), "", *jsonl)
+		}
+		if err := mgr.Set("scope", *scopeFlag); err != nil {
+			exitRuntime("config", "scope", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
 	}
 
 	switch subcmd {
@@ -1419,6 +1431,7 @@ func printUsage() {
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
 	fmt.Println("  cleanup-worktrees Clean up stale agy subagent git worktrees (g8s cleanup-worktrees --older-than 1h [--dry-run])")
 	fmt.Println("  cleanup      Run lifecycle sweep for ghost processes, orphan worktrees, branches, tags, receipts")
+	fmt.Println("  migrate      Migrate legacy cwd-relative g8s data to canonical paths (g8s migrate --from ./ [--dry-run])")
 	fmt.Println("  status       Display worker heartbeat and lifecycle observability status (--worker)")
 	fmt.Println("  state        Show state and replay event logs (g8s state show|replay <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")

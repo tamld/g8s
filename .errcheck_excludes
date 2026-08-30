@@ -35,3 +35,6 @@ fmt.Println
 
 // pterm — terminal rendering
 (github.com/pterm/pterm.TablePrinter).Render
+
+// g8s registry
+(*github.com/tamld/g8s/internal/registry.Key).Close

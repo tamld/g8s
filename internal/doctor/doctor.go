@@ -14,7 +14,9 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
+	"github.com/tamld/g8s/internal/registry"
 	_ "modernc.org/sqlite"
 )
 
@@ -32,22 +34,217 @@ type DoctorReport struct {
 	Platform      string             `json:"platform"`
 	GoRuntime     string             `json:"go_runtime"`
 	ZeroCGO       bool               `json:"zero_cgo"`
+	Scope         string             `json:"scope,omitempty"`
+	ConfigDir     string             `json:"config_dir,omitempty"`
+	DataDir       string             `json:"data_dir,omitempty"`
+	CacheDir      string             `json:"cache_dir,omitempty"`
+	DatabasePath  string             `json:"database_path,omitempty"`
 	Checks        []DiagnosticResult `json:"checks"`
 	AppliedFixes  []string           `json:"applied_fixes,omitempty"`
 }
 
+// Doctor provides diagnostic health and environment checks.
+type Doctor struct {
+	Scope       string
+	DetectPaths bool
+}
+
+// New creates a new Doctor instance.
+func New() *Doctor {
+	return &Doctor{
+		Scope: pathutil.ScopeUser,
+	}
+}
+
+// detectInstallSource inspects the host registry to detect whether g8s was installed via MSI/NSIS or ZIP.
+func (d *Doctor) detectInstallSource() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	// Check Uninstall registry key
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s`,
+		registry.QUERY_VALUE)
+	if err == nil {
+		defer key.Close()
+		return "msi-or-nsis"
+	}
+	return "zip-or-manual"
+}
+
+// detectInstallPath determines the installation directory of g8s on Windows.
+func (d *Doctor) detectInstallPath() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s`,
+		registry.QUERY_VALUE)
+	if err == nil {
+		defer key.Close()
+		if loc, err := key.GetStringValue("InstallLocation"); err == nil && loc != "" {
+			return loc
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Dir(exe)
+	}
+	return `C:\Program Files\g8s`
+}
+
+func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, onPath, detectPaths bool) []DiagnosticResult {
+	var results []DiagnosticResult
+
+	if scope == "" {
+		scope = pathutil.ScopeUser
+	}
+
+	results = append(results, DiagnosticResult{
+		Name:    "Windows User Profile",
+		Status:  "OK",
+		Message: fmt.Sprintf("User profile: %s", userProfile),
+		Details: userProfile,
+	})
+
+	results = append(results, DiagnosticResult{
+		Name:    "Windows Execution Scope",
+		Status:  "OK",
+		Message: fmt.Sprintf("Scope: %s", scope),
+		Details: scope,
+	})
+
+	sourceMsg := "Install source: ZIP/Manual"
+	if source == "msi-or-nsis" {
+		sourceMsg = `Install source: MSI/NSIS (registry HKLM\...\Uninstall\g8s)`
+	}
+
+	results = append(results, DiagnosticResult{
+		Name:    "Windows Install Source",
+		Status:  "OK",
+		Message: sourceMsg,
+		Details: source,
+	})
+
+	results = append(results, DiagnosticResult{
+		Name:    "Windows Install Path",
+		Status:  "OK",
+		Message: fmt.Sprintf("Install path: %s", installPath),
+		Details: installPath,
+	})
+
+	configDir := pathutil.DefaultConfigDir()
+	dataDir := pathutil.DataDirForScope(scope)
+	cacheDir := pathutil.DefaultCacheDir()
+
+	results = append(results, DiagnosticResult{
+		Name:    "Config Directory",
+		Status:  "OK",
+		Message: fmt.Sprintf("Config: %s", configDir),
+		Details: configDir,
+	})
+	results = append(results, DiagnosticResult{
+		Name:    "Data Directory",
+		Status:  "OK",
+		Message: fmt.Sprintf("Data:   %s", dataDir),
+		Details: dataDir,
+	})
+	results = append(results, DiagnosticResult{
+		Name:    "Cache Directory",
+		Status:  "OK",
+		Message: fmt.Sprintf("Cache:  %s", cacheDir),
+		Details: cacheDir,
+	})
+
+	if onPath {
+		results = append(results, DiagnosticResult{
+			Name:    "Windows PATH State",
+			Status:  "OK",
+			Message: "✓ INSTDIR is on system PATH",
+			Details: installPath,
+		})
+	} else {
+		results = append(results, DiagnosticResult{
+			Name:    "Windows PATH State",
+			Status:  "WARN",
+			Message: fmt.Sprintf("INSTDIR %s is not in system PATH", installPath),
+			Details: installPath,
+		})
+	}
+
+	if detectPaths {
+		profiles := pathutil.DetectUserProfiles()
+		var foundProfiles []string
+		for _, p := range profiles {
+			if p.Exists {
+				foundProfiles = append(foundProfiles, fmt.Sprintf("%s (%s)", p.Username, p.DataDir))
+			}
+		}
+		if len(foundProfiles) > 0 {
+			results = append(results, DiagnosticResult{
+				Name:    "Multi-Profile Path Detection",
+				Status:  "OK",
+				Message: fmt.Sprintf("Found %d g8s profile(s) on system", len(foundProfiles)),
+				Details: strings.Join(foundProfiles, ", "),
+			})
+		} else {
+			results = append(results, DiagnosticResult{
+				Name:    "Multi-Profile Path Detection",
+				Status:  "OK",
+				Message: "No secondary g8s user profiles found",
+			})
+		}
+	}
+
+	return results
+}
+
+// checkWindowsEnvironment executes Windows-specific diagnostics for install source and PATH.
+func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		userProfile, _ = os.UserHomeDir()
+	}
+
+	scope := d.Scope
+	if scope == "" {
+		scope = pathutil.ScopeUser
+	}
+
+	source := d.detectInstallSource()
+	installPath := d.detectInstallPath()
+
+	pathEnv := os.Getenv("PATH")
+	onPath := false
+	for _, p := range filepath.SplitList(pathEnv) {
+		if strings.EqualFold(strings.TrimRight(p, `/\`), strings.TrimRight(installPath, `/\`)) {
+			onPath = true
+			break
+		}
+	}
+
+	return diagnoseWindowsEnvironment(scope, userProfile, source, installPath, onPath, d.DetectPaths)
+}
+
 // RunDiagnostics executes the full diagnostic suite across the environment.
 func RunDiagnostics(ctx context.Context, dbPath string) *DoctorReport {
-	return RunDiagnosticsWithFix(ctx, dbPath, false)
+	return New().RunDiagnosticsWithFix(ctx, dbPath, false)
 }
 
 // RunDiagnosticsWithFix executes the diagnostic suite and optionally applies automatic self-healing remediations.
 func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *DoctorReport {
+	return New().RunDiagnosticsWithFix(ctx, dbPath, autoFix)
+}
+
+// RunDiagnosticsWithFix executes the diagnostic suite on Doctor instance.
+func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *DoctorReport {
 	var appliedFixes []string
 
 	if dbPath == "" {
-		home, _ := os.UserHomeDir()
-		dbPath = filepath.Join(home, ".local", "state", "g8s", "g8s.db")
+		dbPath = pathutil.DefaultDatabasePath()
 	}
 
 	if autoFix {
@@ -80,16 +277,29 @@ func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *Do
 		}
 	}
 
+	scope := d.Scope
+	if scope == "" {
+		scope = pathutil.ScopeUser
+	}
+
 	report := &DoctorReport{
 		OverallStatus: "HEALTHY",
 		Platform:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 		GoRuntime:     runtime.Version(),
 		ZeroCGO:       true,
+		Scope:         scope,
+		ConfigDir:     pathutil.DefaultConfigDir(),
+		DataDir:       pathutil.DataDirForScope(scope),
+		CacheDir:      pathutil.DefaultCacheDir(),
+		DatabasePath:  dbPath,
 		AppliedFixes:  appliedFixes,
 	}
 
 	report.Checks = append(report.Checks, checkDatabase(dbPath))
 	report.Checks = append(report.Checks, checkWorkspace())
+	if runtime.GOOS == "windows" {
+		report.Checks = append(report.Checks, d.checkWindowsEnvironment()...)
+	}
 	report.Checks = append(report.Checks, checkWorkerBinaries()...)
 	report.Checks = append(report.Checks, checkProviders())
 	report.Checks = append(report.Checks, checkHarnessProfiles())
@@ -109,8 +319,7 @@ func RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoFix bool) *Do
 
 func checkDatabase(dbPath string) DiagnosticResult {
 	if dbPath == "" {
-		home, _ := os.UserHomeDir()
-		dbPath = filepath.Join(home, ".local", "state", "g8s", "g8s.db")
+		dbPath = pathutil.DefaultDatabasePath()
 	}
 
 	info, err := os.Stat(dbPath)
