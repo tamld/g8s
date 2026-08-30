@@ -210,7 +210,9 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 	// 2. Initialize default providers.json if missing
 	configDir := filepath.Join(homeDir, ".config", "g8s")
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		configDir = filepath.Join(xdg, "g8s")
+		if home, err := os.UserHomeDir(); err == nil && home == homeDir {
+			configDir = filepath.Join(xdg, "g8s")
+		}
 	}
 	_ = os.MkdirAll(configDir, 0o700)
 	providersPath := filepath.Join(configDir, "providers.json")

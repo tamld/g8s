@@ -72,6 +72,7 @@ func TestDetectAndConfigureMCP(t *testing.T) {
 
 func TestRunInitFullLifecycle(t *testing.T) {
 	tempHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", "")
 	binPath := "/opt/bin/g8s"
 
 	res, err := RunInit([]string{IDECursor, IDEClaudeDesktop}, tempHome, binPath)
@@ -95,6 +96,7 @@ func TestRunInitFullLifecycle(t *testing.T) {
 
 func TestInitwizConfigPassesValidator(t *testing.T) {
 	tempHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", "")
 	binPath := "/opt/bin/g8s"
 
 	res, err := RunInit([]string{IDECursor}, tempHome, binPath)
