@@ -272,7 +272,7 @@ func runMCPServer() {
 	}
 	defer receipts.Close()
 
-	registry := provider.NewRegistry(provider.DefaultConfigs(), nil, nil)
+	registry := provider.NewPoolRegistry(provider.DefaultConfigs(), nil, nil)
 	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry)
 	if err := server.ServeStdio(context.Background()); err != nil {
 		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
