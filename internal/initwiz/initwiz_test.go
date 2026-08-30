@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tamld/g8s/internal/config"
 )
 
 func TestDetectAndConfigureMCP(t *testing.T) {
@@ -88,5 +90,38 @@ func TestRunInitFullLifecycle(t *testing.T) {
 	// Verify configured IDEs
 	if len(res.ConfiguredIDEs) != 2 {
 		t.Fatalf("configured %d IDEs, want 2", len(res.ConfiguredIDEs))
+	}
+}
+
+func TestInitwizConfigPassesValidator(t *testing.T) {
+	tempHome := t.TempDir()
+	binPath := "/opt/bin/g8s"
+
+	res, err := RunInit([]string{IDECursor}, tempHome, binPath)
+	if err != nil {
+		t.Fatalf("RunInit: %v", err)
+	}
+
+	if res.ProvidersConfig == "" {
+		t.Fatal("expected ProvidersConfig to be set")
+	}
+
+	cfg, err := config.Load(res.ProvidersConfig)
+	if err != nil {
+		t.Fatalf("config.Load failed for initwiz providers.json: %v", err)
+	}
+
+	if len(cfg.Providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(cfg.Providers))
+	}
+
+	agy := cfg.Providers[0]
+	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.7-flash-high" {
+		t.Errorf("unexpected agy provider config: %+v", agy)
+	}
+
+	claude := cfg.Providers[1]
+	if claude.Class != "platform_dispatch" || claude.Name != "claude" || len(claude.Models) != 2 {
+		t.Errorf("unexpected claude provider config: %+v", claude)
 	}
 }

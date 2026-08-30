@@ -219,18 +219,40 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 			"version": "1.0",
 			"providers": []map[string]any{
 				{
-					"name":        "gemini-3.7-flash-high",
-					"class":       "fast_worker",
-					"command":     "agy",
-					"model":       "gemini-3.7-flash-high",
-					"concurrency": 8,
+					"name":  "agy",
+					"class": "platform_dispatch",
+					"models": []map[string]any{
+						{
+							"id": "gemini-3.7-flash-high",
+						},
+					},
+					"slots": 8,
+					"args": []string{
+						"agy",
+						"--model",
+						"{model}",
+						"--mode",
+						"accept-edits",
+						"{prompt}",
+					},
 				},
 				{
-					"name":        "claude-3.7-sonnet",
-					"class":       "reasoning_brain",
-					"command":     "claude",
-					"model":       "claude-3-7-sonnet-latest",
-					"concurrency": 2,
+					"name":  "claude",
+					"class": "platform_dispatch",
+					"models": []map[string]any{
+						{
+							"id": "claude-3-7-sonnet-latest",
+						},
+						{
+							"id": "claude-haiku-4-5",
+						},
+					},
+					"slots": 2,
+					"args": []string{
+						"claude",
+						"-p",
+						"{prompt}",
+					},
 				},
 			},
 		}
