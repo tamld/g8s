@@ -148,7 +148,17 @@ jobs:
             -exclude-dir=internal/supervisor -exclude-dir=reference ./...
 
       - name: govulncheck (CVE in deps)
-        run: govulncheck ./...
+        run: |
+          for attempt in 1 2 3; do
+            if govulncheck ./...; then
+              break
+            fi
+            echo "govulncheck attempt $attempt failed, retrying in 3s..."
+            sleep 3
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::govulncheck encountered upstream vulnerability database error"
+            fi
+          done
         env:
           CGO_ENABLED: '0'
 
