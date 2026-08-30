@@ -121,7 +121,7 @@ check_no_ai_artifacts() {
     return 0
 }
 
-check_test_pins_fabricated_symbol() {
+check_tdd_trap_fabricated_symbol() {
     local target="$1"
     local doctor_out
     local repo_root
@@ -130,15 +130,23 @@ check_test_pins_fabricated_symbol() {
     doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"fabricated\" ]]; then
-        echo "::error::[test-pins-fabricated-symbol] Test references fabricated/undefined symbols (DEBT-49):"
-        echo "$doctor_out"
+        echo "::error::[check_tdd_trap_fabricated_symbol] (test-pins-fabricated-symbol) Test references fabricated/undefined symbols (DEBT-49):"
+        if command -v jq >/dev/null 2>&1; then
+            echo "$doctor_out" | jq -r '.data[]? | select(.category == "fabricated") | "  \(.file):\(.line): symbol \(.symbol) undefined in package"'
+        else
+            echo "$doctor_out"
+        fi
         echo "  Hint: Define symbols in production code before pinning them in unit tests."
         return 1
     fi
     return 0
 }
 
-check_test_locks_impl_detail() {
+check_test_pins_fabricated_symbol() {
+    check_tdd_trap_fabricated_symbol "$@"
+}
+
+check_tdd_trap_impl_detail() {
     local target="$1"
     local doctor_out
     local repo_root
@@ -147,12 +155,20 @@ check_test_locks_impl_detail() {
     doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"locks-impl-detail\" ]]; then
-        echo "::error::[test-locks-impl-detail] Test asserts on private implementation details (DEBT-49):"
-        echo "$doctor_out"
+        echo "::error::[check_tdd_trap_impl_detail] (test-locks-impl-detail) Test asserts on private implementation details (DEBT-49):"
+        if command -v jq >/dev/null 2>&1; then
+            echo "$doctor_out" | jq -r '.data[]? | select(.category == "locks-impl-detail") | "  \(.file):\(.line): asserts on private field \(.symbol)"'
+        else
+            echo "$doctor_out"
+        fi
         echo "  Hint: Assert on observable public behavior rather than internal private fields."
         return 1
     fi
     return 0
+}
+
+check_test_locks_impl_detail() {
+    check_tdd_trap_impl_detail "$@"
 }
 
 run_linter() {
@@ -181,11 +197,11 @@ run_linter() {
         failed=$((failed + 1))
     fi
 
-    if ! check_test_pins_fabricated_symbol "$target"; then
+    if ! check_tdd_trap_fabricated_symbol "$target"; then
         failed=$((failed + 1))
     fi
 
-    if ! check_test_locks_impl_detail "$target"; then
+    if ! check_tdd_trap_impl_detail "$target"; then
         failed=$((failed + 1))
     fi
 

@@ -136,9 +136,17 @@ jobs:
         shell: bash
         run: bash tools/ai_lint_test.sh
 
-      - name: AI anti-pattern gate
+      - name: Brief anti-pattern self-test
+        shell: bash
+        run: bash tools/brief_lint_test.sh
+
+      - name: AI anti-pattern lint (DEBT-21 + DEBT-49)
         shell: bash
         run: bash tools/ai_lint.sh
+
+      - name: Brief anti-pattern lint (DEBT-51)
+        shell: bash
+        run: bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/
 
       - name: No debug prints in library code
         shell: bash
