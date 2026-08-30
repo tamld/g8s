@@ -449,3 +449,29 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 		t.Fatalf("expected exit code 1 from worker --once on FAILED task, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
 	}
 }
+
+func TestNoColorInPipe(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	envVars := append(os.Environ(), "G8S_DB="+dbPath)
+
+	// 1. Submit with --json through pipe (exec.Command pipes stdout by default)
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "no-color-task", "--prompt", "test ansi", "--json")
+	submitCmd.Env = envVars
+	submitOut, err := submitCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit failed: %v\nOutput: %s", err, string(submitOut))
+	}
+	if bytes.Contains(submitOut, []byte("\033")) || bytes.Contains(submitOut, []byte("\x1b")) {
+		t.Fatalf("submit --json output contains ANSI escape codes:\n%q", string(submitOut))
+	}
+
+	// 2. Doctor output through pipe
+	docCmd := exec.Command(binPath, "doctor")
+	docCmd.Env = envVars
+	docOut, _ := docCmd.CombinedOutput()
+	if bytes.Contains(docOut, []byte("\033")) || bytes.Contains(docOut, []byte("\x1b")) {
+		t.Fatalf("doctor piped output contains ANSI escape codes:\n%q", string(docOut))
+	}
+}
