@@ -220,14 +220,14 @@ jobs:
 
           # 3. Orchestrate brief-file
           printf "# Orchestrate CI Task\nCI payload.\n## DoD\n- [x] DoD item\n" > "$BRIEF_FILE"
-          ORCH_BRIEF_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --brief-file "$BRIEF_FILE" --issued-by sisyphus --ttl 1h | jq -r '.data.id // .id // empty')
+          ORCH_BRIEF_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --brief-file "$BRIEF_FILE" --issued-by sisyphus --ttl 1h)
           if [ -z "$ORCH_BRIEF_ID" ] || [[ "$ORCH_BRIEF_ID" != brief-* ]]; then
             echo "::error::Failed to obtain brief ID from orchestrate --brief-file: '$ORCH_BRIEF_ID'"
             exit 1
           fi
 
           # 4. Orchestrate dispatch (re-issue)
-          DISPATCH_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --dispatch "$ORCH_BRIEF_ID" --ttl 1h | jq -r '.data.id // .id // empty')
+          DISPATCH_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --dispatch "$ORCH_BRIEF_ID" --ttl 1h)
           if [ -z "$DISPATCH_ID" ] || [[ "$DISPATCH_ID" != brief-* ]]; then
             echo "::error::Failed to obtain brief ID from orchestrate --dispatch: '$DISPATCH_ID'"
             exit 1
