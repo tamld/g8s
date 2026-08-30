@@ -85,6 +85,10 @@ type SupervisorConfig struct {
 	DBPath                 string
 	ProcessManager         cleanup.ProcessManager
 	GitRunner              cleanup.CleanupGitRunner
+	SilenceThreshold       time.Duration
+	PollInterval           time.Duration
+	NoPoll                 bool
+	BinaryPath             string
 }
 
 // defaultSupervisorConfig returns the safe defaults called out in the spec.
@@ -95,6 +99,9 @@ func defaultSupervisorConfig() SupervisorConfig {
 		SelfTestMode:           false,
 		AutoCleanup:            true,
 		CleanupOnEscalate:      false,
+		SilenceThreshold:       300 * time.Second,
+		PollInterval:           30 * time.Second,
+		NoPoll:                 false,
 	}
 }
 
@@ -155,6 +162,7 @@ type Supervisor struct {
 func NewSelfTestSupervisor(store Persistence, worker orchestrator.Worker, reviewer Reviewer) *Supervisor {
 	cfg := defaultSupervisorConfig()
 	cfg.SelfTestMode = true
+	cfg.NoPoll = true
 	return &Supervisor{
 		Store:        store,
 		Worker:       worker,
@@ -382,7 +390,30 @@ func (s *Supervisor) dispatch(ctx context.Context, task orchestrator.Task) (orch
 	if err != nil {
 		return orchestrator.Receipt{}, err
 	}
-	receipt, err := handle.Wait(ctx)
+
+	attemptCtx, cancelAttempt := context.WithCancel(ctx)
+	defer cancelAttempt()
+
+	if !s.Config.NoPoll {
+		poller := NewHeartbeatPoller(PollerConfig{
+			Interval:         s.Config.PollInterval,
+			StaleThreshold:   60 * time.Second,
+			SilenceThreshold: s.Config.SilenceThreshold,
+			HeartbeatDir:     s.Config.HeartbeatDir,
+			NoPoll:           s.Config.NoPoll,
+			Clock:            s.Clock,
+			ProcessManager:   s.Config.ProcessManager,
+			Store:            s.Store,
+			BinaryPath:       s.Config.BinaryPath,
+			OnWorkerDead: func(deadTaskID string, pid int) {
+				_ = handle.Cancel(ctx)
+				cancelAttempt()
+			},
+		})
+		poller.Start(attemptCtx, task.ID, task.ID, handle.PID())
+	}
+
+	receipt, err := handle.Wait(attemptCtx)
 	if err != nil && receipt.TaskID == "" {
 		// Synthesize a minimal receipt so reviewer can still grade.
 		receipt.TaskID = task.ID

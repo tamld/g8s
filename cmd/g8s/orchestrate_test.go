@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/supervisor"
 )
 
@@ -285,5 +286,27 @@ func TestAggregateSupervisorMetricsWithRows(t *testing.T) {
 	}
 	if agg.EscalationRate != 0.5 {
 		t.Errorf("expected escalation_rate=0.5, got %f", agg.EscalationRate)
+	}
+}
+
+func TestOrchestratePollingFlags(t *testing.T) {
+	origCtor := orchestratorWorkerCtor
+	defer func() { orchestratorWorkerCtor = origCtor }()
+	orchestratorWorkerCtor = func() orchestrator.Worker { return &trackingStubWorker{} }
+
+	dbPath := withTempDB(t)
+	t.Setenv("G8S_DB", dbPath)
+
+	out := captureStdout(t, func() {
+		runOrchestrate([]string{
+			"--self-test",
+			"--silence-threshold", "5m",
+			"--no-poll",
+			"--json",
+		})
+	})
+
+	if !strings.Contains(out, `"outcome"`) {
+		t.Fatalf("expected JSON output containing outcome, got %s", out)
 	}
 }
