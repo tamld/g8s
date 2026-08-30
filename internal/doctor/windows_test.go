@@ -14,6 +14,31 @@ import (
 	"github.com/tamld/g8s/internal/settings"
 )
 
+func findG8sBinary() (string, bool) {
+	if p, err := exec.LookPath("g8s"); err == nil {
+		return p, true
+	}
+	if p, err := exec.LookPath("g8s.exe"); err == nil {
+		return p, true
+	}
+	candidates := []string{
+		"../../g8s.exe",
+		"../g8s.exe",
+		"./g8s.exe",
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "g8s", "bin", "g8s.exe"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			abs, err := filepath.Abs(c)
+			if err == nil {
+				return abs, true
+			}
+			return c, true
+		}
+	}
+	return "", false
+}
+
 func TestWindows_DefaultPathsResolve(t *testing.T) {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
@@ -33,48 +58,38 @@ func TestWindows_DefaultPathsResolve(t *testing.T) {
 }
 
 func TestWindows_PATHContainsG8s(t *testing.T) {
-	// Look for g8s binary in PATH
-	path, err := exec.LookPath("g8s")
-	if err != nil {
-		// If running in development without installation, check local binary
-		t.Logf("g8s not found in system PATH (expected before installation): %v", err)
+	path, ok := findG8sBinary()
+	if !ok {
+		t.Log("g8s not yet in PATH or build directory (expected before binary install)")
 	} else {
-		t.Logf("g8s found in PATH at: %s", path)
+		t.Logf("g8s found at: %s", path)
 	}
 }
 
 func TestWindows_CmdExecutesG8s(t *testing.T) {
-	exePath, err := exec.LookPath("g8s")
-	if err != nil {
-		exePath, err = os.Executable()
-		if err != nil {
-			t.Skipf("cannot find executable: %v", err)
-		}
+	exePath, ok := findG8sBinary()
+	if !ok {
+		t.Skip("g8s binary not found in PATH or build directory")
 	}
 	cmd := exec.Command("cmd.exe", "/c", exePath, "version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Logf("cmd /c execution: %v (%s)", err, string(out))
-	} else {
-		t.Logf("cmd /c output: %s", string(out))
+		t.Fatalf("cmd /c failed: %v (%s)", err, string(out))
 	}
+	t.Logf("cmd /c output: %s", string(out))
 }
 
 func TestWindows_PowerShellExecutesG8s(t *testing.T) {
-	exePath, err := exec.LookPath("g8s")
-	if err != nil {
-		exePath, err = os.Executable()
-		if err != nil {
-			t.Skipf("cannot find executable: %v", err)
-		}
+	exePath, ok := findG8sBinary()
+	if !ok {
+		t.Skip("g8s binary not found in PATH or build directory")
 	}
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "& '"+exePath+"' version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Logf("powershell execution: %v (%s)", err, string(out))
-	} else {
-		t.Logf("powershell output: %s", string(out))
+		t.Fatalf("powershell failed: %v (%s)", err, string(out))
 	}
+	t.Logf("powershell output: %s", string(out))
 }
 
 func TestWindows_PerUserWrite(t *testing.T) {
