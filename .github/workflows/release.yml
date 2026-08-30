@@ -67,3 +67,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+      - name: Sign Windows binaries
+        if: matrix.goos == 'windows-latest' && env.HAS_CERT == 'true'
+        shell: pwsh
+        run: |
+          signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /f ${{ env.CERT_PATH }} ./dist/*.exe
+          signtool verify /pa ./dist/*.exe
+
+      - name: Skip signing (no cert)
+        if: matrix.goos == 'windows-latest' && env.HAS_CERT != 'true'
+        run: echo "No signing cert available; skipping"
+
