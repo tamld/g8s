@@ -28,8 +28,55 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  path-scope:
+    name: Scope Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Paths
+        id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1...HEAD 2>/dev/null || true)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          CODE_CHANGED="false"
+          DOCS_CHANGED="false"
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if [[ "$file" == docs/* ]] || [[ "$file" == *.md ]] || [[ "$file" == spec/* ]] || [[ "$file" == .claude/* ]]; then
+              DOCS_CHANGED="true"
+            else
+              CODE_CHANGED="true"
+            fi
+          done <<< "$CHANGED"
+
+          if [ -z "$CHANGED" ]; then
+            CODE_CHANGED="true"
+          fi
+
+          echo "code=$CODE_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "docs=$DOCS_CHANGED" >> "$GITHUB_OUTPUT"
+
   quality:
     name: Quality Gate
+    needs: [path-scope]
+    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -152,6 +199,10 @@ jobs:
         shell: bash
         run: bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/
 
+      - name: Doc-Code Contract Check (Issue #208)
+        shell: bash
+        run: bash tools/ci_doc_contract_check.sh
+
       - name: No debug prints in library code
         shell: bash
         run: |
@@ -273,6 +324,8 @@ jobs:
 
   cross-platform:
     name: Cross-Platform Build
+    needs: [path-scope]
+    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -288,4 +341,38 @@ jobs:
           GOOS=linux go build ./...
           GOOS=darwin go build ./...
           GOOS=windows go build ./...
+
+  verify:
+    name: Verify Gate
+    needs: [path-scope, quality, cross-platform]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate Status Verification
+        shell: bash
+        run: |
+          SCOPE_RESULT="${{ needs.path-scope.result }}"
+          QUALITY_RESULT="${{ needs.quality.result }}"
+          CROSS_RESULT="${{ needs.cross-platform.result }}"
+
+          echo "path-scope: $SCOPE_RESULT"
+          echo "quality: $QUALITY_RESULT"
+          echo "cross-platform: $CROSS_RESULT"
+
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "::error::Path scope job failed."
+            exit 1
+          fi
+
+          if [ "$QUALITY_RESULT" != "success" ] && [ "$QUALITY_RESULT" != "skipped" ]; then
+            echo "::error::Quality Gate failed with state: $QUALITY_RESULT"
+            exit 1
+          fi
+
+          if [ "$CROSS_RESULT" != "success" ] && [ "$CROSS_RESULT" != "skipped" ]; then
+            echo "::error::Cross-Platform Gate failed with state: $CROSS_RESULT"
+            exit 1
+          fi
+
+          echo "Quality Verification Gate PASSED (all required jobs succeeded or safely skipped)."
 
