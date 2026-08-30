@@ -65,10 +65,17 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/NSIS:/c/Program Files (x86)/WiX Toolset v3.11/bin:/c/Program Files/WiX Toolset v3.11/bin:$PATH"
           mkdir -p dist/windows_amd64
           go build -o dist/windows_amd64/g8s.exe ./cmd/g8s
           cp README.md LICENSE dist/windows_amd64/
-          makensis -DVERSION=0.4.0 -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
+          if command -v makensis &> /dev/null; then
+            makensis -DVERSION=0.4.0 -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
+          elif [ -f "/c/Program Files (x86)/NSIS/makensis.exe" ]; then
+            "/c/Program Files (x86)/NSIS/makensis.exe" -DVERSION=0.4.0 -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
+          elif [ -f "/c/Program Files/NSIS/makensis.exe" ]; then
+            "/c/Program Files/NSIS/makensis.exe" -DVERSION=0.4.0 -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
+          fi
           if command -v candle &> /dev/null && command -v light &> /dev/null; then
             candle -dVersion=0.4.0 -dSourceDir=dist/windows_amd64 -out dist/g8s.wixobj packaging/windows/g8s.wxs
             light -out dist/g8s_0.4.0_windows_amd64.msi dist/g8s.wixobj
