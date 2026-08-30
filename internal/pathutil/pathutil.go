@@ -29,7 +29,17 @@ func joinPathForOS(goos string, elem ...string) string {
 		}
 		return strings.Join(parts, "\\")
 	}
-	return filepath.Join(elem...)
+
+	var parts []string
+	for _, e := range elem {
+		normalized := strings.ReplaceAll(e, "\\", "/")
+		for _, p := range strings.Split(normalized, "/") {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+	}
+	return "/" + strings.Join(parts, "/")
 }
 
 // DefaultStateDir returns the platform-specific default state directory.
