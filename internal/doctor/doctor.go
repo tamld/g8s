@@ -44,6 +44,7 @@ type DoctorReport struct {
 }
 
 // Doctor provides diagnostic health and environment checks.
+<<<<<<< HEAD
 type Doctor struct {
 	Scope       string
 	DetectPaths bool
@@ -54,6 +55,13 @@ func New() *Doctor {
 	return &Doctor{
 		Scope: pathutil.ScopeUser,
 	}
+=======
+type Doctor struct{}
+
+// New creates a new Doctor instance.
+func New() *Doctor {
+	return &Doctor{}
+>>>>>>> 290ba67 (feat(doctor): detect Windows install source and PATH state in g8s doctor (DEBT-40))
 }
 
 // detectInstallSource inspects the host registry to detect whether g8s was installed via MSI/NSIS or ZIP.
@@ -92,6 +100,7 @@ func (d *Doctor) detectInstallPath() string {
 	return `C:\Program Files\g8s`
 }
 
+<<<<<<< HEAD
 func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, onPath, detectPaths bool) []DiagnosticResult {
 	var results []DiagnosticResult
 
@@ -112,6 +121,17 @@ func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, 
 		Message: fmt.Sprintf("Scope: %s", scope),
 		Details: scope,
 	})
+=======
+// checkWindowsEnvironment executes Windows-specific diagnostics for install source and PATH.
+func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	var results []DiagnosticResult
+	source := d.detectInstallSource()
+	installPath := d.detectInstallPath()
+>>>>>>> 290ba67 (feat(doctor): detect Windows install source and PATH state in g8s doctor (DEBT-40))
 
 	sourceMsg := "Install source: ZIP/Manual"
 	if source == "msi-or-nsis" {
@@ -132,6 +152,7 @@ func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, 
 		Details: installPath,
 	})
 
+<<<<<<< HEAD
 	configDir := pathutil.DefaultConfigDir()
 	dataDir := pathutil.DataDirForScope(scope)
 	cacheDir := pathutil.DefaultCacheDir()
@@ -154,6 +175,17 @@ func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, 
 		Message: fmt.Sprintf("Cache:  %s", cacheDir),
 		Details: cacheDir,
 	})
+=======
+	// Check PATH registration
+	pathEnv := os.Getenv("PATH")
+	onPath := false
+	for _, p := range filepath.SplitList(pathEnv) {
+		if strings.EqualFold(strings.TrimRight(p, `/\`), strings.TrimRight(installPath, `/\`)) {
+			onPath = true
+			break
+		}
+	}
+>>>>>>> 290ba67 (feat(doctor): detect Windows install source and PATH state in g8s doctor (DEBT-40))
 
 	if onPath {
 		results = append(results, DiagnosticResult{
@@ -171,6 +203,7 @@ func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, 
 		})
 	}
 
+<<<<<<< HEAD
 	if detectPaths {
 		profiles := pathutil.DetectUserProfiles()
 		var foundProfiles []string
@@ -229,6 +262,11 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 	return diagnoseWindowsEnvironment(scope, userProfile, source, installPath, onPath, d.DetectPaths)
 }
 
+=======
+	return results
+}
+
+>>>>>>> 290ba67 (feat(doctor): detect Windows install source and PATH state in g8s doctor (DEBT-40))
 // RunDiagnostics executes the full diagnostic suite across the environment.
 func RunDiagnostics(ctx context.Context, dbPath string) *DoctorReport {
 	return New().RunDiagnosticsWithFix(ctx, dbPath, false)
