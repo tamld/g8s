@@ -217,14 +217,17 @@ func (s *Store) Record(sessionID, status string, metadata map[string]any, opts .
 		return nil, fmt.Errorf("sync temp heartbeat file: %w", err)
 	}
 
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("close temp heartbeat file: %w", err)
+	var renameErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		renameErr = os.Rename(tmpPath, targetPath)
+		if renameErr == nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-
-	if err := os.Rename(tmpPath, targetPath); err != nil {
+	if renameErr != nil {
 		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("atomic rename heartbeat file: %w", err)
+		return nil, fmt.Errorf("atomic rename heartbeat file: %w", renameErr)
 	}
 
 	return &hb, nil
