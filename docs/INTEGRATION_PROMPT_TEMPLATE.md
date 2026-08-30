@@ -44,6 +44,51 @@ g8s cleanup --stale-hours 1
 
 ---
 
+## Pin to a specific release (not local build)
+
+When integrating g8s into another project, ALWAYS pin to a
+release tag, not the local `~/.local/.../bin/g8s` (or local build) binary.
+
+```bash
+# Get the latest release (preferred)
+G8S=$(gh release view --repo tamld/g8s --json tagName --jq .tagName)
+PLATFORM=$(uname -s | tr A-Z a-z)
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+G8S_URL="https://github.com/tamld/g8s/releases/download/${G8S}/g8s_${G8S#v}_${PLATFORM}_${ARCH}.tar.gz"
+curl -L "$G8S_URL" | tar xz
+G8S=./g8s
+```
+
+**Why this matters:**
+- GHA releases include all merged fixes since the last tag
+- Local builds may be stale (especially after rebase/cherry-pick)
+- The aegis agent on 2026-08-30 reported 4 BUGs that were ALREADY
+  fixed in main but not yet in a release — if aegis had used a
+  stale local build, it would have missed those fixes entirely
+
+**Don't use** a local `~/.local/.../bin/g8s` or workspace build for production integration.
+That's only for the Sisyphus supervisor's own testing.
+
+### Discover the latest g8s version
+
+```bash
+gh release view --repo tamld/g8s --json tagName,publishedAt
+```
+
+Output:
+```json
+{
+  "tagName": "v0.4.0",
+  "publishedAt": "2026-08-30T..."
+}
+```
+
+Cross-check this against the BUG list. If a BUG you found is
+already in the latest release's CHANGELOG, do NOT report it
+again — it was already fixed.
+
+---
+
 ## 2. Golden Rule: Parse `stdout` Envelope Before Trusting State
 
 **Never assume `task.state == "SUCCEEDED"` or `result.ok: true` implies success.**
