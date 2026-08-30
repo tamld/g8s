@@ -205,17 +205,17 @@ Spawning returns a `Handle` interface:
 
 ---
 
-## 6. Implementation Plan (3-PR Roadmap)
+## 6. Implementation Plan & Completed PR Lineage
 
-1. **PR 1 (Doc-only)**: `docs/ORCA_AUDIT.md` (Orca MIT license analysis and architecture mapping).
-2. **PR 2 (Core Engine)**: `internal/provider` package:
+1. **PR 1 (Doc-only)**: `docs/ORCA_AUDIT.md` (Orca MIT license analysis and architecture mapping) — **Merged in PR #177**.
+2. **PR 2 (Core Engine)**: `internal/provider` package — **Merged in PR #178**:
    - `internal/provider/registry.go` (Provider interface, Spec, Handle, Registry).
    - `internal/provider/agy.go` (AgyProvider).
    - `internal/provider/codex.go` (CodexProvider stub).
    - `internal/provider/claude.go` (ClaudeProvider).
    - `internal/provider/ollama.go` (OllamaProvider).
    - `internal/provider/registry_test.go` (Table-driven detection & spawn tests).
-3. **PR 3 (CLI Integration & Wiring)**:
+3. **PR 3 (CLI Integration & Wiring)**: — **Merged in PR #179**:
    - `cmd/g8s/main.go`: `g8s providers` subcommand + `g8s orchestrate --provider` flag.
    - Backward compatibility: default provider remains `agy`.
    - Comprehensive end-to-end and regression tests.
