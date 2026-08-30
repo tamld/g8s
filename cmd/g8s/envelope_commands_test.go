@@ -504,4 +504,25 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 			t.Errorf("expected cmd=doctor sub=tdd-trap-check, got %s/%s", env.Command, env.Subcommand)
 		}
 	})
+
+	t.Run("doctor --anti-pattern-catalog returns envelope", func(t *testing.T) {
+		env, code, _ := runCmd("doctor", "--anti-pattern-catalog", "--json")
+		if code != 0 {
+			t.Fatalf("anti-pattern catalog exit code = %d, want 0", code)
+		}
+		if env.Command != "doctor" || env.Subcommand != "anti-pattern-catalog" || env.Kind != "anti_pattern_catalog" {
+			t.Errorf("expected cmd=doctor sub=anti-pattern-catalog kind=anti_pattern_catalog, got %s/%s kind=%s", env.Command, env.Subcommand, env.Kind)
+		}
+		var data struct {
+			Rules        []map[string]any `json:"rules"`
+			TotalRules   int              `json:"total_rules"`
+			Last24hFires int              `json:"last_24h_fires"`
+		}
+		if err := json.Unmarshal(env.Data, &data); err != nil {
+			t.Fatalf("unmarshal catalog data: %v", err)
+		}
+		if data.TotalRules != 10 || len(data.Rules) != 10 {
+			t.Errorf("expected 10 rules, got total_rules=%d, len=%d", data.TotalRules, len(data.Rules))
+		}
+	})
 }

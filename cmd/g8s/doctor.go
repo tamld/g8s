@@ -23,6 +23,7 @@ func runDoctor(args []string) {
 	detectPathsFlag := fs.Bool("detect-paths", false, "detect and enumerate all g8s profile paths on host")
 	attentionCheck := fs.Bool("attention-check", false, "run self-reflection prompts against the worker")
 	tddTrapCheck := fs.Bool("tdd-trap-check", false, "detect test files that pin fabricated symbols or lock implementation details (DEBT-49)")
+	antiPatternCatalog := fs.Bool("anti-pattern-catalog", false, "list all 10 minimal anti-pattern rules and status (DEBT-51)")
 
 	var flagArgs []string
 	var posArgs []string
@@ -46,6 +47,32 @@ func runDoctor(args []string) {
 	doc := &doctor.Doctor{
 		Scope:       *scopeFlag,
 		DetectPaths: *detectPathsFlag,
+	}
+
+	if *antiPatternCatalog {
+		report := doctor.GetAntiPatternCatalog()
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("anti_pattern_catalog", "doctor", "anti-pattern-catalog", report)
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			return
+		}
+
+		pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Anti-Pattern Catalog (DEBT-51)")
+		var td pterm.TableData
+		td = append(td, []string{"#", "Rule", "Severity", "Linter", "Last Firing"})
+		for i, r := range report.Rules {
+			var sevStr string
+			if r.Severity == "HIGH" {
+				sevStr = pterm.Red(r.Severity)
+			} else {
+				sevStr = pterm.Yellow(r.Severity)
+			}
+			td = append(td, []string{fmt.Sprintf("%d", i+1), r.ID, sevStr, r.Linter, r.LastFiring})
+		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+		fmt.Printf("\nTotal rules: %d\nLast 24h fires: %d\n", report.TotalRules, report.Last24hFires)
+		return
 	}
 
 	if *tddTrapCheck {
