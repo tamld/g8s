@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -251,6 +252,46 @@ func TestAgyHandleSynthesizeRejectsErrorEnvelope(t *testing.T) {
 	}
 	if r.ReturnCode == 0 {
 		t.Errorf("synthesize() ReturnCode = %v, want non-zero", r.ReturnCode)
+	}
+	if r.LastError == "" || !strings.Contains(r.LastError, "unknown command") {
+		t.Errorf("synthesize() LastError = %q, want unknown command", r.LastError)
+	}
+	if len(r.RawStdout) == 0 {
+		t.Errorf("synthesize() RawStdout is empty, want captured bytes")
+	}
+}
+
+func TestAgyHandleWaitRejectsErrorEnvelopeExitZero(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `echo '{"v":1,"kind":"error","cmd":"g8s","error":{"code":"E_USAGE","message":"unknown flag --prompt-file"}}'; exit 0`)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+
+	h := &agyHandle{
+		cmd:       cmd,
+		stdout:    &stdout,
+		stderr:    &stderr,
+		task:      Task{ID: "task-error-env-exit-0"},
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+		mounts:    DefaultMountRegistry(),
+	}
+
+	receipt, err := h.Wait(context.Background())
+	if err == nil {
+		t.Fatal("Wait() expected error for stdout error envelope with exit 0, got nil")
+	}
+	if receipt.OK {
+		t.Errorf("receipt.OK = true for stdout error envelope, want false")
+	}
+	if receipt.ReturnCode == 0 {
+		t.Errorf("receipt.ReturnCode = %d, want non-zero", receipt.ReturnCode)
+	}
+	if receipt.LastError == "" || !strings.Contains(receipt.LastError, "unknown flag") {
+		t.Errorf("receipt.LastError = %q, want error message", receipt.LastError)
 	}
 }
 

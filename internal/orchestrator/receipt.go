@@ -19,6 +19,8 @@ type Receipt struct {
 	DurationSeconds float64
 	Stdout          string
 	Stderr          string
+	LastError       string
+	RawStdout       []byte
 	Violations      []string
 	FilesModified   []string
 	ScopeViolations []string
