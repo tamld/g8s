@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform
+.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check
 
 all: build
 
@@ -23,6 +23,9 @@ clean-worktrees:
 
 spawn-worktree:
 	@bash tools/spawn_worktree.sh $(BRANCH)
+
+ci-layer-check:
+	@bash tools/ci_layer_check.sh
 
 dogfood:
 	@$(GO) build -o /tmp/g8s-dogfood ./cmd/g8s
