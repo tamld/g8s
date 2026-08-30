@@ -251,3 +251,18 @@ func TestDefaultCPUUsageChecker_CurrentProcess(t *testing.T) {
 		t.Error("expected error for invalid pid -1")
 	}
 }
+
+func TestSampleCPU_CurrentProcess(t *testing.T) {
+	idle, err := sampleCPU(os.Getpid())
+	if err != nil {
+		t.Logf("sampleCPU returned err (expected on some CI/platforms): %v", err)
+	} else {
+		t.Logf("sampleCPU for current process: idle=%v", idle)
+	}
+
+	// Invalid PID should error
+	_, err = sampleCPU(-1)
+	if err == nil {
+		t.Error("expected error for invalid pid -1")
+	}
+}
