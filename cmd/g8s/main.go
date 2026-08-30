@@ -430,6 +430,9 @@ func runTasks(args []string) {
 	filter := controlplane.TaskFilter{Limit: *limit}
 	if *state != "" {
 		s := strings.ToUpper(*state)
+		if s == "PENDING" {
+			s = controlplane.StateQueued
+		}
 		filter.State = &s
 	}
 	tasks, err := store.ListTasks(context.Background(), filter)
