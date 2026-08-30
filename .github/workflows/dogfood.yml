@@ -23,8 +23,12 @@ on:
       - 'docs/DOGFOODING.md'
 
 permissions:
-  contents: read
+  contents: write
   issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   self-audit:
