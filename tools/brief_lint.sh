@@ -9,9 +9,10 @@
 
 set -euo pipefail
 
+IS_DEFAULT_RUN=0
 TARGET_PATHS=("$@")
 if [ ${#TARGET_PATHS[@]} -eq 0 ]; then
-    # Default to scanning /tmp/agy-*.md if present, plus docs/ and spec/
+    IS_DEFAULT_RUN=1
     TARGET_PATHS=("docs" "spec")
     if compgen -G "/tmp/agy-*.md" > /dev/null; then
         TARGET_PATHS+=("/tmp/agy-*.md")
@@ -28,7 +29,7 @@ check_supervisor_thinks() {
     local failed=0
     local go_files=()
 
-    # Collect Go files from targets or default supervisor/orchestrator dirs
+    # Collect Go files from targets
     for p in "${target_paths[@]}"; do
         if [ -f "$p" ] && [[ "$p" == *.go ]] && [[ "$p" != *_test.go ]]; then
             go_files+=("$p")
@@ -39,8 +40,8 @@ check_supervisor_thinks() {
         fi
     done
 
-    # If no specific Go files were in targets, check cmd/ and internal/orchestrator/ if they exist
-    if [ ${#go_files[@]} -eq 0 ]; then
+    # If default run or no Go files found but default repo directories exist, check cmd/ and internal/orchestrator/
+    if [ "$IS_DEFAULT_RUN" -eq 1 ] && [ ${#go_files[@]} -eq 0 ]; then
         for d in "cmd" "internal/orchestrator"; do
             if [ -d "$d" ]; then
                 while IFS= read -r f; do
@@ -56,7 +57,7 @@ check_supervisor_thinks() {
 
     for file in "${go_files[@]}"; do
         # 1. Polling loops with time.Sleep
-        if grep -nE 'for[[:space:]]*\{?[^}]*time\.Sleep' "$file" > /dev/null 2>&1; then
+        if grep -nE 'time\.Sleep\(' "$file" > /dev/null 2>&1; then
             echo "::warning::[supervisor_thinks] Found polling loop in supervisor/orchestrator code ($file):"
             grep -nE 'time\.Sleep\(' "$file" | while IFS= read -r line; do
                 echo "  $file:$line"
@@ -99,7 +100,8 @@ is_brief_file() {
     local first_heading
     first_heading=$(grep -m 1 -E '^# ' "$file" 2>/dev/null || true)
 
-    if [[ "$first_heading" =~ ^#[[:space:]]+(AGY[[:space:]]+)?Brief\b ]] || [[ "$first_heading" =~ ^#[[:space:]]+Task[[:space:]]+Brief\b ]]; then
+    if [[ "$first_heading" =~ ^#[[:space:]]+(AGY[[:space:]]+)?Brief([[:space:]]|—|-|:|$) ]] || \
+       [[ "$first_heading" =~ ^#[[:space:]]+Task[[:space:]]+Brief([[:space:]]|—|-|:|$) ]]; then
         return 0
     fi
 
@@ -164,7 +166,7 @@ check_missing_dual_blind() {
     local failed=0
 
     # Keywords indicating complex architecture/design tasks
-    local complex_regex='state machine|schema|parser|rpc contract|concurrency model|garbage collector|lock-free'
+    local complex_regex='(state machine|schema|parser|rpc contract|concurrency model|garbage collector|lock-free)'
 
     for file in "${md_files[@]}"; do
         [ ! -f "$file" ] && continue
