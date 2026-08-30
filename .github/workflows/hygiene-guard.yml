@@ -1,0 +1,37 @@
+name: Hygiene Guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check worktree count
+        run: |
+          COUNT=$(git worktree list | wc -l)
+          if [ "$COUNT" -gt 5 ]; then
+            echo "::error::Too many worktrees: $COUNT (max 5). Run tools/cleanup_all.sh."
+            exit 1
+          fi
+      - name: Check for test artifacts
+        run: |
+          for f in coverage.out cover.out *.cover; do
+            if git diff --name-only origin/main...HEAD | grep -q "^$f\$"; then
+              echo "::error::Test artifact $f committed. Use .gitignore."
+              exit 1
+            fi
+          done
+      - name: Check untracked files
+        run: |
+          UNTRACKED=$(git status --porcelain -uall 2>&1 | wc -l)
+          if [ "$UNTRACKED" -gt 10 ]; then
+            echo "::error::Too many untracked files: $UNTRACKED (max 10). Clean up first."
+            exit 1
+          fi
