@@ -249,3 +249,22 @@ jobs:
         with:
           name: coverage-report
           path: coverage.out
+
+  cross-platform:
+    name: Cross-Platform Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+
+      - name: Verify Cross-Platform Compilation
+        run: |
+          GOOS=linux go build ./...
+          GOOS=darwin go build ./...
+          GOOS=windows go build ./...
+

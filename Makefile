@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree
+.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform
 
 all: build
 
@@ -9,6 +9,11 @@ build:
 
 test:
 	@$(GO) test -v ./...
+
+verify-cross-platform:
+	GOOS=linux GOARCH=amd64 $(GO) build ./...
+	GOOS=darwin GOARCH=arm64 $(GO) build ./...
+	GOOS=windows GOARCH=amd64 $(GO) build ./...
 
 clean-branches:
 	@bash tools/clean_branches.sh
