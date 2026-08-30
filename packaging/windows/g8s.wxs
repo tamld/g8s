@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?ifndef Version?>
+    <?define Version = "0.4.0" ?>
+  <?endif?>
+  <?ifndef SourceDir?>
+    <?define SourceDir = "." ?>
+  <?endif?>
+
+  <Product Id="*"
+           Name="g8s (The Gatekeepers)"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="TamLD"
+           UpgradeCode="5B741071-8605-4B95-97F4-98F1E5E4E302">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="g8s Engine" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="StartMenuShortcuts" />
+      <ComponentRef Id="PathEnvironment" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="g8s" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="g8s (The Gatekeepers)" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="g8s.exe" Guid="C3527D74-9C78-433A-88D8-5F5B2F1F762B" Win64="yes">
+        <File Id="g8s.exe" Source="$(var.SourceDir)\g8s.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="RegistryEntries" Guid="D2067C19-3382-4FE8-9844-4860D492A721" Win64="yes">
+        <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\g8s">
+          <RegistryValue Type="string" Name="DisplayName" Value="g8s (The Gatekeepers)" KeyPath="yes" />
+          <RegistryValue Type="string" Name="DisplayVersion" Value="$(var.Version)" />
+          <RegistryValue Type="string" Name="Publisher" Value="TamLD" />
+          <RegistryValue Type="string" Name="InstallLocation" Value="[INSTALLFOLDER]" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcuts" Guid="A784033C-3FE9-4DEB-9E39-C460D1E6145B" Win64="yes">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="g8s (The Gatekeepers)"
+                  Description="Lightweight Zero-Trust Execution Harness for AI Agents"
+                  Target="[INSTALLFOLDER]g8s.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\TamLD\g8s" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="PathEnvironment" Guid="E6B47FE6-8D99-4A73-B8B7-B178A7E00DE9" Win64="yes">
+        <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+        <RegistryValue Root="HKLM" Key="Software\TamLD\g8s\Environment" Name="PathSet" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+  </Product>
+</Wix>

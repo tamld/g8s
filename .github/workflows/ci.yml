@@ -61,3 +61,16 @@ jobs:
       - name: Build smoke (all packages, including cmd/g8s which has no tests)
         run: go build ./...
 
+      - name: Build Windows Installers (NSIS & WiX MSI)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p dist/windows_amd64
+          go build -o dist/windows_amd64/g8s.exe ./cmd/g8s
+          cp README.md LICENSE dist/windows_amd64/
+          makensis -DVERSION=0.4.0 -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
+          if command -v candle &> /dev/null && command -v light &> /dev/null; then
+            candle -dVersion=0.4.0 -dSourceDir=dist/windows_amd64 -out dist/g8s.wixobj packaging/windows/g8s.wxs
+            light -out dist/g8s_0.4.0_windows_amd64.msi dist/g8s.wixobj
+          fi
+
