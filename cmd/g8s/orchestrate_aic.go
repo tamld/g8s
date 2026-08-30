@@ -28,7 +28,7 @@ func defaultGHDiffFetcher(pr int) (string, error) {
 
 // runOrchestrateAIC executes the PR review orchestrator for AIC workflows.
 func runOrchestrateAIC(args []string) {
-	fs := flag.NewFlagSet("orchestrate-aic", flag.ContinueOnError)
+	fs := flag.NewFlagSet("orchestrate-aic", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	pr := fs.Int("pr", 0, "GitHub PR number")
 	intent := fs.String("intent", "", "review intent or guidance")

@@ -12,7 +12,7 @@ import (
 
 // runConverge takes N solution.md files and produces a synthesized converged.md.
 func runConverge(args []string) {
-	fs := flag.NewFlagSet("converge", flag.ContinueOnError)
+	fs := flag.NewFlagSet("converge", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	outPath := fs.String("out", "converged.md", "path to write synthesized converged markdown output")

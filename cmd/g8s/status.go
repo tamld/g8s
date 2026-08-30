@@ -50,7 +50,7 @@ type StatusOptions struct {
 }
 
 func runStatus(args []string) {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	workerFlag := fs.Bool("worker", false, "display worker heartbeat and lifecycle status")

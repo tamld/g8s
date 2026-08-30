@@ -194,7 +194,7 @@ func migrateDirectory(srcDir, destDir string, dryRun, force bool) ([]MigrateItem
 }
 
 func runMigrate(args []string) {
-	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	fromFlag := fs.String("from", ".", "source directory containing cwd-relative g8s files")

@@ -16,7 +16,7 @@ import (
 // runDoctor executes diagnostic sanity checks for environment, permissions, and tools,
 // or runs attention self-reflection checks when --attention-check is set per DEBT-47.
 func runDoctor(args []string) {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	fixMode := fs.Bool("fix", false, "apply automatic self-healing remediations")
 	scopeFlag := fs.String("scope", pathutil.ScopeUser, "installation and execution scope (user or system)")
