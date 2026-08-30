@@ -802,8 +802,6 @@ func runReceipt(args []string) {
 	}
 }
 
-
-
 // runInit handles interactive and headless onboarding wizard.
 func runInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
