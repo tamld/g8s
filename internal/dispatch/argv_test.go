@@ -2,8 +2,10 @@ package dispatch
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -57,5 +59,33 @@ func TestBuildWorkerArgvDefaults(t *testing.T) {
 
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("BuildWorkerArgv() = %v\nwant: %v", argv, want)
+	}
+}
+
+func TestBuildWorkerArgvAgreesWithAgyCLI(t *testing.T) {
+	agy, err := exec.LookPath("agy")
+	if err != nil {
+		t.Skip("agy not in PATH")
+	}
+	// Run agy --help and parse the flag set
+	out, err := exec.Command(agy, "--help").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		t.Skip("failed to run agy --help")
+	}
+	helpText := string(out)
+
+	args := BuildWorkerArgv(BuildWorkerArgvOptions{
+		PromptFile: "/tmp/test-prompt.md",
+		Model:      "gemini-3.7-flash-high",
+	})
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--") && arg != "--prompt" {
+			flagName := strings.SplitN(arg, "=", 2)[0]
+			// strip leading --
+			name := strings.TrimPrefix(flagName, "--")
+			if !strings.Contains(helpText, "--"+name) {
+				t.Errorf("argv emits %q but agy --help does not list --%s", arg, name)
+			}
+		}
 	}
 }

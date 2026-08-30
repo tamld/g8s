@@ -4,8 +4,8 @@ import (
 	"os"
 )
 
-// WorkerArgvOptions describes parameters for constructing worker invocation arguments.
-type WorkerArgvOptions struct {
+// BuildWorkerArgvOptions describes parameters for constructing worker invocation arguments.
+type BuildWorkerArgvOptions struct {
 	Binary          string
 	Prompt          string
 	PromptFile      string
@@ -20,8 +20,11 @@ type WorkerArgvOptions struct {
 	Home            string
 }
 
+// WorkerArgvOptions is an alias for BuildWorkerArgvOptions.
+type WorkerArgvOptions = BuildWorkerArgvOptions
+
 // BuildWorkerArgv constructs the worker command argv according to standard CLI argument structure.
-func BuildWorkerArgv(opts WorkerArgvOptions) []string {
+func BuildWorkerArgv(opts BuildWorkerArgvOptions) []string {
 	binary := opts.Binary
 	if binary == "" {
 		binary = "agy"
