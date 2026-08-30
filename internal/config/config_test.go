@@ -141,3 +141,21 @@ func TestLoadPreservesArgsTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestInitwizFixturePassesValidator(t *testing.T) {
+	f, err := Load("testdata/initwiz.json")
+	if err != nil {
+		t.Fatalf("Load(testdata/initwiz.json): %v", err)
+	}
+	if len(f.Providers) != 2 {
+		t.Fatalf("got %d providers, want 2", len(f.Providers))
+	}
+	agy := f.Providers[0]
+	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.7-flash-high" {
+		t.Errorf("unexpected agy provider: %+v", agy)
+	}
+	claude := f.Providers[1]
+	if claude.Class != "platform_dispatch" || claude.Name != "claude" || len(claude.Models) != 2 {
+		t.Errorf("unexpected claude provider: %+v", claude)
+	}
+}
