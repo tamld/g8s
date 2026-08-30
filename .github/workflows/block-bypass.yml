@@ -1,0 +1,46 @@
+name: Block Bypass Attempts
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  guard:
+    name: Bypass Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Reject force-push
+        run: |
+          if git log --since="7 days ago" --pretty=format:"%H" | \
+             xargs -I{} git show {} --name-only --pretty=format: | \
+             sort -u | head -1000 > /tmp/recent.txt; then
+            # Count files in recent commits
+            if [ $(wc -l < /tmp/recent.txt) -gt 500 ]; then
+              echo "::error::Too many files changed in recent commits (force-push?)"
+              exit 1
+            fi
+          fi
+
+      - name: Verify no self-merge in commit messages
+        run: |
+          if git rev-parse --verify HEAD~5 >/dev/null 2>&1; then
+            RANGE="HEAD~5..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          if git log --pretty=format:"%s" $RANGE | grep -E "Merge.*#[0-9]+"; then
+            echo "::error::Commit message contains self-merge"
+            exit 1
+          fi
+          echo "Commit message audit clean: no self-merges detected."

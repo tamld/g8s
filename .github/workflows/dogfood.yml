@@ -23,8 +23,12 @@ on:
       - 'docs/DOGFOODING.md'
 
 permissions:
-  contents: read
+  contents: write
   issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   self-audit:
@@ -47,7 +51,7 @@ jobs:
         id: audit
         run: |
           set -o pipefail
-          /tmp/g8s self-audit 2>&1 | tee /tmp/dogfood-audit.log
+          make dogfood 2>&1 | tee /tmp/dogfood-audit.log
         env:
           CGO_ENABLED: '0'
 

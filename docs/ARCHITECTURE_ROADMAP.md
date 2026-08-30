@@ -21,7 +21,7 @@ The following table defines the non-negotiable architectural boundaries, runtime
 
 | Subsystem / Layer | Technical Choice / Dependency | Version / Standard | Rationales & Architectural Constraints |
 | :--- | :--- | :--- | :--- |
-| **Core Language** | Go | `1.22+` (toolchain `go1.25.14`+) | High concurrency, predictable memory footprints, sub-millisecond execution latency. |
+| **Core Language** | Go | `1.25.0` (toolchain `go1.25.0`+) | High concurrency, predictable memory footprints, sub-millisecond execution latency. |
 | **Compilation Standard** | Pure-Go (`CGO_ENABLED=0`) | Zero CGO | Eliminates dynamic C runtime links, cross-compilation toolchain pain, and shared library vulnerabilities. |
 | **Embedded Database** | `modernc.org/sqlite` | Pure-Go SQLite engine | File-based state management, SQLite WAL mode, `PRAGMA busy_timeout=5000`, `0600` POSIX file security. |
 | **CLI & Flag Parsing** | Standard Library `flag.FlagSet` | Pure Go standard | Lightweight, zero-allocation subcommand dispatch with deterministic flag validation. |
@@ -31,7 +31,7 @@ The following table defines the non-negotiable architectural boundaries, runtime
 | **Memory & Indexing** | SQLite FTS5 + BM25 | Pure Go FTS Tokenizer | Decoupled knowledge vault indexing code symbols, identifiers, CamelCase, and snake_case tokens. |
 | **Process Containment** | OS Process Groups (`Setpgid`) | POSIX / Win32 JobObjects | Guarantees clean subtree process termination (`SIGTERM` / `SIGKILL` to `-pgid`) without orphan processes. |
 | **Packaging & Release** | GoReleaser & NFPM | GoReleaser `v2.10+` | Static single-binary builds for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, and `windows/amd64`. |
-| **Quality Gates** | Go Test, Staticcheck, Gosec, AI Lint, Cross-Platform Build | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), memory optimization (`gofumpt`), cross-platform compilation (Linux, Darwin, Windows), and zero AI anti-patterns. |
+| **Quality Gates** | Go Test, Staticcheck, Gosec, AI Lint, Receipt Verifier, Cross-Platform Build | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), strict formatting (`gofumpt`), cross-platform compilation (Linux, Darwin, Windows), receipt verification gate, and zero AI anti-patterns. |
 
 ---
 
@@ -56,7 +56,8 @@ The design and development of g8s are guided by core strategic principles:
         │ • ADR-0001 Fix Loop │               │ • SkillMount        │
         │ • Write Receipts    │               │ • HookMount         │
         │ • Unified Envelope  │               │ • MemoryMount       │
-        └─────────────────────┘               └─────────────────────┘
+        │ • Receipt Verifier  │               └─────────────────────┘
+        └─────────────────────┘
 ```
 
 1. **Two-Tier Agent Governance**: Strict separation between the reasoning supervisory brain (architecture, spec authorship, receipt signing, git commits) and mechanical execution workers (scouting, tests, file modifications).
@@ -65,6 +66,7 @@ The design and development of g8s are guided by core strategic principles:
 4. **Dual-Audience Interface Design**: Equal focus on Human Developer Experience (Human DX: Feynman diagnostic hints, TUI wizards) and Autonomous Agent Experience (Agent AX: unified JSON envelope v1, `--jsonl` streaming, deterministic exit codes `0` to `5`).
 5. **Non-Invasive Lego Block Mounts**: Stateful workers mount capabilities (`SkillMount`, `HookMount`, `MemoryMount`) dynamically without coupling worker processes to the core orchestrator.
 6. **Resilient Process Lifecycle Hygiene**: Real-time heartbeat mapping (`internal/heartbeat`), process enumeration (`internal/process`), automated worktree pruning (`tools/cleanup_worktrees.sh`), and safe kill confirmation.
+7. **Receipt Verification Layer**: All worker execution receipts undergo strict stdout envelope verification (`ReceiptVerifier` / `StdoutEnvelopeVerifier`) to ensure error envelopes override exit code 0 and reject "success theater".
 
 ---
 
@@ -79,7 +81,8 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 | **2** | **Resilience, Hardening & DX/AX** | DELTA-13 (DX/AX Wizard & Auto-repair)<br>DELTA-14 (Core Hardening) | #77, #78, #79, #80 | #76, #81, #89, #98, #99, #102 | **Done** |
 | **3** | **Orchestrator FSM, Lego Blocks & Quality Gates** | DELTA-15 (FSM Lifecycle)<br>DELTA-17 (Receipt Lake Wiring)<br>DELTA-18 (AIC Orchestration)<br>DELTA-19 (Lego Mounts)<br>Concern A/B/C Fix Loop | #82, #83, #84, #85, #86, #87, #91, #92, #93, #94, #95, #96, #97, #107, #112, #113, #114 | #100, #101, #103, #104, #105, #106, #108, #109, #110, #111, #115, #117 | **Done** |
 | **4** | **Lifecycle Hygiene, Heartbeats & Worktree Tooling** | DEBT-28 (Lifecycle Cleanup)<br>DEBT-29 (Worker Heartbeats)<br>DEBT-30 (Unified JSON Envelope)<br>DEBT-32 (Auto-cleanup Hook)<br>DEBT-36 (Process Lister & Kill)<br>DEBT-37 (Worktree Helpers)<br>DEBT-38 (Cross-Platform Audit) | #118, #119, #120, #124, #130, #138, #141 | #121, #122, #128, #129, #131, #132, #133, #134, #135, #136, #139, #140 | **Done** |
-| **5** | **Active Roadmap & Next Initiatives** | DEBT-31 (Pure FSM Validator)<br>DEBT-33 (Architecture Roadmap)<br>DEBT-34 (Layer-Ownership Gate)<br>DEBT-35 (Adaptive Polling & Escalation) | #123, #125, #126, #127 | Active Sprint | **In Progress** |
+| **5** | **FSM Validation, Providers & Packaging** | DEBT-31 (Pure FSM Validator)<br>DEBT-33 (Architecture Roadmap)<br>DEBT-34 (Layer-Ownership Gate)<br>DEBT-35 (Adaptive Polling & Escalation)<br>DEBT-40..51 (Windows, Signing, Memory, Catalog)<br>DEBT-52 (Orca Pluggable Providers)<br>DEBT-53 (Dual Licensing)<br>DEBT-54/55 (Worktree & Session Hygiene) | #123, #125, #126, #127, #168, #169, #170, #172, #173, #174, #175, #176, #182, #185 | #142, #164, #168, #169, #170, #172, #173, #174, #175, #177, #178, #179, #180, #182, #184, #186 | **Done** |
+| **6** | **Active Roadmap & Governance Initiatives** | DEBT-56 (CI/CD Concurrency Controls)<br>DEBT-57 (PR Path Scoping & Verify Gate)<br>DEBT-58 (Crash Survival Harness)<br>DEBT-62 (Worker Boundary Enforcement)<br>DEBT-63 (AGY Worker Policy)<br>DEBT-64 (CI Bypass Guard) | #194, #195, #196, #208, #209, #210, #211 | Active Sprint | **In Progress** |
 
 ### Complete PR Mapping Index
 
@@ -101,7 +104,7 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 * **PR #98**: Bolt optimization for `TokenizeCodeSymbols` string normalizer.
 * **PR #99**: Sentinel security patch resolving SQLite connection string injection in doctor.
 * **PR #100**: Re-enabling strict quality checks (DEBT-22 staticcheck, DEBT-23 errcheck, DEBT-24 gosec).
-* **PR #101**: DELTA-15 Orchestrator FSM engine (`PLAN` $\rightarrow$ `SPAWN` $\rightarrow$ `MONITOR` $\rightarrow$ `RECEIPT` $\rightarrow$ `MERGE|ESCALATE`).
+* **PR #101**: DELTA-15 Orchestrator FSM engine (`PLAN` $\rightarrow$ `SPAWN` $\rightarrow$ `MONITOR` $\rightarrow$ `RECEIPT` $\rightarrow$ `MERGE` | `ESCALATE` | `CANCEL` | `CONFLICT`).
 * **PR #102**: GoReleaser v2.10+ schema migration.
 * **PR #103**: DELTA-17 Receipt lake wiring to control plane task metadata.
 * **PR #104**: DELTA-11 Concern B receipt schema evolution for supervisor provenance.
@@ -125,6 +128,17 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 * **PR #136**: Bulk cleanup of orphan `feat/*` git branches.
 * **PR #139**: Git worktree helper tools (`spawn_worktree.sh`, `drop_worktree.sh`, `cleanup_worktrees.sh`) and Makefile targets (DEBT-37).
 * **PR #140**: Living architecture roadmap and single source of truth matrix (DEBT-33).
+* **PR #177**: Orca MIT license analysis and architecture mapping audit (DEBT-52).
+* **PR #178**: Pluggable provider registry, spec, and adapters (`AgyProvider`, `ClaudeProvider`, `CodexProvider`, `OllamaProvider`) (DEBT-52).
+* **PR #179**: CLI `g8s providers` command and `g8s orchestrate --provider` flag (DEBT-52).
+* **PR #180**: Legal disclaimers and copyright notices for reference architectures (DEBT-52.1).
+* **PR #182**: Dual licensing (MIT + Apache 2.0) and license decision matrix (DEBT-53).
+* **PR #184**: Universal session & worktree cleanup script `tools/cleanup_all.sh` (DEBT-54).
+* **PR #186**: Worktree and artifact boundary hygiene CI workflow (DEBT-55).
+* **PR #203**: Anti-pattern rule `check_no_local_path_leak` in `tools/ai_lint.sh` (DEBT-61).
+* **PR #206**: Alignment of `BuildWorkerArgv` CLI flags with agy CLI specification.
+* **PR #207**: Exit code separation (`0`..`5`) and CLI ergonomics.
+* **PR #217**: Batch A fix — receipt verification layer (`VerifyReceipt`, `StdoutEnvelopeVerifier`) + sandbox flag alignment.
 * **DEBT-38 / Issue #141**: Cross-platform CPU sampling and worktree temp dir fixes with cross-platform CI gate (`verify-cross-platform`).
 
 ---
