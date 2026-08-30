@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -201,5 +202,155 @@ func TestAllSubcommandsHelp(t *testing.T) {
 				t.Fatalf("%s --help returned empty output", sub)
 			}
 		})
+	}
+}
+
+func TestSubmitAndWorkerE2E(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	stateDir := filepath.Join(tempDir, "state")
+	configDir := filepath.Join(tempDir, "config")
+	_ = os.MkdirAll(stateDir, 0o700)
+	_ = os.MkdirAll(configDir, 0o700)
+
+	// Mock provider configuration that outputs valid success JSON
+	providersPath := filepath.Join(configDir, "providers.json")
+	providerJSON := `{
+  "version": "1.0",
+  "providers": [
+    {
+      "name": "mock-success",
+      "class": "platform_dispatch",
+      "models": [{"id": "gemini-3.7-flash-high"}],
+      "args": ["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]
+    }
+  ]
+}`
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
+		t.Fatalf("write mock providers: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_STATE_DIR=" + stateDir,
+		"G8S_PROVIDERS=" + providersPath,
+		"PATH=" + os.Getenv("PATH"),
+	}
+
+	// 1. Submit a task
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--json")
+	submitCmd.Env = envVars
+	submitOut, err := submitCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit failed: %v\nOutput: %s", err, string(submitOut))
+	}
+
+	var submitEnv struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+			State  string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(submitOut, &submitEnv); err != nil {
+		t.Fatalf("unmarshal submit output: %v\nOutput: %s", err, string(submitOut))
+	}
+	if submitEnv.Data.TaskID == "" {
+		t.Fatalf("empty task_id in submit response: %s", string(submitOut))
+	}
+	taskID := submitEnv.Data.TaskID
+
+	// 2. Run worker --once (should claim and succeed)
+	workerCmd := exec.Command(binPath, "worker", "--once", "--json")
+	workerCmd.Env = envVars
+	workerOut, err := workerCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("worker failed: %v\nOutput: %s", err, string(workerOut))
+	}
+
+	// 3. Inspect task via g8s get
+	getCmd := exec.Command(binPath, "get", taskID, "--json")
+	getCmd.Env = envVars
+	getOut, err := getCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get failed: %v\nOutput: %s", err, string(getOut))
+	}
+
+	var getEnv struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+			State  string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getOut, &getEnv); err != nil {
+		t.Fatalf("unmarshal get output: %v\nOutput: %s", err, string(getOut))
+	}
+	if getEnv.Data.State != "SUCCEEDED" {
+		t.Fatalf("task state = %q, want SUCCEEDED\nGet output: %s\nWorker output: %s", getEnv.Data.State, string(getOut), string(workerOut))
+	}
+
+	// 4. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
+	errProviderJSON := `{
+  "version": "1.0",
+  "providers": [
+    {
+      "name": "mock-error-envelope",
+      "class": "platform_dispatch",
+      "models": [{"id": "gemini-3.7-flash-high"}],
+      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]
+    }
+  ]
+}`
+	if err := os.WriteFile(providersPath, []byte(errProviderJSON), 0o600); err != nil {
+		t.Fatalf("write err mock providers: %v", err)
+	}
+
+	// Submit second task
+	submitCmd2 := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-2", "--prompt", "failing prompt", "--json")
+	submitCmd2.Env = envVars
+	submitOut2, err := submitCmd2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit2 failed: %v\nOutput: %s", err, string(submitOut2))
+	}
+
+	var submitEnv2 struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(submitOut2, &submitEnv2); err != nil {
+		t.Fatalf("unmarshal submit2 output: %v", err)
+	}
+	taskID2 := submitEnv2.Data.TaskID
+
+	// Run worker --once (child exits 0, but stdout is error envelope -> must fail)
+	workerCmd2 := exec.Command(binPath, "worker", "--once", "--json")
+	workerCmd2.Env = envVars
+	_ = workerCmd2.Run() // worker may exit non-zero when task fails, which is expected
+
+	// Verify task 2 is FAILED
+	getCmd2 := exec.Command(binPath, "get", taskID2, "--json")
+	getCmd2.Env = envVars
+	getOut2, err := getCmd2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get2 failed: %v\nOutput: %s", err, string(getOut2))
+	}
+
+	var getEnv2 struct {
+		Data struct {
+			TaskID    string  `json:"task_id"`
+			State     string  `json:"state"`
+			LastError *string `json:"last_error"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getOut2, &getEnv2); err != nil {
+		t.Fatalf("unmarshal get2 output: %v", err)
+	}
+	if getEnv2.Data.State == "SUCCEEDED" {
+		t.Fatalf("anti-success-theater violation: task state is SUCCEEDED despite error envelope on stdout")
+	}
+	if getEnv2.Data.State != "FAILED" {
+		t.Fatalf("task state = %q, want FAILED", getEnv2.Data.State)
+	}
+	if getEnv2.Data.LastError == nil || !strings.Contains(*getEnv2.Data.LastError, "unknown command") {
+		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv2.Data.LastError)
 	}
 }

@@ -289,6 +289,15 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if uerr := json.Unmarshal(task.Request, &req); uerr != nil {
 		return nil, fmt.Errorf("decode task request: %w", uerr)
 	}
+	if req.Model == "" {
+		req.Model = "gemini-3.7-flash-high"
+	}
+	if req.Role == "" {
+		req.Role = dispatch.DefaultRole
+	}
+	if req.Permission == "" {
+		req.Permission = dispatch.DefaultPermission
+	}
 
 	runDir := filepath.Join(s.runRoot, task.TaskID, fmt.Sprintf("attempt-%d", task.Attempts))
 	if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
@@ -532,6 +541,20 @@ func (s *Supervisor) maybePause(ctx context.Context, wr workerResult, stdoutText
 }
 
 func readWorkerResult(resultPath string, stdoutText string, code int) workerResult {
+	if envErr := dispatch.ParseWorkerEnvelope([]byte(stdoutText)); envErr != nil {
+		var envE *dispatch.WorkerEnvelopeError
+		reason := envErr.Error()
+		if errors.As(envErr, &envE) && envE.Message != "" {
+			reason = envE.Message
+		}
+		return workerResult{
+			OK:      false,
+			Status:  "failed",
+			Reason:  reason,
+			Summary: fmt.Sprintf("child process returned error envelope: %s", reason),
+		}
+	}
+
 	if raw, err := os.ReadFile(resultPath); err == nil {
 		var wr workerResult
 		if json.Unmarshal(raw, &wr) == nil && wr.Status != "" {
@@ -563,22 +586,18 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 // buildArgv assembles the worker invocation mirroring the baseline contract:
 // prompt file in, structured result file out, explicit scope roots attached.
 func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) []string {
-	argv := []string{
-		s.binaryPath,
-		"--prompt-file", promptPath,
-		"--model", req.Model,
-		"--role", req.Role,
-		"--permission", req.Permission,
-		"--timeout", req.Timeout,
-		"--out", resultPath,
-	}
-	for _, dir := range req.AddDirs {
-		argv = append(argv, "--add-dir", dir)
-	}
-	if req.SkipPermiss {
-		argv = append(argv, "--dangerously-skip-permissions")
-	}
-	return argv
+	return dispatch.BuildWorkerArgv(dispatch.WorkerArgvOptions{
+		Binary:          s.binaryPath,
+		PromptFile:      promptPath,
+		Model:           req.Model,
+		Role:            req.Role,
+		Permission:      req.Permission,
+		Timeout:         req.Timeout,
+		ResultPath:      resultPath,
+		AddDirs:         req.AddDirs,
+		SkipPermissions: req.SkipPermiss,
+		NoSandbox:       req.NoSandbox,
+	})
 }
 
 // snapshot removes leftover artifacts, exports the sealed receipt, and

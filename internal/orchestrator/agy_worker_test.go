@@ -234,3 +234,19 @@ func TestAgyWorkerSpawnDefaultsFilledIn(t *testing.T) {
 	// Wait for process to finish
 	_, _ = h.Wait(context.Background())
 }
+
+func TestAgyHandleSynthesizeRejectsErrorEnvelope(t *testing.T) {
+	h := &agyHandle{
+		stdout:    bytes.NewBufferString(`{"v":1,"kind":"error","cmd":"g8s","error":{"code":"E_USAGE","message":"unknown command \"--prompt-file\""}}`),
+		stderr:    bytes.NewBufferString(""),
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+	}
+	r := h.synthesize(nil)
+	if r.OK {
+		t.Error("synthesize() OK = true for stdout error envelope, want false (anti-success-theater)")
+	}
+	if r.ReturnCode == 0 {
+		t.Errorf("synthesize() ReturnCode = %v, want non-zero", r.ReturnCode)
+	}
+}
