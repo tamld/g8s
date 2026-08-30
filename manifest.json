@@ -3,7 +3,13 @@
   "name": "g8s",
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
-  "version": "0.1.0-alpha",
+  "version": "0.3.0",
+  "go_version": "1.25",
+  "latest_release": {
+    "tag": "v0.3.0",
+    "commit": "a35d205",
+    "date": "2026-08-29"
+  },
   "license": "MIT",
   "repository": "https://github.com/tamld/g8s",
   "governance": {
@@ -21,7 +27,8 @@
     "agent_protocol": "AGENTS.md"
   },
   "runtime": {
-    "language": "Go 1.22+",
+    "language": "Go 1.25+",
+    "go_version": "1.25",
     "cgo_enabled": 0,
     "module": "github.com/tamld/g8s",
     "entrypoint": "cmd/g8s/main.go",
