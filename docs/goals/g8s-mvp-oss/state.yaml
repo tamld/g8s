@@ -72,7 +72,7 @@ visual_board:
   local:
     status: not_requested
     url: null
-    command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
+    command: "node ~/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-mvp-oss"
 
 active_task: null
 
@@ -86,7 +86,7 @@ tasks:
     inputs:
       - "docs/REFACTORING_PLAN.md"
       - "manifest.json"
-      - "plans/M1-receipt-sprint-log.md (in worktree /Users/tamld/Documents/github/g8s-feat-receipt-engine)"
+      - "plans/M1-receipt-sprint-log.md (in worktree feat-receipt-engine)"
       - "git branch state of main vs feat/m1-receipt-engine"
     constraints:
       - "Read-only. Do not implement or merge."
@@ -104,8 +104,8 @@ tasks:
         objective: "Merge feat/m1-receipt-engine into main and re-run oracle test subset to prove M1 landed green."
         allowed_files: []
         verify:
-          - "git -C /Users/tamld/Documents/github/g8s merge --no-ff feat/m1-receipt-engine"
-          - "docker run --rm -v /Users/tamld/Documents/github/g8s:/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -count=1 ./...'"
+          - "git merge --no-ff feat/m1-receipt-engine"
+          - "docker run --rm -v $(pwd):/workspace -w /workspace -v g8s-gomod:/go/pkg/mod -v g8s-gocache:/root/.cache/go-build -e CGO_ENABLED=0 --security-opt=no-new-privileges golang:1.25 sh -c 'go vet ./... && go test -count=1 ./...'"
         stop_if:
           - "Merge conflicts require semantic decisions beyond taking both sides cleanly."
           - "Oracle subset fails on main after merge."
@@ -439,7 +439,7 @@ tasks:
       - "internal/provider/provider.go (existing AGY_BIN>LookPath precedence - extend or delegate, do not duplicate)"
     constraints:
       - "Spec-first: check spec/openspec/ for a dispatch-wrapper delta; author one if absent."
-      - "Injectable env/home/which/platform params; no global mutation."
+      - "Injectable env, home, which, platform params; no global mutation."
       - "Never emit credentials into logs or test fixtures."
     allowed_files:
       - "spec/openspec/08-dispatch-wrapper-spec.md"
@@ -453,7 +453,7 @@ tasks:
       - "Verification fails twice."
     receipt:
       result: done
-      summary: "DELTA-08 dispatch wrapper ported to internal/dispatch per spec/openspec/08-dispatch-wrapper-spec.md: ResolveBinary (explicit > AGY_BIN > PATH > home fallbacks, Windows .exe/.cmd/.bat suffix expansion, injectable env/platform/home/which/exists), BuildCommand (sandbox default on, skip-permissions additive, ~ expansion via injectable Home), six read-only violation detectors verbatim from python baseline with +/-96-rune sanitized snippets, credential sanitization x4 patterns, bounded 2MiB capture with <OUTPUT_TRUNCATED> head/tail halves and U+FFFD replacement, Run envelope gating via harness.ValidateRequest before spawn with injectable runner/clock and fail-closed exit 3 on read-only side effects."
+      summary: "DELTA-08 dispatch wrapper ported to internal/dispatch per spec/openspec/08-dispatch-wrapper-spec.md: ResolveBinary (explicit > AGY_BIN > PATH > home fallback, Windows .exe/.cmd/.bat suffix expansion, injectable env, platform, home, which, exists), BuildCommand (sandbox default on, skip-permissions additive, ~ expansion via injectable Home), six read-only violation detectors verbatim from python baseline with +/-96-rune sanitized snippets, credential sanitization x4 patterns, bounded 2MiB capture with <OUTPUT_TRUNCATED> head/tail halves and U+FFFD replacement, Run envelope gating via harness.ValidateRequest before spawn with injectable runner/clock and fail-closed exit 3 on read-only side effects."
       commands:
         - command: "docker golang:1.25 CGO_ENABLED=0: go vet ./... && go test ./..."
           status: pass

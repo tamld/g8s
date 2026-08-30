@@ -1,24 +1,24 @@
-# g8s AI Anti-Pattern Catalog (DEBT-51)
+# g8s AI Anti-Pattern Catalog (DEBT-51 / DEBT-61)
 
 > **Authority**: Spec-Driven Development & Constitution Axioms 1, 3, 4, 5  
-> **Enforcement Gates**: `tools/ai_lint.sh` (Rules 1–7) & `tools/brief_lint.sh` (Rules 8–10)  
+> **Enforcement Gates**: `tools/ai_lint.sh` (Rules 1–8) & `tools/brief_lint.sh` (Rules 9–11)  
 > **Diagnostics**: `g8s doctor --anti-pattern-catalog`
 
 ---
 
 ## 1. Overview & Catalog Design Principles
 
-Autonomous AI agents (such as Claude, Cursor, Antigravity) generate predictable failure modes when writing Go code or dispatching supervisor-worker workflows. Rather than creating an unbounded, noisy style guide, `g8s` enforces a **minimal 10-rule anti-pattern catalog**.
+Autonomous AI agents (such as Claude, Cursor, Antigravity) generate predictable failure modes when writing Go code or dispatching supervisor-worker workflows. Rather than creating an unbounded, noisy style guide, `g8s` enforces a **minimal 11-rule anti-pattern catalog**.
 
 Every rule in this catalog satisfies four strict criteria:
-1. **Prevents a Real Failure Mode**: Addresses catastrophic crashes, data loss, deadlocks, brittle test debt, or AI hallucination loops.
+1. **Prevents a Real Failure Mode**: Addresses catastrophic crashes, data loss, deadlocks, brittle test debt, internal path leaks, or AI hallucination loops.
 2. **Historical Anecdote**: Rooted in concrete failures observed in `g8s` development.
-3. **Sub-Second Execution**: Total CI gate execution time across all 10 checks is under 2 seconds.
+3. **Sub-Second Execution**: Total CI gate execution time across all 11 checks is under 2 seconds.
 4. **Actionable Remediation**: Produces exact `file:line` locations and unambiguous 1-line fix guidance.
 
 ---
 
-## 2. The 10 Anti-Pattern Rules
+## 2. The 11 Anti-Pattern Rules
 
 | # | Rule Identifier | Linter | Severity | What It Prevents | Check Cost |
 |---|-----------------|--------|----------|-------------------|------------|
@@ -32,6 +32,7 @@ Every rule in this catalog satisfies four strict criteria:
 | 8 | `supervisor_thinks` | `tools/brief_lint.sh` | **HIGH** | Supervisor acts as dictator with busy polling loops vs event triggers | ~20ms |
 | 9 | `directive_brief` | `tools/brief_lint.sh` | **MED** | Rigid directive brief bypassing LLM risk analysis (needs v2 framing) | ~20ms |
 | 10 | `missing_dual_blind` | `tools/brief_lint.sh` | **HIGH** | Single-agent architecture mistakes on complex multi-state systems | ~20ms |
+| 11 | `no_local_path_leak` | `tools/ai_lint.sh` | **HIGH** | Local filesystem paths leaked in tracked repository files (DEBT-61) | ~20ms |
 
 ---
 
@@ -116,6 +117,14 @@ Every rule in this catalog satisfies four strict criteria:
 * **Real g8s Anecdote**: A single worker modified the SQLite lineage CTE migration schema without peer validation, introducing an unrecoverable deadlock until dual-blind convergence (`--blind-converge`) was introduced in DEBT-48.
 * **Cost**: < 20ms.
 * **How to Fix**: Dispatch complex architecture briefs using dual-blind convergence (`g8s orchestrate --blind-converge 2` per DEBT-48).
+
+### Rule 11: `no_local_path_leak`
+* **Linter Function**: `check_no_local_path_leak` in `tools/ai_lint.sh`
+* **Severity**: HIGH
+* **What It Prevents**: Leaking internal developer filesystem paths (e.g. absolute user home directories, macOS/Linux user roots, Windows drive user folders, private temp roots) in tracked repository files.
+* **Real g8s Anecdote**: An agent generated 28 brief files in `/tmp` containing full internal local repo paths (`github.com/tamld/g8s (local: ...)`), which risked exposing private host directory structures in public git repositories and CI logs (DEBT-61).
+* **Cost**: < 20ms.
+* **How to Fix**: Use `$HOME`, generic repo paths, or user-relative configs without absolute machine usernames.
 
 ---
 

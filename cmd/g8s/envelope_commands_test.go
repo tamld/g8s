@@ -521,8 +521,8 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 		if err := json.Unmarshal(env.Data, &data); err != nil {
 			t.Fatalf("unmarshal catalog data: %v", err)
 		}
-		if data.TotalRules != 10 || len(data.Rules) != 10 {
-			t.Errorf("expected 10 rules, got total_rules=%d, len=%d", data.TotalRules, len(data.Rules))
+		if data.TotalRules != 11 || len(data.Rules) != 11 {
+			t.Errorf("expected 11 rules, got total_rules=%d, len=%d", data.TotalRules, len(data.Rules))
 		}
 	})
 }

@@ -60,7 +60,7 @@ If an exact human approval phrase is the only remaining blocker and no safe loca
 The PM owns board health:
 
 ```bash
-node /Users/tamld/.claude/skills/goal-prep/scripts/check-goal-state.mjs docs/goals/g8s-mvp-oss
+node ~/.claude/skills/goal-prep/scripts/check-goal-state.mjs docs/goals/g8s-mvp-oss
 ```
 
 ## Canonical Board

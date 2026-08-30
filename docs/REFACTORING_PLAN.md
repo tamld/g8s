@@ -1,6 +1,6 @@
 # g8s Refactoring Masterplan: Python Baseline to Pure-Go
 
-> **Baseline Reference**: `reference/python/` (Extracted from `/Users/tamld/plugins/agy-dispatch`)  
+> **Baseline Reference**: `reference/python/` (Extracted from `plugins/agy-dispatch`)  
 > **Target Architecture**: Pure Go (Zero-CGO), Cross-Platform, Modular Engine  
 > **Status**: Active Execution  
 

@@ -1,6 +1,6 @@
 package doctor
 
-// AntiPatternRule defines a single rule in the minimal anti-pattern catalog (DEBT-51).
+// AntiPatternRule defines a single rule in the minimal anti-pattern catalog (DEBT-51/DEBT-61).
 type AntiPatternRule struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -10,14 +10,14 @@ type AntiPatternRule struct {
 	LastFiring  string `json:"last_firing"`
 }
 
-// AntiPatternCatalogReport wraps the full 10-rule catalog with firing telemetry.
+// AntiPatternCatalogReport wraps the full 11-rule catalog with firing telemetry.
 type AntiPatternCatalogReport struct {
 	Rules        []AntiPatternRule `json:"rules"`
 	TotalRules   int               `json:"total_rules"`
 	Last24hFires int               `json:"last_24h_fires"`
 }
 
-// GetAntiPatternCatalog returns the canonical 10-rule minimal anti-pattern catalog (DEBT-51).
+// GetAntiPatternCatalog returns the canonical 11-rule minimal anti-pattern catalog (DEBT-51/DEBT-61).
 func GetAntiPatternCatalog() *AntiPatternCatalogReport {
 	rules := []AntiPatternRule{
 		{
@@ -98,6 +98,14 @@ func GetAntiPatternCatalog() *AntiPatternCatalogReport {
 			Severity:    "HIGH",
 			Linter:      "tools/brief_lint.sh",
 			Description: "No complex task briefs dispatched without --blind-converge (DEBT-48)",
+			LastFiring:  "never",
+		},
+		{
+			ID:          "no_local_path_leak",
+			Name:        "No Local Path Leak in Tracked Files",
+			Severity:    "HIGH",
+			Linter:      "tools/ai_lint.sh",
+			Description: "No local filesystem paths (/Users/, /home/, etc.) in tracked files (DEBT-61)",
 			LastFiring:  "never",
 		},
 	}

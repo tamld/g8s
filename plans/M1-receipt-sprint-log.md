@@ -1,7 +1,7 @@
 # M1 Receipt Engine Sprint Log (DELTA-02)
 
 > Traceability log. Every phase records evidence, decisions, and deviations.
-> Worktree: `/Users/tamld/Documents/github/g8s-feat-receipt-engine` @ branch `feat/m1-receipt-engine`
+> Worktree: `worktrees/feat-receipt-engine` @ branch `feat/m1-receipt-engine`
 > Base: `main` @ e6f01ec
 
 ## Goal (self-defined under delegated authority)
