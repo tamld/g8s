@@ -230,32 +230,3 @@ func TestDoctorWindowsDetection(t *testing.T) {
 		}
 	}
 }
-
-func TestDoctorWindowsDetection(t *testing.T) {
-	d := New()
-	src := d.detectInstallSource()
-	if runtime.GOOS != "windows" {
-		if src != "" {
-			t.Fatalf("expected empty install source on non-windows, got %s", src)
-		}
-		if path := d.detectInstallPath(); path != "" {
-			t.Fatalf("expected empty install path on non-windows, got %s", path)
-		}
-		checks := d.checkWindowsEnvironment()
-		if len(checks) != 0 {
-			t.Fatalf("expected 0 windows checks on non-windows, got %d", len(checks))
-		}
-	} else {
-		if src != "msi-or-nsis" && src != "zip-or-manual" {
-			t.Fatalf("unexpected install source on windows: %s", src)
-		}
-		path := d.detectInstallPath()
-		if path == "" {
-			t.Fatalf("expected non-empty install path on windows")
-		}
-		checks := d.checkWindowsEnvironment()
-		if len(checks) < 3 {
-			t.Fatalf("expected at least 3 windows checks on windows, got %d", len(checks))
-		}
-	}
-}
