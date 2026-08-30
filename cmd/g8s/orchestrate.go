@@ -11,11 +11,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/conv"
 	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/supervisor"
 )
@@ -297,6 +299,8 @@ func runOrchestrate(args []string) {
 	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
 	briefFile := fs.String("brief-file", "", "path to brief markdown file to issue and dispatch")
 	dispatchID := fs.String("dispatch", "", "stored brief ID to re-issue and dispatch")
+	briefID := fs.String("brief", "", "stored brief ID for dual-blind orchestration")
+	blindConverge := fs.Int("blind-converge", 0, "run N dual-blind workers with isolated worktrees and synthesize convergence")
 	issuedBy := fs.String("issued-by", "", "issuer identity for brief (defaults to --actor)")
 	ttlStr := fs.String("ttl", "2h", "time-to-live duration for brief (e.g. 2h, 30m)")
 	title := fs.String("title", "", "optional title for brief (overrides title in file)")
@@ -337,8 +341,8 @@ func runOrchestrate(args []string) {
 		effectiveNoPoll = true
 	}
 
-	if !*selfTest && *fromIntent == "" && *fromFile == "" && *briefFile == "" && *dispatchID == "" {
-		exitUsage("orchestrate", "", *traceID, "usage: g8s orchestrate [--brief-file <path> | --dispatch <id> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]", "", *jsonl)
+	if !*selfTest && *fromIntent == "" && *fromFile == "" && *briefFile == "" && *dispatchID == "" && *briefID == "" && *blindConverge <= 0 {
+		exitUsage("orchestrate", "", *traceID, "usage: g8s orchestrate [--brief-file <path> | --brief <id> | --dispatch <id> | --blind-converge <N> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]", "", *jsonl)
 	}
 
 	dbPath, err := databasePath()
@@ -357,6 +361,88 @@ func runOrchestrate(args []string) {
 	}
 	if effectiveIssuer == "" {
 		effectiveIssuer = "sisyphus"
+	}
+
+	if *blindConverge > 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		dirs := []string(addDirs)
+		if len(dirs) == 0 {
+			dirs = []string{cwd}
+		}
+
+		var briefTitle string
+		var briefContent string
+		if *briefFile != "" {
+			raw, err := os.ReadFile(*briefFile)
+			if err != nil {
+				exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeIO, err, "", *jsonl)
+			}
+			briefContent = string(raw)
+			briefTitle = filepath.Base(*briefFile)
+		} else if *briefID != "" || *dispatchID != "" {
+			targetID := *briefID
+			if targetID == "" {
+				targetID = *dispatchID
+			}
+			bRow, err := store.GetBrief(context.Background(), targetID)
+			if err != nil {
+				exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeNotFound, err, "", *jsonl)
+			}
+			briefTitle = bRow.Title
+			briefContent = bRow.PayloadMD
+		} else if *fromFile != "" {
+			raw, err := os.ReadFile(*fromFile)
+			if err != nil {
+				exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeIO, err, "", *jsonl)
+			}
+			briefContent = string(raw)
+			briefTitle = "Brief from File"
+		} else if *fromIntent != "" {
+			briefContent = *fromIntent
+			briefTitle = "Brief from Intent"
+		} else {
+			briefContent = *taskDesc
+			briefTitle = "Task Brief"
+		}
+
+		convReq := conv.Request{
+			Brief:        briefTitle,
+			BriefPayload: briefContent,
+			N:            *blindConverge,
+			Model:        *model,
+			Timeout:      *timeout,
+			Repo:         cwd,
+			AddDirs:      dirs,
+			Worker:       orchestratorWorkerCtor(),
+		}
+
+		convRes, err := conv.Run(context.Background(), convReq)
+		if err != nil {
+			exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("blind_converge_result", "orchestrate", "blind-converge", convRes)
+			env.TraceID = *traceID
+			if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+				exitRuntime("orchestrate", "blind-converge", *traceID, cli.CodeIO, err, "", *jsonl)
+			}
+			return
+		}
+
+		fmt.Fprintf(os.Stdout, "Dual-blind run completed for session: %s\n", convRes.SessionID)
+		fmt.Fprintf(os.Stdout, "Workers spawned: %d\n", len(convRes.Solutions))
+		fmt.Fprintf(os.Stdout, "Solutions collected:\n")
+		for _, sol := range convRes.Solutions {
+			fmt.Fprintf(os.Stdout, "  - %s\n", sol)
+		}
+		if convRes.Converged != "" {
+			fmt.Fprintf(os.Stdout, "Converged output: %s\n", convRes.Converged)
+		}
+		return
 	}
 
 	if *briefFile != "" {
