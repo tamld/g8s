@@ -10,10 +10,6 @@ type BuildWorkerArgvOptions struct {
 	Prompt          string
 	PromptFile      string
 	Model           string
-	Role            string
-	Permission      string
-	Timeout         string
-	ResultPath      string
 	AddDirs         []string
 	SkipPermissions bool
 	NoSandbox       bool

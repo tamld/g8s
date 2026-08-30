@@ -16,14 +16,10 @@ func TestBuildWorkerArgv(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	opts := WorkerArgvOptions{
+	opts := BuildWorkerArgvOptions{
 		Binary:          "/usr/local/bin/g8s-worker",
 		PromptFile:      promptPath,
 		Model:           "gemini-3.7-flash-high",
-		Role:            "collector",
-		Permission:      "read_only",
-		Timeout:         "30s",
-		ResultPath:      "/tmp/result.json",
 		AddDirs:         []string{"/tmp/workspace"},
 		SkipPermissions: true,
 	}
