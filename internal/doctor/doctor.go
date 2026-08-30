@@ -92,19 +92,9 @@ func (d *Doctor) detectInstallPath() string {
 	return `C:\Program Files\g8s`
 }
 
-// checkWindowsEnvironment executes Windows-specific diagnostics for install source and PATH.
-func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-
+func diagnoseWindowsEnvironment(scope, userProfile, source, installPath string, onPath, detectPaths bool) []DiagnosticResult {
 	var results []DiagnosticResult
-	userProfile := os.Getenv("USERPROFILE")
-	if userProfile == "" {
-		userProfile, _ = os.UserHomeDir()
-	}
 
-	scope := d.Scope
 	if scope == "" {
 		scope = pathutil.ScopeUser
 	}
@@ -122,9 +112,6 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 		Message: fmt.Sprintf("Scope: %s", scope),
 		Details: scope,
 	})
-
-	source := d.detectInstallSource()
-	installPath := d.detectInstallPath()
 
 	sourceMsg := "Install source: ZIP/Manual"
 	if source == "msi-or-nsis" {
@@ -145,7 +132,6 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 		Details: installPath,
 	})
 
-	// Resolved canonical paths
 	configDir := pathutil.DefaultConfigDir()
 	dataDir := pathutil.DataDirForScope(scope)
 	cacheDir := pathutil.DefaultCacheDir()
@@ -169,16 +155,6 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 		Details: cacheDir,
 	})
 
-	// Check PATH registration
-	pathEnv := os.Getenv("PATH")
-	onPath := false
-	for _, p := range filepath.SplitList(pathEnv) {
-		if strings.EqualFold(strings.TrimRight(p, `/\`), strings.TrimRight(installPath, `/\`)) {
-			onPath = true
-			break
-		}
-	}
-
 	if onPath {
 		results = append(results, DiagnosticResult{
 			Name:    "Windows PATH State",
@@ -195,7 +171,7 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 		})
 	}
 
-	if d.DetectPaths {
+	if detectPaths {
 		profiles := pathutil.DetectUserProfiles()
 		var foundProfiles []string
 		for _, p := range profiles {
@@ -220,6 +196,37 @@ func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
 	}
 
 	return results
+}
+
+// checkWindowsEnvironment executes Windows-specific diagnostics for install source and PATH.
+func (d *Doctor) checkWindowsEnvironment() []DiagnosticResult {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		userProfile, _ = os.UserHomeDir()
+	}
+
+	scope := d.Scope
+	if scope == "" {
+		scope = pathutil.ScopeUser
+	}
+
+	source := d.detectInstallSource()
+	installPath := d.detectInstallPath()
+
+	pathEnv := os.Getenv("PATH")
+	onPath := false
+	for _, p := range filepath.SplitList(pathEnv) {
+		if strings.EqualFold(strings.TrimRight(p, `/\`), strings.TrimRight(installPath, `/\`)) {
+			onPath = true
+			break
+		}
+	}
+
+	return diagnoseWindowsEnvironment(scope, userProfile, source, installPath, onPath, d.DetectPaths)
 }
 
 // RunDiagnostics executes the full diagnostic suite across the environment.

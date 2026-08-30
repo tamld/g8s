@@ -1,6 +1,7 @@
 package pathutil
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -97,6 +98,22 @@ func TestPathutil_TableDrivenOS(t *testing.T) {
 			wantCache:  "/Users/alice/Library/Caches/g8s",
 			wantLogs:   "/Users/alice/Library/Logs/g8s",
 		},
+		{
+			name:    "darwin custom XDG override",
+			goos:    "darwin",
+			scope:   ScopeUser,
+			homeDir: "/Users/alice",
+			env: map[string]string{
+				"XDG_DATA_HOME":   "/custom/data",
+				"XDG_CONFIG_HOME": "/custom/config",
+				"XDG_CACHE_HOME":  "/custom/cache",
+				"XDG_STATE_HOME":  "/custom/state",
+			},
+			wantData:   "/custom/data/g8s",
+			wantConfig: "/custom/config/g8s",
+			wantCache:  "/custom/cache/g8s",
+			wantLogs:   "/custom/state/g8s/logs",
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +140,16 @@ func TestPathutil_TableDrivenOS(t *testing.T) {
 			gotLogs := LogsDirForOS(tt.goos, envGetter, tt.homeDir)
 			if filepath.Clean(gotLogs) != filepath.Clean(tt.wantLogs) {
 				t.Errorf("LogsDirForOS() = %v, want %v", gotLogs, tt.wantLogs)
+			}
+
+			gotState := StateDirForOS(tt.goos, envGetter, tt.homeDir)
+			if gotState == "" {
+				t.Errorf("StateDirForOS() returned empty")
+			}
+
+			gotDB := DatabasePathForOS(tt.goos, envGetter, tt.homeDir, tt.scope)
+			if gotDB == "" {
+				t.Errorf("DatabasePathForOS() returned empty")
 			}
 		})
 	}
@@ -163,6 +190,16 @@ func TestPathutil_CurrentPlatformDefaults(t *testing.T) {
 	if evidenceDir == "" {
 		t.Fatalf("DefaultEvidenceDir() returned empty")
 	}
+
+	userData := DataDirForScope(ScopeUser)
+	if userData == "" {
+		t.Fatalf("DataDirForScope(ScopeUser) returned empty")
+	}
+
+	sysData := DataDirForScope(ScopeSystem)
+	if sysData == "" {
+		t.Fatalf("DataDirForScope(ScopeSystem) returned empty")
+	}
 }
 
 func TestPathutil_DatabasePathOverride(t *testing.T) {
@@ -187,8 +224,26 @@ func TestPathutil_DatabasePathOverride(t *testing.T) {
 
 func TestPathutil_DetectUserProfiles(t *testing.T) {
 	profiles := DetectUserProfiles()
-	// Must not panic and return at least 0 profiles
 	if profiles == nil {
 		t.Fatalf("expected non-nil profile list")
+	}
+
+	// Create simulated profiles in a temp directory
+	tempRoot := t.TempDir()
+	userDir := filepath.Join(tempRoot, "testuser", ".local", "share", "g8s")
+	if err := os.MkdirAll(userDir, 0o700); err != nil {
+		t.Fatalf("failed to create temp profile dir: %v", err)
+	}
+}
+
+func TestPathutil_JoinPathForOS(t *testing.T) {
+	winPath := joinPathForOS("windows", `C:\Users\Test`, "AppData", "Local")
+	if winPath != `C:\Users\Test\AppData\Local` {
+		t.Errorf("joinPathForOS(windows) = %s, want C:\\Users\\Test\\AppData\\Local", winPath)
+	}
+
+	linuxPath := joinPathForOS("linux", "/home/test", ".local", "share")
+	if linuxPath != "/home/test/.local/share" {
+		t.Errorf("joinPathForOS(linux) = %s, want /home/test/.local/share", linuxPath)
 	}
 }
