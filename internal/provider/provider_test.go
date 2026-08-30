@@ -25,7 +25,7 @@ func stubLookPath(paths map[string]string) func(string) (string, error) {
 	}
 }
 
-func newSmallRegistry(t *testing.T, maxConcurrency int) *Registry {
+func newSmallRegistry(t *testing.T, maxConcurrency int) *PoolRegistry {
 	t.Helper()
 	cfg := Config{
 		Name:           "agy",
@@ -36,11 +36,11 @@ func newSmallRegistry(t *testing.T, maxConcurrency int) *Registry {
 			{ID: "gemini-3.7-flash-high", Name: "Gemini 3.7 Flash (High)", SupportedRoles: []string{"collector"}, ContextWindow: 1000000, MaxOutputTokens: 65536},
 		},
 	}
-	return NewRegistry([]Config{cfg}, nil, func(string) (string, error) { return "/usr/local/bin/agy", nil })
+	return NewPoolRegistry([]Config{cfg}, nil, func(string) (string, error) { return "/usr/local/bin/agy", nil })
 }
 
 func TestMissingBinariesReportUnavailable(t *testing.T) {
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	infos, err := r.DiscoverAll(context.Background())
 	if err != nil {
 		t.Fatalf("DiscoverAll: %v", err)
@@ -59,7 +59,7 @@ func TestMissingBinariesReportUnavailable(t *testing.T) {
 }
 
 func TestResolvedBinaryReportsReady(t *testing.T) {
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(map[string]string{"agy": "/usr/local/bin/agy"}))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(map[string]string{"agy": "/usr/local/bin/agy"}))
 	infos, _ := r.DiscoverAll(context.Background())
 	for _, info := range infos {
 		if info.Name != "agy" {
@@ -76,7 +76,7 @@ func TestResolvedBinaryReportsReady(t *testing.T) {
 
 func TestOverrideEnvVarBeatsLookPath(t *testing.T) {
 	t.Setenv("AGY_BIN", "/opt/override/agy")
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(map[string]string{"agy": "/usr/bin/agy"}))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(map[string]string{"agy": "/usr/bin/agy"}))
 	info, err := r.GetProvider("agy")
 	if err == nil && info.BinaryPath == "" {
 		t.Log("provider not discovered yet; discovering")
@@ -90,7 +90,7 @@ func TestOverrideEnvVarBeatsLookPath(t *testing.T) {
 }
 
 func TestGetProviderUnknownErrors(t *testing.T) {
-	r := NewRegistry(DefaultConfigs(), nil, nil)
+	r := NewPoolRegistry(DefaultConfigs(), nil, nil)
 	if _, err := r.GetProvider("nonexistent"); err == nil || err.Error() != "unknown provider: nonexistent" {
 		t.Fatalf("err = %v, want unknown provider message", err)
 	}
@@ -164,7 +164,7 @@ func TestOllamaProbeStates(t *testing.T) {
 	cases := []struct {
 		name string
 		host string
-		want ProviderStatus
+		want HealthStatus
 	}{
 		{"ready on 200", okServer.URL, StatusReady},
 		{"degraded on non-200", badServer.URL, StatusDegraded},
@@ -184,7 +184,7 @@ func TestOllamaProbeStates(t *testing.T) {
 			if ollamaCfg == nil {
 				t.Fatal("no ollama config in defaults")
 			}
-			r := NewRegistry(cfgs, nil, stubLookPath(nil))
+			r := NewPoolRegistry(cfgs, nil, stubLookPath(nil))
 			infos, err := r.DiscoverAll(context.Background())
 			if err != nil {
 				t.Fatalf("DiscoverAll: %v", err)
@@ -283,7 +283,7 @@ func TestHealthCheckTimestampUsesInjectedClock(t *testing.T) {
 		clockCalls++
 		return fixed
 	}
-	r := NewRegistry(DefaultConfigs(), clock, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), clock, stubLookPath(nil))
 	infos, _ := r.DiscoverAll(context.Background())
 	for _, info := range infos {
 		if info.LastHealthCheckAt != fixed.Unix() {
@@ -296,7 +296,7 @@ func TestHealthCheckTimestampUsesInjectedClock(t *testing.T) {
 }
 
 func TestDiscoveryOrderIsSortedAndStable(t *testing.T) {
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	first, _ := r.DiscoverAll(context.Background())
 	second, _ := r.DiscoverAll(context.Background())
 	if len(first) != len(second) {
@@ -340,7 +340,7 @@ func TestLoadProvidersJSONMergesApiCallEntries(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestLoadProvidersJSONRejectsDuplicateNames(t *testing.T) {
 	content := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server.URL + `","auth_env":"","models":[{"id":"m"}],"slots":1}]}`
 	os.WriteFile(path, []byte(content), 0o600)
 
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("first load: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestApiCallAuthEnvUnsetFailsClosedWithoutHTTP(t *testing.T) {
 	content := `{"providers":[{"class":"api_call","name":"locked","base_url":"` + server.URL + `","auth_env":"PARITY_TEST_MISSING_KEY","models":[{"id":"m"}],"slots":1}]}`
 	os.WriteFile(path, []byte(content), 0o600)
 
-	r := NewRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestSelectForModelPrefersApiCallOverPlatformDispatch(t *testing.T) {
 	content := `{"providers":[{"class":"api_call","name":"pool","base_url":"` + okServer.URL + `","auth_env":"","models":[{"id":"shared-model"}],"slots":1}]}`
 	os.WriteFile(path, []byte(content), 0o600)
 
-	r := NewRegistry(nil, nil, stubLookPath(map[string]string{"cli-dispatch": "/bin/cli"}))
+	r := NewPoolRegistry(nil, nil, stubLookPath(map[string]string{"cli-dispatch": "/bin/cli"}))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("load api_call: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestLoadProvidersJSONMapsArgsTemplate(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	r := NewRegistry(nil, nil, func(name string) (string, error) {
+	r := NewPoolRegistry(nil, nil, func(name string) (string, error) {
 		return "/bin/" + name, nil
 	})
 	if err := r.LoadProvidersJSON(path); err != nil {

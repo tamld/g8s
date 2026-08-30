@@ -28,19 +28,19 @@ import (
 	"github.com/tamld/g8s/internal/config"
 )
 
-// ProviderStatus reports the outcome of the most recent health check.
-type ProviderStatus string
+// HealthStatus reports the outcome of the most recent health check.
+type HealthStatus string
 
 const (
 	// StatusReady means the binary or endpoint answered its health probe.
-	StatusReady ProviderStatus = "READY"
+	StatusReady HealthStatus = "READY"
 
 	// StatusDegraded means the provider exists but its health probe failed
 	// softly (for example a non-200 response from an Ollama daemon).
-	StatusDegraded ProviderStatus = "DEGRADED"
+	StatusDegraded HealthStatus = "DEGRADED"
 
 	// StatusUnavailable means the provider could not be located at all.
-	StatusUnavailable ProviderStatus = "UNAVAILABLE"
+	StatusUnavailable HealthStatus = "UNAVAILABLE"
 )
 
 // ModelDescriptor describes a single model exposed by a provider.
@@ -57,7 +57,7 @@ type ModelDescriptor struct {
 type ProviderInfo struct {
 	Name              string            `json:"name"`
 	BinaryPath        string            `json:"binary_path,omitempty"`
-	Status            ProviderStatus    `json:"status"`
+	Status            HealthStatus      `json:"status"`
 	AvailableModels   []ModelDescriptor `json:"available_models"`
 	MaxConcurrency    int               `json:"max_concurrency"`
 	CurrentInFlight   int               `json:"current_in_flight"`
@@ -185,8 +185,8 @@ type state struct {
 	last     ProviderInfo
 }
 
-// Registry is the concrete ProviderRegistry.
-type Registry struct {
+// PoolRegistry is the concrete ProviderRegistry for concurrency pooling.
+type PoolRegistry struct {
 	mu         sync.Mutex
 	clock      func() time.Time
 	lookPath   func(string) (string, error)
@@ -194,16 +194,16 @@ type Registry struct {
 	states     map[string]*state
 }
 
-// NewRegistry builds a registry over the supplied configs. Nil clock or
+// NewPoolRegistry builds a pool registry over the supplied configs. Nil clock or
 // lookPath fall back to time.Now and exec.LookPath respectively.
-func NewRegistry(configs []Config, clock func() time.Time, lookPath func(string) (string, error)) *Registry {
+func NewPoolRegistry(configs []Config, clock func() time.Time, lookPath func(string) (string, error)) *PoolRegistry {
 	if clock == nil {
 		clock = time.Now
 	}
 	if lookPath == nil {
 		lookPath = exec.LookPath
 	}
-	r := &Registry{
+	r := &PoolRegistry{
 		clock:      clock,
 		lookPath:   lookPath,
 		httpClient: &http.Client{Timeout: time.Second},
@@ -225,7 +225,7 @@ func NewRegistry(configs []Config, clock func() time.Time, lookPath func(string)
 
 // DiscoverAll probes every configured provider and returns a stable,
 // name-sorted snapshot.
-func (r *Registry) DiscoverAll(ctx context.Context) ([]ProviderInfo, error) {
+func (r *PoolRegistry) DiscoverAll(ctx context.Context) ([]ProviderInfo, error) {
 	names := make([]string, 0, len(r.states))
 	for name := range r.states {
 		names = append(names, name)
@@ -240,7 +240,7 @@ func (r *Registry) DiscoverAll(ctx context.Context) ([]ProviderInfo, error) {
 }
 
 // probe resolves one provider and refreshes its stored snapshot.
-func (r *Registry) probe(ctx context.Context, name string) ProviderInfo {
+func (r *PoolRegistry) probe(ctx context.Context, name string) ProviderInfo {
 	info := ProviderInfo{
 		Name:              name,
 		Status:            StatusUnavailable,
@@ -312,7 +312,7 @@ func (r *Registry) probe(ctx context.Context, name string) ProviderInfo {
 // (DELTA-10 R2/R3): api_call entries become remote HTTP pools and
 // platform_dispatch entries resolve local CLI binaries through the
 // standard discovery chain. Duplicate names are rejected.
-func (r *Registry) LoadProvidersJSON(path string) error {
+func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 	file, err := config.Load(path)
 	if err != nil {
 		return err
@@ -357,7 +357,7 @@ func (r *Registry) LoadProvidersJSON(path string) error {
 
 // SelectForModel acquires a slot on the READY provider serving modelID,
 // preferring api_call pools over platform_dispatch entries per DELTA-10 R5.
-func (r *Registry) SelectForModel(ctx context.Context, modelID string) (string, func(), error) {
+func (r *PoolRegistry) SelectForModel(ctx context.Context, modelID string) (string, func(), error) {
 	r.mu.Lock()
 	candidates := make([]string, 0, 2)
 	for name := range r.states {
@@ -391,7 +391,7 @@ func (r *Registry) SelectForModel(ctx context.Context, modelID string) (string, 
 }
 
 // probeHTTP performs the synthetic smoke health check for local daemons.
-func (r *Registry) probeHTTP(ctx context.Context, url string) ProviderStatus {
+func (r *PoolRegistry) probeHTTP(ctx context.Context, url string) HealthStatus {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return StatusUnavailable
@@ -408,7 +408,7 @@ func (r *Registry) probeHTTP(ctx context.Context, url string) ProviderStatus {
 }
 
 // GetProvider returns the most recently observed snapshot for name.
-func (r *Registry) GetProvider(name string) (ProviderInfo, error) {
+func (r *PoolRegistry) GetProvider(name string) (ProviderInfo, error) {
 	r.mu.Lock()
 	st, ok := r.states[name]
 	if !ok {
@@ -433,7 +433,7 @@ func (r *Registry) GetProvider(name string) (ProviderInfo, error) {
 // AcquireSlot reserves one concurrency slot, blocking until a slot frees up
 // or ctx is cancelled. The returned release function must be invoked exactly
 // once when the caller finishes using the slot.
-func (r *Registry) AcquireSlot(ctx context.Context, providerName string) (func(), error) {
+func (r *PoolRegistry) AcquireSlot(ctx context.Context, providerName string) (func(), error) {
 	r.mu.Lock()
 	st, ok := r.states[providerName]
 	r.mu.Unlock()
@@ -467,4 +467,4 @@ func (r *Registry) AcquireSlot(ctx context.Context, providerName string) (func()
 }
 
 // ensure the concrete type satisfies the spec interface at compile time.
-var _ ProviderRegistry = (*Registry)(nil)
+var _ ProviderRegistry = (*PoolRegistry)(nil)
