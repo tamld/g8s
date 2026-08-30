@@ -203,4 +203,3 @@ func TestAllSubcommandsHelp(t *testing.T) {
 		})
 	}
 }
-
