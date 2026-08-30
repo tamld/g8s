@@ -10,7 +10,7 @@
     "commit": "a35d205",
     "date": "2026-08-29"
   },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/tamld/g8s",
   "governance": {
     "constitution": "spec/constitution.md",
