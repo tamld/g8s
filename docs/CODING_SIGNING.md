@@ -85,3 +85,44 @@ When renewing or rotating the EV certificate:
    gh secret set WINDOWS_SIGNING_CERT_PFX
    ```
 5. Run a test release verification against a staging tag to verify `signtool verify /pa` passes.
+
+---
+
+## 6. macOS Notarization (DEBT-215)
+
+### Requirements
+- Apple Developer ID ($99/yr, register at developer.apple.com)
+- App-specific password (App Store Connect -> Users -> Security)
+- Team ID (App Store Connect -> Membership)
+
+### GitHub secrets
+Set these in github.com/tamld/g8s/settings/secrets:
+- APPLE_ID: your Apple ID email
+- APPLE_PASSWORD: the app-specific password (NOT your real password)
+- APPLE_TEAM_ID: 10-character alphanumeric
+
+### What happens when secrets are set
+- The release workflow runs `notarytool submit` + `stapler staple`
+- A new artifact `g8s-darwin-notarized.zip` is published
+- Users can run the notarized binary without Gatekeeper warnings
+
+### What happens when secrets are NOT set
+- Release workflow skips the notarize job
+- The regular `g8s-darwin-all.tar.gz` is published unsigned
+- Document in release notes: "macOS users: may need to right-click -> Open the first time"
+
+---
+
+## 7. AV Heuristics (Windows Defender + Others)
+
+Unsigned Go binaries trigger Defender false positives because:
+- No version-info resource
+- "Damaged file" dialog from SmartScreen
+- Random path in Downloads/
+
+Mitigations in priority order:
+1. Version-info (Commit 1 of this PR) - FREE
+2. Signing (DEBT-41) - already in roadmap
+3. Never UPX-pack
+4. Submit FPs to microsoft.com/wdsi/filesubmission
+5. Reputation builds over time
