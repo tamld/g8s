@@ -8,12 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Unified JSON Envelope v1** (`internal/cli`, Issue #120 / DEBT-30):
-  - Standardized `Envelope` schema with `v`, `kind`, `cmd`, `sub`, `data`, `error`, `trace_id`, and `at` across all 29 CLI subcommands.
-  - Correlation `trace_id` generation using UUID v7 (RFC 9562) with time ordering and v4 fallback.
-  - Common flag parser helper (`--actor`, `--trace-id`, `--jsonl`, `--json`) added across all subcommands.
-  - Single-line JSONL streaming mode (`--jsonl`) for streaming and log parsing pipelines.
-  - Standardized error envelopes on stdout with Feynman hints (`code`, `message`, `hint`, `cause`), using exit code 1 for runtime errors and 2 for usage errors.
+- **DEBT-25: Brief Workflow Integration** (`internal/brief`, `internal/orchestrator`, #112, #117):
+  - Integrated `g8s brief-issue` and `g8s brief-consume` workflow with the orchestrator and Sisyphus dispatch loop.
+- **DEBT-26: Automatic Worktree Cleanup** (`internal/cli`, `cmd/g8s`, #113, #115):
+  - Automatic isolation worktree pruning for agy subagents upon session completion or error exit.
+- **DEBT-27: Automated Self-Dogfooding Cycle** (`.github/workflows/dogfood.yml`, `cmd/g8s`, #114):
+  - Weekly automated dogfooding cycle executing brief roundtrip, worktree pruning, and tracking issue creation.
+- **DEBT-28: Lifecycle Hygiene & Resource Cleanup** (`internal/cleanup`, `cmd/g8s`, #118, #121):
+  - Added `g8s cleanup` subcommand to terminate ghost worker processes, prune orphan worktrees, and evict stale scratch artifacts.
+- **DEBT-29: Worker Heartbeat & Status Observability** (`internal/heartbeat`, `cmd/g8s`, #119, #122, #129):
+  - Per-session heartbeat file tracking with `g8s status --worker` for real-time worker liveness and status introspection.
+- **DEBT-30: Unified JSON Envelope v1** (`internal/cli`, #120, #128):
+  - Standardized `Envelope` schema with `v`, `kind`, `cmd`, `sub`, `data`, `error`, `trace_id`, and `at` across all CLI subcommands.
+  - Added common flag parser support for `--actor`, `--trace-id`, `--json`, and `--jsonl` (single-line JSONL streaming mode).
+  - Standardized structured error envelopes on stdout with Feynman hints (`code`, `message`, `hint`, `cause`).
+- **DEBT-32: Auto-Cleanup on Terminal State** (`internal/orchestrator`, #124, #131):
+  - Automatic `g8s cleanup` lifecycle hook triggered when orchestration reaches a terminal success state.
+- **DEBT-36: Cross-Platform Process Management & Safe-Kill** (`internal/process`, `internal/cleanup`, #130, #133, #134):
+  - Introduced cross-platform `ProcessLister` interface with Darwin/Linux `ps` parsing and Windows `tasklist`/WMI implementations.
+  - Heartbeat-to-PID mapping validation and safe-kill confirmation to prevent accidental process termination.
+
+## [0.3.0] - 2026-08-29
+
+### Added
+- **Supervisor 8-State FSM** (`internal/supervisor`, DELTA-15): Full lifecycle FSM (`PLAN` -> `SPAWN` -> `MONITOR` -> `RECEIPT` -> `MERGE` / `ESCALATE`) with retry budget and Root Cause Analysis (RCA).
+- **Control Plane Orchestrator Lineage** (`internal/controlplane`, DELTA-17): Added `orchestrator_id`, `worktree_id`, `worker_name`, and `iter` tracking columns with indexed schema migrations.
+- **Supervisor Receipt Evolution** (`internal/receipt`, DELTA-11 Concern B): Backward-compatible `SupervisorMeta` with NULL handling.
+- **Meta-Optimizer Aggregate Telemetry** (`internal/supervisor`, DELTA-11 Concern C): Read-only aggregate performance queries and metrics streaming.
+- **AIC Integration & Intent Orchestration** (`cmd/g8s`, DELTA-18): Subcommand `g8s orchestrate <intent>` for direct natural language intent dispatch.
+- **Stateful Worker Lego Mounts** (`internal/orchestrator`, DELTA-19): Added composable `SkillMount`, `HookMount`, and `MemoryMount` building blocks.
+- **Brief Issue & Consume Dispatch Contract** (`internal/brief`, `cmd/g8s`, DEBT-107): Added `g8s brief-issue` and `g8s brief-consume` subcommands.
+- **Dogfooding CI Gate** (`.github/workflows/dogfood.yml`, DEBT-20): CI verification that g8s can orchestrate g8s on every PR.
+- **AI Anti-Pattern Gate** (`tools/ai_lint.sh`, DEBT-21): AST and regex linter rejecting silent error swallowing, untyped `any`, unhandled panics, and committed TODOs.
+
+## [0.2.0] - 2026-08-29
+
+### Added
+- **Supervisor Core Engine** (`internal/supervisor`, DELTA-11 Concern A): Planner, enforcer, reviewer, RCA analyzer, escalator, and telemetry metrics engine wired to SQLite WAL.
+- **Dogfood Self-Test Loop** (`cmd/g8s`): Terminal loop `g8s orchestrate --self-test` exercising real CLI workers with mock failure escalation.
+- **Supervisor Metrics Command** (`cmd/g8s`): Subcommand `g8s supervisor-metrics` with `--task-id` and `--aggregate` filters.
+
+### Changed
+- **Linter & Security Tightening** (DEBT-22/23/24/25): Re-enabled pinned `staticcheck` v0.7.0 (ADR-0015), `errcheck` with `.errcheck_excludes` (ADR-0017), tightened `gosec` rules, and raised aggregate test coverage above 82%.
 
 ## [0.1.0] - 2026-08-25
 

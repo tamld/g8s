@@ -41,6 +41,10 @@ g8s là một **hệ thống đa tác tử hai tầng** thuần Go, Zero-CGO:
 - **Chặn lệnh nguy hiểm** & bảo vệ đường dẫn nhạy cảm.
 - **Ủy quyền ghi qua receipt**: single-use, TTL 1..3600s, giới hạn theo path.
 - **Control plane SQLite WAL** bền vững: CAS lease, idempotency-key, lineage cha–con.
+- **Supervisor & Điều phối Ý định (Intent Orchestrator)**: FSM 8 trạng thái, phân tích nguyên nhân gốc rễ (RCA) tự động, vòng lặp tự sửa lỗi (`g8s orchestrate`).
+- **Heartbeat & Giám sát tiến trình thời gian thực**: theo dõi liveness của worker (`g8s status --worker`).
+- **Dọn dẹp tài nguyên & Vệ sinh vòng đời**: tự động dọn process ma, worktree mồ côi và artifact rác (`g8s cleanup`).
+- **Quy trình điều phối Brief**: cấp phát và sử dụng brief (`g8s brief-issue`, `g8s brief-consume`).
 - **MCP stdio protocol**: kết nối Claude Desktop, Cursor, Codex, Windsurf.
 - **Service manager macOS** (LaunchAgent, hardened) — systemd/Windows sắp tới.
 

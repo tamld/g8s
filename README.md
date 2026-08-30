@@ -61,6 +61,10 @@
   * **Sensitive Path Protections**: Rejects access to `.ssh`, `.aws`, `.env`, `id_rsa` (including symlinks and `..` traversal).
 * **🎟️ Receipt-Based Write Delegation**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain.
 * **📦 Durable Control Plane**: SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases, idempotency keys, and parent-child task lineage.
+* **🧠 Supervisor & Intent Orchestrator**: 8-State FSM (`PLAN` → `SPAWN` → `MONITOR` → `RECEIPT` → `MERGE`/`ESCALATE`) with automated Root Cause Analysis (RCA), iterative fix loops, and `SkillMount`/`HookMount`/`MemoryMount` composability (`g8s orchestrate`).
+* **💓 Worker Heartbeat & Real-Time Observability**: Live per-session heartbeat monitoring and process status introspection (`g8s status --worker`).
+* **🧹 Lifecycle Hygiene & Resource Pruning**: Built-in sweeper to reap ghost processes, prune orphan worktrees, and evict stale scratch artifacts (`g8s cleanup`), with auto-cleanup hooks on orchestrator completion.
+* **📜 Decoupled Brief Dispatch Workflow**: Contract-driven brief issuance and atomic consumption (`g8s brief-issue`, `g8s brief-consume`).
 * **🔌 Stdio MCP Protocol**: Plugs directly into Claude Desktop, Cursor, Codex, and Windsurf via standard JSON-RPC.
 * **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: one-command hardened background service installation for macOS (`launchd`); Linux (`systemd`) and Windows backends are on the roadmap.
 
@@ -116,6 +120,26 @@ g8s submit \
 
 > Note: receipts cannot be carried through the MCP surface — they are consumed
 > by workers directly against the control plane.
+
+### 5. Orchestrate an Intent via Supervisor Fix Loop
+```bash
+g8s orchestrate "Refactor auth middleware to use pure-Go context tokens" \
+  --max-iterations 3 \
+  --actor "brain-supervisor"
+```
+
+### 6. Monitor Worker Heartbeat & Process Status
+```bash
+# Check real-time heartbeat and worker liveness across active sessions
+g8s status --worker --json
+```
+
+### 7. Run Lifecycle & Orphan Resource Cleanup
+```bash
+# Inspect and purge ghost worker processes, orphan worktrees, and stale artifacts
+g8s cleanup --dry-run
+g8s cleanup --force
+```
 
 ---
 

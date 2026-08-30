@@ -29,7 +29,7 @@ Grab the matching archive from the [releases page](https://github.com/tamld/g8s/
 | Windows amd64 | `g8s_<ver>_windows_amd64.zip` |
 
 ```sh
-tar -xzf g8s_0.1.0_darwin_arm64.tar.gz
+tar -xzf g8s_0.3.0_darwin_arm64.tar.gz
 ./g8s version
 ```
 
