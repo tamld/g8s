@@ -344,6 +344,24 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("doctor attention check envelope", func(t *testing.T) {
+		docEnv, docCode, _ := runCmd("doctor", "--attention-check", "--actor", "attn-worker")
+		if docCode != 0 {
+			t.Fatalf("doctor attention-check exit code = %d, want 0", docCode)
+		}
+		if docEnv.V != 1 || docEnv.Kind != "attention_check" || docEnv.Command != "doctor" || docEnv.Subcommand != "attention-check" {
+			t.Errorf("doctor attention check headers: %+v", docEnv)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(docEnv.Data, &data); err != nil {
+			t.Fatalf("unmarshal attention check data: %v", err)
+		}
+		qs, ok := data["questions"].([]any)
+		if !ok || len(qs) != 5 {
+			t.Fatalf("expected 5 questions in attention check, got %+v", data)
+		}
+	})
+
 	t.Run("init envelope", func(t *testing.T) {
 		initEnv, initCode, _ := runCmd("init", "--agent", "--json")
 		if initCode != 0 {
