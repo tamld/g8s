@@ -1,6 +1,7 @@
 package heartbeat
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -263,7 +264,7 @@ func TestRecordEventAndEmit(t *testing.T) {
 		t.Errorf("expected sess-pkg-1, got %s", hb4.SessionID)
 	}
 
-	if err := Emit(nil, "sess-pkg-2", evt); err != nil {
+	if err := Emit(context.Background(), "sess-pkg-2", evt); err != nil {
 		t.Fatalf("Emit failed: %v", err)
 	}
 
