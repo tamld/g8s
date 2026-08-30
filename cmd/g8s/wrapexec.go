@@ -28,7 +28,7 @@ func runWrapExec(argv []string) error {
 		return errors.New("usage: g8s internal wrap-exec --out <path> -- <child argv>")
 	}
 	outPath := ""
-	fs := flag.NewFlagSet("wrap-exec", flag.ContinueOnError)
+	fs := flag.NewFlagSet("wrap-exec", flag.ExitOnError)
 	fs.StringVar(&outPath, "out", "", "path to write the result envelope")
 	if err := fs.Parse(rest[:idx]); err != nil {
 		return err

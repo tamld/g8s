@@ -30,7 +30,7 @@ var (
 )
 
 func runCleanupWorktrees(args []string) {
-	fs := flag.NewFlagSet("cleanup-worktrees", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cleanup-worktrees", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	olderThanStr := fs.String("older-than", "1h", "remove worktrees older than duration (e.g. 1h, 24h, 30m)")

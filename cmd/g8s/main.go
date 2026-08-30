@@ -79,7 +79,7 @@ func main() {
 	case "permissions":
 		runPermissions(os.Args[2:])
 	case "mcp":
-		runMCPServer()
+		runMCPServer(os.Args[2:])
 	case "submit":
 		runSubmit(os.Args[2:])
 	case "get":
@@ -176,7 +176,7 @@ func databasePath() (string, error) {
 
 // runVersion emits application build and version metadata.
 func runVersion(args []string) {
-	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	if err := fs.Parse(args); err != nil {
 		exitUsage("version", "", *traceID, err.Error(), "", *jsonl)
@@ -199,7 +199,7 @@ func runVersion(args []string) {
 
 // runRoles lists registered worker roles.
 func runRoles(args []string) {
-	fs := flag.NewFlagSet("roles", flag.ContinueOnError)
+	fs := flag.NewFlagSet("roles", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args); err != nil {
@@ -226,7 +226,7 @@ func runRoles(args []string) {
 
 // runPermissions lists registered permission profiles.
 func runPermissions(args []string) {
-	fs := flag.NewFlagSet("permissions", flag.ContinueOnError)
+	fs := flag.NewFlagSet("permissions", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args); err != nil {
@@ -253,7 +253,7 @@ func runPermissions(args []string) {
 
 // runProviders lists detected AI agent CLI providers and their availability status.
 func runProviders(args []string) {
-	fs := flag.NewFlagSet("providers", flag.ContinueOnError)
+	fs := flag.NewFlagSet("providers", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args); err != nil {
@@ -287,7 +287,12 @@ func runProviders(args []string) {
 }
 
 // runMCPServer serves the stdio JSON-RPC MCP surface until stdin closes.
-func runMCPServer() {
+func runMCPServer(args []string) {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		return
+	}
+
 	dbPath, err := databasePath()
 	if err != nil {
 		exitRuntime("mcp", "", "", cli.CodeIO, err, "", false)
@@ -319,7 +324,7 @@ func runMCPServer() {
 // runSubmit queues one durable task through the control plane after validating
 // it against the security harness.
 func runSubmit(args []string) {
-	fs := flag.NewFlagSet("submit", flag.ContinueOnError)
+	fs := flag.NewFlagSet("submit", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
@@ -416,7 +421,7 @@ func runSubmit(args []string) {
 
 // runGet prints the current durable view of one task.
 func runGet(args []string) {
-	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+	fs := flag.NewFlagSet("get", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -459,7 +464,7 @@ func runGet(args []string) {
 
 // runResume moves a NEEDS_INFO or BLOCKED task back to QUEUED with optional clarifying prompt.
 func runResume(args []string) {
-	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	fs := flag.NewFlagSet("resume", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	taskIDFlag := fs.String("task-id", "", "task ID to resume")
@@ -513,7 +518,7 @@ func runResume(args []string) {
 
 // runTasks lists durable tasks optionally filtered by state.
 func runTasks(args []string) {
-	fs := flag.NewFlagSet("tasks", flag.ContinueOnError)
+	fs := flag.NewFlagSet("tasks", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -552,7 +557,7 @@ func runTasks(args []string) {
 
 // runCancel cancels an active or queued task.
 func runCancel(args []string) {
-	fs := flag.NewFlagSet("cancel", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -600,7 +605,7 @@ func runCancel(args []string) {
 
 // runLineage prints the full ancestry chain of a task up to the root.
 func runLineage(args []string) {
-	fs := flag.NewFlagSet("lineage", flag.ContinueOnError)
+	fs := flag.NewFlagSet("lineage", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -643,7 +648,7 @@ func runLineage(args []string) {
 
 // runChildren lists direct child subtasks for a parent task.
 func runChildren(args []string) {
-	fs := flag.NewFlagSet("children", flag.ContinueOnError)
+	fs := flag.NewFlagSet("children", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -696,6 +701,17 @@ func runReceipt(args []string) {
 		exitUsage("receipt", "", "", "usage: g8s receipt <issue|show|verify|revoke|list> [options]", "Supported subcommands: issue, show, verify, revoke, list", false)
 	}
 
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Println("Usage: g8s receipt <issue|show|verify|revoke|list> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  issue   Issue a write receipt")
+		fmt.Println("  show    Show receipt details")
+		fmt.Println("  verify  Verify a receipt")
+		fmt.Println("  revoke  Revoke a receipt")
+		fmt.Println("  list    List active receipts")
+		os.Exit(0)
+	}
+
 	subcmd := args[0]
 	dbPath, err := receiptDatabasePath()
 	if err != nil {
@@ -709,7 +725,7 @@ func runReceipt(args []string) {
 
 	switch subcmd {
 	case "issue":
-		fs := flag.NewFlagSet("receipt issue", flag.ContinueOnError)
+		fs := flag.NewFlagSet("receipt issue", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = jsonMode
 		issuer := fs.String("issuer", "", "identity recorded on the receipt (defaults to --actor)")
@@ -739,7 +755,7 @@ func runReceipt(args []string) {
 		}
 
 	case "show", "get":
-		fs := flag.NewFlagSet("receipt show", flag.ContinueOnError)
+		fs := flag.NewFlagSet("receipt show", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -765,7 +781,7 @@ func runReceipt(args []string) {
 		}
 
 	case "verify":
-		fs := flag.NewFlagSet("receipt verify", flag.ContinueOnError)
+		fs := flag.NewFlagSet("receipt verify", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -795,7 +811,7 @@ func runReceipt(args []string) {
 		}
 
 	case "revoke":
-		fs := flag.NewFlagSet("receipt revoke", flag.ContinueOnError)
+		fs := flag.NewFlagSet("receipt revoke", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -823,7 +839,7 @@ func runReceipt(args []string) {
 		}
 
 	case "list":
-		fs := flag.NewFlagSet("receipt list", flag.ContinueOnError)
+		fs := flag.NewFlagSet("receipt list", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -847,7 +863,7 @@ func runReceipt(args []string) {
 
 // runInit handles interactive and headless onboarding wizard.
 func runInit(args []string) {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	agentMode := fs.Bool("agent", false, "run in non-interactive headless agent mode")
@@ -899,7 +915,17 @@ func runConfig(args []string) {
 		exitUsage("config", "", "", fmt.Sprintf("%s: usage: g8s config <get|set|list|unset> [key] [value] [--json]", AppName), "", false)
 	}
 
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Println("Usage: g8s config <get|set|list|unset> [key] [value] [--json]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  get    Get config key")
+		fmt.Println("  set    Set config key value")
+		fmt.Println("  list   List all configuration")
+		fmt.Println("  unset  Unset config key")
+		os.Exit(0)
+	}
+
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	scopeFlag := fs.String("scope", "", "installation and execution scope (user or system)")
@@ -1026,7 +1052,11 @@ func runCompletion(args []string) {
 	if len(args) < 1 {
 		exitUsage("completion", "", "", fmt.Sprintf("%s: usage: g8s completion <bash|zsh|fish>", AppName), "", false)
 	}
-	fs := flag.NewFlagSet("completion", flag.ContinueOnError)
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Printf("%s: usage: g8s completion <bash|zsh|fish>\n", AppName)
+		os.Exit(0)
+	}
+	fs := flag.NewFlagSet("completion", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	_ = fs.Parse(args[1:])
@@ -1050,8 +1080,19 @@ func runService(args []string) {
 		exitUsage("service", "", "", "usage: g8s service <install|start|stop|status|uninstall>", "", false)
 	}
 
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Println("Usage: g8s service <install|start|stop|status|uninstall>")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  install    Install service unit")
+		fmt.Println("  start      Start service daemon")
+		fmt.Println("  stop       Stop service daemon")
+		fmt.Println("  status     Check service status")
+		fmt.Println("  uninstall  Uninstall service unit")
+		os.Exit(0)
+	}
+
 	subcmd := args[0]
-	fs := flag.NewFlagSet("service", flag.ContinueOnError)
+	fs := flag.NewFlagSet("service", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args[1:]); err != nil {
@@ -1141,7 +1182,7 @@ func runService(args []string) {
 
 // runAnalyze computes Blast Radius Intelligence for a target file or symbol per DELTA-07.
 func runAnalyze(args []string) {
-	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
+	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
@@ -1188,6 +1229,17 @@ func runVault(args []string) {
 		exitUsage("vault", "", "", "usage: g8s vault <store|query|list|get|delete> [options]", "", false)
 	}
 
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Println("Usage: g8s vault <store|query|list|get|delete> [options]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  store   Store a distillation record")
+		fmt.Println("  query   Query vault records")
+		fmt.Println("  list    List vault records")
+		fmt.Println("  get     Get a vault record")
+		fmt.Println("  delete  Delete a vault record")
+		os.Exit(0)
+	}
+
 	subcmd := args[0]
 	dbPath, err := databasePath()
 	if err != nil {
@@ -1203,7 +1255,7 @@ func runVault(args []string) {
 
 	switch subcmd {
 	case "store":
-		fs := flag.NewFlagSet("vault store", flag.ContinueOnError)
+		fs := flag.NewFlagSet("vault store", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -1267,7 +1319,7 @@ func runVault(args []string) {
 		}
 
 	case "query":
-		fs := flag.NewFlagSet("vault query", flag.ContinueOnError)
+		fs := flag.NewFlagSet("vault query", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -1291,7 +1343,7 @@ func runVault(args []string) {
 		}
 
 	case "get":
-		fs := flag.NewFlagSet("vault get", flag.ContinueOnError)
+		fs := flag.NewFlagSet("vault get", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -1313,7 +1365,7 @@ func runVault(args []string) {
 		}
 
 	case "list":
-		fs := flag.NewFlagSet("vault list", flag.ContinueOnError)
+		fs := flag.NewFlagSet("vault list", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
@@ -1347,7 +1399,7 @@ func runVault(args []string) {
 		}
 
 	case "delete":
-		fs := flag.NewFlagSet("vault delete", flag.ContinueOnError)
+		fs := flag.NewFlagSet("vault delete", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		idFlag := fs.String("id", "", "record ID to delete")
@@ -1430,7 +1482,7 @@ func printUsage() {
 // resolving provider command templates from providers.json when present
 // (DELTA-10 phase-2 registry-to-worker bridge).
 func runWorker(args []string) {
-	fs := flag.NewFlagSet("worker", flag.ContinueOnError)
+	fs := flag.NewFlagSet("worker", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	once := fs.Bool("once", true, "claim and execute a single task, then exit")
 	model := fs.String("model", "", "restrict to tasks targeting this model")
@@ -1535,6 +1587,13 @@ func runState(args []string) {
 	if len(args) == 0 {
 		exitUsage("state", "", "", "usage: g8s state <show|replay> <id> [flags]", "Use 'g8s state show <id>' or 'g8s state replay <id>'", false)
 	}
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
+		fmt.Println("Usage: g8s state <show|replay> <id> [flags]")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  show    Show state history for an ID")
+		fmt.Println("  replay  Replay state history for an ID")
+		os.Exit(0)
+	}
 	sub := args[0]
 	switch sub {
 	case "show":
@@ -1547,7 +1606,7 @@ func runState(args []string) {
 }
 
 func runStateShow(args []string) {
-	fs := flag.NewFlagSet("state show", flag.ContinueOnError)
+	fs := flag.NewFlagSet("state show", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	dbFlag := fs.String("db", "", "path to control-plane database")
@@ -1636,7 +1695,7 @@ func runStateShow(args []string) {
 }
 
 func runStateReplay(args []string) {
-	fs := flag.NewFlagSet("state replay", flag.ContinueOnError)
+	fs := flag.NewFlagSet("state replay", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	_ = jsonMode

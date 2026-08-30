@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -129,3 +130,77 @@ func captureUsage(t *testing.T) string {
 	n, _ := r.Read(buf)
 	return string(buf[:n])
 }
+
+func TestSubmitHelp(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	cmd := exec.Command(binPath, "submit", "--help")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit --help failed: %v\nOutput: %s", err, string(out))
+	}
+	output := string(out)
+	if strings.Contains(output, `"kind":"error"`) || strings.Contains(output, "E_USAGE") {
+		t.Fatalf("submit --help returned error envelope:\n%s", output)
+	}
+	if !strings.Contains(output, "idempotency-key") || !strings.Contains(output, "prompt") {
+		t.Fatalf("submit --help output missing expected flag definitions:\n%s", output)
+	}
+}
+
+func TestAllSubcommandsHelp(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	subcommands := []string{
+		"version",
+		"roles",
+		"permissions",
+		"providers",
+		"submit",
+		"get",
+		"resume",
+		"tasks",
+		"cancel",
+		"lineage",
+		"children",
+		"receipt",
+		"doctor",
+		"init",
+		"config",
+		"completion",
+		"service",
+		"worker",
+		"analyze",
+		"vault",
+		"orchestrate",
+		"orchestrate-aic",
+		"supervisor-metrics",
+		"brief-issue",
+		"brief-consume",
+		"cleanup-worktrees",
+		"cleanup",
+		"status",
+		"state",
+		"migrate",
+		"converge",
+		"sleep",
+		"wake",
+		"mcp",
+	}
+
+	for _, sub := range subcommands {
+		t.Run(sub, func(t *testing.T) {
+			cmd := exec.Command(binPath, sub, "--help")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s --help failed: %v\nOutput: %s", sub, err, string(out))
+			}
+			output := string(out)
+			if strings.Contains(output, `"kind":"error"`) || strings.Contains(output, "E_USAGE") {
+				t.Fatalf("%s --help returned error envelope:\n%s", sub, output)
+			}
+			if len(strings.TrimSpace(output)) == 0 {
+				t.Fatalf("%s --help returned empty output", sub)
+			}
+		})
+	}
+}
+

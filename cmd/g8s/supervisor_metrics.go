@@ -26,7 +26,7 @@ type supervisorMetricsOutput struct {
 }
 
 func runSupervisorMetrics(args []string) {
-	fs := flag.NewFlagSet("supervisor-metrics", flag.ContinueOnError)
+	fs := flag.NewFlagSet("supervisor-metrics", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	taskID := fs.String("task-id", "", "supervisor task id (returns single-run metrics)")

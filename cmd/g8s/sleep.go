@@ -15,7 +15,7 @@ import (
 
 // runSleep records operator away/sleep status and defers non-critical notifications per DEBT-50.
 func runSleep(args []string) {
-	fs := flag.NewFlagSet("sleep", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sleep", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	untilFlag := fs.String("until", "", "target wakeup time (e.g. 09:00 or ISO timestamp)")
 	criticalOnly := fs.Bool("critical-only", true, "defer all non-critical notifications until wake")
@@ -55,7 +55,7 @@ func runSleep(args []string) {
 
 // runWake ends sleep cycle and emits voice or json summary report per DEBT-50.
 func runWake(args []string) {
-	fs := flag.NewFlagSet("wake", flag.ContinueOnError)
+	fs := flag.NewFlagSet("wake", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	formatFlag := fs.String("format", "voice", "summary format (voice or json)")
 	_ = actor

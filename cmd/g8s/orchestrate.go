@@ -362,7 +362,7 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 // it parses the natural language intent into collector sub-tasks and runs
 // them via FanOut.
 func runOrchestrate(args []string) {
-	fs := flag.NewFlagSet("orchestrate", flag.ContinueOnError)
+	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
 	briefFile := fs.String("brief-file", "", "path to brief markdown file to issue and dispatch")

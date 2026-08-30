@@ -50,7 +50,7 @@ var (
 )
 
 func runCleanup(args []string) {
-	fs := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	dryRunFlag := fs.Bool("dry-run", true, "show resources that would be cleaned up without removing them")

@@ -13,7 +13,7 @@ import (
 )
 
 func runBriefIssue(args []string) {
-	fs := flag.NewFlagSet("brief-issue", flag.ContinueOnError)
+	fs := flag.NewFlagSet("brief-issue", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	title := fs.String("title", "", "brief title (required)")

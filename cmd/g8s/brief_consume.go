@@ -12,7 +12,7 @@ import (
 )
 
 func runBriefConsume(args []string) {
-	fs := flag.NewFlagSet("brief-consume", flag.ContinueOnError)
+	fs := flag.NewFlagSet("brief-consume", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	_ = jsonMode
