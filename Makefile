@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build test dogfood clean-branches
+.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree
 
 all: build
 
@@ -12,6 +12,12 @@ test:
 
 clean-branches:
 	@bash tools/clean_branches.sh
+
+clean-worktrees:
+	@bash tools/cleanup_worktrees.sh
+
+spawn-worktree:
+	@bash tools/spawn_worktree.sh $(BRANCH)
 
 dogfood:
 	@$(GO) build -o /tmp/g8s-dogfood ./cmd/g8s
@@ -25,5 +31,3 @@ dogfood:
 	G8S_DB=/tmp/g8s-dogfood.db /tmp/g8s-dogfood brief-consume --id "$$DISPATCH_ID"; \
 	/tmp/g8s-dogfood cleanup-worktrees --older-than 1h; \
 	rm -f /tmp/g8s-dogfood-payload.md /tmp/g8s-dogfood-dod.md /tmp/g8s-dogfood-brief.md /tmp/g8s-dogfood.db /tmp/g8s-dogfood.db-wal /tmp/g8s-dogfood.db-shm /tmp/g8s-dogfood
-
-
