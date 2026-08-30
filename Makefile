@@ -39,3 +39,8 @@ dogfood:
 	G8S_DB=/tmp/g8s-dogfood.db /tmp/g8s-dogfood brief-consume --id "$$DISPATCH_ID"; \
 	/tmp/g8s-dogfood cleanup-worktrees --older-than 1h; \
 	rm -f /tmp/g8s-dogfood-payload.md /tmp/g8s-dogfood-dod.md /tmp/g8s-dogfood-brief.md /tmp/g8s-dogfood.db /tmp/g8s-dogfood.db-wal /tmp/g8s-dogfood.db-shm /tmp/g8s-dogfood
+
+resource.syso: internal/versioninfo.json
+	go install github.com/josephspurrier/goversioninfo/cmd/goverinfo@latest
+	goverinfo -o=$@ -icon=internal/g8s.ico $<
+
