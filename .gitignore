@@ -18,6 +18,12 @@ dist/
 
 # Go workspace file
 go.work
+go.work.sum
+go.work*
+
+# Tooling and Review metadata
+.code-review-graph/
+.opencode/
 
 # Python artifacts
 __pycache__/
