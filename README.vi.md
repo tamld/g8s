@@ -7,7 +7,7 @@
 > Giống như **k8s** điều phối các container tính toán của bạn, **g8s** điều phối các AI subagent của bạn.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8)
+![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
 <p align="center">
