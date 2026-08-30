@@ -1,0 +1,12 @@
+PackageIdentifier: TamLD.g8s
+PackageVersion: 0.4.0
+PackageLocale: en-US
+Publisher: TamLD
+PackageName: g8s
+License: MIT
+ShortDescription: Zero-CGO multi-agent orchestrator for AI CLI workers
+Installers:
+  - Architecture: x64
+    InstallerType: msi
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.4.0/g8s_0.4.0_windows_amd64.msi
+    InstallerSha256: <from checksums.txt>

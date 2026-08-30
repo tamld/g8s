@@ -70,6 +70,7 @@ nfpms:
     maintainer: TamLD <tamld@users.noreply.github.com>
     description: Zero-CGO pure-Go harness orchestrating AI subagents
     license: MIT
+    file_name_template: "{{ .ConventionalFileName }}"
     formats:
       - deb
       - rpm
