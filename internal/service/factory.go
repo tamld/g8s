@@ -24,6 +24,8 @@ func NewPlatformServiceManager(cfg Config, guard LifecycleGuard, runner Runner) 
 		return mgr, nil
 	case "linux":
 		return NewSystemdManager(cfg, guard, runner)
+	case "windows":
+		return NewWindowsServiceManager(cfg, guard, runner)
 	default:
 		return nil, fmt.Errorf("unsupported platform for background daemon: %s", platform)
 	}

@@ -42,6 +42,12 @@ jobs:
           .\g8s.exe cleanup --dry-run
           .\g8s.exe config get data_dir
 
+          # Service management execution
+          .\g8s.exe service status --json
+          .\g8s.exe service install
+          .\g8s.exe service status --json
+          .\g8s.exe service uninstall
+
       - name: Upload Logs on Failure
         if: failure()
         uses: actions/upload-artifact@v4

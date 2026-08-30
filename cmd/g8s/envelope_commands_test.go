@@ -384,7 +384,7 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 
 	t.Run("service status envelope", func(t *testing.T) {
 		srvEnv, srvCode, _ := runCmd("service", "status", "--json")
-		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" || runtime.GOOS == "windows" {
 			if srvCode != 0 {
 				t.Fatalf("service status exit code = %d, want 0", srvCode)
 			}
