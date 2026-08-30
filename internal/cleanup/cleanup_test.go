@@ -49,9 +49,7 @@ func (m *MockProcessManager) KillProcess(pid int, sig syscall.Signal) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.killedWith[pid] = append(m.killedWith[pid], sig)
-	if sig == syscall.SIGKILL {
-		m.aliveStatus[pid] = false
-	}
+	m.aliveStatus[pid] = false
 	return nil
 }
 
@@ -757,19 +755,20 @@ func TestFindGhostProcesses_HeartbeatPIDMapping(t *testing.T) {
 	// Processes reported by ProcessLister:
 	// 5001: agy (active heartbeat file by PID -> not a ghost)
 	// 5002: agy.exe (stale heartbeat file by PID -> ghost with HasHeartbeat=true)
-	// 5003: agy (NO heartbeat file -> ghost with HasHeartbeat=false)
+	// 5003: agy in project dir (NO heartbeat file -> ghost with HasHeartbeat=false)
 	// 5004: other-editor (not agy/claude -> ignored)
 	lister := &mockCleanupProcessLister{
 		processes: []process.ProcessInfo{
-			{PID: 5001, Binary: "agy", CommandLine: "agy worker --task=1"},
-			{PID: 5002, Binary: "agy.exe", CommandLine: "agy.exe worker --task=2"},
-			{PID: 5003, Binary: "agy", CommandLine: "agy worker --task=3"},
-			{PID: 5004, Binary: "vim", CommandLine: "vim file.txt"},
+			{PID: 5001, Binary: "agy", CommandLine: "agy worker --task=1", CWD: tempDir},
+			{PID: 5002, Binary: "agy.exe", CommandLine: "agy.exe worker --task=2", CWD: tempDir},
+			{PID: 5003, Binary: "agy", CommandLine: "agy worker --task=3", CWD: tempDir},
+			{PID: 5004, Binary: "vim", CommandLine: "vim file.txt", CWD: tempDir},
 		},
 	}
 
 	pm := &DefaultProcessManager{
-		Lister: lister,
+		RepoDir: tempDir,
+		Lister:  lister,
 	}
 
 	ghosts, err := pm.FindGhostProcesses(context.Background(), tempDir, 5*time.Minute, clock)
@@ -803,5 +802,166 @@ func TestFindGhostProcesses_HeartbeatPIDMapping(t *testing.T) {
 		t.Errorf("expected PID 5003 in ghosts")
 	} else if g3.HasHeartbeat {
 		t.Errorf("expected PID 5003 to have HasHeartbeat=false")
+	}
+}
+
+func TestFindGhostProcesses_ForeignProcessIgnored(t *testing.T) {
+	tempDir := t.TempDir()
+	otherDir := filepath.Join(tempDir, "other-project")
+	projectDir := filepath.Join(tempDir, "g8s-project")
+	_ = os.MkdirAll(otherDir, 0o755)
+	_ = os.MkdirAll(projectDir, 0o755)
+
+	lister := &mockCleanupProcessLister{
+		processes: []process.ProcessInfo{
+			{PID: 6001, Binary: "agy", CommandLine: "agy -p test", CWD: otherDir},
+			{PID: 6002, Binary: "claude", CommandLine: "claude --project other", CWD: otherDir},
+		},
+	}
+
+	pm := &DefaultProcessManager{
+		RepoDir: projectDir,
+		Lister:  lister,
+	}
+
+	ghosts, err := pm.FindGhostProcesses(context.Background(), filepath.Join(projectDir, ".heartbeat"), 5*time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("FindGhostProcesses failed: %v", err)
+	}
+
+	if len(ghosts) != 0 {
+		t.Fatalf("expected 0 ghosts for foreign processes in other-project, got %d: %+v", len(ghosts), ghosts)
+	}
+}
+
+func TestFindGhostProcesses_AddDirFlagRecognized(t *testing.T) {
+	tempDir := t.TempDir()
+	otherDir := filepath.Join(tempDir, "other-project")
+	projectDir := filepath.Join(tempDir, "g8s-project")
+	_ = os.MkdirAll(otherDir, 0o755)
+	_ = os.MkdirAll(projectDir, 0o755)
+
+	lister := &mockCleanupProcessLister{
+		processes: []process.ProcessInfo{
+			{
+				PID:         7001,
+				Binary:      "agy",
+				CommandLine: fmt.Sprintf("agy worker --add-dir %s", projectDir),
+				CWD:         otherDir,
+			},
+		},
+	}
+
+	pm := &DefaultProcessManager{
+		RepoDir: projectDir,
+		Lister:  lister,
+	}
+
+	ghosts, err := pm.FindGhostProcesses(context.Background(), filepath.Join(projectDir, ".heartbeat"), 5*time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("FindGhostProcesses failed: %v", err)
+	}
+
+	if len(ghosts) != 1 {
+		t.Fatalf("expected 1 ghost recognized via --add-dir, got %d", len(ghosts))
+	}
+	if ghosts[0].PID != 7001 {
+		t.Errorf("expected PID 7001, got %d", ghosts[0].PID)
+	}
+}
+
+func TestFindGhostProcesses_ClaudeWithoutHeartbeatIgnored(t *testing.T) {
+	tempDir := t.TempDir()
+
+	lister := &mockCleanupProcessLister{
+		processes: []process.ProcessInfo{
+			{PID: 8001, Binary: "claude", CommandLine: "claude code", CWD: tempDir},
+		},
+	}
+
+	pm := &DefaultProcessManager{
+		RepoDir: tempDir,
+		Lister:  lister,
+	}
+
+	// Even if CWD matches project dir, claude without matching heartbeat must never be touched
+	ghosts, err := pm.FindGhostProcesses(context.Background(), filepath.Join(tempDir, ".heartbeat"), 5*time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("FindGhostProcesses failed: %v", err)
+	}
+
+	if len(ghosts) != 0 {
+		t.Fatalf("expected 0 ghosts for claude without heartbeat, got %d", len(ghosts))
+	}
+}
+
+func TestGhostProcessCleanup_AuditLogAppended(t *testing.T) {
+	tempDir := t.TempDir()
+	auditLog := filepath.Join(tempDir, ".cleanup-audit.jsonl")
+
+	now := time.Date(2026, 8, 30, 8, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	ghosts := []ProcessInfo{
+		{
+			PID:          9001,
+			ParentPID:    5678,
+			Binary:       "agy",
+			CommandLine:  "agy worker --task=1",
+			CWD:          tempDir,
+			Reason:       "no live heartbeat file in project repo",
+			HasHeartbeat: false,
+		},
+	}
+
+	procMgr := NewMockProcessManager(ghosts)
+	cfg := CleanupConfig{
+		RepoDir:        tempDir,
+		Targets:        []string{TargetGhostProcess},
+		DryRun:         false,
+		ForceForeign:   true,
+		AuditLogPath:   auditLog,
+		GracePeriod:    50 * time.Millisecond,
+		Clock:          clock,
+		ProcessManager: procMgr,
+	}
+
+	report, err := RunCleanupSweep(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(report.Items) != 1 || report.Items[0].Action != "killed" {
+		t.Fatalf("expected 1 killed item, got %+v", report.Items)
+	}
+
+	// Verify audit log content
+	data, err := os.ReadFile(auditLog)
+	if err != nil {
+		t.Fatalf("failed to read audit log: %v", err)
+	}
+
+	var entry CleanupAuditEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("failed to parse audit log JSON: %v (%s)", err, string(data))
+	}
+
+	if entry.PID != 9001 {
+		t.Errorf("expected PID 9001, got %d", entry.PID)
+	}
+	if entry.Binary != "agy" {
+		t.Errorf("expected Binary agy, got %s", entry.Binary)
+	}
+	if entry.CWD != tempDir {
+		t.Errorf("expected CWD %s, got %s", tempDir, entry.CWD)
+	}
+	if entry.ParentPID != 5678 {
+		t.Errorf("expected ParentPID 5678, got %d", entry.ParentPID)
+	}
+	if entry.Signal != "SIGTERM" {
+		t.Errorf("expected Signal SIGTERM, got %s", entry.Signal)
+	}
+	if entry.OperatorPID != os.Getpid() {
+		t.Errorf("expected OperatorPID %d, got %d", os.Getpid(), entry.OperatorPID)
 	}
 }

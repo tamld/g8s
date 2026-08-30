@@ -64,8 +64,10 @@ type FullCleanupReport struct {
 // ProcessInfo represents a running process evaluated by the ghost process detector.
 type ProcessInfo struct {
 	PID          int       `json:"pid"`
+	ParentPID    int       `json:"parent_pid,omitempty"`
 	Binary       string    `json:"binary"`
 	CommandLine  string    `json:"command_line"`
+	CWD          string    `json:"cwd,omitempty"`
 	StartedAt    time.Time `json:"started_at,omitempty"`
 	LastUpdate   time.Time `json:"last_update,omitempty"`
 	Reason       string    `json:"reason"`
@@ -114,7 +116,8 @@ type CleanupGitRunner interface {
 
 // DefaultProcessManager is the production implementation of ProcessManager using OS primitives and ProcessLister.
 type DefaultProcessManager struct {
-	Lister process.ProcessLister
+	RepoDir string
+	Lister  process.ProcessLister
 }
 
 func (d *DefaultProcessManager) getLister() process.ProcessLister {
@@ -124,7 +127,101 @@ func (d *DefaultProcessManager) getLister() process.ProcessLister {
 	return process.NewLister()
 }
 
-// FindGhostProcesses inspects host processes matching agy or claude and cross-references heartbeats.
+// isPathUnderRepo checks whether target path is equal to or inside repoDir.
+func isPathUnderRepo(target, repoDir string) bool {
+	if target == "" || repoDir == "" {
+		return false
+	}
+
+	cleanTarget := filepath.Clean(target)
+	cleanRepo := filepath.Clean(repoDir)
+
+	absTarget, err1 := filepath.Abs(cleanTarget)
+	absRepo, err2 := filepath.Abs(cleanRepo)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	if isSubpath(absTarget, absRepo) {
+		return true
+	}
+
+	// Try symlink evaluation for macOS /var -> /private/var
+	evalTarget, errT := filepath.EvalSymlinks(absTarget)
+	evalRepo, errR := filepath.EvalSymlinks(absRepo)
+	if errT == nil && errR == nil {
+		if isSubpath(evalTarget, evalRepo) {
+			return true
+		}
+	} else if errT == nil {
+		if isSubpath(evalTarget, absRepo) {
+			return true
+		}
+	} else if errR == nil {
+		if isSubpath(absTarget, evalRepo) {
+			return true
+		}
+	}
+
+	// Check /private prefix normalization
+	trimTarget := strings.TrimPrefix(absTarget, "/private")
+	trimRepo := strings.TrimPrefix(absRepo, "/private")
+	return isSubpath(trimTarget, trimRepo)
+}
+
+func isSubpath(target, base string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+}
+
+// cmdlineReferencesRepo checks if the command line contains --add-dir or explicit path pointing to repoDir.
+func cmdlineReferencesRepo(cmdLine, repoDir string) bool {
+	if cmdLine == "" || repoDir == "" {
+		return false
+	}
+
+	absRepo, err := filepath.Abs(repoDir)
+	if err != nil {
+		absRepo = repoDir
+	}
+
+	// 1. Exact or subpath match of absRepo in cmdLine
+	if strings.Contains(cmdLine, absRepo) {
+		return true
+	}
+	evalRepo, err := filepath.EvalSymlinks(absRepo)
+	if err == nil && evalRepo != absRepo && strings.Contains(cmdLine, evalRepo) {
+		return true
+	}
+	trimRepo := strings.TrimPrefix(absRepo, "/private")
+	if trimRepo != absRepo && strings.Contains(cmdLine, trimRepo) {
+		return true
+	}
+
+	// 2. Parse --add-dir arguments: e.g. --add-dir <path> or --add-dir=<path>
+	fields := strings.Fields(cmdLine)
+	for i, f := range fields {
+		var dirArg string
+		if strings.HasPrefix(f, "--add-dir=") {
+			dirArg = strings.TrimPrefix(f, "--add-dir=")
+		} else if f == "--add-dir" && i+1 < len(fields) {
+			dirArg = fields[i+1]
+		}
+		if dirArg != "" {
+			dirArg = strings.Trim(dirArg, `"'`)
+			if isPathUnderRepo(dirArg, repoDir) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// FindGhostProcesses inspects host processes matching agy or claude and cross-references heartbeats within the project scope.
 func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbeatDir string, maxAge time.Duration, clock func() time.Time) ([]ProcessInfo, error) {
 	if clock == nil {
 		clock = time.Now
@@ -136,6 +233,15 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
 
+	repoDir := d.RepoDir
+	if repoDir == "" {
+		if heartbeatDir != "" && heartbeatDir != ".heartbeat" {
+			repoDir = filepath.Dir(heartbeatDir)
+		} else {
+			repoDir = "."
+		}
+	}
+
 	var ghosts []ProcessInfo
 	selfPID := os.Getpid()
 	parentPID := os.Getppid()
@@ -145,6 +251,7 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 
 	for _, p := range procs {
 		pid := p.PID
+		ppid := p.PPID
 		if pid <= 0 || pid == selfPID || pid == parentPID {
 			continue
 		}
@@ -165,15 +272,45 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		}
 
 		// Cross-reference with heartbeat by PID
-		hb, found := heartbeats[pid]
+		hb, hasHeartbeat := heartbeats[pid]
 		now := clock()
 
-		if !found {
+		// Skip-by-name (mandatory): NEVER touch claude unless its session_id is in heartbeat store of this repo
+		if isClaude && !hasHeartbeat {
+			continue
+		}
+
+		// Resolve CWD
+		cwd := p.CWD
+		if cwd == "" {
+			cwd = l.ResolveCWD(pid)
+		}
+		if cwd == "" {
+			cwd = resolveProcessCWD(pid)
+		}
+
+		// Project association checks:
+		cwdInProject := cwd != "" && isPathUnderRepo(cwd, repoDir)
+		cmdInProject := cmdlineReferencesRepo(cmdLine, repoDir)
+
+		// Candidate ghost qualification:
+		// A process is associated with this project if:
+		// 1. It has a heartbeat in this repo's heartbeatDir, OR
+		// 2. Its CWD is inside the project repo, OR
+		// 3. Its command line references the project repo (e.g. --add-dir)
+		if !hasHeartbeat && !cwdInProject && !cmdInProject {
+			// Foreign process completely unrelated to this project repo -> skip
+			continue
+		}
+
+		if !hasHeartbeat {
 			ghosts = append(ghosts, ProcessInfo{
 				PID:          pid,
+				ParentPID:    ppid,
 				Binary:       binName,
 				CommandLine:  cmdLine,
-				Reason:       "no live heartbeat file",
+				CWD:          cwd,
+				Reason:       "no live heartbeat file in project repo",
 				HasHeartbeat: false,
 			})
 			continue
@@ -183,8 +320,10 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		if parseErr != nil {
 			ghosts = append(ghosts, ProcessInfo{
 				PID:          pid,
+				ParentPID:    ppid,
 				Binary:       binName,
 				CommandLine:  cmdLine,
+				CWD:          cwd,
 				Reason:       "invalid heartbeat timestamp",
 				HasHeartbeat: true,
 			})
@@ -194,8 +333,10 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		if now.Sub(lastUpdate) > maxAge {
 			ghosts = append(ghosts, ProcessInfo{
 				PID:          pid,
+				ParentPID:    ppid,
 				Binary:       binName,
 				CommandLine:  cmdLine,
+				CWD:          cwd,
 				LastUpdate:   lastUpdate,
 				Reason:       fmt.Sprintf("heartbeat stale (last update %s ago > %s)", now.Sub(lastUpdate).Round(time.Second), maxAge),
 				HasHeartbeat: true,
@@ -440,6 +581,45 @@ func (g *DefaultCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag st
 	return nil
 }
 
+// CleanupAuditEntry defines the schema for .cleanup-audit.jsonl records.
+type CleanupAuditEntry struct {
+	Timestamp   string `json:"ts"`
+	PID         int    `json:"pid"`
+	Binary      string `json:"binary"`
+	CommandLine string `json:"cmdline"`
+	CWD         string `json:"cwd"`
+	ParentPID   int    `json:"parent_pid"`
+	Reason      string `json:"reason"`
+	OperatorPID int    `json:"operator_pid"`
+	Signal      string `json:"signal"`
+	ExitCode    int    `json:"exit_code"`
+}
+
+func appendAuditLog(logPath string, entry CleanupAuditEntry) error {
+	if logPath == "" {
+		return nil
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(logPath)
+	if dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0o755)
+	}
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.Write(data)
+	return err
+}
+
 // CleanupConfig holds parameters and dependencies for executing a full cleanup sweep.
 type CleanupConfig struct {
 	RepoDir         string
@@ -448,7 +628,9 @@ type CleanupConfig struct {
 	WorktreeBaseDir string
 	Targets         []string
 	DryRun          bool
-	ForceMissing    bool
+	ForceForeign    bool
+	ForceMissing    bool // Alias for ForceForeign for backwards compatibility
+	AuditLogPath    string
 	GracePeriod     time.Duration
 	Clock           func() time.Time
 	GitRunner       CleanupGitRunner
@@ -576,9 +758,25 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 
 // 1. Ghost processes sweep
 func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	if dpm, ok := cfg.ProcessManager.(*DefaultProcessManager); ok {
+		if dpm.RepoDir == "" {
+			dpm.RepoDir = cfg.RepoDir
+		}
+	}
+
 	ghosts, err := cfg.ProcessManager.FindGhostProcesses(ctx, cfg.HeartbeatDir, 5*time.Minute, cfg.Clock)
 	if err != nil {
 		return nil, err
+	}
+
+	forceForeign := cfg.ForceForeign || cfg.ForceMissing
+
+	auditLogPath := cfg.AuditLogPath
+	if auditLogPath == "" {
+		auditLogPath = ".cleanup-audit.jsonl"
+	}
+	if !filepath.IsAbs(auditLogPath) && cfg.RepoDir != "" {
+		auditLogPath = filepath.Join(cfg.RepoDir, auditLogPath)
 	}
 
 	var items []CleanupItem
@@ -596,18 +794,27 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 			continue
 		}
 
-		// Safety rule: If process has no heartbeat file and ForceMissing is false, report and skip (never kill)
-		if !proc.HasHeartbeat && !cfg.ForceMissing {
+		// Safety rule: If process has no heartbeat file and ForceForeign is false, report and skip (never kill)
+		if !proc.HasHeartbeat && !forceForeign {
 			items = append(items, CleanupItem{
 				Target: TargetGhostProcess,
 				ID:     idStr,
-				Detail: fmt.Sprintf("%s (no heartbeat file, requires --force-missing to kill): %s", proc.Binary, proc.CommandLine),
+				Detail: fmt.Sprintf("%s (no heartbeat in project repo, requires --force-foreign to kill): %s", proc.Binary, proc.CommandLine),
 				Action: "skipped",
 			})
 			continue
 		}
 
+		// Warning when killing a foreign / no-heartbeat process
+		if !proc.HasHeartbeat && forceForeign {
+			if cfg.Writer != nil {
+				fmt.Fprintf(cfg.Writer, "[WARN] Terminating process PID %d (%s) without heartbeat in project repo (CWD: %s, Parent PID: %d)\n",
+					proc.PID, proc.Binary, proc.CWD, proc.ParentPID)
+			}
+		}
+
 		// Force mode: SIGTERM, grace period, then SIGKILL
+		sigSent := "SIGTERM"
 		_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGTERM)
 
 		// Wait up to grace period for process to exit
@@ -622,8 +829,28 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 		}
 
 		if !killed && cfg.ProcessManager.IsProcessAlive(proc.PID) {
+			sigSent = "SIGKILL"
 			_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGKILL)
 		}
+
+		// Append to audit log
+		now := time.Now().UTC()
+		if cfg.Clock != nil {
+			now = cfg.Clock().UTC()
+		}
+		auditEntry := CleanupAuditEntry{
+			Timestamp:   now.Format(time.RFC3339),
+			PID:         proc.PID,
+			Binary:      proc.Binary,
+			CommandLine: proc.CommandLine,
+			CWD:         proc.CWD,
+			ParentPID:   proc.ParentPID,
+			Reason:      proc.Reason,
+			OperatorPID: os.Getpid(),
+			Signal:      sigSent,
+			ExitCode:    0,
+		}
+		_ = appendAuditLog(auditLogPath, auditEntry)
 
 		items = append(items, CleanupItem{
 			Target: TargetGhostProcess,

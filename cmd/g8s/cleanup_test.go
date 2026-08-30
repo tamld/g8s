@@ -50,9 +50,7 @@ func (m *MockProcessManager) KillProcess(pid int, sig syscall.Signal) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.killedWith[pid] = append(m.killedWith[pid], sig)
-	if sig == syscall.SIGKILL {
-		m.aliveStatus[pid] = false
-	}
+	m.aliveStatus[pid] = false
 	return nil
 }
 

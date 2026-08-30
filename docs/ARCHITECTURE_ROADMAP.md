@@ -141,6 +141,7 @@ All past, current, and future contributions must satisfy the **8 Invariant Rules
 6. **Self-Describing Executable (SSoT)**: The binary itself is the documentation. All capabilities, flags, schemas, and remediation hints are discoverable via CLI flags (`--help`, `--json`).
 7. **Quality & AI Anti-Pattern Gate**: All code must pass `go test -race ./...`, cross-platform build validation (Linux/Darwin/Windows), `staticcheck`, `gosec`, `errcheck`, `gofumpt`, and `tools/ai_lint.sh` (zero panics, zero unhandled errors, zero unassigned TODOs).
 8. **100% Language Purity**: Code, comments, docs, and git commit messages must be written in professional English with zero non-ASCII diacritics.
+9. **Cross-Project Kill Safety**: Lifecycle cleanup (`g8s cleanup --target ghost-process`) MUST be strictly scoped to the active project repository. Processes with CWD outside the repository, lacking `--add-dir` pointing inside, or without a matching PID heartbeat file under `<repo>/.heartbeat/` are NEVER targeted without explicit `--force-foreign` confirmation, and all kills are logged to `.cleanup-audit.jsonl`.
 
 ---
 
