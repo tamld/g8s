@@ -193,3 +193,45 @@ func TestAttentionerHookName(t *testing.T) {
 		t.Errorf("expected hook name attentioner, got %s", hook.Name())
 	}
 }
+
+func TestNewAttentionerHookWithStore(t *testing.T) {
+	tempDir := t.TempDir()
+	store := heartbeat.NewStore(tempDir, time.Now)
+	hook := NewAttentionerHookWithStore(store)
+
+	ctx := context.Background()
+	task := TaskSpec{
+		TaskID:    "task-store",
+		SessionID: "sess-store",
+		Prompt:    "Original prompt",
+	}
+
+	res, err := hook.PreSpawn(ctx, task)
+	if err != nil {
+		t.Fatalf("PreSpawn failed: %v", err)
+	}
+	if !strings.Contains(res.Prompt, "Before you start, take 30 seconds to answer:") {
+		t.Errorf("expected PreSpawn prompt to contain reflection prefix")
+	}
+
+	receipt := Receipt{OK: true}
+	if err := hook.PostWait(ctx, res, receipt); err != nil {
+		t.Fatalf("PostWait failed: %v", err)
+	}
+
+	// Poll store for recorded event
+	var hb *heartbeat.Heartbeat
+	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		hb, err = store.Status("sess-store")
+		if err == nil && hb != nil {
+			break
+		}
+	}
+	if hb == nil {
+		t.Fatalf("expected recorded heartbeat in store, got nil")
+	}
+	if hb.Metadata["event_kind"] != "self_review_required" {
+		t.Errorf("expected event_kind self_review_required, got %v", hb.Metadata["event_kind"])
+	}
+}

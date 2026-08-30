@@ -282,4 +282,10 @@ func TestRunAttentionCheck(t *testing.T) {
 	if !strings.Contains(rep2.Questions[3].Answer, "sess-attn-1") {
 		t.Errorf("expected heartbeat answer to mention sess-attn-1, got %q", rep2.Questions[3].Answer)
 	}
+
+	// 3. Run with default actor ("default" or empty)
+	rep3 := doc.RunAttentionCheck(ctx, "default", hbDir)
+	if !strings.Contains(rep3.Questions[2].Answer, "recommend setting --actor") {
+		t.Errorf("expected recommendation for default actor, got %q", rep3.Questions[2].Answer)
+	}
 }
