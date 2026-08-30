@@ -700,9 +700,7 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 	if cfg.WorktreeBaseDir != "" {
 		candidateDirs = append(candidateDirs, cfg.WorktreeBaseDir)
 	} else {
-		tmp := os.TempDir()
-		candidateDirs = append(candidateDirs, filepath.Join(tmp, "g8s-worktrees"))
-		candidateDirs = append(candidateDirs, "/tmp/g8s-worktrees")
+		candidateDirs = append(candidateDirs, filepath.Join(os.TempDir(), "g8s-worktrees"))
 	}
 
 	var items []CleanupItem

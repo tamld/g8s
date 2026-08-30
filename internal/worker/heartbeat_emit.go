@@ -4,11 +4,7 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -170,33 +166,4 @@ func StartHeartbeat(sessionID string, opts EmitterOptions) func() {
 	}
 
 	return stop
-}
-
-// defaultCPUUsageChecker inspects process CPU utilization percentage via ps command.
-func defaultCPUUsageChecker(pid int) (float64, error) {
-	if pid <= 0 {
-		return 0, fmt.Errorf("invalid pid: %d", pid)
-	}
-
-	if runtime.GOOS == "windows" {
-		return 0, nil
-	}
-
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "%cpu=")
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, fmt.Errorf("ps %%cpu for pid %d: %w", pid, err)
-	}
-
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return 0, fmt.Errorf("empty %%cpu output for pid %d", pid)
-	}
-
-	val, err := strconv.ParseFloat(trimmed, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse %%cpu output %q: %w", trimmed, err)
-	}
-
-	return val, nil
 }

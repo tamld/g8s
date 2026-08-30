@@ -31,7 +31,7 @@ The following table defines the non-negotiable architectural boundaries, runtime
 | **Memory & Indexing** | SQLite FTS5 + BM25 | Pure Go FTS Tokenizer | Decoupled knowledge vault indexing code symbols, identifiers, CamelCase, and snake_case tokens. |
 | **Process Containment** | OS Process Groups (`Setpgid`) | POSIX / Win32 JobObjects | Guarantees clean subtree process termination (`SIGTERM` / `SIGKILL` to `-pgid`) without orphan processes. |
 | **Packaging & Release** | GoReleaser & NFPM | GoReleaser `v2.10+` | Static single-binary builds for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, and `windows/amd64`. |
-| **Quality Gates** | Go Test, Staticcheck, Gosec, AI Lint | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), memory optimization (`gofumpt`), and zero AI anti-patterns. |
+| **Quality Gates** | Go Test, Staticcheck, Gosec, AI Lint, Cross-Platform Build | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), memory optimization (`gofumpt`), cross-platform compilation (Linux, Darwin, Windows), and zero AI anti-patterns. |
 
 ---
 
@@ -78,7 +78,7 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 | **1** | **Core Lifecycle, Evidence Lake & Knowledge Vault** | DELTA-07 (Blast Radius)<br>DELTA-08 (Dispatch)<br>DELTA-09 (Supervisor)<br>DELTA-10 (Two-Class Providers)<br>DELTA-11 (Knowledge Vault)<br>DELTA-12 (Lineage CTE) | #58, #59, #67, #68, #69, #72, #73, #74, #75 | #53, #60, #61, #62, #63, #64, #65, #66, #70, #71 | **Done** |
 | **2** | **Resilience, Hardening & DX/AX** | DELTA-13 (DX/AX Wizard & Auto-repair)<br>DELTA-14 (Core Hardening) | #77, #78, #79, #80 | #76, #81, #89, #98, #99, #102 | **Done** |
 | **3** | **Orchestrator FSM, Lego Blocks & Quality Gates** | DELTA-15 (FSM Lifecycle)<br>DELTA-17 (Receipt Lake Wiring)<br>DELTA-18 (AIC Orchestration)<br>DELTA-19 (Lego Mounts)<br>Concern A/B/C Fix Loop | #82, #83, #84, #85, #86, #87, #91, #92, #93, #94, #95, #96, #97, #107, #112, #113, #114 | #100, #101, #103, #104, #105, #106, #108, #109, #110, #111, #115, #117 | **Done** |
-| **4** | **Lifecycle Hygiene, Heartbeats & Worktree Tooling** | DEBT-28 (Lifecycle Cleanup)<br>DEBT-29 (Worker Heartbeats)<br>DEBT-30 (Unified JSON Envelope)<br>DEBT-32 (Auto-cleanup Hook)<br>DEBT-36 (Process Lister & Kill)<br>DEBT-37 (Worktree Helpers) | #118, #119, #120, #124, #130, #138 | #121, #122, #128, #129, #131, #132, #133, #134, #135, #136, #139 | **Done** |
+| **4** | **Lifecycle Hygiene, Heartbeats & Worktree Tooling** | DEBT-28 (Lifecycle Cleanup)<br>DEBT-29 (Worker Heartbeats)<br>DEBT-30 (Unified JSON Envelope)<br>DEBT-32 (Auto-cleanup Hook)<br>DEBT-36 (Process Lister & Kill)<br>DEBT-37 (Worktree Helpers)<br>DEBT-38 (Cross-Platform Audit) | #118, #119, #120, #124, #130, #138, #141 | #121, #122, #128, #129, #131, #132, #133, #134, #135, #136, #139, #140 | **Done** |
 | **5** | **Active Roadmap & Next Initiatives** | DEBT-31 (Pure FSM Validator)<br>DEBT-33 (Architecture Roadmap)<br>DEBT-34 (Layer-Ownership Gate)<br>DEBT-35 (Adaptive Polling & Escalation) | #123, #125, #126, #127 | Active Sprint | **In Progress** |
 
 ### Complete PR Mapping Index
@@ -124,6 +124,8 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 * **PR #135**: Bulk cleanup of orphan `agy-sup-*` git branches.
 * **PR #136**: Bulk cleanup of orphan `feat/*` git branches.
 * **PR #139**: Git worktree helper tools (`spawn_worktree.sh`, `drop_worktree.sh`, `cleanup_worktrees.sh`) and Makefile targets (DEBT-37).
+* **PR #140**: Living architecture roadmap and single source of truth matrix (DEBT-33).
+* **DEBT-38 / Issue #141**: Cross-platform CPU sampling and worktree temp dir fixes with cross-platform CI gate (`verify-cross-platform`).
 
 ---
 
@@ -137,7 +139,7 @@ All past, current, and future contributions must satisfy the **8 Invariant Rules
 4. **Deterministic Clocks**: Any component handling time (leases, TTLs, heartbeats) must accept an injectable `clock func() time.Time` to ensure deterministic, zero-sleep unit tests.
 5. **Two-Tier Governance**: High-tier reasoning models hold exclusive authority over code commits and receipt issuance. Low-tier workers are bounded to read-only sandboxes by default.
 6. **Self-Describing Executable (SSoT)**: The binary itself is the documentation. All capabilities, flags, schemas, and remediation hints are discoverable via CLI flags (`--help`, `--json`).
-7. **Quality & AI Anti-Pattern Gate**: All code must pass `go test -race ./...`, `staticcheck`, `gosec`, `errcheck`, `gofumpt`, and `tools/ai_lint.sh` (zero panics, zero unhandled errors, zero unassigned TODOs).
+7. **Quality & AI Anti-Pattern Gate**: All code must pass `go test -race ./...`, cross-platform build validation (Linux/Darwin/Windows), `staticcheck`, `gosec`, `errcheck`, `gofumpt`, and `tools/ai_lint.sh` (zero panics, zero unhandled errors, zero unassigned TODOs).
 8. **100% Language Purity**: Code, comments, docs, and git commit messages must be written in professional English with zero non-ASCII diacritics.
 
 ---
