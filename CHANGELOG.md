@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Common flag parser helper (`--actor`, `--trace-id`, `--jsonl`, `--json`) added across all subcommands.
   - Single-line JSONL streaming mode (`--jsonl`) for streaming and log parsing pipelines.
   - Standardized error envelopes on stdout with Feynman hints (`code`, `message`, `hint`, `cause`), using exit code 1 for runtime errors and 2 for usage errors.
+- **Lifecycle Cleanup Subcommand** (`internal/cleanup`, `cmd/g8s`, Issue #121 / DEBT-28):
+  - Added `g8s cleanup` subcommand to sweep and terminate ghost processes, reap orphan git worktrees, and prune stale branches.
+  - Escalating termination with SIGTERM grace period before SIGKILL, `--dry-run` simulation mode, and interactive confirmation for missing heartbeats.
+- **Per-Session Heartbeat File & Worker Status** (`internal/worker`, `cmd/g8s`, Issue #122 / DEBT-29):
+  - Atomic per-session heartbeat emission to `.g8s/heartbeats/<session_id>.json` tracking PID, timestamps, CPU load, memory usage, and lease renewal.
+  - Added `g8s status --worker` CLI command to inspect active worker sessions and report stale or unmanaged leases.
+- **Automatic Resource Cleanup on Terminal State** (`internal/orchestrator`, Issue #124 / DEBT-32):
+  - Automatic cleanup hook triggered when an orchestrated workflow reaches a terminal state (`COMPLETED`, `FAILED`, `CANCELLED`).
+  - Automatically prunes transient git worktrees and releases locks upon task completion.
+- **Architecture Roadmap & SSoT Matrix** (`docs/ARCHITECTURE_ROADMAP.md`, Issue #125 / DEBT-33):
+  - Added comprehensive multi-phase architecture roadmap documenting OpenSpec deltas, milestone delivery matrices, and invariant rules.
+- **Cross-Platform Process Management** (`internal/process`, `internal/cleanup`, Issue #133, #134 / DEBT-36):
+  - Extracted cross-platform `ProcessLister` abstraction with native implementations for macOS (POSIX `ps`), Linux (`/proc`), and Windows (`tasklist`).
+  - Implemented heartbeat-to-PID cross-referencing and robust process lifecycle termination across operating systems.
 
 ## [0.1.0] - 2026-08-25
 
