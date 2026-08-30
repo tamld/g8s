@@ -30,25 +30,17 @@ func BuildWorkerArgv(opts WorkerArgvOptions) []string {
 	argv := []string{binary}
 
 	if opts.PromptFile != "" {
-		argv = append(argv, "--prompt-file", opts.PromptFile)
+		if content, err := os.ReadFile(opts.PromptFile); err == nil {
+			argv = append(argv, "--prompt", string(content))
+		} else if opts.Prompt != "" {
+			argv = append(argv, "--prompt", opts.Prompt)
+		}
 	} else if opts.Prompt != "" {
 		argv = append(argv, "--prompt", opts.Prompt)
 	}
 
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
-	}
-	if opts.Role != "" {
-		argv = append(argv, "--role", opts.Role)
-	}
-	if opts.Permission != "" {
-		argv = append(argv, "--permission", opts.Permission)
-	}
-	if opts.Timeout != "" {
-		argv = append(argv, "--timeout", opts.Timeout)
-	}
-	if opts.ResultPath != "" {
-		argv = append(argv, "--out", opts.ResultPath)
 	}
 
 	home := opts.Home
@@ -65,5 +57,9 @@ func BuildWorkerArgv(opts WorkerArgvOptions) []string {
 	if opts.SkipPermissions {
 		argv = append(argv, "--dangerously-skip-permissions")
 	}
+
+	argv = append(argv, "--output-format", "stream-json")
+	argv = append(argv, "--print-timeout", "30m")
+
 	return argv
 }
