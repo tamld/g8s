@@ -3,8 +3,11 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -248,5 +251,80 @@ func TestAgyHandleSynthesizeRejectsErrorEnvelope(t *testing.T) {
 	}
 	if r.ReturnCode == 0 {
 		t.Errorf("synthesize() ReturnCode = %v, want non-zero", r.ReturnCode)
+	}
+}
+
+func TestAgyHandleWritesReceiptToOutPath(t *testing.T) {
+	tempDir := t.TempDir()
+	outPath := filepath.Join(tempDir, "custom", "receipt.json")
+
+	cmd := exec.Command("true")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+
+	h := &agyHandle{
+		cmd:       cmd,
+		stdout:    &stdout,
+		stderr:    &stderr,
+		task:      Task{ID: "task-receipt-test", OutPath: outPath},
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+		mounts:    DefaultMountRegistry(),
+	}
+
+	receipt, err := h.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait() error: %v", err)
+	}
+	if !receipt.OK {
+		t.Errorf("receipt.OK = false, want true")
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("expected receipt file at %s, read error: %v", outPath, err)
+	}
+	var written Receipt
+	if err := json.Unmarshal(data, &written); err != nil {
+		t.Fatalf("unmarshal written receipt: %v", err)
+	}
+	if written.TaskID != "task-receipt-test" {
+		t.Errorf("written.TaskID = %q, want task-receipt-test", written.TaskID)
+	}
+}
+
+func TestAgyHandleWaitTimeout(t *testing.T) {
+	cmd := exec.Command("sleep", "10")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+
+	h := &agyHandle{
+		cmd:       cmd,
+		stdout:    &stdout,
+		stderr:    &stderr,
+		task:      Task{ID: "task-timeout-test"},
+		timeout:   50 * time.Millisecond,
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+		mounts:    DefaultMountRegistry(),
+	}
+
+	receipt, err := h.Wait(context.Background())
+	if !errors.Is(err, ErrWorkerTimeout) {
+		t.Errorf("Wait() err = %v, want %v", err, ErrWorkerTimeout)
+	}
+	if receipt.OK {
+		t.Errorf("receipt.OK = true, want false")
+	}
+	if receipt.HarnessCode != 124 {
+		t.Errorf("receipt.HarnessCode = %d, want 124", receipt.HarnessCode)
 	}
 }

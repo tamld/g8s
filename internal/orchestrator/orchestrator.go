@@ -56,6 +56,7 @@ type Task struct {
 	AllowedFiles []string
 	ReceiptID    string
 	Iter         int
+	OutPath      string
 }
 
 // Worktree is the per-worker isolated git checkout.
