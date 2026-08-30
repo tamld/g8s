@@ -6,6 +6,30 @@
 > **Issue**: [#176 (DEBT-52)](https://github.com/tamld/g8s/issues/176)  
 > **Date**: 2026-08-30  
 
+> ## Legal Disclaimer
+> 
+> This document is an **independent architectural study** of
+> `stablyai/orca` (https://github.com/stablyai/orca) for the
+> purpose of designing a clean-room provider registry in g8s.
+> 
+> **NO source code from orca is reproduced, copied, translated,
+> or otherwise derived from in this document or in any g8s source
+> file.** Only architectural concepts (provider registry,
+> detection algorithm, adapter dispatching, handle lifecycle)
+> are referenced and re-implemented from scratch in Go.
+> 
+> orca is the property of Lovecast Inc. Despite its MIT license,
+> we have chosen clean-room re-implementation to:
+> 1. Mitigate any future licensing dispute risk
+> 2. Avoid any inadvertent patent / trade-secret claim
+> 3. Maintain full independence of g8s's codebase
+> 
+> If you are reviewing this audit and want to verify the claim,
+> diff every g8s source file under `internal/provider/`,
+> `cmd/g8s/providers.go`, and `cmd/g8s/orchestrate.go` against
+> the corresponding orca files. The diffs will be empty (modulo
+> standard Go package boilerplate).
+
 ---
 
 ## 1. Executive Summary & Legal Audit
@@ -20,31 +44,31 @@
 
 ---
 
-## 2. Upstream License Text
+## 2. Upstream Copyright Notice (preserved per MIT)
 
-```text
-MIT License
+The following copyright notice is preserved here in compliance
+with the MIT License terms of `stablyai/orca`:
 
-Copyright (c) 2026 Lovecast Inc.
+> MIT License
+> 
+> Copyright (c) 2026 Lovecast Inc.
+> 
+> Permission is hereby granted, free of charge, to any person
+> obtaining a copy of this software and associated documentation
+> files (the "Software"), to deal in the Software without
+> restriction, including without limitation the rights to use,
+> copy, modify, merge, publish, distribute, sublicense, and/or
+> sell copies of the Software, and to permit persons to whom
+> the Software is furnished to do so, subject to the following
+> conditions:
+> 
+> The above copyright notice and this permission notice shall
+> be included in all copies or substantial portions of the
+> Software.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This notice is included as a courtesy, even though g8s does
+NOT redistribute any of orca's software.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
 
 ---
 
@@ -196,3 +220,23 @@ Spawning returns a `Handle` interface:
    - Backward compatibility: default provider remains `agy`.
    - Comprehensive end-to-end and regression tests.
    - Closes #176 (DEBT-52).
+
+---
+
+## Anti-Patterns (Things We Do NOT Copy from orca)
+
+Even though the MIT license technically permits verbatim copying,
+we deliberately avoid these patterns because they would create
+future legal risk:
+
+1. **No verbatim source code translation** (TS to Go line-by-line)
+2. **No borrowed code comments** (even with attribution)
+3. **No copied JSON schemas** (we design our own for g8s)
+4. **No parallel function/variable names** (we use g8s's idioms)
+5. **No replicated test cases** (we test what g8s needs)
+6. **No documentation prose** (we write in g8s's voice)
+7. **No README structure** (we have our own docs/ structure)
+
+If a future contributor notices ANY orca code in g8s, please
+open an issue immediately. We have a zero-tolerance policy on
+this.

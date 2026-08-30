@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,11 +24,31 @@ type mockProvider struct {
 	spawnErr  error
 }
 
-func (m *mockProvider) Name() string                                      { return m.name }
-func (m *mockProvider) Binary() string                                    { return m.binary }
-func (m *mockProvider) Version(_ context.Context) (string, error)         { return m.version, nil }
-func (m *mockProvider) Available(_ context.Context) error                 { return m.available }
-func (m *mockProvider) Spawn(_ context.Context, _ Spec) (Handle, error) { return nil, m.spawnErr }
+func (m *mockProvider) Name() string                              { return m.name }
+func (m *mockProvider) Binary() string                            { return m.binary }
+func (m *mockProvider) Version(_ context.Context) (string, error) { return m.version, nil }
+func (m *mockProvider) Available(_ context.Context) error         { return m.available }
+func (m *mockProvider) Spawn(_ context.Context, _ Spec) (Handle, error) {
+	return nil, m.spawnErr
+}
+
+func writeMockBinary(t *testing.T, dir, name, versionText string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		mockBin := filepath.Join(dir, name+".bat")
+		script := "@echo off\r\nif \"%~1\"==\"--version\" (\r\n  echo " + versionText + "\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n"
+		if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
+			t.Fatalf("failed to write mock script: %v", err)
+		}
+		return mockBin
+	}
+	mockBin := filepath.Join(dir, name)
+	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"" + versionText + "\"; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write mock script: %v", err)
+	}
+	return mockBin
+}
 
 func TestRegistry_NewAndDefaultProviders(t *testing.T) {
 	reg := NewRegistry()
@@ -119,11 +140,7 @@ func TestRegistry_List(t *testing.T) {
 
 func TestAgyProvider_AvailableAndVersion(t *testing.T) {
 	tmpDir := t.TempDir()
-	mockBin := filepath.Join(tmpDir, "agy")
-	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"agy v0.7.0\"; exit 0; fi\nexit 1\n"
-	if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("failed to write mock script: %v", err)
-	}
+	mockBin := writeMockBinary(t, tmpDir, "agy", "agy v0.7.0")
 
 	t.Setenv("AGY_BIN", mockBin)
 	p := NewAgyProvider()
@@ -183,11 +200,7 @@ func TestCodexProvider_Stub(t *testing.T) {
 
 func TestClaudeProvider_AvailableAndVersion(t *testing.T) {
 	tmpDir := t.TempDir()
-	mockBin := filepath.Join(tmpDir, "claude")
-	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"claude 1.0.0\"; exit 0; fi\nexit 1\n"
-	if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
-		t.Fatalf("failed to write mock script: %v", err)
-	}
+	mockBin := writeMockBinary(t, tmpDir, "claude", "claude 1.0.0")
 
 	t.Setenv("CLAUDE_BIN", mockBin)
 	p := NewClaudeProvider()
