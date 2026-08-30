@@ -10,12 +10,12 @@ func TestGetAntiPatternCatalog(t *testing.T) {
 		t.Fatalf("expected non-nil anti-pattern catalog")
 	}
 
-	if cat.TotalRules != 10 {
-		t.Errorf("expected 10 total rules, got %d", cat.TotalRules)
+	if cat.TotalRules != 11 {
+		t.Errorf("expected 11 total rules, got %d", cat.TotalRules)
 	}
 
-	if len(cat.Rules) != 10 {
-		t.Errorf("expected len(cat.Rules) == 10, got %d", len(cat.Rules))
+	if len(cat.Rules) != 11 {
+		t.Errorf("expected len(cat.Rules) == 11, got %d", len(cat.Rules))
 	}
 
 	expectedIDs := []string{
@@ -29,6 +29,7 @@ func TestGetAntiPatternCatalog(t *testing.T) {
 		"supervisor_thinks",
 		"directive_brief",
 		"missing_dual_blind",
+		"no_local_path_leak",
 	}
 
 	foundIDs := make(map[string]bool)

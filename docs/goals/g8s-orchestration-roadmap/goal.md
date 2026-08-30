@@ -171,7 +171,7 @@ set `goal.status: blocked`, and set `active_task: null`.
 The PM owns board health:
 
 ```bash
-node /Users/tamld/.claude/skills/goal-prep/scripts/check-goal-state.mjs docs/goals/g8s-orchestration-roadmap
+node ~/.claude/skills/goal-prep/scripts/check-goal-state.mjs docs/goals/g8s-orchestration-roadmap
 ```
 
 ## Canonical Board

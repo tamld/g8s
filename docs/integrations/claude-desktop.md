@@ -25,14 +25,14 @@ Add `g8s` under the `mcpServers` section:
       "command": "g8s",
       "args": ["mcp"],
       "env": {
-        "G8S_DB": "/Users/YOUR_USERNAME/.local/state/g8s/g8s.db"
+        "G8S_DB": "$HOME/.local/state/g8s/g8s.db"
       }
     }
   }
 }
 ```
 
-> **Tip**: If `g8s` is installed in `~/.local/bin/g8s`, specify the full path: `"/Users/YOUR_USERNAME/.local/bin/g8s"`.
+> **Tip**: If `g8s` is installed in `~/.local/bin/g8s`, specify the full path: `"$HOME/.local/bin/g8s"`.
 
 ---
 

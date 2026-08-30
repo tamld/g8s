@@ -59,7 +59,13 @@ func AntiPatternExamples(raw any) {
 }
 EOF
 
-# 1b. Create test file in badpkg triggering TDD trap rules
+# 1b. Create leak fixture in badpkg triggering check_no_local_path_leak
+cat << 'EOF' > "$TMP_DIR/internal/badpkg/leak.md"
+# Local Path Leak Fixture
+Repo location: /Users/developer/Documents/github/g8s
+EOF
+
+# 1c. Create test file in badpkg triggering TDD trap rules
 cat << 'EOF' > "$TMP_DIR/internal/badpkg/bad_test.go"
 package badpkg
 
@@ -152,6 +158,7 @@ assert_check_triggered "check_todo_owner"
 assert_check_triggered "check_no_ai_artifacts"
 assert_check_triggered "test-pins-fabricated-symbol"
 assert_check_triggered "test-locks-impl-detail"
+assert_check_triggered "check_no_local_path_leak"
 
 echo "==> Test 2: Assert linter passes cleanly on compliant fixture..."
 clean_output=""
@@ -188,6 +195,34 @@ if [ "$test_exempt_exit" -ne 0 ]; then
     exit 1
 fi
 echo "  [PASS] Test file exemptions honored"
+
+echo "==> Test 4: Assert check_no_local_path_leak catches brief/PR path leaks in markdown & YAML..."
+mkdir -p "$TMP_DIR/internal/leakpkg"
+cat << 'EOF' > "$TMP_DIR/internal/leakpkg/brief.md"
+github.com/tamld/g8s (local: /Users/tamld/Documents/github/g8s, branch=main, head=1f5fa6a)
+EOF
+
+cat << 'EOF' > "$TMP_DIR/internal/leakpkg/config.yaml"
+worktree_dir: /private/var/folders/vj/2xz4y7td4pv95q4jn4zfpkyr0000gn/T/g8s-worktrees/
+EOF
+
+leak_output=""
+leak_exit=0
+leak_output=$(bash "$LINT_SCRIPT" "$TMP_DIR/internal/leakpkg" 2>&1) || leak_exit=$?
+
+if [ "$leak_exit" -eq 0 ]; then
+    echo "FAIL: Expected linter to fail on leaked path fixture, but got exit code 0"
+    echo "$leak_output"
+    exit 1
+fi
+
+if echo "$leak_output" | grep -q "check_no_local_path_leak"; then
+    echo "  [PASS] check_no_local_path_leak detected path leak in standalone fixture"
+else
+    echo "  [FAIL] check_no_local_path_leak not in output"
+    echo "$leak_output"
+    exit 1
+fi
 
 echo ""
 echo "[ALL SELF-TESTS PASSED]"

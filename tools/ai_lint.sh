@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #
-# g8s AI Anti-Pattern CI Gate (DEBT-21 / Issue #87)
+# g8s AI Anti-Pattern CI Gate (DEBT-21 / Issue #87 / DEBT-61 / Issue #202)
 # Enforces Constitution Axioms 1, 3, 4, 5 by detecting common AI-generated code smells:
 #   1. check_no_panic: No panic("...") or panic(fmt.Sprintf(...)) in non-test code.
 #   2. check_no_ignored_errors: No _ = ...Close() or defer ... _ = error swallowing.
 #   3. check_no_type_assertion_in_library: No unchecked .(Type) downcasts in internal/.
 #   4. check_todo_owner: No TODO/FIXME/XXX without OWNER= annotation.
 #   5. check_no_ai_artifacts: No conversational LLM boilerplate in source code.
+#   6. check_tdd_trap_fabricated_symbol: No test referencing fabricated/undefined symbols (DEBT-49).
+#   7. check_tdd_trap_impl_detail: No test asserting on private implementation details (DEBT-49).
+#   8. check_no_local_path_leak: No local filesystem paths in tracked files (DEBT-61).
 #
 
 set -euo pipefail
@@ -171,6 +174,29 @@ check_test_locks_impl_detail() {
     check_tdd_trap_impl_detail "$@"
 }
 
+check_no_local_path_leak() {
+    local target="$1"
+    local files
+    files=$(find "$target" -type f \( -name "*.md" -o \( -name "*.go" ! -name "*_test.go" \) \
+        -o -name "*.yaml" -o -name "*.yml" \) \
+        ! -path "*/reference/*" ! -path "*/.git/*" ! -path "*/.opencode/*" ! -path "*/.claude/scratch/*" 2>/dev/null || true)
+    if [ -z "$files" ]; then
+        return 0
+    fi
+
+    local hits
+    hits=$(echo "$files" | xargs grep -rnE \
+        '(/Users/[A-Za-z][A-Za-z0-9_.-]*/|/home/[A-Za-z][A-Za-z0-9_.-]*/|~/Documents/|~/Downloads/|/private/var/folders/|/var/folders/.*/T/|/Users/tamld/|(C:\\\\Users\\\\|[A-Za-z]):\\\\Users\\\\)' 2>/dev/null || true)
+    if [ -n "$hits" ]; then
+        echo "::error::[check_no_local_path_leak] Found local filesystem paths in tracked files:"
+        echo "$hits"
+        echo "  Hint: Use ~/Documents or \$HOME instead of /Users/<name>/..."
+        echo "  Hint: Or use just 'github.com/tamld/g8s' without local path"
+        return 1
+    fi
+    return 0
+}
+
 run_linter() {
     local target="$1"
     local failed=0
@@ -205,12 +231,16 @@ run_linter() {
         failed=$((failed + 1))
     fi
 
+    if ! check_no_local_path_leak "$target"; then
+        failed=$((failed + 1))
+    fi
+
     if [ "$failed" -gt 0 ]; then
         echo ""
         echo "[AI-LINT] FAILED: $failed check(s) found violations."
         return 1
     else
-        echo "[AI-LINT] PASSED: All 7 AI anti-pattern checks clean."
+        echo "[AI-LINT] PASSED: All 8 AI anti-pattern checks clean."
         return 0
     fi
 }

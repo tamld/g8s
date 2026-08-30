@@ -37,7 +37,7 @@ owner-gated decisions made at release time.
 
 ## Side-by-side verification assessment (REFACTORING_PLAN line 87)
 
-Feasibility confirmed locally: the `agy` binary is installed at `/Users/tamld/.local/bin/agy`
+Feasibility confirmed locally: the `agy` binary is installed at `~/.local/bin/agy`
 and the Python reference scripts remain under `reference/python/scripts/`. Running a true
 side-by-side comparison requires an identical-workload parity matrix exercised against both
 stacks with output comparison. Proposed matrix:
@@ -76,7 +76,7 @@ harness calling `dispatch.Run` with `BinaryOverride` set to the real binary:
 ```text
 err=<nil>
 ok=true returncode=0 harness_rc=0 duration=8.8s
-preview=/Users/tamld/.local/bin/agy --prompt <prompt> --model gemini-3.7-flash-high --print-timeout 2m0s
+preview=~/.local/bin/agy --prompt <prompt> --model gemini-3.7-flash-high --print-timeout 2m0s
 stdout="READY"
 stderr=""
 ```

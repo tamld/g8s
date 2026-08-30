@@ -23,7 +23,7 @@ func runDoctor(args []string) {
 	detectPathsFlag := fs.Bool("detect-paths", false, "detect and enumerate all g8s profile paths on host")
 	attentionCheck := fs.Bool("attention-check", false, "run self-reflection prompts against the worker")
 	tddTrapCheck := fs.Bool("tdd-trap-check", false, "detect test files that pin fabricated symbols or lock implementation details (DEBT-49)")
-	antiPatternCatalog := fs.Bool("anti-pattern-catalog", false, "list all 10 minimal anti-pattern rules and status (DEBT-51)")
+	antiPatternCatalog := fs.Bool("anti-pattern-catalog", false, "list all 11 minimal anti-pattern rules and status (DEBT-51/DEBT-61)")
 
 	var flagArgs []string
 	var posArgs []string

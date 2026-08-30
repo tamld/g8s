@@ -132,8 +132,8 @@ Output:
   "ok": true,
   "status": "CONFIGURED",
   "mcp_configs_updated": [
-    "/Users/tamld/.cursor/mcp.json",
-    "/Users/tamld/Library/Application Support/Claude/claude_desktop_config.json"
+    "~/.cursor/mcp.json",
+    "~/Library/Application Support/Claude/claude_desktop_config.json"
   ],
   "discovered_providers": ["agy", "claude"]
 }

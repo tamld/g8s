@@ -74,7 +74,7 @@ visual_board:
   local:
     status: not_requested
     url: null
-    command: "node /Users/tamld/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-orchestration-roadmap"
+    command: "node ~/.claude/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/g8s-orchestration-roadmap"
 
 active_task: null
 
