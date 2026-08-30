@@ -40,11 +40,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG_VERSION="${TAG_NAME#v}"
-          SRC_VERSION="$(grep -o 'Version = "[^"]*"' cmd/g8s/main.go | cut -d'"' -f2)"
+          SRC_VERSION="$(grep -o 'Version = "[^"]*"' cmd/g8s/version.go | cut -d'"' -f2)"
           echo "tag version : ${TAG_VERSION}"
           echo "src  version: ${SRC_VERSION}"
           if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]; then
-            echo "::error::Tag ${TAG_NAME} does not match cmd/g8s/main.go Version '${SRC_VERSION}'."
+            echo "::error::Tag ${TAG_NAME} does not match cmd/g8s/version.go Version '${SRC_VERSION}'."
             exit 1
           fi
 
