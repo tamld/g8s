@@ -38,13 +38,12 @@ func GenerateVoiceSummary(state *SleepState, events []Event, now time.Time) *Wak
 	durationStr := formatDurationNatural(duration)
 
 	var (
-		criticals   []Event
-		successes   []Event
-		failures    []Event
-		sessionSet  = make(map[string]bool)
-		bullets     []string
-		failedMsgs  []string
-		successMsgs []string
+		criticals  []Event
+		successes  []Event
+		failures   []Event
+		sessionSet = make(map[string]bool)
+		bullets    []string
+		failedMsgs []string
 	)
 
 	for _, ev := range events {
@@ -59,9 +58,6 @@ func GenerateVoiceSummary(state *SleepState, events []Event, now time.Time) *Wak
 		switch ev.Type {
 		case EventReceiptSuccess, EventSessionComplete:
 			successes = append(successes, ev)
-			if ev.Message != "" {
-				successMsgs = append(successMsgs, ev.Message)
-			}
 		case EventReceiptFailure, EventWorkerDead, EventBranchConflict:
 			failures = append(failures, ev)
 			if ev.Message != "" {
@@ -125,7 +121,7 @@ func GenerateVoiceSummary(state *SleepState, events []Event, now time.Time) *Wak
 	// Paragraph 4: Next recommended actions and PR readiness
 	var p4 string
 	if succCount > 0 {
-		p4 = fmt.Sprintf("Completed PR branches are staged and ready for your review. Repository HEAD is healthy.")
+		p4 = "Completed PR branches are staged and ready for your review. Repository HEAD is healthy."
 	} else {
 		p4 = "System is standing by for your next dispatch."
 	}
