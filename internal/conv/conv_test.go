@@ -17,7 +17,7 @@ type mockWorker struct {
 	solutionTexts map[string]string
 }
 
-func (m *mockWorker) Name() string { return m.name }
+func (m *mockWorker) Name() string                        { return m.name }
 func (m *mockWorker) Available(ctx context.Context) error { return nil }
 func (m *mockWorker) Spawn(ctx context.Context, task orchestrator.Task) (orchestrator.Handle, error) {
 	wtPath := task.Worktree.Path
