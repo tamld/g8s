@@ -264,11 +264,7 @@ func TestRecordEventAndEmit(t *testing.T) {
 		t.Errorf("expected sess-pkg-1, got %s", hb4.SessionID)
 	}
 
-<<<<<<< HEAD
 	if err := Emit(context.Background(), "sess-pkg-2", evt); err != nil {
-=======
-	if err := Emit(nil, "sess-pkg-2", evt); err != nil {
->>>>>>> 7f4ec9a (test(quality): boost unit test coverage for hooks, heartbeat, and doctor (DEBT-47))
 		t.Fatalf("Emit failed: %v", err)
 	}
 
