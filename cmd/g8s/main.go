@@ -374,6 +374,7 @@ func runSubmit(args []string) {
 
 	payloadMap := map[string]any{
 		"prompt":     *prompt,
+		"model":      *model,
 		"role":       *role,
 		"permission": *permission,
 		"timeout":    *timeout,

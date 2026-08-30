@@ -224,6 +224,13 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	h.mu.Unlock()
 
 	receipt := h.synthesize(err)
+	if !receipt.OK && err == nil {
+		if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
+			err = envErr
+		} else {
+			err = errors.New("worker returned failure receipt")
+		}
+	}
 	if hookErr := h.mounts.Hooks().PostWait(ctx, h.spec, receipt); hookErr != nil {
 		if err == nil {
 			err = fmt.Errorf("agy hook post-wait: %w", hookErr)
@@ -244,6 +251,14 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 		FinishedAt:      h.clock(),
 		DurationSeconds: time.Since(h.startedAt).Seconds(),
 	}
+
+	// Reject success theater if stdout is an error envelope
+	if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
+		r.OK = false
+		r.ReturnCode = 1
+		return r
+	}
+
 	switch {
 	case runErr == nil:
 		r.OK = true

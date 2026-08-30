@@ -867,3 +867,32 @@ func TestCommandResolverOverridesContractArgv(t *testing.T) {
 		t.Fatalf("resolver argv not used: %v", env.runner.spawned[0].Argv)
 	}
 }
+
+func TestWorkerFailureDespiteExitZero(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	done := make(chan struct{})
+	close(done)
+
+	// The child process exits 0, but emits a JSON error envelope to stdout.
+	env.runner.factory = func(opts SpawnOptions) Child {
+		errorEnvelope := `{"v":1,"kind":"error","cmd":"g8s","error":{"code":"E_USAGE","message":"unknown command \"--prompt-file\""}}`
+		_, _ = opts.Stdout.Write([]byte(errorEnvelope + "\n"))
+		return &instantChild{done: done}
+	}
+
+	submitTask(t, env, "anti-success-theater-1", 1, map[string]any{})
+	task, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-verifier", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if task.State == controlplane.StateSucceeded {
+		t.Fatalf("task must NOT be SUCCEEDED when stdout contains an error envelope (state: %s)", task.State)
+	}
+	if task.State != controlplane.StateFailed {
+		t.Fatalf("task.State = %q, want FAILED", task.State)
+	}
+	if task.LastError == nil || !strings.Contains(*task.LastError, "unknown command") {
+		t.Fatalf("task.LastError should contain error message, got %v", task.LastError)
+	}
+}
