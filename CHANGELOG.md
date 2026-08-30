@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Windows version-info resource (ProductName, FileVersion, LegalCopyright)
+- macOS notarization support (when APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID secrets are set)
+- AV heuristics documentation in docs/CODING_SIGNING.md
+- Makefile target for building Windows .syso resource
+
 ### Changed
 - **Onboarding docs**: explicit guidance to pin g8s to a release
   tag, not the local build, to avoid stale-binary drift (aegis
