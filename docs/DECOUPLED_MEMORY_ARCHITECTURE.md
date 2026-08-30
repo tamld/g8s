@@ -129,3 +129,16 @@ Every architectural mechanism in `g8s` is grounded in published, peer-reviewed c
 5. **Capability Delegation & Principle of Least Privilege**:
    * *Citation*: Saltzer, J. H., & Schroeder, M. D. (1975). **The Protection of Information in Computer Systems**. *Proceedings of the IEEE*, 63(9), 1278-1308.
    * *Application in g8s*: Formal foundation for `g8s`'s Single-Use Write Receipts (`internal/receipt`), POSIX `0600` access controls, and Process Group isolation (`Setpgid: true`).
+
+---
+
+## 7. Long-Term Memory Across Sleep Cycles & Attention Routing (Cu Dem AI Tap 1 Notes - DEBT-50)
+
+Operational insights from multi-project autonomous agent supervision:
+
+* **Insight #5 — Dual-Blind Consensus & Best-of-N Design**: Dispathing $N$ independent workers with isolated workspaces and zero shared context prevents single-model blindspots and biases. The supervisor aligns sections, resolves conflicts against Constitution axioms, and spot-checks for missing requirements (`internal/conv`, `g8s orchestrate --blind-converge`, `g8s converge`).
+* **Insight #7 — TDD-Trap Prevention**: Prevents tests from asserting on fabricated symbols or pinning private implementation details (`internal/doctor/tdd_trap.go`, `g8s doctor --tdd-trap-check`, `tools/ai_lint.sh`).
+* **Insight #8 — Memory Across Sleep Cycles & Night Shift Mode**: When operators enter sleep mode (`g8s sleep`), non-critical background notifications are deferred while critical events route immediately. Upon waking (`g8s wake`), a natural, voice-friendly audio briefing ($\le 4$ paragraphs, $\le 200$ words each) summarizes completed sessions, anomalies, and review readiness (`internal/sleep`).
+* **Insight #12 — Lightweight Episodic Event Stream**: Capturing streaming JSONL events in state persistence allows historical replay without polluting the agent's context window.
+* **Insight #13 — AST Spot-Checking & Fast Verification**: In-memory AST traversals detect contradictions and undeclared contracts in milliseconds.
+* **Insight #14 — Hands-Free Voice-First Interface**: Plain-language summaries formatted for speech-to-text enable operator status assimilation while away from screens.

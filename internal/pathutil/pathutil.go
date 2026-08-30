@@ -44,6 +44,9 @@ func joinPathForOS(goos string, elem ...string) string {
 
 // DefaultStateDir returns the platform-specific default state directory.
 func DefaultStateDir() string {
+	if env := os.Getenv("G8S_STATE_DIR"); env != "" {
+		return env
+	}
 	return stateDir()
 }
 

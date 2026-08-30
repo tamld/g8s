@@ -141,6 +141,10 @@ func main() {
 		runMigrate(os.Args[2:])
 	case "converge":
 		runConverge(os.Args[2:])
+	case "sleep":
+		runSleep(os.Args[2:])
+	case "wake":
+		runWake(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -1369,6 +1373,8 @@ func printUsage() {
 	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
 	fmt.Println("  converge     Synthesize N independent solution.md proposals into a converged design")
+	fmt.Println("  sleep        Mark operator away and defer non-critical notifications (g8s sleep [--until <time>])")
+	fmt.Println("  wake         End sleep cycle and output voice/json summary (g8s wake [--format voice|json])")
 	fmt.Println("  cleanup-worktrees Clean up stale agy subagent git worktrees (g8s cleanup-worktrees --older-than 1h [--dry-run])")
 	fmt.Println("  cleanup      Run lifecycle sweep for ghost processes, orphan worktrees, branches, tags, receipts")
 	fmt.Println("  migrate      Migrate legacy cwd-relative g8s data to canonical paths (g8s migrate --from ./ [--dry-run])")
