@@ -578,3 +578,50 @@ func TestSubmitPromptFileError(t *testing.T) {
 		t.Fatalf("expected exit code 1 on nonexistent prompt-file IO error, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
 	}
 }
+
+func TestVersionStamp(t *testing.T) {
+	binPath := buildG8sBinary(t)
+
+	// 1. Text output
+	cmd := exec.Command(binPath, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("g8s --version failed: %v\nOutput: %s", err, string(out))
+	}
+	output := string(out)
+	if !strings.Contains(output, "g8s version") && !strings.Contains(output, Version) {
+		t.Fatalf("version output missing version string:\n%s", output)
+	}
+	if !strings.Contains(output, "commit:") {
+		t.Fatalf("version output missing commit stamp:\n%s", output)
+	}
+	if !strings.Contains(output, "built:") {
+		t.Fatalf("version output missing build stamp:\n%s", output)
+	}
+
+	// 2. JSON output
+	jsonCmd := exec.Command(binPath, "version", "--json")
+	jsonOut, err := jsonCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("g8s version --json failed: %v\nOutput: %s", err, string(jsonOut))
+	}
+	var env struct {
+		Data struct {
+			Version   string `json:"version"`
+			Commit    string `json:"commit"`
+			BuildTime string `json:"build_time"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(jsonOut, &env); err != nil {
+		t.Fatalf("unmarshal version json failed: %v\nOutput: %s", err, string(jsonOut))
+	}
+	if env.Data.Version != Version {
+		t.Fatalf("expected version %q, got %q", Version, env.Data.Version)
+	}
+	if env.Data.Commit == "" {
+		t.Fatalf("expected non-empty commit in version JSON data")
+	}
+	if env.Data.BuildTime == "" {
+		t.Fatalf("expected non-empty build_time in version JSON data")
+	}
+}

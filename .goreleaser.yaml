@@ -21,6 +21,8 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
   - id: g8s-windows
     main: ./cmd/g8s
     binary: g8s
@@ -33,6 +35,8 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
 
 universal_binaries:
   - id: darwin_all

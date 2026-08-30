@@ -33,11 +33,7 @@ import (
 	"github.com/tamld/g8s/internal/worker"
 )
 
-// Version is a var so goreleaser ldflags -X can inject the build tag (D4).
-var (
-	Version = "0.5.0"
-	AppName = "g8s"
-)
+var AppName = "g8s"
 
 func failUsage(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "ERROR: "+msg+"\n", args...)
@@ -186,29 +182,6 @@ func databasePath() (string, error) {
 		return "", fmt.Errorf("create state directory: %w", err)
 	}
 	return dbPath, nil
-}
-
-// runVersion emits application build and version metadata.
-func runVersion(args []string) {
-	fs := flag.NewFlagSet("version", flag.ExitOnError)
-	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
-	if err := fs.Parse(args); err != nil {
-		exitUsage("version", "", *traceID, err.Error(), "", *jsonl)
-	}
-	if *jsonMode || *jsonl {
-		data := map[string]any{
-			"app":      AppName,
-			"version":  Version,
-			"zero_cgo": true,
-			"runtime":  "pure-go",
-			"actor":    *actor,
-		}
-		env := cli.NewEnvelope("version", "version", "", data)
-		env.TraceID = *traceID
-		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-		return
-	}
-	pterm.DefaultHeader.WithFullWidth().Println(fmt.Sprintf("%s v%s (The Gatekeepers - Zero-CGO, Pure Go)", AppName, Version))
 }
 
 // runRoles lists registered worker roles.
