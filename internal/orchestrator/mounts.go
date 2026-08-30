@@ -27,6 +27,13 @@ func NewMountRegistry() *MountRegistry {
 	}
 }
 
+// DefaultMountRegistry constructs a MountRegistry preloaded with default hooks (including AttentionerHook).
+func DefaultMountRegistry() *MountRegistry {
+	r := NewMountRegistry()
+	r.RegisterHook(&AttentionerHook{})
+	return r
+}
+
 // RegisterSkill registers a SkillMount to be executed in registration order.
 func (r *MountRegistry) RegisterSkill(s SkillMount) {
 	if s == nil {

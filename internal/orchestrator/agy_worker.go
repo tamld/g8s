@@ -32,7 +32,7 @@ func NewAgyWorker() *AgyWorker {
 	return &AgyWorker{
 		binary: bin,
 		clock:  time.Now,
-		mounts: NewMountRegistry(),
+		mounts: DefaultMountRegistry(),
 	}
 }
 
