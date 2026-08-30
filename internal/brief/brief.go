@@ -11,13 +11,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/state"
 )
 
 // Status constants for Brief.
 const (
-	StatusActive   = "active"
-	StatusConsumed = "consumed"
-	StatusExpired  = "expired"
+	StatusActive   = string(state.BriefStateActive)
+	StatusConsumed = string(state.BriefStateConsumed)
+	StatusExpired  = string(state.BriefStateExpired)
 )
 
 // Sentinel errors.
@@ -80,6 +81,8 @@ func Issue(store *controlplane.Store, title, payload, dod, issuedBy string, ttl 
 		return Brief{}, fmt.Errorf("issue brief: %w", err)
 	}
 
+	_ = store.LogStateEvent(context.Background(), id, state.SubjectBrief, "", state.BriefStateActive, "issue", issuedBy, "brief issued")
+
 	return fromRow(row), nil
 }
 
@@ -108,15 +111,24 @@ func Consume(store *controlplane.Store, id string) (Brief, error) {
 
 	now := store.Clock()
 	if row.Status == StatusExpired || now.After(row.ExpiresAt) {
-		_ = store.UpdateBriefStatus(ctx, id, StatusExpired)
+		if _, aErr := state.Apply(state.SubjectBrief, state.State(row.Status), state.BriefEventExpire, nil, now); aErr == nil {
+			_ = store.UpdateBriefStatus(ctx, id, StatusExpired)
+			_ = store.LogStateEvent(ctx, id, state.SubjectBrief, state.State(row.Status), state.BriefStateExpired, state.BriefEventExpire, "system", "brief expired")
+		}
 		return Brief{}, fmt.Errorf("%w: %s", ErrExpired, id)
 	}
 
-	if err := store.UpdateBriefStatus(ctx, id, StatusConsumed); err != nil {
-		return Brief{}, fmt.Errorf("consume brief: %w", err)
+	nextState, err := state.Apply(state.SubjectBrief, state.State(row.Status), state.BriefEventConsume, nil, now)
+	if err != nil {
+		return Brief{}, fmt.Errorf("consume brief invalid transition: %w", err)
 	}
 
-	row.Status = StatusConsumed
+	if err := store.UpdateBriefStatus(ctx, id, string(nextState)); err != nil {
+		return Brief{}, fmt.Errorf("consume brief: %w", err)
+	}
+	_ = store.LogStateEvent(ctx, id, state.SubjectBrief, state.State(row.Status), nextState, state.BriefEventConsume, row.IssuedBy, "brief consumed")
+
+	row.Status = string(nextState)
 	return fromRow(row), nil
 }
 
@@ -134,6 +146,7 @@ func ListActive(store *controlplane.Store) ([]Brief, error) {
 	for _, r := range rows {
 		if now.After(r.ExpiresAt) {
 			_ = store.UpdateBriefStatus(context.Background(), r.ID, StatusExpired)
+			_ = store.LogStateEvent(context.Background(), r.ID, state.SubjectBrief, state.State(r.Status), state.BriefStateExpired, state.BriefEventExpire, "system", "brief expired")
 			continue
 		}
 		out = append(out, fromRow(r))

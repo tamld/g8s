@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/state"
 )
 
 // State is the FSM state enum.
@@ -21,21 +23,21 @@ type State string
 
 const (
 	// StatePlan is the initial planning phase where tasks are assembled.
-	StatePlan State = "PLAN"
+	StatePlan State = State(state.OrchestratorStatePlan)
 	// StateSpawn is the phase where workers are spawned into worktrees.
-	StateSpawn State = "SPAWN"
+	StateSpawn State = State(state.OrchestratorStateSpawn)
 	// StateMonitor is the phase where spawned workers are actively monitored.
-	StateMonitor State = "MONITOR"
+	StateMonitor State = State(state.OrchestratorStateMonitor)
 	// StateReceipt is the phase where worker receipts are collected and validated.
-	StateReceipt State = "RECEIPT"
+	StateReceipt State = State(state.OrchestratorStateReceipt)
 	// StateMerge is the terminal success state: all receipts OK, ready to merge.
-	StateMerge State = "MERGE"
+	StateMerge State = State(state.OrchestratorStateMerge)
 	// StateEscalate is the terminal escalation state: unrecoverable failure.
-	StateEscalate State = "ESCALATE"
+	StateEscalate State = State(state.OrchestratorStateEscalate)
 	// StateCancel is the terminal cancellation state.
-	StateCancel State = "CANCEL"
+	StateCancel State = State(state.OrchestratorStateCancel)
 	// StateConflict is the terminal conflict state: merge conflict detected.
-	StateConflict State = "CONFLICT"
+	StateConflict State = State(state.OrchestratorStateConflict)
 )
 
 // allStates enumerates every valid state for validation.
@@ -47,35 +49,6 @@ var allStates = map[State]struct{}{
 // terminalStates cannot transition further.
 var terminalStates = map[State]struct{}{
 	StateMerge: {}, StateEscalate: {}, StateCancel: {}, StateConflict: {},
-}
-
-// validTransitions maps each state to its set of valid target states.
-// Cancel is allowed from any non-terminal state (added programmatically).
-var validTransitions = map[State]map[State]struct{}{
-	StatePlan: {
-		StateSpawn:  {},
-		StateCancel: {},
-	},
-	StateSpawn: {
-		StateMonitor: {},
-		StateCancel:  {},
-	},
-	StateMonitor: {
-		StateReceipt: {},
-		StateSpawn:   {}, // retry cycle: MONITOR → SPAWN
-		StateCancel:  {},
-	},
-	StateReceipt: {
-		StateMerge:    {},
-		StateEscalate: {},
-		StateConflict: {},
-		StateCancel:   {},
-	},
-	// Terminal states have no outgoing transitions.
-	StateMerge:    {},
-	StateEscalate: {},
-	StateCancel:   {},
-	StateConflict: {},
 }
 
 // ErrInvalidTransition is returned when a requested state change is not
@@ -147,23 +120,34 @@ func (f *FSM) Next(target State, reason string) (State, error) {
 		return f.current, fmt.Errorf("%w: %s is terminal", ErrTerminalState, f.current)
 	}
 
-	// Check the transition is in the allowed set.
-	allowed, ok := validTransitions[f.current]
-	if !ok {
-		return f.current, fmt.Errorf("%w: no transitions from %s", ErrInvalidTransition, f.current)
+	// Validate using the unified state registry
+	valid := state.ValidTransitions(state.SubjectOrchestrator, state.State(f.current))
+	var matchedEvent state.Event
+	found := false
+	for _, t := range valid {
+		if t.To == state.State(target) {
+			matchedEvent = t.Event
+			found = true
+			break
+		}
 	}
-	if _, valid := allowed[target]; !valid {
+	if !found {
 		return f.current, fmt.Errorf("%w: %s → %s", ErrInvalidTransition, f.current, target)
+	}
+
+	nextState, err := state.Apply(state.SubjectOrchestrator, state.State(f.current), matchedEvent, nil, f.clock())
+	if err != nil {
+		return f.current, fmt.Errorf("%w: %w", ErrInvalidTransition, err)
 	}
 
 	t := Transition{
 		From:   f.current,
-		To:     target,
+		To:     State(nextState),
 		Reason: reason,
 		At:     f.clock(),
 	}
 	f.history = append(f.history, t)
-	f.current = target
+	f.current = State(nextState)
 	return f.current, nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tamld/g8s/internal/state"
 	_ "modernc.org/sqlite"
 )
 
@@ -183,7 +184,7 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
-	} else if !strings.Contains(err.Error(), "unsupported control-plane schema version 9; expected 6") {
+	} else if !strings.Contains(err.Error(), fmt.Sprintf("unsupported control-plane schema version 9; expected %d", SchemaVersion)) {
 		t.Errorf("error mismatch: %v", err)
 	}
 }
@@ -1115,4 +1116,64 @@ func TestGetTaskLineageDeepTreeRecursiveCTE(t *testing.T) {
 	if len(emptyLineage) != 0 {
 		t.Errorf("expected empty lineage for unknown task, got %d items", len(emptyLineage))
 	}
+}
+
+func TestEventLogStoreMethods(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	subjectID := "task-xyz"
+	if err := s.LogStateEvent(ctx, subjectID, state.SubjectTask, state.TaskStateQueued, state.TaskStateLeased, state.TaskEventClaim, "test-actor", "claim test"); err != nil {
+		t.Fatalf("LogStateEvent failed: %v", err)
+	}
+	if err := s.LogStateEvent(ctx, subjectID, state.SubjectTask, state.TaskStateLeased, state.TaskStateRunning, state.TaskEventStart, "test-actor", "start test"); err != nil {
+		t.Fatalf("LogStateEvent failed: %v", err)
+	}
+
+	events, err := s.ReplayStateEvents(ctx, subjectID)
+	if err != nil {
+		t.Fatalf("ReplayStateEvents failed: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	if events[0].Event != state.TaskEventClaim || events[1].Event != state.TaskEventStart {
+		t.Errorf("unexpected events: %+v", events)
+	}
+
+	shown, err := s.ShowStateEvents(ctx, subjectID, 1)
+	if err != nil {
+		t.Fatalf("ShowStateEvents failed: %v", err)
+	}
+	if len(shown) != 1 || shown[0].Event != state.TaskEventStart {
+		t.Errorf("unexpected shown event: %+v", shown)
+	}
+}
+
+func TestEventLogMigrationFromV6(t *testing.T) {
+	s, path := newTestStore(t)
+	s.Close()
+
+	// Drop event_log and set version to 6
+	raw := openRawDB(t, path)
+	if _, err := raw.Exec("DROP TABLE IF EXISTS event_log; PRAGMA user_version = 6;"); err != nil {
+		t.Fatalf("downgrade to v6: %v", err)
+	}
+	raw.Close()
+
+	migrated, err := NewControlPlane(path, nil)
+	if err != nil {
+		t.Fatalf("open and migrate v6: %v", err)
+	}
+	defer migrated.Close()
+
+	check := openRawDB(t, path)
+	var v int
+	if err := check.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if v != SchemaVersion {
+		t.Errorf("user_version = %d, want %d", v, SchemaVersion)
+	}
+	check.Close()
 }

@@ -20,6 +20,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/state"
 )
 
 // SchemaVersion is the control-plane schema generation written into
@@ -36,7 +38,9 @@ import (
 //	    tasks table for evidence lake correlation.
 //	v6 (DEBT-XX brief-issue & brief-consume): adds briefs table for
 //	    structured dispatch contracts and audit trail.
-const SchemaVersion = 6
+//	v7 (DEBT-31 pure FSM validator & event log): adds event_log table for
+//	    append-only state transition audit trail.
+const SchemaVersion = 7
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
@@ -104,16 +108,16 @@ type MetricsRow struct {
 // TaskSchemaVersion tags request payloads submitted to the queue.
 const TaskSchemaVersion = "agy.task.v1"
 
-// Task lifecycle states, mirroring TASK_STATES in the Python baseline.
+// Task lifecycle states, mirroring TASK_STATES in the Python baseline and internal/state registry.
 const (
-	StateQueued    = "QUEUED"
-	StateLeased    = "LEASED"
-	StateRunning   = "RUNNING"
-	StateNeedsInfo = "NEEDS_INFO"
-	StateBlocked   = "BLOCKED"
-	StateSucceeded = "SUCCEEDED"
-	StateFailed    = "FAILED"
-	StateCancelled = "CANCELLED"
+	StateQueued    = string(state.TaskStateQueued)
+	StateLeased    = string(state.TaskStateLeased)
+	StateRunning   = string(state.TaskStateRunning)
+	StateNeedsInfo = string(state.TaskStateNeedsInfo)
+	StateBlocked   = string(state.TaskStateBlocked)
+	StateSucceeded = string(state.TaskStateSucceeded)
+	StateFailed    = string(state.TaskStateFailed)
+	StateCancelled = string(state.TaskStateCancelled)
 )
 
 // TaskStates enumerates every valid lifecycle state.

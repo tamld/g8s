@@ -158,8 +158,8 @@ func TestBriefStoreMigrationFromV5(t *testing.T) {
 	if err := check.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 6 {
-		t.Errorf("user_version = %d, want 6", version)
+	if version != SchemaVersion {
+		t.Errorf("user_version = %d, want %d", version, SchemaVersion)
 	}
 
 	// Verify briefs table exists and has all columns
