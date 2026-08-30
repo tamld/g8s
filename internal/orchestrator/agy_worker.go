@@ -252,8 +252,12 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	h.mu.Unlock()
 
 	receipt := h.synthesize(err)
+	verifier := &StdoutEnvelopeVerifier{}
+	_ = verifier.VerifyReceipt(ctx, &receipt)
 	if !receipt.OK && err == nil {
-		if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
+		if receipt.LastError != "" {
+			err = errors.New(receipt.LastError)
+		} else if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
 			err = envErr
 		} else {
 			err = errors.New("worker returned failure receipt")
@@ -288,6 +292,7 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 		WorktreeID:      h.task.Worktree.ID,
 		Branch:          h.task.Worktree.Branch,
 		Stdout:          h.stdout.String(),
+		RawStdout:       h.stdout.Bytes(),
 		Stderr:          h.stderr.String(),
 		StartedAt:       h.startedAt,
 		FinishedAt:      h.clock(),
@@ -298,6 +303,12 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 	if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
 		r.OK = false
 		r.ReturnCode = 1
+		var envE *dispatch.WorkerEnvelopeError
+		if errors.As(envErr, &envE) && envE.Code != "" && envE.Message != "" {
+			r.LastError = fmt.Sprintf("%s: %s", envE.Code, envE.Message)
+		} else {
+			r.LastError = envErr.Error()
+		}
 		return r
 	}
 

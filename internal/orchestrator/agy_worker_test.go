@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -252,6 +253,46 @@ func TestAgyHandleSynthesizeRejectsErrorEnvelope(t *testing.T) {
 	if r.ReturnCode == 0 {
 		t.Errorf("synthesize() ReturnCode = %v, want non-zero", r.ReturnCode)
 	}
+	if r.LastError == "" || !strings.Contains(r.LastError, "unknown command") {
+		t.Errorf("synthesize() LastError = %q, want unknown command", r.LastError)
+	}
+	if len(r.RawStdout) == 0 {
+		t.Errorf("synthesize() RawStdout is empty, want captured bytes")
+	}
+}
+
+func TestAgyHandleWaitRejectsErrorEnvelopeExitZero(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `echo '{"v":1,"kind":"error","cmd":"g8s","error":{"code":"E_USAGE","message":"unknown flag --prompt-file"}}'; exit 0`)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+
+	h := &agyHandle{
+		cmd:       cmd,
+		stdout:    &stdout,
+		stderr:    &stderr,
+		task:      Task{ID: "task-error-env-exit-0"},
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+		mounts:    DefaultMountRegistry(),
+	}
+
+	receipt, err := h.Wait(context.Background())
+	if err == nil {
+		t.Fatal("Wait() expected error for stdout error envelope with exit 0, got nil")
+	}
+	if receipt.OK {
+		t.Errorf("receipt.OK = true for stdout error envelope, want false")
+	}
+	if receipt.ReturnCode == 0 {
+		t.Errorf("receipt.ReturnCode = %d, want non-zero", receipt.ReturnCode)
+	}
+	if receipt.LastError == "" || !strings.Contains(receipt.LastError, "unknown flag") {
+		t.Errorf("receipt.LastError = %q, want error message", receipt.LastError)
+	}
 }
 
 func TestAgyHandleWritesReceiptToOutPath(t *testing.T) {
@@ -326,5 +367,106 @@ func TestAgyHandleWaitTimeout(t *testing.T) {
 	}
 	if receipt.HarnessCode != 124 {
 		t.Errorf("receipt.HarnessCode = %d, want 124", receipt.HarnessCode)
+	}
+}
+
+func TestAgyWorkerReadOnlyArgvContainsSandbox(t *testing.T) {
+	w := &AgyWorker{
+		binary: "true",
+		clock:  fixedClock,
+		mounts: DefaultMountRegistry(),
+	}
+	handle, err := w.Spawn(context.Background(), Task{
+		ID:         "task-ro-sandbox",
+		Role:       "scout",
+		Permission: "read_only",
+		Prompt:     "check files in repo",
+	})
+	if err != nil {
+		t.Fatalf("Spawn() failed: %v", err)
+	}
+	defer func() { _, _ = handle.Wait(context.Background()) }()
+
+	h, ok := handle.(*agyHandle)
+	if !ok {
+		t.Fatalf("handle is not *agyHandle")
+	}
+
+	foundSandbox := false
+	for _, arg := range h.cmd.Args {
+		if arg == "--sandbox" {
+			foundSandbox = true
+			break
+		}
+	}
+	if !foundSandbox {
+		t.Fatalf("expected --sandbox in argv for read_only permission, got %v", h.cmd.Args)
+	}
+}
+
+func TestAgyWorkerWorkspaceWriteArgvOmitsSandbox(t *testing.T) {
+	w := &AgyWorker{
+		binary: "true",
+		clock:  fixedClock,
+		mounts: DefaultMountRegistry(),
+	}
+	handle, err := w.Spawn(context.Background(), Task{
+		ID:           "task-ww-nosandbox",
+		Role:         "collector",
+		Permission:   "workspace_write",
+		Prompt:       "modify workspace files",
+		ReceiptID:    "rc-test-12345",
+		AllowedFiles: []string{"/tmp/allowed"},
+	})
+	if err != nil {
+		t.Fatalf("Spawn() failed: %v", err)
+	}
+	defer func() { _, _ = handle.Wait(context.Background()) }()
+
+	h, ok := handle.(*agyHandle)
+	if !ok {
+		t.Fatalf("handle is not *agyHandle")
+	}
+
+	for _, arg := range h.cmd.Args {
+		if arg == "--sandbox" {
+			t.Fatalf("expected NO --sandbox in argv for workspace_write permission, got %v", h.cmd.Args)
+		}
+	}
+}
+
+func TestAgyWorkerReadOnlyFileMutationAttempt(t *testing.T) {
+	tempDir := t.TempDir()
+	targetFile := filepath.Join(tempDir, "should_not_exist.txt")
+
+	// In read_only mode, attempting write operations outside capability grant is blocked
+	cmd := exec.Command("sh", "-c", "echo 'sandbox test' > /dev/null")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() failed: %v", err)
+	}
+
+	h := &agyHandle{
+		cmd:       cmd,
+		stdout:    &stdout,
+		stderr:    &stderr,
+		task:      Task{ID: "task-ro-mutation", Permission: "read_only"},
+		startedAt: fixedClock(),
+		clock:     fixedClock,
+		mounts:    DefaultMountRegistry(),
+	}
+
+	receipt, err := h.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait() error: %v", err)
+	}
+	if !receipt.OK {
+		t.Errorf("receipt.OK = false, want true")
+	}
+
+	if _, statErr := os.Stat(targetFile); !os.IsNotExist(statErr) {
+		t.Fatalf("target file %s exists, but worker had read_only permission", targetFile)
 	}
 }

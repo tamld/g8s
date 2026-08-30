@@ -10,6 +10,10 @@ type BuildWorkerArgvOptions struct {
 	Prompt          string
 	PromptFile      string
 	Model           string
+	Role            string
+	Permission      string
+	Timeout         string
+	ResultPath      string
 	AddDirs         []string
 	SkipPermissions bool
 	NoSandbox       bool
@@ -55,6 +59,10 @@ func BuildWorkerArgv(opts BuildWorkerArgvOptions) []string {
 	}
 	if opts.SkipPermissions {
 		argv = append(argv, "--dangerously-skip-permissions")
+	}
+
+	if opts.Permission == "read_only" || (!opts.NoSandbox && opts.Permission != "workspace_write") {
+		argv = append(argv, "--sandbox")
 	}
 
 	argv = append(argv, "--output-format", "stream-json")

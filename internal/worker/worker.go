@@ -586,13 +586,23 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 // buildArgv assembles the worker invocation mirroring the baseline contract:
 // prompt file in, structured result file out, explicit scope roots attached.
 func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) []string {
+	noSandbox := req.NoSandbox
+	if req.Permission == "workspace_write" {
+		noSandbox = true
+	} else if req.Permission == "read_only" || req.Permission == "automation_read" {
+		noSandbox = false
+	}
 	return dispatch.BuildWorkerArgv(dispatch.BuildWorkerArgvOptions{
 		Binary:          s.binaryPath,
 		PromptFile:      promptPath,
 		Model:           req.Model,
+		Role:            req.Role,
+		Permission:      req.Permission,
+		Timeout:         req.Timeout,
+		ResultPath:      resultPath,
 		AddDirs:         req.AddDirs,
 		SkipPermissions: req.SkipPermiss,
-		NoSandbox:       req.NoSandbox,
+		NoSandbox:       noSandbox,
 	})
 }
 
