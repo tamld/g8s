@@ -62,6 +62,12 @@ jobs:
             exit 1
           fi
 
+      - name: Layer-ownership gate (DEBT-34)
+        run: bash tools/ci_layer_check.sh
+
+      - name: Layer-ownership self-test
+        run: bash tools/ci_layer_check_test.sh
+
       - name: go vet
         run: go vet ./...
         env:

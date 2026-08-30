@@ -131,7 +131,7 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 
 ## 4. Invariants (Cross-Phase Engineering Laws)
 
-All past, current, and future contributions must satisfy the **8 Invariant Rules**:
+All past, current, and future contributions must satisfy the **10 Invariant Rules**:
 
 1. **Zero-CGO & Pure-Go Invariant**: The repository must compile cleanly with `CGO_ENABLED=0` across all target architectures. SQLite MUST use `modernc.org/sqlite`.
 2. **Zero-Trust Capability Receipts**: Filesystem modifications require a valid, path-scoped, time-limited ($\le 3600s$), single-use Write Receipt verified atomically in SQLite.
@@ -142,6 +142,7 @@ All past, current, and future contributions must satisfy the **8 Invariant Rules
 7. **Quality & AI Anti-Pattern Gate**: All code must pass `go test -race ./...`, cross-platform build validation (Linux/Darwin/Windows), `staticcheck`, `gosec`, `errcheck`, `gofumpt`, and `tools/ai_lint.sh` (zero panics, zero unhandled errors, zero unassigned TODOs).
 8. **100% Language Purity**: Code, comments, docs, and git commit messages must be written in professional English with zero non-ASCII diacritics.
 9. **Cross-Project Kill Safety**: Lifecycle cleanup (`g8s cleanup --target ghost-process`) MUST be strictly scoped to the active project repository. Processes with CWD outside the repository, lacking `--add-dir` pointing inside, or without a matching PID heartbeat file under `<repo>/.heartbeat/` are NEVER targeted without explicit `--force-foreign` confirmation, and all kills are logged to `.cleanup-audit.jsonl`.
+10. **Layer-Ownership Rule**: PRs must not touch disjoint layers (`internal/orchestrator/` vs `internal/worker/` or `internal/worker/` vs `cmd/g8s/`) to enforce modular boundaries and prevent cross-layer ownership violations (DEBT-34).
 
 ---
 
