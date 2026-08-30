@@ -39,6 +39,20 @@ var (
 	AppName = "g8s"
 )
 
+func failUsage(msg string, args ...any) {
+	fmt.Fprintf(os.Stderr, "ERROR: "+msg+"\n", args...)
+	fmt.Fprintln(os.Stderr, "Run 'g8s help' for usage.")
+	os.Exit(2)
+}
+
+func failRuntime(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+	os.Exit(1)
+}
+
 func exitUsage(cmd, sub, traceID, msg, hint string, jsonl bool) {
 	if traceID == "" {
 		traceID = cli.GenerateTraceID()
@@ -72,7 +86,7 @@ func main() {
 
 	command := os.Args[1]
 	switch command {
-	case "version":
+	case "version", "-v", "--version":
 		runVersion(os.Args[2:])
 	case "roles":
 		runRoles(os.Args[2:])
@@ -1578,6 +1592,9 @@ func runWorker(args []string) {
 			_ = model
 		}
 		if *once {
+			if task.State == "FAILED" {
+				os.Exit(1)
+			}
 			return
 		}
 	}

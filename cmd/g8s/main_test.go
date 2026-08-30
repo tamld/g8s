@@ -354,3 +354,98 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv2.Data.LastError)
 	}
 }
+
+func TestExitCodeSubmitBadArgs(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	cmd := exec.Command(binPath, "submit")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected submit with no args to fail, but succeeded with output: %s", string(out))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("expected exit code 2 on bad submit args, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
+
+func TestExitCodeGetBadId(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	cmd := exec.Command(binPath, "get", "nonexistent-task-id-12345")
+	cmd.Env = append(cmd.Environ(), "G8S_DB="+dbPath)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected get nonexistent to fail, but succeeded with output: %s", string(out))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("expected exit code 1 on get nonexistent, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
+
+func TestExitCodeVersion(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	cmd := exec.Command(binPath, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected g8s --version to exit 0, got error: %v\nOutput: %s", err, string(out))
+	}
+}
+
+func TestExitCodeWorkerOnceFailed(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	stateDir := filepath.Join(tempDir, "state")
+	configDir := filepath.Join(tempDir, "config")
+	_ = os.MkdirAll(stateDir, 0o700)
+	_ = os.MkdirAll(configDir, 0o700)
+
+	providersPath := filepath.Join(configDir, "providers.json")
+	providerJSON := `{
+  "version": "1.0",
+  "providers": [
+    {
+      "name": "mock-error-envelope",
+      "class": "platform_dispatch",
+      "models": [{"id": "gemini-3.7-flash-high"}],
+      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]
+    }
+  ]
+}`
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
+		t.Fatalf("write err mock providers: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_STATE_DIR=" + stateDir,
+		"G8S_PROVIDERS=" + providersPath,
+		"PATH=" + os.Getenv("PATH"),
+	}
+
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--json")
+	submitCmd.Env = envVars
+	if out, err := submitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("submit failed: %v\nOutput: %s", err, string(out))
+	}
+
+	workerCmd := exec.Command(binPath, "worker", "--once", "--json")
+	workerCmd.Env = envVars
+	out, err := workerCmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected worker --once to exit 1 on FAILED task, but got exit 0\nOutput: %s", string(out))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("expected exit code 1 from worker --once on FAILED task, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
