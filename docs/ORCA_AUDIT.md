@@ -6,6 +6,30 @@
 > **Issue**: [#176 (DEBT-52)](https://github.com/tamld/g8s/issues/176)  
 > **Date**: 2026-08-30  
 
+> ## Legal Disclaimer
+> 
+> This document is an **independent architectural study** of
+> `stablyai/orca` (https://github.com/stablyai/orca) for the
+> purpose of designing a clean-room provider registry in g8s.
+> 
+> **NO source code from orca is reproduced, copied, translated,
+> or otherwise derived from in this document or in any g8s source
+> file.** Only architectural concepts (provider registry,
+> detection algorithm, adapter dispatching, handle lifecycle)
+> are referenced and re-implemented from scratch in Go.
+> 
+> orca is the property of Lovecast Inc. Despite its MIT license,
+> we have chosen clean-room re-implementation to:
+> 1. Mitigate any future licensing dispute risk
+> 2. Avoid any inadvertent patent / trade-secret claim
+> 3. Maintain full independence of g8s's codebase
+> 
+> If you are reviewing this audit and want to verify the claim,
+> diff every g8s source file under `internal/provider/`,
+> `cmd/g8s/providers.go`, and `cmd/g8s/orchestrate.go` against
+> the corresponding orca files. The diffs will be empty (modulo
+> standard Go package boilerplate).
+
 ---
 
 ## 1. Executive Summary & Legal Audit
@@ -196,3 +220,23 @@ Spawning returns a `Handle` interface:
    - Backward compatibility: default provider remains `agy`.
    - Comprehensive end-to-end and regression tests.
    - Closes #176 (DEBT-52).
+
+---
+
+## Anti-Patterns (Things We Do NOT Copy from orca)
+
+Even though the MIT license technically permits verbatim copying,
+we deliberately avoid these patterns because they would create
+future legal risk:
+
+1. **No verbatim source code translation** (TS to Go line-by-line)
+2. **No borrowed code comments** (even with attribution)
+3. **No copied JSON schemas** (we design our own for g8s)
+4. **No parallel function/variable names** (we use g8s's idioms)
+5. **No replicated test cases** (we test what g8s needs)
+6. **No documentation prose** (we write in g8s's voice)
+7. **No README structure** (we have our own docs/ structure)
+
+If a future contributor notices ANY orca code in g8s, please
+open an issue immediately. We have a zero-tolerance policy on
+this.
