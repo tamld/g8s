@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>g8s</id>
+    <version>0.4.0</version>
+    <title>g8s (The Gatekeepers)</title>
+    <authors>TamLD</authors>
+    <license>MIT</license>
+    <projectUrl>https://github.com/tamld/g8s</projectUrl>
+    <description>Zero-CGO multi-agent orchestrator for AI CLI workers</description>
+  </metadata>
+  <files>
+    <file src="tools/chocolateyinstall.ps1" target="tools" />
+  </files>
+</package>
