@@ -475,3 +475,106 @@ func TestNoColorInPipe(t *testing.T) {
 		t.Fatalf("doctor piped output contains ANSI escape codes:\n%q", string(docOut))
 	}
 }
+
+func TestSubmitPromptFromFile(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	envVars := append(os.Environ(), "G8S_DB="+dbPath)
+
+	promptFile := filepath.Join(tempDir, "prompt.txt")
+	promptContent := "prompt loaded from file content"
+	if err := os.WriteFile(promptFile, []byte(promptContent), 0o600); err != nil {
+		t.Fatalf("write prompt file: %v", err)
+	}
+
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "file-prompt-task", "--prompt-file", promptFile, "--json")
+	submitCmd.Env = envVars
+	submitOut, err := submitCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit with --prompt-file failed: %v\nOutput: %s", err, string(submitOut))
+	}
+
+	var submitEnv struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(submitOut, &submitEnv); err != nil {
+		t.Fatalf("unmarshal submit output: %v", err)
+	}
+	if submitEnv.Data.TaskID == "" {
+		t.Fatalf("expected non-empty task_id in response: %s", string(submitOut))
+	}
+
+	// Verify task in DB has the file prompt
+	getCmd := exec.Command(binPath, "get", submitEnv.Data.TaskID, "--json")
+	getCmd.Env = envVars
+	getOut, err := getCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get task failed: %v\nOutput: %s", err, string(getOut))
+	}
+	if !strings.Contains(string(getOut), promptContent) {
+		t.Fatalf("expected get task payload to contain %q, got: %s", promptContent, string(getOut))
+	}
+}
+
+func TestSubmitPromptFromStdin(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	envVars := append(os.Environ(), "G8S_DB="+dbPath)
+
+	promptContent := "prompt piped through stdin stream"
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "stdin-prompt-task", "--json")
+	submitCmd.Env = envVars
+	submitCmd.Stdin = strings.NewReader(promptContent)
+	submitOut, err := submitCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit with stdin prompt failed: %v\nOutput: %s", err, string(submitOut))
+	}
+
+	var submitEnv struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(submitOut, &submitEnv); err != nil {
+		t.Fatalf("unmarshal submit output: %v", err)
+	}
+	if submitEnv.Data.TaskID == "" {
+		t.Fatalf("expected non-empty task_id in response: %s", string(submitOut))
+	}
+
+	// Verify task in DB has the stdin prompt
+	getCmd := exec.Command(binPath, "get", submitEnv.Data.TaskID, "--json")
+	getCmd.Env = envVars
+	getOut, err := getCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get task failed: %v\nOutput: %s", err, string(getOut))
+	}
+	if !strings.Contains(string(getOut), promptContent) {
+		t.Fatalf("expected get task payload to contain %q, got: %s", promptContent, string(getOut))
+	}
+}
+
+func TestSubmitPromptFileError(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	envVars := append(os.Environ(), "G8S_DB="+dbPath)
+
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "bad-file-task", "--prompt-file", "/nonexistent/path/to/prompt.txt", "--json")
+	submitCmd.Env = envVars
+	out, err := submitCmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected submit with nonexistent prompt file to fail, but got exit 0\nOutput: %s", string(out))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("expected exit code 1 on nonexistent prompt-file IO error, got %d\nOutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
