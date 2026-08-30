@@ -211,10 +211,9 @@ func (s *Store) Record(sessionID, status string, metadata map[string]any, opts .
 		return nil, fmt.Errorf("write temp heartbeat file: %w", err)
 	}
 
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
 		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("sync temp heartbeat file: %w", err)
+		return nil, fmt.Errorf("close temp heartbeat file: %w", err)
 	}
 
 	var renameErr error
