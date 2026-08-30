@@ -64,6 +64,8 @@ Thumbs.db
 agy-*.log
 agy-*.brief
 agy-*.brief.md
+.cleanup-audit.jsonl
+*.cleanup-audit.jsonl
 /var/folders/**/wt-*
 /var/folders/**/g8s-worktrees/
 /tmp/agy-*.md

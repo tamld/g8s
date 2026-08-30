@@ -54,8 +54,10 @@ func runCleanup(args []string) {
 	_ = actor
 	dryRunFlag := fs.Bool("dry-run", true, "show resources that would be cleaned up without removing them")
 	forceFlag := fs.Bool("force", false, "apply cleanup and remove detected ghost/orphan resources")
-	forceMissingFlag := fs.Bool("force-missing", false, "allow killing ghost processes that have no heartbeat file (requires confirmation)")
-	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-missing")
+	forceForeignFlag := fs.Bool("force-foreign", false, "allow killing ghost processes that have no heartbeat file (requires confirmation)")
+	forceMissingFlag := fs.Bool("force-missing", false, "alias for --force-foreign")
+	auditLogFlag := fs.String("audit-log", ".cleanup-audit.jsonl", "path to audit log file for process terminations")
+	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-foreign")
 	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
@@ -68,9 +70,10 @@ func runCleanup(args []string) {
 		dryRun = false
 	}
 
-	if *forceFlag && *forceMissingFlag && !dryRun && !*yesFlag {
-		if !confirmForceMissing(os.Stdin, os.Stdout) {
-			pterm.Warning.Println("Aborted --force-missing ghost process termination.")
+	forceForeign := *forceForeignFlag || *forceMissingFlag
+	if *forceFlag && forceForeign && !dryRun && !*yesFlag {
+		if !confirmForceForeign(os.Stdin, os.Stdout) {
+			pterm.Warning.Println("Aborted --force-foreign ghost process termination.")
 			return
 		}
 	}
@@ -93,11 +96,13 @@ func runCleanup(args []string) {
 		DBPath:         dbPath,
 		Targets:        targets,
 		DryRun:         dryRun,
-		ForceMissing:   *forceMissingFlag,
+		ForceForeign:   forceForeign,
+		ForceMissing:   forceForeign,
+		AuditLogPath:   *auditLogFlag,
 		GracePeriod:    *gracePeriod,
 		Clock:          time.Now,
 		GitRunner:      &DefaultCleanupGitRunner{},
-		ProcessManager: &DefaultProcessManager{},
+		ProcessManager: &DefaultProcessManager{RepoDir: *repoDir},
 		Writer:         os.Stdout,
 	}
 
@@ -154,7 +159,7 @@ func renderCleanupReport(report *FullCleanupReport) {
 	}
 }
 
-func confirmForceMissing(r io.Reader, w io.Writer) bool {
+func confirmForceForeign(r io.Reader, w io.Writer) bool {
 	if r == nil {
 		r = os.Stdin
 	}
@@ -170,4 +175,8 @@ func confirmForceMissing(r io.Reader, w io.Writer) bool {
 	}
 	resp = strings.ToLower(strings.TrimSpace(resp))
 	return resp == "y" || resp == "yes"
+}
+
+func confirmForceMissing(r io.Reader, w io.Writer) bool {
+	return confirmForceForeign(r, w)
 }
