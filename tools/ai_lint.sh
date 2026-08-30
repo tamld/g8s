@@ -127,13 +127,7 @@ check_test_pins_fabricated_symbol() {
     local repo_root
     repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-    if [ -x "$repo_root/bin/g8s" ]; then
-        doctor_out=$("$repo_root/bin/g8s" doctor --tdd-trap-check "$target" --json 2>&1) || true
-    elif command -v g8s >/dev/null 2>&1; then
-        doctor_out=$(g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
-    else
-        doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
-    fi
+    doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"fabricated\" ]]; then
         echo "::error::[test-pins-fabricated-symbol] Test references fabricated/undefined symbols (DEBT-49):"
@@ -150,13 +144,7 @@ check_test_locks_impl_detail() {
     local repo_root
     repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-    if [ -x "$repo_root/bin/g8s" ]; then
-        doctor_out=$("$repo_root/bin/g8s" doctor --tdd-trap-check "$target" --json 2>&1) || true
-    elif command -v g8s >/dev/null 2>&1; then
-        doctor_out=$(g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
-    else
-        doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
-    fi
+    doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"locks-impl-detail\" ]]; then
         echo "::error::[test-locks-impl-detail] Test asserts on private implementation details (DEBT-49):"
