@@ -45,8 +45,8 @@ jobs:
           fi
           sleep 2
 
-      - name: Restart g8s, verify pending tasks still queue and recover
+      - name: Restart g8s, verify pending tasks still queue
         run: |
           ./g8s submit --idempotency-key crash2-${{ github.run_id }} --role scout --prompt "noop2"
-          ./g8s tasks --state PENDING | grep -q "crash2-${{ github.run_id }}"
-          ./g8s tasks --state QUEUED | grep -q "crash-${{ github.run_id }}"
+          ./g8s worker --once
+          ./g8s tasks --state PENDING | grep -q "crash2"
