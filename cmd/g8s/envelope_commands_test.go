@@ -494,4 +494,14 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 			t.Errorf("expected E_NOTFOUND code, got: %+v", env.Error)
 		}
 	})
+
+	t.Run("doctor --tdd-trap-check returns envelope", func(t *testing.T) {
+		env, code, _ := runCmd("doctor", "--tdd-trap-check", "--json")
+		if code != 0 {
+			t.Fatalf("clean repo tdd trap exit code = %d, want 0", code)
+		}
+		if env.Command != "doctor" || env.Subcommand != "tdd-trap-check" {
+			t.Errorf("expected cmd=doctor sub=tdd-trap-check, got %s/%s", env.Command, env.Subcommand)
+		}
+	})
 }
