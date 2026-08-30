@@ -77,21 +77,24 @@ var orchestratorWorkerCtor = func() orchestrator.Worker { return orchestrator.Ne
 
 // orchestrateOptions carries dependencies and configuration for orchestration runs.
 type orchestrateOptions struct {
-	Store         supervisor.Persistence
-	Worker        orchestrator.Worker
-	Reviewer      supervisor.Reviewer
-	Pool          *orchestrator.Pool
-	Registry      *orchestrator.Registry
-	MaxAttempts   int
-	MaxApproaches int
-	Timeout       time.Duration
-	Model         string
-	Role          string
-	Permission    string
-	AddDirs       []string
-	ParentTaskID  *string
-	SelfTest      bool
-	AutoCleanup   bool
+	Store            supervisor.Persistence
+	Worker           orchestrator.Worker
+	Reviewer         supervisor.Reviewer
+	Pool             *orchestrator.Pool
+	Registry         *orchestrator.Registry
+	MaxAttempts      int
+	MaxApproaches    int
+	Timeout          time.Duration
+	Model            string
+	Role             string
+	Permission       string
+	AddDirs          []string
+	ParentTaskID     *string
+	SelfTest         bool
+	AutoCleanup      bool
+	SilenceThreshold time.Duration
+	PollInterval     time.Duration
+	NoPoll           bool
 }
 
 // executeOrchestration drives the supervisor fix loop and sub-task fan-out
@@ -116,6 +119,13 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 	sup.Config.MaxApproaches = opts.MaxApproaches
 	sup.Config.SelfTestMode = true
 	sup.Config.AutoCleanup = opts.AutoCleanup
+	if opts.SilenceThreshold > 0 {
+		sup.Config.SilenceThreshold = opts.SilenceThreshold
+	}
+	if opts.PollInterval > 0 {
+		sup.Config.PollInterval = opts.PollInterval
+	}
+	sup.Config.NoPoll = opts.NoPoll
 
 	role := opts.Role
 	if role == "" {
@@ -302,6 +312,9 @@ func runOrchestrate(args []string) {
 	maxApproaches := fs.Int("max-approaches", 3, "approach budget before escalation")
 	timeout := fs.Duration("timeout", 5*time.Minute, "per-attempt execution window")
 	autoCleanup := fs.Bool("auto-cleanup", true, "automatically clean up orphan worktrees and dirs after run")
+	silenceThreshold := fs.Duration("silence-threshold", 5*time.Minute, "worker heartbeat silence escalation threshold (default 5m)")
+	noPoll := fs.Bool("no-poll", false, "disable background adaptive heartbeat polling")
+	pollInterval := fs.Duration("poll-interval", 30*time.Second, "cadence for heartbeat polling (default 30s)")
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
 	if err := fs.Parse(args); err != nil {
@@ -309,11 +322,20 @@ func runOrchestrate(args []string) {
 	}
 
 	var jsonExplicit bool
+	var noPollExplicit bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "json" || f.Name == "jsonl" {
 			jsonExplicit = true
 		}
+		if f.Name == "no-poll" {
+			noPollExplicit = true
+		}
 	})
+
+	effectiveNoPoll := *noPoll
+	if *selfTest && !noPollExplicit {
+		effectiveNoPoll = true
+	}
 
 	if !*selfTest && *fromIntent == "" && *fromFile == "" && *briefFile == "" && *dispatchID == "" {
 		exitUsage("orchestrate", "", *traceID, "usage: g8s orchestrate [--brief-file <path> | --dispatch <id> | --from-intent <text> | --from-file <path> | --self-test] [--task <text>] [--json] [--add-dir <path> ...]", "", *jsonl)
@@ -396,21 +418,24 @@ func runOrchestrate(args []string) {
 		_ = reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
 
 		opts := orchestrateOptions{
-			Store:         store,
-			Worker:        worker,
-			Reviewer:      supervisor.NewStubReviewer(),
-			Pool:          pool,
-			Registry:      reg,
-			MaxAttempts:   *maxAttempts,
-			MaxApproaches: *maxApproaches,
-			Timeout:       *timeout,
-			Model:         *model,
-			Role:          *role,
-			Permission:    *permission,
-			AddDirs:       dirs,
-			ParentTaskID:  parentIDPtr,
-			SelfTest:      *selfTest,
-			AutoCleanup:   *autoCleanup,
+			Store:            store,
+			Worker:           worker,
+			Reviewer:         supervisor.NewStubReviewer(),
+			Pool:             pool,
+			Registry:         reg,
+			MaxAttempts:      *maxAttempts,
+			MaxApproaches:    *maxApproaches,
+			Timeout:          *timeout,
+			Model:            *model,
+			Role:             *role,
+			Permission:       *permission,
+			AddDirs:          dirs,
+			ParentTaskID:     parentIDPtr,
+			SelfTest:         *selfTest,
+			AutoCleanup:      *autoCleanup,
+			SilenceThreshold: *silenceThreshold,
+			PollInterval:     *pollInterval,
+			NoPoll:           effectiveNoPoll,
 		}
 		res, err := executeOrchestration(context.Background(), intentText, opts)
 		if err != nil {
@@ -425,6 +450,13 @@ func runOrchestrate(args []string) {
 		sup.Config.AutoCleanup = *autoCleanup
 		sup.Config.RepoDir = cwd
 		sup.Config.DBPath = dbPath
+		if *silenceThreshold > 0 {
+			sup.Config.SilenceThreshold = *silenceThreshold
+		}
+		if *pollInterval > 0 {
+			sup.Config.PollInterval = *pollInterval
+		}
+		sup.Config.NoPoll = effectiveNoPoll
 
 		req := supervisor.RunRequest{
 			TaskDescription: *taskDesc,
