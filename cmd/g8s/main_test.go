@@ -97,7 +97,7 @@ func TestPrintUsageMentionsEveryLiveCommand(t *testing.T) {
 	commands := []string{
 		"submit", "get", "resume", "tasks", "cancel", "lineage", "children",
 		"receipt", "doctor", "init", "config", "completion", "service",
-		"analyze", "vault", "worker", "mcp", "roles", "permissions",
+		"analyze", "vault", "worker", "mcp", "roles", "permissions", "providers",
 		"version", "orchestrate", "orchestrate-aic", "supervisor-metrics",
 		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "migrate", "status",
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/conv"
 	"github.com/tamld/g8s/internal/orchestrator"
+	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/supervisor"
 )
 
@@ -76,6 +77,73 @@ func parseIntentSubtasks(intent string) []string {
 
 // orchestratorWorkerCtor is the worker factory seam for orchestrate runs.
 var orchestratorWorkerCtor = func() orchestrator.Worker { return orchestrator.NewAgyWorker() }
+
+type providerWorkerAdapter struct {
+	p provider.Provider
+}
+
+func newProviderWorkerAdapter(p provider.Provider) orchestrator.Worker {
+	return &providerWorkerAdapter{p: p}
+}
+
+func (a *providerWorkerAdapter) Name() string {
+	return a.p.Name()
+}
+
+func (a *providerWorkerAdapter) Available(ctx context.Context) error {
+	return a.p.Available(ctx)
+}
+
+func (a *providerWorkerAdapter) Spawn(ctx context.Context, t orchestrator.Task) (orchestrator.Handle, error) {
+	spec := provider.Spec{
+		Brief:       t.Prompt,
+		Model:       t.Model,
+		AddDirs:     t.AllowedFiles,
+		WorktreeDir: t.Worktree.Path,
+		Timeout:     t.Timeout,
+		Role:        t.Role,
+		Permission:  t.Permission,
+	}
+	h, err := a.p.Spawn(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return &providerHandleAdapter{h: h, task: t}, nil
+}
+
+type providerHandleAdapter struct {
+	h    provider.Handle
+	task orchestrator.Task
+}
+
+func (a *providerHandleAdapter) PID() int {
+	return a.h.PID()
+}
+
+func (a *providerHandleAdapter) Wait(ctx context.Context) (orchestrator.Receipt, error) {
+	r, err := a.h.Wait(ctx)
+	return orchestrator.Receipt{
+		OK:              r.Status == "COMPLETED" && err == nil,
+		TaskID:          a.task.ID,
+		WorktreeID:      a.task.Worktree.ID,
+		ReturnCode:      r.ExitCode,
+		DurationSeconds: float64(r.DurationMs) / 1000.0,
+		Stdout:          r.Stdout,
+		Stderr:          r.Stderr,
+		Violations:      r.Violations,
+	}, err
+}
+
+func (a *providerHandleAdapter) Cancel(ctx context.Context) error {
+	return a.h.Cancel(ctx)
+}
+
+func (a *providerHandleAdapter) StdoutStream() interface {
+	Read(p []byte) (int, error)
+	Close() error
+} {
+	return a.h.StdoutStream()
+}
 
 // orchestrateOptions carries dependencies and configuration for orchestration runs.
 type orchestrateOptions struct {
@@ -308,6 +376,7 @@ func runOrchestrate(args []string) {
 	fromIntent := fs.String("from-intent", "", "free-text natural language intent")
 	fromFile := fs.String("from-file", "", "path to file containing natural language intent")
 	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
+	providerName := fs.String("provider", "agy", "agent provider backend (e.g. agy, codex, claude, ollama)")
 	role := fs.String("role", "collector", "worker role contract")
 	permission := fs.String("permission", "read_only", "permission profile")
 	taskDesc := fs.String("task", "scan ./src for MCP server candidate implementations", "task description handed to the supervisor")
@@ -363,6 +432,19 @@ func runOrchestrate(args []string) {
 		effectiveIssuer = "sisyphus"
 	}
 
+	provReg := provider.NewRegistry()
+	prov, provErr := provReg.Get(*providerName)
+	if provErr != nil {
+		exitUsage("orchestrate", "", *traceID, fmt.Sprintf("invalid provider %q: %v", *providerName, provErr), "", *jsonl)
+	}
+
+	resolveWorker := func() orchestrator.Worker {
+		if *providerName == "agy" {
+			return orchestratorWorkerCtor()
+		}
+		return newProviderWorkerAdapter(prov)
+	}
+
 	if *blindConverge > 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -416,7 +498,7 @@ func runOrchestrate(args []string) {
 			Timeout:      *timeout,
 			Repo:         cwd,
 			AddDirs:      dirs,
-			Worker:       orchestratorWorkerCtor(),
+			Worker:       resolveWorker(),
 		}
 
 		convRes, err := conv.Run(context.Background(), convReq)
@@ -499,7 +581,7 @@ func runOrchestrate(args []string) {
 		if poolErr == nil {
 			pool = p
 		}
-		worker := orchestratorWorkerCtor()
+		worker := resolveWorker()
 		reg := orchestrator.NewRegistry()
 		_ = reg.Register(worker.Name(), func() orchestrator.Worker { return worker })
 
@@ -529,7 +611,7 @@ func runOrchestrate(args []string) {
 		}
 		out = res
 	} else {
-		sup := supervisor.NewSelfTestSupervisor(store, orchestratorWorkerCtor(), supervisor.NewStubReviewer())
+		sup := supervisor.NewSelfTestSupervisor(store, resolveWorker(), supervisor.NewStubReviewer())
 		sup.Config.MaxAttemptsPerApproach = *maxAttempts
 		sup.Config.MaxApproaches = *maxApproaches
 		sup.Config.SelfTestMode = true

@@ -145,6 +145,8 @@ func main() {
 		runSleep(os.Args[2:])
 	case "wake":
 		runWake(os.Args[2:])
+	case "providers":
+		runProviders(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -245,6 +247,41 @@ func runPermissions(args []string) {
 	td = append(td, []string{"Name", "Description", "Mutation Allowed"})
 	for _, p := range perms {
 		td = append(td, []string{p.Name, p.Description, fmt.Sprintf("%t", p.MutationAllowed)})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+}
+
+// runProviders lists detected AI agent CLI providers and their availability status.
+func runProviders(args []string) {
+	fs := flag.NewFlagSet("providers", flag.ContinueOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		exitUsage("providers", "", *traceID, err.Error(), "", *jsonl)
+	}
+
+	reg := provider.NewRegistry()
+	statuses := reg.List(context.Background())
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("providers_list", "providers", "", statuses)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("providers", "", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		return
+	}
+
+	var td pterm.TableData
+	td = append(td, []string{"Name", "Status", "Binary", "Version / Reason"})
+	for _, st := range statuses {
+		detail := st.Version
+		bin := st.BinaryPath
+		if st.Status == "NO" {
+			detail = st.Reason
+			bin = "-"
+		}
+		td = append(td, []string{st.Name, st.Status, bin, detail})
 	}
 	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 }
@@ -1383,6 +1420,7 @@ func printUsage() {
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
+	fmt.Println("  providers    List detected agent providers and availability status")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
