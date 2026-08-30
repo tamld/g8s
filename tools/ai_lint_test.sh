@@ -33,6 +33,10 @@ import (
 )
 
 // Certainly! I am an AI language model generated helper.
+type User struct {
+	ID string
+}
+
 func AntiPatternExamples(raw any) {
 	// 1. check_no_panic
 	panic("panic used for control flow")
@@ -50,8 +54,28 @@ func AntiPatternExamples(raw any) {
 	// 4. check_todo_owner (TODO without OWNER=)
 	// TODO: fix this unassigned debt later
 
-	// 5. check_no_ai_artifacts
+// 5. check_no_ai_artifacts
 	// I hope this helps!
+}
+EOF
+
+# 1b. Create test file in badpkg triggering TDD trap rules
+cat << 'EOF' > "$TMP_DIR/internal/badpkg/bad_test.go"
+package badpkg
+
+import "testing"
+
+func TestTDDTraps(t *testing.T) {
+	// check_test_pins_fabricated_symbol
+	u := &User{
+		ID:             "u1",
+		loyalty_points: 100,
+	}
+	_ = u.loyalty_points
+
+	// check_test_locks_impl_detail
+	s := struct{ internalConnStatus int }{internalConnStatus: 1}
+	_ = s.internalConnStatus
 }
 EOF
 
@@ -126,6 +150,8 @@ assert_check_triggered "check_no_ignored_errors"
 assert_check_triggered "check_no_type_assertion_in_library"
 assert_check_triggered "check_todo_owner"
 assert_check_triggered "check_no_ai_artifacts"
+assert_check_triggered "test-pins-fabricated-symbol"
+assert_check_triggered "test-locks-impl-detail"
 
 echo "==> Test 2: Assert linter passes cleanly on compliant fixture..."
 clean_output=""

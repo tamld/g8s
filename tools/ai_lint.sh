@@ -121,6 +121,52 @@ check_no_ai_artifacts() {
     return 0
 }
 
+check_test_pins_fabricated_symbol() {
+    local target="$1"
+    local doctor_out
+    local repo_root
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+    if [ -x "$repo_root/bin/g8s" ]; then
+        doctor_out=$("$repo_root/bin/g8s" doctor --tdd-trap-check "$target" --json 2>&1) || true
+    elif command -v g8s >/dev/null 2>&1; then
+        doctor_out=$(g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
+    else
+        doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
+    fi
+
+    if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"fabricated\" ]]; then
+        echo "::error::[test-pins-fabricated-symbol] Test references fabricated/undefined symbols (DEBT-49):"
+        echo "$doctor_out"
+        echo "  Hint: Define symbols in production code before pinning them in unit tests."
+        return 1
+    fi
+    return 0
+}
+
+check_test_locks_impl_detail() {
+    local target="$1"
+    local doctor_out
+    local repo_root
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+    if [ -x "$repo_root/bin/g8s" ]; then
+        doctor_out=$("$repo_root/bin/g8s" doctor --tdd-trap-check "$target" --json 2>&1) || true
+    elif command -v g8s >/dev/null 2>&1; then
+        doctor_out=$(g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
+    else
+        doctor_out=$(cd "$repo_root" && go run ./cmd/g8s doctor --tdd-trap-check "$target" --json 2>&1) || true
+    fi
+
+    if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"locks-impl-detail\" ]]; then
+        echo "::error::[test-locks-impl-detail] Test asserts on private implementation details (DEBT-49):"
+        echo "$doctor_out"
+        echo "  Hint: Assert on observable public behavior rather than internal private fields."
+        return 1
+    fi
+    return 0
+}
+
 run_linter() {
     local target="$1"
     local failed=0
@@ -147,12 +193,20 @@ run_linter() {
         failed=$((failed + 1))
     fi
 
+    if ! check_test_pins_fabricated_symbol "$target"; then
+        failed=$((failed + 1))
+    fi
+
+    if ! check_test_locks_impl_detail "$target"; then
+        failed=$((failed + 1))
+    fi
+
     if [ "$failed" -gt 0 ]; then
         echo ""
         echo "[AI-LINT] FAILED: $failed check(s) found violations."
         return 1
     else
-        echo "[AI-LINT] PASSED: All 5 AI anti-pattern checks clean."
+        echo "[AI-LINT] PASSED: All 7 AI anti-pattern checks clean."
         return 0
     fi
 }
