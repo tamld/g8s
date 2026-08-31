@@ -19,14 +19,14 @@ import (
 
 // Supported cleanup target identifiers aliased from internal/cleanup.
 const (
-	TargetGhostProcess      = cleanup.TargetGhostProcess
-	TargetOrphanWT          = cleanup.TargetOrphanWT
-	TargetOrphanDir         = cleanup.TargetOrphanDir
-	TargetOrphanBranch      = cleanup.TargetOrphanBranch
-	TargetStaleReceipt      = cleanup.TargetStaleReceipt
-	TargetClosedPRBranch    = cleanup.TargetClosedPRBranch
-	TargetOldTag            = cleanup.TargetOldTag
-	TargetBlindWorktreeDir  = cleanup.TargetBlindWorktreeDir
+	TargetGhostProcess     = cleanup.TargetGhostProcess
+	TargetOrphanWT         = cleanup.TargetOrphanWT
+	TargetOrphanDir        = cleanup.TargetOrphanDir
+	TargetOrphanBranch     = cleanup.TargetOrphanBranch
+	TargetStaleReceipt     = cleanup.TargetStaleReceipt
+	TargetClosedPRBranch   = cleanup.TargetClosedPRBranch
+	TargetOldTag           = cleanup.TargetOldTag
+	TargetBlindWorktreeDir = cleanup.TargetBlindWorktreeDir
 )
 
 // AllCleanupTargets lists all available cleanup target flags.

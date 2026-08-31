@@ -253,13 +253,13 @@ func CleanupWorktrees(ctx context.Context, opts CleanupOptions) (*CleanupReport,
 
 // CleanupBlindWorktreesOptions defines parameters for the CleanupBlindWorktrees function.
 type CleanupBlindWorktreesOptions struct {
-	RepoDir           string
-	OlderThan         time.Duration
-	DryRun            bool
-	Clock             func() time.Time
-	Runner            GitRunner
-	Writer            io.Writer
-	ForceRemoveDirty  bool
+	RepoDir          string
+	OlderThan        time.Duration
+	DryRun           bool
+	Clock            func() time.Time
+	Runner           GitRunner
+	Writer           io.Writer
+	ForceRemoveDirty bool
 }
 
 // CleanupBlindWorktrees identifies and removes stale blind worktrees (branch pattern: blind/*).

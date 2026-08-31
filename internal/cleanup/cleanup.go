@@ -25,15 +25,15 @@ import (
 
 // Supported cleanup target identifiers.
 const (
-	TargetGhostProcess       = "ghost-process"
-	TargetOrphanWT           = "orphan-wt"
-	TargetOrphanDir          = "orphan-dir"
-	TargetOrphanBranch       = "orphan-branch"
-	TargetStaleReceipt       = "stale-receipt"
-	TargetClosedPRBranch     = "closed-pr-branch"
-	TargetOldTag             = "old-tag"
-	TargetBlindWorktreeDir   = "blind-wt-dir"
-	TargetBlindWorktree      = "blind-wt"
+	TargetGhostProcess     = "ghost-process"
+	TargetOrphanWT         = "orphan-wt"
+	TargetOrphanDir        = "orphan-dir"
+	TargetOrphanBranch     = "orphan-branch"
+	TargetStaleReceipt     = "stale-receipt"
+	TargetClosedPRBranch   = "closed-pr-branch"
+	TargetOldTag           = "old-tag"
+	TargetBlindWorktreeDir = "blind-wt-dir"
+	TargetBlindWorktree    = "blind-wt"
 )
 
 // AllCleanupTargets lists all available cleanup target flags.
@@ -641,23 +641,23 @@ func appendAuditLog(logPath string, entry CleanupAuditEntry) error {
 
 // CleanupConfig holds parameters and dependencies for executing a full cleanup sweep.
 type CleanupConfig struct {
-	RepoDir               string
-	HeartbeatDir          string
-	DBPath                string
-	WorktreeBaseDir       string
-	BlindWorktreeBaseDir  string
-	Targets               []string
-	DryRun                bool
-	ForceForeign          bool
-	ForceMissing          bool // Alias for ForceForeign for backwards compatibility
-	ForceRemoveDirty      bool
-	AuditLogPath          string
-	GracePeriod           time.Duration
-	OlderThan             time.Duration
-	Clock                 func() time.Time
-	GitRunner             CleanupGitRunner
-	ProcessManager        ProcessManager
-	Writer                io.Writer
+	RepoDir              string
+	HeartbeatDir         string
+	DBPath               string
+	WorktreeBaseDir      string
+	BlindWorktreeBaseDir string
+	Targets              []string
+	DryRun               bool
+	ForceForeign         bool
+	ForceMissing         bool // Alias for ForceForeign for backwards compatibility
+	ForceRemoveDirty     bool
+	AuditLogPath         string
+	GracePeriod          time.Duration
+	OlderThan            time.Duration
+	Clock                func() time.Time
+	GitRunner            CleanupGitRunner
+	ProcessManager       ProcessManager
+	Writer               io.Writer
 }
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
