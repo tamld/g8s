@@ -25,13 +25,15 @@ import (
 
 // Supported cleanup target identifiers.
 const (
-	TargetGhostProcess   = "ghost-process"
-	TargetOrphanWT       = "orphan-wt"
-	TargetOrphanDir      = "orphan-dir"
-	TargetOrphanBranch   = "orphan-branch"
-	TargetStaleReceipt   = "stale-receipt"
-	TargetClosedPRBranch = "closed-pr-branch"
-	TargetOldTag         = "old-tag"
+	TargetGhostProcess       = "ghost-process"
+	TargetOrphanWT           = "orphan-wt"
+	TargetOrphanDir          = "orphan-dir"
+	TargetOrphanBranch       = "orphan-branch"
+	TargetStaleReceipt       = "stale-receipt"
+	TargetClosedPRBranch     = "closed-pr-branch"
+	TargetOldTag             = "old-tag"
+	TargetBlindWorktreeDir   = "blind-wt-dir"
+	TargetBlindWorktree      = "blind-wt"
 )
 
 // AllCleanupTargets lists all available cleanup target flags.
@@ -43,6 +45,8 @@ var AllCleanupTargets = []string{
 	TargetStaleReceipt,
 	TargetClosedPRBranch,
 	TargetOldTag,
+	TargetBlindWorktreeDir,
+	TargetBlindWorktree,
 }
 
 // CleanupItem describes an individual resource identified for or subjected to cleanup.
@@ -104,7 +108,7 @@ type ProcessManager interface {
 type CleanupGitRunner interface {
 	WorktreeListPorcelain(ctx context.Context, repoDir string) (string, error)
 	WorktreePrune(ctx context.Context, repoDir string) (string, error)
-	WorktreeRemove(ctx context.Context, repoDir, wtPath string) error
+	WorktreeRemove(ctx context.Context, repoDir, wtPath string, force bool) error
 	MergedBranches(ctx context.Context, repoDir string) ([]string, error)
 	RemoteBranches(ctx context.Context, repoDir string) ([]string, error)
 	DeleteBranch(ctx context.Context, repoDir, branch string, force bool) error
@@ -112,6 +116,7 @@ type CleanupGitRunner interface {
 	LocalTags(ctx context.Context, repoDir string) ([]TagInfo, error)
 	RemoteTags(ctx context.Context, repoDir string) ([]string, error)
 	DeleteTag(ctx context.Context, repoDir, tag string) error
+	StatusPorcelain(ctx context.Context, wtPath string) (string, error)
 }
 
 // DefaultProcessManager is the production implementation of ProcessManager using OS primitives and ProcessLister.
@@ -427,8 +432,13 @@ func (g *DefaultCleanupGitRunner) WorktreePrune(ctx context.Context, repoDir str
 	return string(out), nil
 }
 
-func (g *DefaultCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", wtPath)
+func (g *DefaultCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string, force bool) error {
+	args := []string{"-C", repoDir, "worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, wtPath)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -581,6 +591,15 @@ func (g *DefaultCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag st
 	return nil
 }
 
+func (g *DefaultCleanupGitRunner) StatusPorcelain(ctx context.Context, wtPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", wtPath, "status", "--porcelain")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git status --porcelain: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
 // CleanupAuditEntry defines the schema for .cleanup-audit.jsonl records.
 type CleanupAuditEntry struct {
 	Timestamp   string `json:"ts"`
@@ -622,20 +641,23 @@ func appendAuditLog(logPath string, entry CleanupAuditEntry) error {
 
 // CleanupConfig holds parameters and dependencies for executing a full cleanup sweep.
 type CleanupConfig struct {
-	RepoDir         string
-	HeartbeatDir    string
-	DBPath          string
-	WorktreeBaseDir string
-	Targets         []string
-	DryRun          bool
-	ForceForeign    bool
-	ForceMissing    bool // Alias for ForceForeign for backwards compatibility
-	AuditLogPath    string
-	GracePeriod     time.Duration
-	Clock           func() time.Time
-	GitRunner       CleanupGitRunner
-	ProcessManager  ProcessManager
-	Writer          io.Writer
+	RepoDir               string
+	HeartbeatDir          string
+	DBPath                string
+	WorktreeBaseDir       string
+	BlindWorktreeBaseDir  string
+	Targets               []string
+	DryRun                bool
+	ForceForeign          bool
+	ForceMissing          bool // Alias for ForceForeign for backwards compatibility
+	ForceRemoveDirty      bool
+	AuditLogPath          string
+	GracePeriod           time.Duration
+	OlderThan             time.Duration
+	Clock                 func() time.Time
+	GitRunner             CleanupGitRunner
+	ProcessManager        ProcessManager
+	Writer                io.Writer
 }
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
@@ -706,6 +728,28 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOrphanDir] = len(items)
+		}
+	}
+
+	// 3b. Blind worktree dirs (AGY worker blind dirs)
+	if targetSet[TargetBlindWorktreeDir] {
+		items, err := sweepOrphanWorktreeDirs(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] blind-wt-dir sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetBlindWorktreeDir] = len(items)
+		}
+	}
+
+	// 3c. Blind worktrees (branch pattern: blind/*)
+	if targetSet[TargetBlindWorktree] {
+		items, err := sweepBlindWorktrees(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(cfg.Writer, "[warn] blind-wt sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetBlindWorktree] = len(items)
 		}
 	}
 
@@ -922,6 +966,8 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 		activeMap[strings.TrimPrefix(clean, "/private")] = true
 	}
 
+	var items []CleanupItem
+
 	// Determine directories to scan
 	var candidateDirs []string
 	if cfg.WorktreeBaseDir != "" {
@@ -930,7 +976,55 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 		candidateDirs = append(candidateDirs, filepath.Join(os.TempDir(), "g8s-worktrees"))
 	}
 
-	var items []CleanupItem
+	// Also scan blind worktree directories if configured
+	// Blind worktrees are at: <baseDir>/wt-<id>/ (wt-* subdirs inside g8s-blind-* base dirs)
+	if cfg.BlindWorktreeBaseDir != "" {
+		matches, _ := filepath.Glob(cfg.BlindWorktreeBaseDir)
+		for _, baseDir := range matches {
+			// Recurse into each g8s-blind-* base dir for wt-* subdirs
+			entries, err := os.ReadDir(baseDir)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				// Only check wt-* subdirs (actual worktrees)
+				if strings.HasPrefix(entry.Name(), "wt-") {
+					dirPath := filepath.Join(baseDir, entry.Name())
+					cleanPath := filepath.Clean(dirPath)
+					trimmedPath := strings.TrimPrefix(cleanPath, "/private")
+
+					if !activeMap[cleanPath] && !activeMap[trimmedPath] {
+						if cfg.DryRun {
+							items = append(items, CleanupItem{
+								Target: TargetBlindWorktreeDir,
+								ID:     dirPath,
+								Detail: "blind worktree directory (AGY worker)",
+								Action: "would_remove",
+							})
+						} else {
+							err := os.RemoveAll(dirPath)
+							action := "removed"
+							var errStr string
+							if err != nil {
+								action = "skipped"
+								errStr = err.Error()
+							}
+							items = append(items, CleanupItem{
+								Target: TargetBlindWorktreeDir,
+								ID:     dirPath,
+								Detail: "blind worktree directory (AGY worker)",
+								Action: action,
+								Error:  errStr,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
 	for _, baseDir := range candidateDirs {
 		entries, err := os.ReadDir(baseDir)
 		if err != nil {
@@ -945,11 +1039,23 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 			trimmedPath := strings.TrimPrefix(cleanPath, "/private")
 
 			if !activeMap[cleanPath] && !activeMap[trimmedPath] {
+				target := TargetOrphanDir
+				detail := "unregistered worktree directory"
+				if cfg.BlindWorktreeBaseDir != "" {
+					matches, _ := filepath.Glob(cfg.BlindWorktreeBaseDir)
+					for _, match := range matches {
+						if strings.HasPrefix(dirPath, match) {
+							target = TargetBlindWorktreeDir
+							detail = "blind worktree directory (AGY worker)"
+							break
+						}
+					}
+				}
 				if cfg.DryRun {
 					items = append(items, CleanupItem{
-						Target: TargetOrphanDir,
+						Target: target,
 						ID:     dirPath,
-						Detail: "unregistered worktree directory",
+						Detail: detail,
 						Action: "would_remove",
 					})
 				} else {
@@ -961,9 +1067,9 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 						errStr = err.Error()
 					}
 					items = append(items, CleanupItem{
-						Target: TargetOrphanDir,
+						Target: target,
 						ID:     dirPath,
-						Detail: "unregistered worktree directory",
+						Detail: detail,
 						Action: action,
 						Error:  errStr,
 					})
@@ -975,8 +1081,54 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 	return items, nil
 }
 
+// sweepBlindWorktrees removes stale blind worktrees (branch pattern: blind/*).
+func sweepBlindWorktrees(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	olderThan := cfg.OlderThan
+	if olderThan <= 0 {
+		olderThan = 1 * time.Hour // default to 1 hour
+	}
+
+	report, err := CleanupBlindWorktrees(ctx, CleanupBlindWorktreesOptions{
+		RepoDir:          cfg.RepoDir,
+		OlderThan:        olderThan,
+		DryRun:           cfg.DryRun,
+		Clock:            cfg.Clock,
+		Runner:           cfg.GitRunner,
+		Writer:           cfg.Writer,
+		ForceRemoveDirty: cfg.ForceRemoveDirty,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var items []CleanupItem
+	for _, cand := range report.Removed {
+		action := "removed"
+		if cfg.DryRun {
+			action = "would_remove"
+		}
+		items = append(items, CleanupItem{
+			Target: TargetBlindWorktree,
+			ID:     cand.Path,
+			Detail: fmt.Sprintf("blind worktree (branch: %s, age: %s)", cand.Branch, cand.Age.Round(time.Second)),
+			Action: action,
+		})
+	}
+	for _, skipped := range report.Skipped {
+		items = append(items, CleanupItem{
+			Target: TargetBlindWorktree,
+			ID:     skipped.Path,
+			Detail: fmt.Sprintf("blind worktree (branch: %s, skipped: %s)", skipped.Branch, skipped.Reason),
+			Action: "skipped",
+		})
+	}
+
+	return items, nil
+}
+
 // 4. Old agy-sup-* branches sweep
-var agySupBranchPattern = regexp.MustCompile(`^(agy/sup-|agy-sup-).*`)
+// Matches: agy/sup-*, agy-sup-*, blind/* (blind worktrees)
+var orphanBranchPattern = regexp.MustCompile(`^(agy/sup-|agy-sup-|blind/).*`)
 
 func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
 	merged, err := cfg.GitRunner.MergedBranches(ctx, cfg.RepoDir)
@@ -997,7 +1149,7 @@ func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 
 	var items []CleanupItem
 	for _, branch := range merged {
-		if !agySupBranchPattern.MatchString(branch) {
+		if !orphanBranchPattern.MatchString(branch) {
 			continue
 		}
 		if remoteMap[branch] {

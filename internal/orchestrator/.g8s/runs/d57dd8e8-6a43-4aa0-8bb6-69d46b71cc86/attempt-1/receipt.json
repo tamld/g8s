@@ -1,0 +1,37 @@
+{
+  "task_id": "d57dd8e8-6a43-4aa0-8bb6-69d46b71cc86",
+  "idempotency_key": "k12",
+  "schema_version": "agy.task.v1",
+  "state": "FAILED",
+  "priority": 0,
+  "request": {
+    "actor": "operator",
+    "add_dirs": [
+      "/Users/tamld/Documents/github/g8s"
+    ],
+    "model": "gemini-3.7-flash-high",
+    "permission": "read_only",
+    "prompt_hash": "48266c632572f3f3b50a62d15e8c0b9ffeff879913c890648d5faf5a2214020b",
+    "prompt_redacted": true,
+    "role": "scout",
+    "timeout": "30s"
+  },
+  "request_hash": "bb23637efd330037a374236b3a514056b373dfe0a14202ec7f3011784b0018f8",
+  "result": {
+    "ok": false,
+    "reason": "Unknown command '--prompt'",
+    "status": "failed",
+    "stdout": "{\n  \"v\": 1,\n  \"kind\": \"error\",\n  \"cmd\": \"--prompt\",\n  \"data\": null,\n  \"error\": {\n    \"code\": \"E_USAGE\",\n    \"message\": \"Unknown command '--prompt'\",\n    \"hint\": \"Run 'g8s help' for available commands\"\n  },\n  \"trace_id\": \"01a054fa-7e7a-7e9e-94b7-35c3842edd52\",\n  \"at\": \"2026-08-30T23:21:37.658959Z\"\n}\n",
+    "summary": "child process returned error envelope: Unknown command '--prompt'"
+  },
+  "result_hash": "1fcb5fd8e078d488fde5908db30b568acec48459ada16aded605301e319e383f",
+  "receipt_hash": "12841939d4296bc5e1a2679ada1185b5ed59f7d4046745764cd8ce4b024978e5",
+  "attempts": 1,
+  "max_attempts": 1,
+  "cancel_requested": false,
+  "created_at": 1788132097.6124852,
+  "updated_at": 1788132097.6604722,
+  "completed_at": 1788132097.6604722,
+  "last_error": "Unknown command '--prompt'",
+  "iter": 0
+}

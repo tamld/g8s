@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "kind": "task",
+  "cmd": "submit",
+  "data": {
+    "task_id": "d57dd8e8-6a43-4aa0-8bb6-69d46b71cc86",
+    "idempotency_key": "k12",
+    "schema_version": "agy.task.v1",
+    "state": "QUEUED",
+    "priority": 0,
+    "request": {
+      "actor": "operator",
+      "add_dirs": [
+        "/Users/tamld/Documents/github/g8s"
+      ],
+      "model": "gemini-3.7-flash-high",
+      "permission": "read_only",
+      "prompt": "audit12",
+      "role": "scout",
+      "timeout": "30s"
+    },
+    "request_hash": "bb23637efd330037a374236b3a514056b373dfe0a14202ec7f3011784b0018f8",
+    "attempts": 0,
+    "max_attempts": 1,
+    "cancel_requested": false,
+    "created_at": 1788132097.6124852,
+    "updated_at": 1788132097.6124852,
+    "iter": 0
+  },
+  "trace_id": "01a054fa-7e4a-7c11-8523-6b5edc41fc7e",
+  "at": "2026-08-30T23:21:37.612714Z"
+}

@@ -1,0 +1,22 @@
+{
+  "OK": false,
+  "OrchestratorID": "",
+  "WorktreeID": "",
+  "WorkerName": "agy",
+  "Iter": 0,
+  "TaskID": "task-error-env-exit-0",
+  "Branch": "",
+  "CommitSHA": "",
+  "ReturnCode": 1,
+  "HarnessCode": 0,
+  "DurationSeconds": 0,
+  "Stdout": "{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown flag --prompt-file\"}}\n",
+  "Stderr": "",
+  "LastError": "E_USAGE: unknown flag --prompt-file",
+  "RawStdout": "eyJ2IjoxLCJraW5kIjoiZXJyb3IiLCJjbWQiOiJnOHMiLCJlcnJvciI6eyJjb2RlIjoiRV9VU0FHRSIsIm1lc3NhZ2UiOiJ1bmtub3duIGZsYWcgLS1wcm9tcHQtZmlsZSJ9fQo=",
+  "Violations": null,
+  "FilesModified": null,
+  "ScopeViolations": null,
+  "StartedAt": "2026-01-01T00:00:00Z",
+  "FinishedAt": "2026-01-01T00:00:00Z"
+}

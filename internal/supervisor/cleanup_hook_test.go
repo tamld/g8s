@@ -64,7 +64,7 @@ func (m *mockSupervisorGitRunner) WorktreePrune(ctx context.Context, repoDir str
 	return "pruned", m.pruneErr
 }
 
-func (m *mockSupervisorGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
+func (m *mockSupervisorGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string, force bool) error {
 	return nil
 }
 
@@ -94,6 +94,10 @@ func (m *mockSupervisorGitRunner) RemoteTags(ctx context.Context, repoDir string
 
 func (m *mockSupervisorGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
 	return nil
+}
+
+func (m *mockSupervisorGitRunner) StatusPorcelain(ctx context.Context, wtPath string) (string, error) {
+	return "", nil
 }
 
 func validTestRequest(desc string) RunRequest {

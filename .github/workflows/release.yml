@@ -71,6 +71,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+      # Smoke test: verify released binaries work
+      - name: Smoke test released binaries
+        run: |
+          set -euo pipefail
+          # Download the release assets
+          gh release download "${{ github.ref_name }}" --repo ${{ github.repository }} --dir dist-test --pattern "*.tar.gz" --pattern "*.zip" --pattern "*.sbom.json" --pattern "*.sig"
+          echo "Downloaded artifacts:"
+          ls -la dist-test/
+          # Test linux amd64 binary
+          tar -xzf dist-test/g8s_*_linux_amd64.tar.gz -C dist-test/
+          ./dist-test/g8s --version
+          ./dist-test/g8s doctor
+          # Test darwin amd64 binary (if on macOS runner, skip on linux)
+          if [ "$(uname)" = "Darwin" ]; then
+            tar -xzf dist-test/g8s_*_darwin_amd64.tar.gz -C dist-test/
+            ./dist-test/g8s --version
+            ./dist-test/g8s doctor
+          fi
+          echo "✅ Smoke test passed for all tested binaries"
+
       - name: Sign Windows binaries
         if: matrix.goos == 'windows-latest' && env.HAS_CERT == 'true'
         shell: pwsh

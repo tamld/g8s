@@ -85,7 +85,7 @@ func (m *MockCleanupGitRunner) WorktreePrune(ctx context.Context, repoDir string
 	return m.PrunedOutput, nil
 }
 
-func (m *MockCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
+func (m *MockCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string, force bool) error {
 	m.RemovedPaths = append(m.RemovedPaths, wtPath)
 	return nil
 }
@@ -118,6 +118,10 @@ func (m *MockCleanupGitRunner) RemoteTags(ctx context.Context, repoDir string) (
 func (m *MockCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
 	m.DeletedTags = append(m.DeletedTags, tag)
 	return nil
+}
+
+func (m *MockCleanupGitRunner) StatusPorcelain(ctx context.Context, wtPath string) (string, error) {
+	return "", nil
 }
 
 func TestGhostProcessCleanup(t *testing.T) {

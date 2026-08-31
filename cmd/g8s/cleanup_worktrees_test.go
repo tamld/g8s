@@ -143,7 +143,7 @@ func (m *mockGitRunner) WorktreeListPorcelain(_ context.Context, _ string) (stri
 	return m.porcelainOutput, nil
 }
 
-func (m *mockGitRunner) WorktreeRemove(_ context.Context, _, wtPath string) error {
+func (m *mockGitRunner) WorktreeRemove(_ context.Context, _, wtPath string, force bool) error {
 	if m.removeErr != nil {
 		return m.removeErr
 	}

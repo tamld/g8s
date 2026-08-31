@@ -60,6 +60,19 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+sboms:
+  - artifacts: archive
+    cmd: syft
+    args: ["-o", "cyclonedx-json={{ .Path }}.sbom.json", "{{ .Path }}"]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}.sbom.json"
+
+signs:
+  - artifacts: all
+    cmd: cosign
+    args: ["sign-blob", "--yes", "--output-signature", "{{ .Path }}.sig", "{{ .Path }}"]
+    env:
+      - COSIGN_EXPERIMENTAL=1
+
 changelog:
   sort: asc
   filters:

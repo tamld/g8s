@@ -19,13 +19,14 @@ import (
 
 // Supported cleanup target identifiers aliased from internal/cleanup.
 const (
-	TargetGhostProcess   = cleanup.TargetGhostProcess
-	TargetOrphanWT       = cleanup.TargetOrphanWT
-	TargetOrphanDir      = cleanup.TargetOrphanDir
-	TargetOrphanBranch   = cleanup.TargetOrphanBranch
-	TargetStaleReceipt   = cleanup.TargetStaleReceipt
-	TargetClosedPRBranch = cleanup.TargetClosedPRBranch
-	TargetOldTag         = cleanup.TargetOldTag
+	TargetGhostProcess      = cleanup.TargetGhostProcess
+	TargetOrphanWT          = cleanup.TargetOrphanWT
+	TargetOrphanDir         = cleanup.TargetOrphanDir
+	TargetOrphanBranch      = cleanup.TargetOrphanBranch
+	TargetStaleReceipt      = cleanup.TargetStaleReceipt
+	TargetClosedPRBranch    = cleanup.TargetClosedPRBranch
+	TargetOldTag            = cleanup.TargetOldTag
+	TargetBlindWorktreeDir  = cleanup.TargetBlindWorktreeDir
 )
 
 // AllCleanupTargets lists all available cleanup target flags.
@@ -59,10 +60,14 @@ func runCleanup(args []string) {
 	forceMissingFlag := fs.Bool("force-missing", false, "alias for --force-foreign")
 	auditLogFlag := fs.String("audit-log", ".cleanup-audit.jsonl", "path to audit log file for process terminations")
 	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-foreign")
-	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
+	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag,blind-wt-dir,blind-wt)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
 	userProfileFlag := fs.String("user-profile", "", "scope cleanup to a specific user profile (e.g. alice)")
+	blindBaseDir := filepath.Join(os.TempDir(), "g8s-blind-*")
+	worktreeBaseDirFlag := fs.String("worktree-base-dir", blindBaseDir, fmt.Sprintf("base directory for blind worktree dirs (default: %s)", blindBaseDir))
+	olderThanFlag := fs.Duration("older-than", 1*time.Hour, "remove blind worktrees older than duration (e.g. 1h, 24h)")
+	forceRemoveDirtyFlag := fs.Bool("force-remove-dirty", false, "remove blind worktrees even with uncommitted changes")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("cleanup", "", *traceID, err.Error(), "", *jsonl)
 	}
@@ -104,19 +109,22 @@ func runCleanup(args []string) {
 	}
 
 	cfg := CleanupConfig{
-		RepoDir:        *repoDir,
-		HeartbeatDir:   hbDir,
-		DBPath:         dbPath,
-		Targets:        targets,
-		DryRun:         dryRun,
-		ForceForeign:   forceForeign,
-		ForceMissing:   forceForeign,
-		AuditLogPath:   *auditLogFlag,
-		GracePeriod:    *gracePeriod,
-		Clock:          time.Now,
-		GitRunner:      &DefaultCleanupGitRunner{},
-		ProcessManager: &DefaultProcessManager{RepoDir: *repoDir},
-		Writer:         os.Stdout,
+		RepoDir:              *repoDir,
+		HeartbeatDir:         hbDir,
+		DBPath:               dbPath,
+		BlindWorktreeBaseDir: *worktreeBaseDirFlag,
+		OlderThan:            *olderThanFlag,
+		ForceRemoveDirty:     *forceRemoveDirtyFlag,
+		Targets:              targets,
+		DryRun:               dryRun,
+		ForceForeign:         forceForeign,
+		ForceMissing:         forceForeign,
+		AuditLogPath:         *auditLogFlag,
+		GracePeriod:          *gracePeriod,
+		Clock:                time.Now,
+		GitRunner:            &DefaultCleanupGitRunner{},
+		ProcessManager:       &DefaultProcessManager{RepoDir: *repoDir},
+		Writer:               os.Stdout,
 	}
 
 	report, err := RunCleanupSweep(context.Background(), cfg)
