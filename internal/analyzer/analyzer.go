@@ -4,6 +4,7 @@
 package analyzer
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -143,9 +144,10 @@ func (a *Analyzer) AnalyzeSymbolImpact(targetFile, symbol string) (*BlastRadiusR
 			return nil
 		}
 
-		content := string(data)
-		if strings.Contains(content, symbol) {
-			occurrences := strings.Count(content, symbol)
+		// ⚡ Bolt Optimization: Use bytes.Contains/Count to avoid allocating a massive string from the file data
+		symBytes := []byte(symbol)
+		if bytes.Contains(data, symBytes) {
+			occurrences := bytes.Count(data, symBytes)
 			affectedMap[relPath] = occurrences
 			directCallers = append(directCallers, fmt.Sprintf("%s (%d refs)", relPath, occurrences))
 		}
@@ -213,10 +215,11 @@ func (a *Analyzer) aggregateSymbolsImpact(relTarget, absTarget string, symbols [
 			if err != nil {
 				return nil
 			}
-			content := string(data)
+			// ⚡ Bolt Optimization: Use bytes.Contains/Count to avoid allocating a massive string from the file data
 			for _, sym := range symbols {
-				if strings.Contains(content, sym) {
-					count := strings.Count(content, sym)
+				symBytes := []byte(sym)
+				if bytes.Contains(data, symBytes) {
+					count := bytes.Count(data, symBytes)
 					affectedMap[relPath] += count
 					directCallers = append(directCallers, fmt.Sprintf("%s:%s (%d refs)", relPath, sym, count))
 				}
@@ -273,8 +276,10 @@ func (a *Analyzer) analyzeGenericFile(relTarget, absTarget string) (*BlastRadius
 		if err != nil {
 			return nil
 		}
-		if strings.Contains(string(data), base) {
-			count := strings.Count(string(data), base)
+		// ⚡ Bolt Optimization: Use bytes.Contains/Count to avoid allocating a massive string from the file data
+		baseBytes := []byte(base)
+		if bytes.Contains(data, baseBytes) {
+			count := bytes.Count(data, baseBytes)
 			affectedMap[relPath] = count
 			directCallers = append(directCallers, fmt.Sprintf("%s (%d refs)", relPath, count))
 		}

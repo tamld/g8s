@@ -10,3 +10,6 @@
 ## 2025-08-29 - Avoid strings.Builder and rune slice casting for simple substring extraction
 **Learning:** Using `strings.Builder` and converting a string to `[]rune` to extract a substring by rune indexes allocates multiple times: once for the rune slice, and again for `builder.String()`. We can bypass this by tracking the starting index and byte size of the runes using `utf8.DecodeRuneInString` and slicing the original string directly, avoiding multiple allocations.
 **Action:** Use `utf8.DecodeRuneInString` inside a loop over a string to find accurate slice bounds for multibyte characters rather than casting the string to a rune slice or relying on a builder, and slice the original string.
+## 2025-08-30 - Avoid file payload string casting for string search
+**Learning:** Calling `string(data)` on a `[]byte` file payload (e.g., from `os.ReadFile`) forces an allocation of a completely new byte slice in memory to host the string value. Doing this on large files causes heavy memory usage and garbage collection churn just to run a string search (`strings.Contains` or `strings.Count`).
+**Action:** Use `bytes.Contains(data, []byte(symbol))` and `bytes.Count(data, []byte(symbol))` directly on the original slice. The small `[]byte(symbol)` allocates very little memory compared to the file payload, bypassing the large string allocation altogether.
