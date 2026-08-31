@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG_VERSION="${TAG_NAME#v}"
-          SRC_VERSION="$(grep -o 'Version = "[^"]*"' cmd/g8s/version.go | cut -d'"' -f2)"
+          SRC_VERSION="$(grep -o 'Version[[:space:]]*=[[:space:]]*"[^"]*"' cmd/g8s/version.go | sed -E 's/.*"([^"]+)".*/\1/')"
           echo "tag version : ${TAG_VERSION}"
           echo "src  version: ${SRC_VERSION}"
           if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]; then
