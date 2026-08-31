@@ -87,7 +87,7 @@ jobs:
     needs: build-darwin
     if: ${{ env.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Download artifact
         uses: actions/download-artifact@v5
         with:
