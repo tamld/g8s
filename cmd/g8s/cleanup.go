@@ -61,6 +61,7 @@ func runCleanup(args []string) {
 	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-foreign")
 	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
+	worktreeBaseDir := fs.String("worktree-base-dir", "", "base directory for orphan worktree scan (defaults to OS temp/g8s-worktrees)")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
 	userProfileFlag := fs.String("user-profile", "", "scope cleanup to a specific user profile (e.g. alice)")
 	if err := fs.Parse(args); err != nil {
@@ -104,19 +105,20 @@ func runCleanup(args []string) {
 	}
 
 	cfg := CleanupConfig{
-		RepoDir:        *repoDir,
-		HeartbeatDir:   hbDir,
-		DBPath:         dbPath,
-		Targets:        targets,
-		DryRun:         dryRun,
-		ForceForeign:   forceForeign,
-		ForceMissing:   forceForeign,
-		AuditLogPath:   *auditLogFlag,
-		GracePeriod:    *gracePeriod,
-		Clock:          time.Now,
-		GitRunner:      &DefaultCleanupGitRunner{},
-		ProcessManager: &DefaultProcessManager{RepoDir: *repoDir},
-		Writer:         os.Stdout,
+		RepoDir:         *repoDir,
+		HeartbeatDir:    hbDir,
+		DBPath:          dbPath,
+		WorktreeBaseDir: *worktreeBaseDir,
+		Targets:         targets,
+		DryRun:          dryRun,
+		ForceForeign:    forceForeign,
+		ForceMissing:    forceForeign,
+		AuditLogPath:    *auditLogFlag,
+		GracePeriod:     *gracePeriod,
+		Clock:           time.Now,
+		GitRunner:       &DefaultCleanupGitRunner{},
+		ProcessManager:  &DefaultProcessManager{RepoDir: *repoDir},
+		Writer:          os.Stdout,
 	}
 
 	report, err := RunCleanupSweep(context.Background(), cfg)

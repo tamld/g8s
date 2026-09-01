@@ -1419,7 +1419,6 @@ func runWorker(args []string) {
 	defer store.Close()
 
 	sup := worker.NewSupervisor(store, filepath.Join(filepath.Dir(dbPath), "runs"),
-		worker.WithBinaryPath(os.Args[0]),
 		worker.WithCommandResolver(func(prompt, modelID, taskTimeout string) ([]string, bool) {
 			tmpl, ok := templates[modelID]
 			if !ok {
