@@ -8,16 +8,16 @@
 
 | Operation | CLI Command | Description |
 | :--- | :--- | :--- |
-| **System Sanity Check** | `g8s doctor` / `g8s doctor --json` *(v0.3.0 — pending PR #66)* | Inspect database permissions, worker discovery, and providers. |
+| **System Sanity Check** | `g8s doctor` / `g8s doctor --json` | Inspect database permissions, worker discovery, and providers. |
 | **Task Submission** | `g8s submit --prompt "..." --role scout` | Enqueue a durable async task with security harness checks. |
 | **Task Inspection** | `g8s get <task-id>` | Show current durable state, lease owner, and result hash. |
 | **Queue Listing** | `g8s tasks --state QUEUED --limit 20` | Query tasks filtered by state with pagination. |
 | **Lineage Tree** | `g8s lineage <task-id>` | Trace complete ancestry from root task to target child. |
 | **Child Subtasks** | `g8s children <parent-id>` | List direct child subtasks submitted by an orchestrator. |
 | **Issue Write Receipt**| `g8s receipt issue --path "src/*" --ttl 600` | Issue cryptographic single-use write delegation receipt. |
-| **Blast Radius Analyzer**| `g8s analyze --file <path>` *(v0.3.0 — pending PR #65)* | Compute change risk score and suggested write receipt paths. |
-| **Knowledge Vault Query**| `g8s vault query <search-term>` *(v0.3.0 — pending PR #64)* | Perform BM25 ranked full-text search over Tri-Anchor records. |
-| **Service Install** | `g8s service install` *(macOS launchd; Linux systemd pending PR #66)* | Register background daemon. |
+| **Blast Radius Analyzer**| `g8s analyze --file <path>` | Compute change risk score and suggested write receipt paths. |
+| **Knowledge Vault Query**| `g8s vault query <search-term>` | Perform BM25 ranked full-text search over Tri-Anchor records. |
+| **Service Install** | `g8s service install` *(macOS launchd; Linux systemd)* | Register background daemon. |
 | **Service Start/Stop** | `g8s service start` / `g8s service stop` | Start or stop the background daemon. |
 | **Service Status** | `g8s service status` | Check whether daemon is loaded and database is intact. |
 | **MCP Surface** | `g8s mcp` | Launch Stdio JSON-RPC 2.0 MCP server for IDEs. |
@@ -80,7 +80,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o g8s ./cmd/g8s
   tail -f ~/.local/state/g8s/service.stdout.log ~/.local/state/g8s/service.stderr.log
   ```
 
-### Linux (Systemd User Unit) *(v0.3.0 — pending PR #66)*
+### Linux (Systemd User Unit)
 
 * **Unit Path**: `~/.config/systemd/user/g8s.service`
 * **Log Directory**: `~/.local/state/g8s/`

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-01
 
 ### Added
 - Windows version-info resource (ProductName, FileVersion, LegalCopyright)
@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tag, not the local build, to avoid stale-binary drift (aegis
   agent on 2026-08-30 reported 4 BUGs that were already fixed
   in main but not yet in a release).
+
+### Fixed
+- **#220**: Worker dispatch now correctly spawns `agy` instead of `g8s` (removed `WithBinaryPath(os.Args[0])` in `runWorker`, defaulted Supervisor `binaryPath` to empty)
+- **#222**: Added `--worktree-base-dir` flag to `g8s cleanup` to clean blind worktree directories outside working directory (Safety Net bypass)
+
+### Performance
+- **#221**: Analyzer uses `bytes.Contains/Count` instead of `strings.Contains/Count` to avoid massive string allocation on file payload
+- **#234**: Process enumeration in cleanup uses `strings.EqualFold` on slice to avoid `strings.ToLower` allocation
+
+## [Unreleased]
 
 ## [0.5.0] - 2026-08-30
 
