@@ -174,7 +174,7 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 		runner:          processRunner{},
 		pollInterval:    defaultPollInterval,
 		captureMaxBytes: defaultCaptureBytes,
-		binaryPath:      "g8s",
+		binaryPath:      "",
 		evidenceDir:     evidenceDir,
 	}
 	for _, opt := range opts {
