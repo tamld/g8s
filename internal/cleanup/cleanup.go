@@ -270,8 +270,10 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 			continue
 		}
 
-		isAgy := strings.EqualFold(binName, "agy") || strings.HasPrefix(strings.ToLower(binName), "agy")
-		isClaude := strings.EqualFold(binName, "claude") || strings.HasPrefix(strings.ToLower(binName), "claude")
+		// PERF: using strings.EqualFold on a string slice prevents a heap allocation
+		// that would otherwise occur if we used strings.HasPrefix(strings.ToLower(binName), ...)
+		isAgy := len(binName) >= 3 && strings.EqualFold(binName[:3], "agy")
+		isClaude := len(binName) >= 6 && strings.EqualFold(binName[:6], "claude")
 		if !isAgy && !isClaude {
 			continue
 		}
