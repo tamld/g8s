@@ -4,6 +4,7 @@
 package analyzer
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -106,6 +107,7 @@ func (a *Analyzer) AnalyzeSymbolImpact(targetFile, symbol string) (*BlastRadiusR
 	if err != nil {
 		relTarget = targetFile
 	}
+	symBytes := []byte(symbol)
 
 	affectedMap := make(map[string]int)
 	var directCallers []string
@@ -143,9 +145,8 @@ func (a *Analyzer) AnalyzeSymbolImpact(targetFile, symbol string) (*BlastRadiusR
 			return nil
 		}
 
-		content := string(data)
-		if strings.Contains(content, symbol) {
-			occurrences := strings.Count(content, symbol)
+		if bytes.Contains(data, symBytes) {
+			occurrences := bytes.Count(data, symBytes)
 			affectedMap[relPath] = occurrences
 			directCallers = append(directCallers, fmt.Sprintf("%s (%d refs)", relPath, occurrences))
 		}
@@ -190,6 +191,11 @@ func (a *Analyzer) aggregateSymbolsImpact(relTarget, absTarget string, symbols [
 
 	var directCallers []string
 
+	var symBytes [][]byte
+	for _, sym := range symbols {
+		symBytes = append(symBytes, []byte(sym))
+	}
+
 	if len(symbols) > 0 {
 		_ = filepath.WalkDir(a.rootDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
@@ -213,10 +219,9 @@ func (a *Analyzer) aggregateSymbolsImpact(relTarget, absTarget string, symbols [
 			if err != nil {
 				return nil
 			}
-			content := string(data)
-			for _, sym := range symbols {
-				if strings.Contains(content, sym) {
-					count := strings.Count(content, sym)
+			for i, sym := range symbols {
+				if bytes.Contains(data, symBytes[i]) {
+					count := bytes.Count(data, symBytes[i])
 					affectedMap[relPath] += count
 					directCallers = append(directCallers, fmt.Sprintf("%s:%s (%d refs)", relPath, sym, count))
 				}
@@ -250,6 +255,7 @@ func (a *Analyzer) aggregateSymbolsImpact(relTarget, absTarget string, symbols [
 
 func (a *Analyzer) analyzeGenericFile(relTarget, absTarget string) (*BlastRadiusReport, error) {
 	base := filepath.Base(relTarget)
+	baseBytes := []byte(base)
 	affectedMap := make(map[string]int)
 	affectedMap[relTarget] = 1
 
@@ -273,8 +279,8 @@ func (a *Analyzer) analyzeGenericFile(relTarget, absTarget string) (*BlastRadius
 		if err != nil {
 			return nil
 		}
-		if strings.Contains(string(data), base) {
-			count := strings.Count(string(data), base)
+		if bytes.Contains(data, baseBytes) {
+			count := bytes.Count(data, baseBytes)
 			affectedMap[relPath] = count
 			directCallers = append(directCallers, fmt.Sprintf("%s (%d refs)", relPath, count))
 		}

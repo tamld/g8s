@@ -13,3 +13,6 @@
 ## 2025-01-20 - Avoid strings.ToLower for Prefix Matching
 **Learning:** Using `strings.HasPrefix(strings.ToLower(str), prefix)` forces Go to allocate memory for a completely new lowercase string. In hot loops or process enumeration, this causes significant memory and GC overhead.
 **Action:** Use a length guard and `strings.EqualFold` on a string slice (e.g., `len(str) >= 3 && strings.EqualFold(str[:3], "agy")`) to achieve the exact same case-insensitive prefix check with zero allocations.
+## 2025-08-30 - Avoid casting huge files to string for Contains/Count searches
+**Learning:** Using `string(data)` to cast a massive byte slice (such as a full file read via `os.ReadFile`) allocates memory on the heap matching the entire file size. When doing reference checking across hundreds of files, this causes devastating GC thrashing.
+**Action:** When scanning byte streams from file reads, never cast them to `string` solely for searching. Always use `bytes.Contains` and `bytes.Count` directly on the returned `[]byte`, pre-allocating the search target string as `[]byte` outside of loops.
