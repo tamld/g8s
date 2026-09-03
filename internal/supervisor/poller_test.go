@@ -241,7 +241,7 @@ func TestPollerAgingHeartbeatTriggersRetry(t *testing.T) {
 		TaskDescription: "test task that hangs on attempt 1",
 		Role:            "collector",
 		Permission:      "read_only",
-		Model:           "gemini-3.7-flash-high",
+		Model:           "gemini-3.8-flash-high",
 		AddDirs:         []string{tempDir},
 	}
 

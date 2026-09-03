@@ -221,7 +221,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
     {
       "name": "mock-success",
       "class": "platform_dispatch",
-      "models": [{"id": "gemini-3.7-flash-high"}],
+      "models": [{"id": "gemini-3.8-flash-high"}],
       "args": ["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]
     }
   ]
@@ -294,7 +294,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
-      "models": [{"id": "gemini-3.7-flash-high"}],
+      "models": [{"id": "gemini-3.8-flash-high"}],
       "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]
     }
   ]
@@ -414,7 +414,7 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
-      "models": [{"id": "gemini-3.7-flash-high"}],
+      "models": [{"id": "gemini-3.8-flash-high"}],
       "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]
     }
   ]

@@ -22,7 +22,7 @@ func runSubmit(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
-	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
+	model := fs.String("model", "gemini-3.8-flash-high", "target worker model")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")

@@ -24,13 +24,13 @@ func TestLoadAcceptsValidMixedClasses(t *testing.T) {
       "name": "nine-router",
       "base_url": "https://router.example.com/v1",
       "auth_env": "NINE_ROUTER_API_KEY",
-      "models": [{"id": "gemini-3.7-flash-high", "context_window": 1000000}],
+      "models": [{"id": "gemini-3.8-flash-high", "context_window": 1000000}],
       "slots": 4
     },
     {
       "class": "platform_dispatch",
       "name": "agy",
-      "models": [{"id": "gemini-3.7-flash-high"}]
+      "models": [{"id": "gemini-3.8-flash-high"}]
     }
   ]
 }`)
@@ -42,7 +42,7 @@ func TestLoadAcceptsValidMixedClasses(t *testing.T) {
 		t.Fatalf("got %d providers, want 2", len(f.Providers))
 	}
 	api := f.Providers[0]
-	if api.Class != "api_call" || api.BaseURL == "" || api.AuthEnv != "NINE_ROUTER_API_KEY" || api.Slots != 4 || api.Models[0].ID != "gemini-3.7-flash-high" {
+	if api.Class != "api_call" || api.BaseURL == "" || api.AuthEnv != "NINE_ROUTER_API_KEY" || api.Slots != 4 || api.Models[0].ID != "gemini-3.8-flash-high" {
 		t.Fatalf("api_call entry mismatch: %+v", api)
 	}
 	disp := f.Providers[1]
@@ -115,7 +115,7 @@ func TestLoadPreservesArgsTemplate(t *testing.T) {
     {
       "class": "platform_dispatch",
       "name": "agy-direct",
-      "models": [{"id": "gemini-3.7-flash-high"}],
+      "models": [{"id": "gemini-3.8-flash-high"}],
       "slots": 4,
       "args": ["-p", "{prompt}", "--model", "{model}", "--print-timeout", "{timeout}"]
     }
@@ -151,7 +151,7 @@ func TestInitwizFixturePassesValidator(t *testing.T) {
 		t.Fatalf("got %d providers, want 2", len(f.Providers))
 	}
 	agy := f.Providers[0]
-	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.7-flash-high" {
+	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.8-flash-high" {
 		t.Errorf("unexpected agy provider: %+v", agy)
 	}
 	claude := f.Providers[1]

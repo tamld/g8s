@@ -132,8 +132,8 @@ func DefaultConfigs() []Config {
 			MaxConcurrency: 10,
 			Models: []ModelDescriptor{
 				{
-					ID:              "gemini-3.7-flash-high",
-					Name:            "Gemini 3.7 Flash (High)",
+					ID:              "gemini-3.8-flash-high",
+					Name:            "Gemini 3.8 Flash (High)",
 					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier"},
 					ContextWindow:   1000000,
 					MaxOutputTokens: 65536,

@@ -20,7 +20,7 @@ import (
 // Defaults mirrored from the Python baseline.
 const (
 	// DefaultModel is used when RunOptions.Model is empty.
-	DefaultModel = "Gemini 3.7 Flash (High)"
+	DefaultModel = "Gemini 3.8 Flash (High)"
 	// ReadOnlyContractExit is the process exit code reported when a worker
 	// that was supposed to stay read-only produced side effects anyway.
 	ReadOnlyContractExit = 3
@@ -30,6 +30,9 @@ const (
 	TruncationMarker = "\n<OUTPUT_TRUNCATED>\n"
 	// ReplacementRune substitutes invalid UTF-8 bytes during decode.
 	ReplacementRune = "\uFFFD"
+	// DefaultEffort pins reasoning effort to "high" for Gemini 3.8 Flash
+	// (High), the worker's primary model. Override per-task via RunOptions.
+	DefaultEffort = "high"
 )
 
 var windowsExecutableSuffixes = []string{".exe", ".cmd", ".bat"}
@@ -235,6 +238,8 @@ type CommandOptions struct {
 	NoSandbox       bool
 	// Home overrides ~ expansion; empty uses os.UserHomeDir().
 	Home string
+	// Effort pins agy's reasoning effort (low|medium|high). Empty omits --effort.
+	Effort string
 }
 
 // BuildCommand constructs the AGY argv. The sandbox stays enabled unless the
@@ -246,6 +251,9 @@ func BuildCommand(opts CommandOptions) []string {
 		"--prompt", opts.Prompt,
 		"--model", opts.Model,
 		"--print-timeout", opts.Timeout,
+	}
+	if opts.Effort != "" {
+		command = append(command, "--effort", opts.Effort)
 	}
 	if opts.SkipPermissions {
 		command = append(command, "--dangerously-skip-permissions")
@@ -403,6 +411,8 @@ type RunOptions struct {
 	SkipPermissions bool
 	ReceiptID       string
 	BinaryOverride  string
+	// Effort overrides reasoning effort (low|medium|high). Empty falls back to DefaultEffort.
+	Effort string
 
 	// Resolver overrides resolution seams; zero functions use host defaults.
 	Resolver ResolveOptions
@@ -444,6 +454,10 @@ func Run(opts RunOptions) (Result, error) {
 	if model == "" {
 		model = DefaultModel
 	}
+	effort := opts.Effort
+	if effort == "" {
+		effort = DefaultEffort
+	}
 	timeout := opts.Timeout
 	if timeout == "" {
 		timeout = "5m0s"
@@ -470,6 +484,7 @@ func Run(opts RunOptions) (Result, error) {
 		AddDirs:         opts.AddDirs,
 		SkipPermissions: opts.SkipPermissions,
 		NoSandbox:       opts.NoSandbox,
+		Effort:          effort,
 	})
 
 	clock := opts.Clock
@@ -512,7 +527,7 @@ func Run(opts RunOptions) (Result, error) {
 		Permission:        permission,
 		AGYBin:            binary,
 		AddDirs:           opts.AddDirs,
-		CommandPreview:    commandPreview(binary, model, timeout),
+		CommandPreview:    commandPreview(binary, model, timeout, effort),
 		Stdout:            SanitizeOutput(stdout),
 		Stderr:            SanitizeOutput(stderr),
 	}

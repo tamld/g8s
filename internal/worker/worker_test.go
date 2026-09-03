@@ -137,7 +137,7 @@ func submitTask(t *testing.T, env *workerEnv, idem string, maxAttempts int, payl
 	task, err := env.store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
 		IdempotencyKey: idem,
 		Payload:        raw,
-		Model:          "gemini-3.7-flash-high",
+		Model:          "gemini-3.8-flash-high",
 		Role:           "collector",
 		Permission:     "read_only",
 		Timeout:        "30s",
@@ -409,7 +409,7 @@ func TestRunOnceLostStartRaceReportsLeaseLossWithoutFinishing(t *testing.T) {
 		"prompt": "inventory the module", "timeout": "30s",
 	})
 	if _, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
-		IdempotencyKey: "race-1", Payload: payload, Model: "gemini-3.7-flash-high",
+		IdempotencyKey: "race-1", Payload: payload, Model: "gemini-3.8-flash-high",
 		AddDirs: []string{"."}, MaxAttempts: 3,
 	}); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -432,7 +432,7 @@ func TestFinishAttemptRejectsStaleToken(t *testing.T) {
 	ctx := context.Background()
 	payload, _ := json.Marshal(map[string]any{"prompt": "p", "timeout": "30s"})
 	if _, err := env.store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
-		IdempotencyKey: "stale-1", Payload: payload, Model: "gemini-3.7-flash-high",
+		IdempotencyKey: "stale-1", Payload: payload, Model: "gemini-3.8-flash-high",
 		AddDirs: []string{"."}, MaxAttempts: 3,
 	}); err != nil {
 		t.Fatalf("submit: %v", err)

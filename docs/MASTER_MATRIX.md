@@ -52,7 +52,7 @@
 
 | Dimension | Tier 1: Supervisor (Brain) | Tier 2: Worker (Muscle) |
 | :--- | :--- | :--- |
-| **Target Models** | Claude 3.7 Sonnet (Thinking), Claude Opus, GPT-4o, DeepSeek R1 | Gemini 3.7 Flash, Claude 3.5 Haiku, DeepSeek V3, Local Ollama |
+| **Target Models** | Claude 3.7 Sonnet (Thinking), Claude Opus, GPT-4o, DeepSeek R1 | Gemini 3.8 Flash (High), Claude 3.5 Haiku, DeepSeek V3, Local Ollama |
 | **Cognitive Strengths** | Deep multi-step reasoning, architectural synthesis, risk evaluation. | High token throughput, sub-second latency, ultra-low cost. |
 | **Assigned Roles** | System Architect, Spec Author, Receipt Issuer, PR Gatekeeper. | `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`. |
 | **Permissions** | Root capability authority, exclusive SSoT & Git commit rights. | `read_only` by default. Can only mutate files matching a valid Write Receipt. |

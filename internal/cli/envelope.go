@@ -104,7 +104,6 @@ func WriteJSON(w io.Writer, env Envelope) error {
 	_, err = fmt.Fprintln(w, string(out))
 	return err
 }
-
 // WriteJSONL serializes an Envelope as a single JSON line without line breaks.
 func WriteJSONL(w io.Writer, env Envelope) error {
 	if env.V == 0 {

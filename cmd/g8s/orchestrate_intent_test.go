@@ -135,7 +135,7 @@ func TestOrchestrateIntentSplitMultiLine(t *testing.T) {
 		MaxAttempts:   1,
 		MaxApproaches: 1,
 		Timeout:       time.Minute,
-		Model:         "gemini-3.7-flash-high",
+		Model:         "gemini-3.8-flash-high",
 		Role:          "collector",
 		Permission:    "read_only",
 		AddDirs:       []string{t.TempDir()},

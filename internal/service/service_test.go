@@ -272,7 +272,7 @@ func TestLifecycleRefusesWhileTasksAreActiveWithoutAnyCommand(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	task, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
-		IdempotencyKey: "busy", Payload: payload, Model: "gemini-3.7-flash-high",
+		IdempotencyKey: "busy", Payload: payload, Model: "gemini-3.8-flash-high",
 		AddDirs: []string{"."}, Timeout: "5s",
 	})
 	if err != nil {
@@ -308,7 +308,7 @@ func TestMaintenanceGateBlocksClaimsDuringInstall(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	if _, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
-		IdempotencyKey: "gate", Payload: payload, Model: "gemini-3.7-flash-high",
+		IdempotencyKey: "gate", Payload: payload, Model: "gemini-3.8-flash-high",
 		AddDirs: []string{"."}, Timeout: "5s",
 	}); err != nil {
 		t.Fatalf("submit: %v", err)

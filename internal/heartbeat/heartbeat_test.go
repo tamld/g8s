@@ -18,7 +18,7 @@ func TestRecordRoundtrip(t *testing.T) {
 	store := NewStore(tempDir, clock)
 
 	meta := map[string]any{
-		"model":  "gemini-3.7-flash-high",
+		"model":  "gemini-3.8-flash-high",
 		"branch": "feat/debt29-worker-heartbeat",
 	}
 
@@ -60,8 +60,8 @@ func TestRecordRoundtrip(t *testing.T) {
 	if readHB.PID != hb.PID {
 		t.Errorf("expected read PID %d, got %d", hb.PID, readHB.PID)
 	}
-	if readHB.Metadata["model"] != "gemini-3.7-flash-high" {
-		t.Errorf("expected model metadata gemini-3.7-flash-high, got %v", readHB.Metadata["model"])
+	if readHB.Metadata["model"] != "gemini-3.8-flash-high" {
+		t.Errorf("expected model metadata gemini-3.8-flash-high, got %v", readHB.Metadata["model"])
 	}
 }
 

@@ -19,7 +19,7 @@ func TestGenerateStatusReport(t *testing.T) {
 	store := heartbeat.NewStore(tempDir, clock)
 
 	// 1. Active worker (<60s)
-	_, _ = store.Record("sess-active", heartbeat.StatusRunning, map[string]any{"model": "gemini-3.7-flash-high"},
+	_, _ = store.Record("sess-active", heartbeat.StatusRunning, map[string]any{"model": "gemini-3.8-flash-high"},
 		heartbeat.WithPID(1001),
 		heartbeat.WithBinary("agy"),
 		heartbeat.WithLastUpdate(now.Add(-20*time.Second)),
@@ -149,7 +149,7 @@ func TestGenerateStatusReport(t *testing.T) {
 	t.Run("active worker from worker.StartHeartbeat", func(t *testing.T) {
 		stop := worker.StartHeartbeat("sess-emitter-test", worker.EmitterOptions{
 			Binary:       "agy",
-			CommandLine:  "agy --model gemini-3.7-flash-high",
+			CommandLine:  "agy --model gemini-3.8-flash-high",
 			Status:       "running",
 			BaseDir:      tempDir,
 			Clock:        clock,

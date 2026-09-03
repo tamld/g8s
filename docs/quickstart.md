@@ -53,7 +53,7 @@ go install github.com/tamld/g8s/cmd/g8s@latest
 ./g8s submit \
   --idempotency-key demo-1 \
   --payload '{"prompt": "inventory the module", "timeout": "30s"}' \
-  --model gemini-3.7-flash-high \
+  --model gemini-3.8-flash-high \
   --role collector \
   --permission read_only \
   --add-dir . \

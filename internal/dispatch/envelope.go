@@ -57,11 +57,15 @@ func permissionProfile(name string) (harness.PermissionProfile, error) {
 
 // commandPreview renders a redacted argv summary; the prompt itself never
 // appears in previews or logs.
-func commandPreview(binary, model, timeout string) string {
-	return shellQuote(binary) +
+func commandPreview(binary, model, timeout, effort string) string {
+	preview := shellQuote(binary) +
 		" --prompt <prompt>" +
 		" --model " + shellQuote(model) +
 		" --print-timeout " + shellQuote(timeout)
+	if effort != "" {
+		preview += " --effort " + shellQuote(effort)
+	}
+	return preview
 }
 
 // shellQuote applies POSIX single-quote escaping for anything outside the

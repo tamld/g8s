@@ -101,7 +101,7 @@ func validTestRequest(desc string) RunRequest {
 		TaskDescription: desc,
 		Role:            "collector",
 		Permission:      "read_only",
-		Model:           "gemini-3.7-flash-high",
+		Model:           "gemini-3.8-flash-high",
 		AddDirs:         []string{"/tmp"},
 		SelfTestMode:    true,
 	}

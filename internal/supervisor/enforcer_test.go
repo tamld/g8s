@@ -10,7 +10,7 @@ func goodRequest() RunRequest {
 		TaskDescription: "scan src for MCP server candidates",
 		Role:            "scout",
 		Permission:      "read_only",
-		Model:           "gemini-3.7-flash-high",
+		Model:           "gemini-3.8-flash-high",
 		AddDirs:         []string{"./src"},
 		AllowedFiles:    nil,
 	}

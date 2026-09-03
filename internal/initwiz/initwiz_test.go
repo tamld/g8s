@@ -118,7 +118,7 @@ func TestInitwizConfigPassesValidator(t *testing.T) {
 	}
 
 	agy := cfg.Providers[0]
-	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.7-flash-high" {
+	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.8-flash-high" {
 		t.Errorf("unexpected agy provider config: %+v", agy)
 	}
 

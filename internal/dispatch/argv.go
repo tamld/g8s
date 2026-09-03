@@ -18,6 +18,10 @@ type BuildWorkerArgvOptions struct {
 	SkipPermissions bool
 	NoSandbox       bool
 	Home            string
+	// Effort is the reasoning-effort level passed to agy via --effort.
+	// Empty means "leave agy's default in place". Set to "high" to fully
+	// exploit Gemini 3.8 Flash (High) on reasoning-heavy briefs.
+	Effort string
 }
 
 // WorkerArgvOptions is an alias for BuildWorkerArgvOptions.
@@ -44,6 +48,10 @@ func BuildWorkerArgv(opts BuildWorkerArgvOptions) []string {
 
 	if opts.Model != "" {
 		argv = append(argv, "--model", opts.Model)
+	}
+
+	if opts.Effort != "" {
+		argv = append(argv, "--effort", opts.Effort)
 	}
 
 	home := opts.Home

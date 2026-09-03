@@ -31,7 +31,7 @@ func TestCLIStateShowAndReplay(t *testing.T) {
 		MaxAttempts:    3,
 		Payload:        json.RawMessage(`{"prompt":"hello"}`),
 		Role:           "scout",
-		Model:          "gemini-3.7-flash-high",
+		Model:          "gemini-3.8-flash-high",
 		AddDirs:        []string{tempDir},
 	})
 	if err != nil {

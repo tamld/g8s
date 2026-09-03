@@ -225,7 +225,7 @@ func TestBuildCommandDefaultSandboxAndArgs(t *testing.T) {
 	cmd := BuildCommand(CommandOptions{
 		Binary:  "/usr/bin/agy",
 		Prompt:  "do things",
-		Model:   "Gemini 3.7 Flash (High)",
+		Model:   "Gemini 3.8 Flash (High)",
 		Timeout: "5m0s",
 		AddDirs: []string{"~/work", "/tmp/x"},
 		Home:    "/home/u",
@@ -233,7 +233,7 @@ func TestBuildCommandDefaultSandboxAndArgs(t *testing.T) {
 	want := []string{
 		"/usr/bin/agy",
 		"--prompt", "do things",
-		"--model", "Gemini 3.7 Flash (High)",
+		"--model", "Gemini 3.8 Flash (High)",
 		"--print-timeout", "5m0s",
 		"--sandbox",
 		"--add-dir", "/home/u/work",
@@ -460,7 +460,7 @@ func TestEnvelopeCleanSuccess(t *testing.T) {
 	if !strings.Contains(contractPrompt, "summarize internal/dispatch") {
 		t.Fatal("contract prompt lost user prompt")
 	}
-	if result.CommandPreview != "/fake/agy --prompt <prompt> --model 'Gemini 3.7 Flash (High)' --print-timeout 5m0s" {
+	if result.CommandPreview != "/fake/agy --prompt <prompt> --model 'Gemini 3.8 Flash (High)' --print-timeout 5m0s --effort high" {
 		t.Fatalf("preview mismatch: %q", result.CommandPreview)
 	}
 }
@@ -632,6 +632,7 @@ func TestCommandPreview(t *testing.T) {
 		binary   string
 		model    string
 		timeout  string
+		effort   string
 		expected string
 	}{
 		{
@@ -639,6 +640,7 @@ func TestCommandPreview(t *testing.T) {
 			binary:   "/usr/bin/cmd",
 			model:    "gpt-4",
 			timeout:  "30s",
+			effort:   "",
 			expected: "/usr/bin/cmd --prompt <prompt> --model gpt-4 --print-timeout 30s",
 		},
 		{
@@ -646,6 +648,7 @@ func TestCommandPreview(t *testing.T) {
 			binary:   "/path with spaces/cmd",
 			model:    "model with spaces",
 			timeout:  "1m 30s",
+			effort:   "",
 			expected: "'/path with spaces/cmd' --prompt <prompt> --model 'model with spaces' --print-timeout '1m 30s'",
 		},
 		{
@@ -653,14 +656,23 @@ func TestCommandPreview(t *testing.T) {
 			binary:   "/usr/bin/it's_cmd",
 			model:    "model's",
 			timeout:  "30's",
+			effort:   "",
 			expected: "'/usr/bin/it'\\''s_cmd' --prompt <prompt> --model 'model'\\''s' --print-timeout '30'\\''s'",
+		},
+		{
+			name:     "with effort high",
+			binary:   "/usr/bin/cmd",
+			model:    "gpt-4",
+			timeout:  "30s",
+			effort:   "high",
+			expected: "/usr/bin/cmd --prompt <prompt> --model gpt-4 --print-timeout 30s --effort high",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := commandPreview(tt.binary, tt.model, tt.timeout); got != tt.expected {
-				t.Errorf("commandPreview(%q, %q, %q) = %q, want %q", tt.binary, tt.model, tt.timeout, got, tt.expected)
+			if got := commandPreview(tt.binary, tt.model, tt.timeout, tt.effort); got != tt.expected {
+				t.Errorf("commandPreview(%q, %q, %q, %q) = %q, want %q", tt.binary, tt.model, tt.timeout, tt.effort, got, tt.expected)
 			}
 		})
 	}

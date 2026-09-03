@@ -859,7 +859,7 @@ func TestResumeTaskLifecycle(t *testing.T) {
 
 	// Resuming task from NEEDS_INFO back to QUEUED
 	resumed, err := s.ResumeTask(context.Background(), task.TaskID,
-		json.RawMessage(`{"prompt":"use cluster us-east-1","model":"gemini-3.7-flash-high"}`), "operator provided cluster name")
+		json.RawMessage(`{"prompt":"use cluster us-east-1","model":"gemini-3.8-flash-high"}`), "operator provided cluster name")
 	if err != nil {
 		t.Fatalf("ResumeTask: %v", err)
 	}

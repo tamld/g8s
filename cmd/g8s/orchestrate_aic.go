@@ -32,7 +32,7 @@ func runOrchestrateAIC(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	pr := fs.Int("pr", 0, "GitHub PR number")
 	intent := fs.String("intent", "", "review intent or guidance")
-	model := fs.String("model", "gemini-3.7-flash-high", "target worker model")
+	model := fs.String("model", "gemini-3.8-flash-high", "target worker model")
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
 	if err := fs.Parse(args); err != nil {

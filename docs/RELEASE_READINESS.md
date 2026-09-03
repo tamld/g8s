@@ -59,7 +59,7 @@ All rows executed on identical inputs; Go side via throwaway harness compiled fr
 | --- | --- | --- |
 | Task lifecycle | PASS — identical state vocabulary | Both stacks progress QUEUED -> LEASED -> RUNNING -> SUCCEEDED; Python `validate_request` raises "request.add_dirs requires at least one explicit scope root" verbatim matching Go `ValidateSubmitRequest`. |
 | Receipt exactly-once | PASS — identical semantics + error text | Second validate fails with "write receipt already consumed: <id>" in both stacks (Go `AlreadyConsumedError` format string matches character-for-character). |
-| Dispatch command construction | PASS — argv byte-identical | Same inputs produce `[agy --prompt <p> --model gemini-3.7-flash-high --print-timeout 5m0s --dangerously-skip-permissions --sandbox --add-dir /tmp/a]` in both. |
+| Dispatch command construction | PASS — argv byte-identical | Same inputs produce `[agy --prompt <p> --model gemini-3.8-flash-high --print-timeout 5m0s --dangerously-skip-permissions --sandbox --add-dir /tmp/a]` in both. |
 | Read-only contract detection | PASS — same violation types | Probe inputs map to identical violation types and snippets (`wiki_reflect_side_effect`, `wiki_write_side_effect`, negative instruction ignored). |
 | MCP tools/list shape | DOCUMENTED DEVIATION (by design) | Go exposes eleven `g8s_*` tools vs Python baseline eight `agy_*` tools per DELTA-04 Amendment A naming decision (T005-D1). Not an equality failure. |
 
@@ -76,7 +76,7 @@ harness calling `dispatch.Run` with `BinaryOverride` set to the real binary:
 ```text
 err=<nil>
 ok=true returncode=0 harness_rc=0 duration=8.8s
-preview=~/.local/bin/agy --prompt <prompt> --model gemini-3.7-flash-high --print-timeout 2m0s
+preview=~/.local/bin/agy --prompt <prompt> --model gemini-3.8-flash-high --print-timeout 2m0s
 stdout="READY"
 stderr=""
 ```

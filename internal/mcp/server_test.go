@@ -222,12 +222,12 @@ func TestSubmitToolMapsToControlPlaneSubmission(t *testing.T) {
 		"payload":         map[string]any{"prompt": "hi"},
 		"priority":        5,
 		"max_attempts":    3,
-		"model":           "gemini-3.7-flash-high",
+		"model":           "gemini-3.8-flash-high",
 	})
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %+v", rpcErr)
 	}
-	if cp.submitted.IdempotencyKey != "k1" || cp.submitted.Priority != 5 || cp.submitted.MaxAttempts != 3 || cp.submitted.Model != "gemini-3.7-flash-high" {
+	if cp.submitted.IdempotencyKey != "k1" || cp.submitted.Priority != 5 || cp.submitted.MaxAttempts != 3 || cp.submitted.Model != "gemini-3.8-flash-high" {
 		t.Fatalf("submitted request mismatch: %+v", cp.submitted)
 	}
 	var out map[string]any
@@ -731,7 +731,7 @@ func TestDurableRoundTripAgainstRealStoreOmitsPrompt(t *testing.T) {
 
 	first, rpcErr := callTool(t, s, "g8s_submit", map[string]any{
 		"idempotency_key": "d1",
-		"model":           "gemini-3.7-flash-high",
+		"model":           "gemini-3.8-flash-high",
 		"add_dirs":        []string{"/workspace"},
 		"payload":         map[string]any{"prompt": "secret-prompt-text"},
 	})
@@ -751,7 +751,7 @@ func TestDurableRoundTripAgainstRealStoreOmitsPrompt(t *testing.T) {
 
 	dup, rpcErr := callTool(t, s, "g8s_submit", map[string]any{
 		"idempotency_key": "d1",
-		"model":           "gemini-3.7-flash-high",
+		"model":           "gemini-3.8-flash-high",
 		"add_dirs":        []string{"/workspace"},
 		"payload":         map[string]any{"prompt": "secret-prompt-text"},
 	})

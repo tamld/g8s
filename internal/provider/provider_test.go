@@ -33,7 +33,7 @@ func newSmallRegistry(t *testing.T, maxConcurrency int) *PoolRegistry {
 		OverrideEnvVar: "AGY_BIN",
 		MaxConcurrency: maxConcurrency,
 		Models: []ModelDescriptor{
-			{ID: "gemini-3.7-flash-high", Name: "Gemini 3.7 Flash (High)", SupportedRoles: []string{"collector"}, ContextWindow: 1000000, MaxOutputTokens: 65536},
+			{ID: "gemini-3.8-flash-high", Name: "Gemini 3.8 Flash (High)", SupportedRoles: []string{"collector"}, ContextWindow: 1000000, MaxOutputTokens: 65536},
 		},
 	}
 	return NewPoolRegistry([]Config{cfg}, nil, func(string) (string, error) { return "/usr/local/bin/agy", nil })
@@ -200,8 +200,8 @@ func TestOllamaProbeStates(t *testing.T) {
 
 func TestModelDescriptorJSONRoundTripVerbatimTags(t *testing.T) {
 	m := ModelDescriptor{
-		ID:              "gemini-3.7-flash-high",
-		Name:            "Gemini 3.7 Flash (High)",
+		ID:              "gemini-3.8-flash-high",
+		Name:            "Gemini 3.8 Flash (High)",
 		SupportedRoles:  []string{"collector", "verifier"},
 		ContextWindow:   1000000,
 		MaxOutputTokens: 65536,
@@ -333,7 +333,7 @@ func TestLoadProvidersJSONMergesApiCallEntries(t *testing.T) {
 	}))
 	defer server.Close()
 	content := fmt.Sprintf(`{"providers":[
-	  {"class": "api_call", "name": "9router", "base_url": %q, "auth_env": "ROUTER_KEY", "models": [{"id": "gemini-3.7-flash-high", "context_window": 1000000}], "slots": 4},
+	  {"class": "api_call", "name": "9router", "base_url": %q, "auth_env": "ROUTER_KEY", "models": [{"id": "gemini-3.8-flash-high", "context_window": 1000000}], "slots": 4},
 	  {"class": "platform_dispatch", "name": "opencode", "models": [{"id": "free-model"}], "slots": 2}
 	]}`, server.URL)
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -462,7 +462,7 @@ func TestLoadProvidersJSONMapsArgsTemplate(t *testing.T) {
     {
       "class": "platform_dispatch",
       "name": "agy-direct",
-      "models": [{"id": "gemini-3.7-flash-high"}],
+      "models": [{"id": "gemini-3.8-flash-high"}],
       "slots": 4,
       "args": ["-p", "{prompt}", "--model", "{model}"]
     }

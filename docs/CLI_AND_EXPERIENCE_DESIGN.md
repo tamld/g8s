@@ -33,7 +33,7 @@ $ g8s init
 🛡️ Welcome to g8s (The Gatekeepers) Setup Wizard!
 
 [1/3] Probing installed AI worker backends...
-  ✓ Found Antigravity CLI: /usr/local/bin/agy (Gemini 3.7 Flash)
+  ✓ Found Antigravity CLI: /usr/local/bin/agy (Gemini 3.8 Flash (High))
   ✓ Found Claude CLI:      /usr/local/bin/claude (Claude 3.5 Haiku)
   ✗ Ollama Local Backend:  Not found (Optional)
 

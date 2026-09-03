@@ -66,7 +66,7 @@ func TestRunSpawnsNWorktrees(t *testing.T) {
 		Brief:   "Implement dual-blind design workflow",
 		N:       3,
 		BaseDir: tempDir,
-		Model:   "gemini-3.7-flash-high",
+		Model:   "gemini-3.8-flash-high",
 		Timeout: 30 * time.Second,
 		Worker:  worker,
 	}

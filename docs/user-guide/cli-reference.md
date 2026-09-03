@@ -25,7 +25,7 @@ g8s submit \
   --role "collector" \
   --permission "read_only" \
   --add-dir "." \
-  --model "gemini-3.7-flash-high" \
+  --model "gemini-3.8-flash-high" \
   --priority 10 \
   --max-attempts 3
 ```
@@ -41,7 +41,7 @@ g8s submit \
 | `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). *(Arrives in v0.2.0 via PR #51)* |
 | `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. *(Arrives in v0.2.0 via PR #51)* |
 | `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
-| `--model` | `string` | `"gemini-3.7-flash-high"` | Target worker model identifier. |
+| `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
 

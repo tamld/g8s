@@ -34,5 +34,5 @@ g8s submit \
   --prompt "Analyze project architecture and generate dependency graph" \
   --role "scout" \
   --permission "read_only" \
-  --model "gemini-3.7-flash-high"
+  --model "gemini-3.8-flash-high"
 ```

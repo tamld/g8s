@@ -45,6 +45,8 @@ type taskRequest struct {
 	AddDirs     []string `json:"add_dirs"`
 	NoSandbox   bool     `json:"no_sandbox"`
 	SkipPermiss bool     `json:"skip_permissions"`
+	// Effort is the reasoning-effort level passed to the worker CLI via --effort.
+	Effort string `json:"effort,omitempty"`
 
 	// ResultMode selects the result-envelope contract per DELTA-10 R4:
 	// "" (default) wraps the child in g8s internal wrap-exec which writes
@@ -290,7 +292,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return nil, fmt.Errorf("decode task request: %w", uerr)
 	}
 	if req.Model == "" {
-		req.Model = "gemini-3.7-flash-high"
+		req.Model = "gemini-3.8-flash-high"
 	}
 	if req.Role == "" {
 		req.Role = dispatch.DefaultRole
@@ -603,6 +605,7 @@ func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) [
 		AddDirs:         req.AddDirs,
 		SkipPermissions: req.SkipPermiss,
 		NoSandbox:       noSandbox,
+		Effort:          req.Effort,
 	})
 }
 

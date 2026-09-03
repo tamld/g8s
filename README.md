@@ -103,7 +103,7 @@ g8s submit \
   --role scout \
   --permission read_only \
   --add-dir ./src \
-  --model gemini-3.7-flash-high \
+  --model gemini-3.8-flash-high \
   --timeout 60s \
   --payload '{"prompt": "Scan ./src for MCP server candidate implementations and return JSON."}'
 ```
@@ -130,7 +130,7 @@ g8s submit \
   --role test-runner \
   --permission workspace_write \
   --add-dir ./tests \
-  --model gemini-3.7-flash-high \
+  --model gemini-3.8-flash-high \
   --timeout 120s \
   --payload '{"prompt": "Generate pytest test cases for user authentication.", "receipt_id": "<receipt_id>", "receipt_issuer": "opus-session-01", "allowed_paths": ["./tests/*.py"]}'
 ```

@@ -19,7 +19,7 @@ func TestBuildWorkerArgv(t *testing.T) {
 	opts := BuildWorkerArgvOptions{
 		Binary:          "/usr/local/bin/g8s-worker",
 		PromptFile:      promptPath,
-		Model:           "gemini-3.7-flash-high",
+		Model:           "gemini-3.8-flash-high",
 		AddDirs:         []string{"/tmp/workspace"},
 		SkipPermissions: true,
 	}
@@ -28,7 +28,7 @@ func TestBuildWorkerArgv(t *testing.T) {
 	want := []string{
 		"/usr/local/bin/g8s-worker",
 		"--prompt", "run collector task",
-		"--model", "gemini-3.7-flash-high",
+		"--model", "gemini-3.8-flash-high",
 		"--add-dir", "/tmp/workspace",
 		"--dangerously-skip-permissions",
 		"--sandbox",
@@ -118,7 +118,7 @@ func TestBuildWorkerArgvAgreesWithAgyCLI(t *testing.T) {
 
 	args := BuildWorkerArgv(BuildWorkerArgvOptions{
 		PromptFile: "/tmp/test-prompt.md",
-		Model:      "gemini-3.7-flash-high",
+		Model:      "gemini-3.8-flash-high",
 	})
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "--") && arg != "--prompt" {

@@ -223,11 +223,11 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 				{
 					"name":  "agy",
 					"class": "platform_dispatch",
-					"models": []map[string]any{
-						{
-							"id": "gemini-3.7-flash-high",
-						},
+				"models": []map[string]any{
+					{
+						"id": "gemini-3.8-flash-high",
 					},
+				},
 					"slots": 8,
 					"args": []string{
 						"agy",
