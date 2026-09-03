@@ -625,3 +625,90 @@ func TestVersionStamp(t *testing.T) {
 		t.Fatalf("expected non-empty build_time in version JSON data")
 	}
 }
+
+func TestStderrFailureOutput(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	envVars := append(os.Environ(), "G8S_DB="+dbPath)
+
+	tests := []struct {
+		name           string
+		args           []string
+		env            []string
+		wantExitCode   int
+		wantStderrCont string
+		wantNoStdout   bool
+	}{
+		{
+			name:           "submit no args text mode -> envelope to stderr",
+			args:           []string{"submit", "--json=false"},
+			env:            envVars,
+			wantExitCode:   2,
+			wantStderrCont: `kind": "error`,
+			wantNoStdout:   true,
+		},
+		{
+			name:           "submit no args json mode -> envelope to stderr",
+			args:           []string{"submit"},
+			env:            envVars,
+			wantExitCode:   2,
+			wantStderrCont: `kind": "error`,
+			wantNoStdout:   true,
+		},
+		{
+			name:           "get nonexistent text mode -> envelope error to stderr",
+			args:           []string{"get", "nonexistent-123", "--json=false"},
+			env:            envVars,
+			wantExitCode:   1,
+			wantStderrCont: `kind": "error`,
+			wantNoStdout:   true,
+		},		{
+			name:           "get nonexistent json mode -> envelope to stderr",
+			args:           []string{"get", "nonexistent-123", "--json"},
+			env:            envVars,
+			wantExitCode:   1,
+			wantStderrCont: `kind": "error`,
+			wantNoStdout:   true,
+		},
+		{
+			name:           "unknown command text mode -> envelope error to stderr",
+			args:           []string{"notacommand", "--json=false"},
+			env:            envVars,
+			wantExitCode:   2,
+			wantStderrCont: `kind": "error`,
+			wantNoStdout:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(binPath, tc.args...)
+			cmd.Env = tc.env
+
+			var stdoutBuf, stderrBuf bytes.Buffer
+			cmd.Stdout = &stdoutBuf
+			cmd.Stderr = &stderrBuf
+
+			err := cmd.Run()
+			exitCode := 0
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+
+			if exitCode != tc.wantExitCode {
+				t.Fatalf("exit code: got %d, want %d\nstdout: %s\nstderr: %s", exitCode, tc.wantExitCode, stdoutBuf.String(), stderrBuf.String())
+			}
+
+			stderr := stderrBuf.String()
+			stdout := stdoutBuf.String()
+
+			if tc.wantStderrCont != "" && !strings.Contains(stderr, tc.wantStderrCont) {
+				t.Fatalf("stderr missing %q:\nstderr: %s\nstdout: %s", tc.wantStderrCont, stderr, stdout)
+			}
+			if tc.wantNoStdout && strings.TrimSpace(stdout) != "" {
+				t.Fatalf("expected empty stdout but got: %q\nstderr: %s", stdout, stderr)
+			}
+		})
+	}
+}

@@ -53,10 +53,7 @@ func runSubmit(args []string) {
 	}
 
 	if *key == "" || prompt == "" {
-		if *jsonMode || *jsonl {
-			exitUsage("submit", "", *traceID, "submit requires --idempotency-key and prompt (via --prompt, --prompt-file, or stdin)", "Provide both --idempotency-key and prompt", *jsonl)
-		}
-		failUsage("submit requires --idempotency-key and prompt (via --prompt, --prompt-file, or stdin)")
+		exitUsage("submit", "", *traceID, "submit requires --idempotency-key and prompt (via --prompt, --prompt-file, or stdin)", "Provide both --idempotency-key and prompt", *jsonl)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

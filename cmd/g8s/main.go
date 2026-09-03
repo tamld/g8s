@@ -54,7 +54,7 @@ func exitUsage(cmd, sub, traceID, msg, hint string, jsonl bool) {
 		traceID = cli.GenerateTraceID()
 	}
 	env := cli.NewErrorEnvelope(cmd, sub, traceID, cli.CodeUsage, msg, hint, "")
-	_ = cli.WriteResponse(os.Stdout, env, jsonl)
+	_ = cli.WriteResponse(os.Stderr, env, jsonl)
 	os.Exit(2)
 }
 
@@ -70,7 +70,7 @@ func exitRuntime(cmd, sub, traceID, code string, err error, hint string, jsonl b
 		msg = err.Error()
 	}
 	env := cli.NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, "")
-	_ = cli.WriteResponse(os.Stdout, env, jsonl)
+	_ = cli.WriteResponse(os.Stderr, env, jsonl)
 	os.Exit(1)
 }
 
