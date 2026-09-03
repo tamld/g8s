@@ -11,10 +11,14 @@ func BenchmarkHasSuffix(b *testing.B) {
 		"another/path/without/suffix",
 		"very/long/path/with/a/lot/of/characters/to/make/lowercasing/expensive.bat",
 	}
+	b.ReportAllocs()
+	var localSink bool
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, c := range cases {
-			benchSink = hasSuffix(c)
+			localSink = hasSuffix(c)
 		}
 	}
+	b.StopTimer()
+	benchSink = localSink
 }
