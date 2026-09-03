@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-04
+
+### Changed
+- **agy worker default model upgraded** from `Gemini 3.7 Flash (High)` to `Gemini 3.8 Flash (High)` across all dispatch paths (CLI `submit`/`orchestrate`/`orchestrate_aic`, initwiz, conv runner, provider registry, control-plane default, dispatcher, worker supervisor)
+- **agy `--effort high` injected** by default into every worker argv via new `dispatch.DefaultEffort = "high"` constant; overridable per-task via worker `taskRequest.Effort` and CLI `--effort` flag
+
 ## [0.5.0] - 2026-08-30
 
 ### Added
