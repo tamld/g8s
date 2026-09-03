@@ -39,9 +39,13 @@ func parseBriefContent(content, fallbackTitle string) (title, payload, dod strin
 	var dodLines []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "## dod") || strings.HasPrefix(lower, "### dod") ||
-			strings.HasPrefix(lower, "## definition of done") || strings.HasPrefix(lower, "### definition of done") {
+
+		isDoD := (len(trimmed) >= 6 && strings.EqualFold(trimmed[:6], "## dod")) ||
+			(len(trimmed) >= 7 && strings.EqualFold(trimmed[:7], "### dod")) ||
+			(len(trimmed) >= 21 && strings.EqualFold(trimmed[:21], "## definition of done")) ||
+			(len(trimmed) >= 22 && strings.EqualFold(trimmed[:22], "### definition of done"))
+
+		if isDoD {
 			inDoD = true
 			continue
 		}
