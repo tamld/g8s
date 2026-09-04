@@ -211,20 +211,20 @@ func (a *Analyzer) aggregateSymbolsImpact(relTarget, absTarget string, symbols [
 				return nil
 			}
 
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			// ⚡ Bolt Optimization: Use bytes.Contains/Count to avoid allocating a massive string from the file data
-			for _, sym := range symbols {
-				symBytes := []byte(sym)
-				if bytes.Contains(data, symBytes) {
-					count := bytes.Count(data, symBytes)
-					affectedMap[relPath] += count
-					directCallers = append(directCallers, fmt.Sprintf("%s:%s (%d refs)", relPath, sym, count))
-				}
-			}
+data, err := os.ReadFile(path)
+		if err != nil {
 			return nil
+		}
+		// ⚡ Bolt Optimization: Use bytes.Contains/Count to avoid allocating a massive string from the file data
+		for _, sym := range symbols {
+			symBytes := []byte(sym)
+			if bytes.Contains(data, symBytes) {
+				count := bytes.Count(data, symBytes)
+				affectedMap[relPath] += count
+				directCallers = append(directCallers, fmt.Sprintf("%s:%s (%d refs)", relPath, sym, count))
+			}
+		}
+		return nil
 		})
 	}
 
