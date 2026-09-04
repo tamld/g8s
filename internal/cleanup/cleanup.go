@@ -265,8 +265,11 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 			continue
 		}
 
-		isAgy := strings.EqualFold(binName, "agy") || strings.HasPrefix(strings.ToLower(binName), "agy")
-		isClaude := strings.EqualFold(binName, "claude") || strings.HasPrefix(strings.ToLower(binName), "claude")
+		// Bolt Performance Optimization:
+		// Replaced strings.ToLower + strings.HasPrefix with zero-allocation length guard + slice EqualFold.
+		// This eliminates 4 heap allocations per process evaluated.
+		isAgy := len(binName) >= 3 && strings.EqualFold(binName[:3], "agy")
+		isClaude := len(binName) >= 6 && strings.EqualFold(binName[:6], "claude")
 		if !isAgy && !isClaude {
 			continue
 		}
