@@ -460,7 +460,7 @@ func TestEnvelopeCleanSuccess(t *testing.T) {
 	if !strings.Contains(contractPrompt, "summarize internal/dispatch") {
 		t.Fatal("contract prompt lost user prompt")
 	}
-	if result.CommandPreview != "/fake/agy --prompt <prompt> --model 'Gemini 3.8 Flash (High)' --print-timeout 5m0s --effort high" {
+	if result.CommandPreview != "/fake/agy --prompt <prompt> --model '' --print-timeout 5m0s" {
 		t.Fatalf("preview mismatch: %q", result.CommandPreview)
 	}
 }

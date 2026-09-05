@@ -375,7 +375,7 @@ func runOrchestrate(args []string) {
 	dod := fs.String("dod", "", "optional DoD for brief (overrides DoD in file)")
 	fromIntent := fs.String("from-intent", "", "free-text natural language intent")
 	fromFile := fs.String("from-file", "", "path to file containing natural language intent")
-	model := fs.String("model", "gemini-3.8-flash-high", "target worker model")
+	model := fs.String("model", "", "target worker model (defaults to first ready provider's first model)")
 	providerName := fs.String("provider", "agy", "agent provider backend (e.g. agy, codex, claude, ollama)")
 	role := fs.String("role", "collector", "worker role contract")
 	permission := fs.String("permission", "read_only", "permission profile")

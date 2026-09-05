@@ -322,8 +322,15 @@ func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 	defer r.mu.Unlock()
 
 	for _, entry := range file.Providers {
-		if _, exists := r.states[entry.Name]; exists {
-			return fmt.Errorf("duplicate provider name %q", entry.Name)
+		entry := entry
+		if existing, exists := r.states[entry.Name]; exists {
+			// DELTA-10 R3: same-name providers.json entry replaces the
+			// built-in baseline so operators can override class/base
+			// URL/auth without editing source. Reject only when the
+			// replacement is structurally incompatible.
+			if existing.cfg.Class != entry.Class {
+				return fmt.Errorf("provider %q: class mismatch (built-in %s vs config %s)", entry.Name, existing.cfg.Class, entry.Class)
+			}
 		}
 		models := make([]ModelDescriptor, 0, len(entry.Models))
 		for _, m := range entry.Models {

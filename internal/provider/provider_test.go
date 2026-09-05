@@ -366,21 +366,51 @@ func TestLoadProvidersJSONMergesApiCallEntries(t *testing.T) {
 	}
 }
 
-func TestLoadProvidersJSONRejectsDuplicateNames(t *testing.T) {
+func TestLoadProvidersJSONSameNameSameClassReplaces(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server1.Close()
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server2.Close()
+	content1 := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server1.URL + `","auth_env":"","models":[{"id":"m1"}],"slots":1}]}`
+	content2 := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server2.URL + `","auth_env":"","models":[{"id":"m2"}],"slots":2}]}`
+	os.WriteFile(path, []byte(content1), 0o600)
+
+	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(content2), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if err := r.LoadProvidersJSON(path); err != nil {
+		t.Fatalf("second load should replace, got error: %v", err)
+	}
+	if _, err := r.GetProvider("dup"); err != nil {
+		t.Errorf("provider 'dup' not registered after override: %v", err)
+	}
+}
+
+func TestLoadProvidersJSONSameNameDifferentClassErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "providers.json")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
-	content := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server.URL + `","auth_env":"","models":[{"id":"m"}],"slots":1}]}`
+	content := `{"providers":[{"class":"api_call","name":"clash","base_url":"` + server.URL + `","auth_env":"","models":[{"id":"m"}],"slots":1}]}`
 	os.WriteFile(path, []byte(content), 0o600)
 
 	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("first load: %v", err)
 	}
-	err := r.LoadProvidersJSON(path)
-	if err == nil || !strings.Contains(err.Error(), "duplicate provider name") {
-		t.Fatalf("want duplicate error, got %v", err)
+	conflict := `{"providers":[{"class":"platform_dispatch","name":"clash","binary":"/usr/bin/clash","models":[],"slots":1}]}`
+	if err := os.WriteFile(path, []byte(conflict), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if err := r.LoadProvidersJSON(path); err == nil {
+		t.Fatalf("expected class conflict error, got nil")
 	}
 }
 

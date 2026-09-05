@@ -300,6 +300,7 @@ func TestOrchestratePollingFlags(t *testing.T) {
 	out := captureStdout(t, func() {
 		runOrchestrate([]string{
 			"--self-test",
+			"--model", "gemini-3.8-flash-high",
 			"--silence-threshold", "5m",
 			"--no-poll",
 			"--json",
