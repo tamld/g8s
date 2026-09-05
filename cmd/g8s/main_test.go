@@ -663,7 +663,7 @@ func TestStderrFailureOutput(t *testing.T) {
 			wantExitCode:   1,
 			wantStderrCont: `kind": "error`,
 			wantNoStdout:   true,
-		},		{
+		}, {
 			name:           "get nonexistent json mode -> envelope to stderr",
 			args:           []string{"get", "nonexistent-123", "--json"},
 			env:            envVars,
