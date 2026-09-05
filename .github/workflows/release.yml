@@ -1,7 +1,7 @@
 # Release automation for g8s.
 #
 # Triggered by annotated SemVer tag pushes (e.g. v0.1.0, v0.2.0-rc.1).
-# Verifies the tag matches the Version constant baked into cmd/g8s/main.go,
+# Verifies the tag matches the Version constant baked into cmd/g8s/version.go,
 # runs the full build + test suite, then publishes cross-platform archives
 # and a GitHub Release via GoReleaser.
 #
@@ -24,8 +24,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build, verify, and publish
+  verify:
+    name: Verify tag and run full test suite
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -47,19 +47,118 @@ jobs:
           SRC_VERSION="$(grep -o 'Version = "[^"]*"' cmd/g8s/version.go | cut -d'"' -f2)"
           echo "tag version : ${TAG_VERSION}"
           echo "src  version: ${SRC_VERSION}"
-          if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]; then
+          if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]]; then
             echo "::error::Tag ${TAG_NAME} does not match cmd/g8s/version.go Version '${SRC_VERSION}'."
             exit 1
           fi
 
-      - name: Build all packages
-        run: go build ./...
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "::error::The following files are not gofmt'd:"
+            gofmt -l .
+            exit 1
+          fi
 
-      - name: Run test suite
+      - name: Vet (Zero-CGO)
+        env:
+          CGO_ENABLED: '0'
+        run: go vet ./...
+
+      - name: Test plain build (Zero-CGO)
+        env:
+          CGO_ENABLED: '0'
         run: go test -count=1 ./...
 
-      - name: Run race detector on internal packages
+      - name: Test race detector
+        env:
+          CGO_ENABLED: '1'
         run: go test -race -count=1 ./internal/...
+
+      - name: Build smoke (all packages, including cmd/g8s which has no tests)
+        env:
+          CGO_ENABLED: '0'
+        run: go build ./...
+
+  build-darwin:
+    name: Build darwin/amd64 + darwin/arm64 archives
+    runs-on: macos-latest
+    needs: verify
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+
+      - name: Build darwin binaries
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=darwin GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/g8s-darwin-${arch} ./cmd/g8s
+            (cd dist && zip g8s-darwin-${arch}.zip g8s-darwin-${arch})
+          done
+
+      - name: Upload darwin artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: g8s-darwin
+          path: dist/*.zip
+          retention-days: 7
+
+  build-windows:
+    name: Build windows/amd64 + windows/arm64 archives
+    runs-on: windows-latest
+    needs: verify
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+
+      - name: Build windows binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=windows GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/g8s-windows-${arch}.exe ./cmd/g8s
+            (cd dist && zip g8s-windows-${arch}.zip g8s-windows-${arch}.exe)
+          done
+
+      - name: Upload windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: g8s-windows
+          path: dist/*.zip
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release with Linux archives
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
 
       - name: Publish release via GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -71,27 +170,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-      - name: Sign Windows binaries
-        if: matrix.goos == 'windows-latest' && env.HAS_CERT == 'true'
-        shell: pwsh
-        run: |
-          signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a /f ${{ env.CERT_PATH }} ./dist/*.exe
-          signtool verify /pa ./dist/*.exe
-
-      - name: Skip signing (no cert)
-        if: matrix.goos == 'windows-latest' && env.HAS_CERT != 'true'
-        run: echo "No signing cert available; skipping"
-
   notarize-macos:
+    name: Notarize macOS binaries (Apple ID required)
     runs-on: macos-latest
     needs: build-darwin
     if: ${{ env.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v5
-      - name: Download artifact
-        uses: actions/download-artifact@v5
+      - name: Download darwin artifacts
+        uses: actions/download-artifact@v7
         with:
           name: g8s-darwin
+
       - name: Notarize
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -104,17 +193,18 @@ jobs:
             --team-id "$APPLE_TEAM_ID"
           for f in *.zip; do
             ditto -xk --keepparent "$f" extracted
-            xcrun notarytool submit extracted/g8s \
+            xcrun notarytool submit extracted/g8s-darwin-* \
               --keychain-profile "notarytool-profile" \
               --wait
-            xcrun stapler staple extracted/g8s
+            xcrun stapler staple extracted/g8s-darwin-*
             ditto -c --keepparent extracted "${f%.zip}-notarized.zip"
             rm -rf extracted
           done
           mv *-notarized.zip g8s-darwin-notarized.zip
-      - uses: actions/upload-artifact@v5
+
+      - name: Upload notarized artifacts
+        uses: actions/upload-artifact@v7
         with:
           name: g8s-darwin-notarized
           path: g8s-darwin-notarized.zip
-
-
+          retention-days: 7
