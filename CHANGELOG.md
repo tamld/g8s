@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-05
+
+### Added
+- **Dynamic Provider Manifest** (#214 spec, `internal/provider/{catalog,openai}.go`): model identity becomes runtime data instead of hardcoded constants. Built-in 5-entry catalog (agy, claude, codex, ollama, 9router) drives `g8s providers recommend` and auto-detect. Removed all hardcoded `DefaultModel`/`DefaultEffort` constants and CLI `--model` flag defaults; users supply providers via `~/.config/g8s/providers.json` per spec §4.
+- **9router OpenAI-compatible HTTP adapter** (`internal/provider/openai.go`): Chat Completions POST driver (sync blocking). Used by 9router gateway and any other OpenAI-compatible endpoint. Tokens via env (`OPENAI_API_KEY`), never inline.
+- **Multi-Tier Code Intelligence** (DELTA-20, PR #260, `internal/codeintel/`): `Adapter` interface + `MultiTierRouter` cascade + Tier 0 `ASTAdapter` (go/ast + literal scanner, 100% Pure Go, Zero-CGO). Tier 0.5 (Go SSA), Tier 1 (LSP), Tier 2 (Tree-sitter/canopy) scaffolded but not yet implemented.
+- **OpenAI provider test suite** (PR #261, `internal/provider/openai_test.go`): 144 lines covering HTTP client, auth header construction, error propagation.
+- **CI dogfood self-test gate** (`ci.yml`, `.opencode/memory/dogfood-gap.md`): exercises built g8s binary (`version --json`, `--help`) on every PR/push. Documents OpenCode-session vs g8s-submit dogfood gap as accepted compromise until v0.8.0 Concern A and v0.9.0 telemetry unify audit surface.
+
+### Changed
+- **Provider registry override semantics** (`internal/provider/provider.go`): `LoadProvidersJSON` now allows same-name same-class replacement (DELTA-10 R3); class conflicts still error. Different-class same-name returns error to prevent accidental type drift.
+
 ## [0.6.1] - 2026-09-04
 
 ### Changed
@@ -142,11 +154,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Cross-platform test portability: macOS `/var` → `/private/var` symlink resolution in
   canonical-path assertions, POSIX-permission assertions gated off on Windows, and
-  Windows stat-mode false positives in world-writable checks.
-- Worker output-capture file handles are closed before removal, fixing a Windows sharing
-  violation that left `worker.stdout`/`worker.stderr` behind.
-- Bulk receipt-issuing timing budget relaxed to tolerate slower CI runners while still
-  detecting pathological regressions.
-
-[Keep a Changelog]: https://keepachangelog.com/en/1.1.0/
-[Semantic Versioning]: https://semver.org/spec/v2.0.0.html
