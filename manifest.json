@@ -168,6 +168,12 @@
       "title": "DX/AX Experience, Interactive Onboarding Wizard & Self-Healing Auto-Remediation",
       "path": "spec/openspec/13-dx-ax-init-and-autorepair-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-20",
+      "title": "Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius",
+      "path": "spec/openspec/20-code-intel-adapter-spec.md",
+      "status": "PROPOSED"
     }
   ],
   "milestones": {
