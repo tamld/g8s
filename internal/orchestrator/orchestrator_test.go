@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -128,6 +129,8 @@ func TestPoolConcurrentAcquire(t *testing.T) {
 	repo := setupGitRepo(t)
 	root := filepath.Join(t.TempDir(), "wtpool")
 
+	// Windows CI runners can be slow, making 200ms insufficient for 8 goroutines
+	// Use a WaitGroup to ensure all acquires have completed instead of time.Sleep
 	pool, err := NewPool(PoolOptions{Repo: repo, Root: root, Prefix: "race"})
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
@@ -136,9 +139,12 @@ func TestPoolConcurrentAcquire(t *testing.T) {
 
 	const n = 8
 	ids := make([]string, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
 	for i := 0; i < n; i++ {
 		i := i
 		go func() {
+			defer wg.Done()
 			wt, err := pool.Acquire(ctx, "task-"+string(rune('a'+i)))
 			if err != nil {
 				t.Errorf("acquire %d: %v", i, err)
@@ -147,9 +153,7 @@ func TestPoolConcurrentAcquire(t *testing.T) {
 			ids[i] = wt.ID
 		}()
 	}
-	// wait via small sleep; tests run sequentially otherwise this races
-	// with the goroutines. OK for a smoke test under -race.
-	time.Sleep(200 * time.Millisecond)
+	wg.Wait()
 	if len(pool.Active()) != n {
 		t.Fatalf("expected %d active, got %d", n, len(pool.Active()))
 	}
