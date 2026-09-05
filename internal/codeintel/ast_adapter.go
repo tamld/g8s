@@ -87,7 +87,6 @@ func (a *ASTAdapter) References(_ context.Context, file string, symbol string) (
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("walk dir: %w", err)
 	}

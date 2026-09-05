@@ -19,14 +19,16 @@ type mockAdapter struct {
 	diagErr      error
 }
 
-func (m *mockAdapter) Name() string                     { return m.name }
-func (m *mockAdapter) Capabilities() Capabilities       { return m.capabilities }
+func (m *mockAdapter) Name() string               { return m.name }
+func (m *mockAdapter) Capabilities() Capabilities { return m.capabilities }
 func (m *mockAdapter) References(_ context.Context, _ string, _ string) ([]Location, error) {
 	return m.refLocations, m.refErr
 }
+
 func (m *mockAdapter) CallHierarchy(_ context.Context, _ string, _ string) (*CallTree, error) {
 	return m.callTree, m.callErr
 }
+
 func (m *mockAdapter) Diagnostics(_ context.Context, _ string) ([]Diagnostic, error) {
 	return m.diagnostics, m.diagErr
 }
@@ -206,4 +208,3 @@ func BenchmarkASTAdapter_Diagnostics(b *testing.B) {
 		_, _ = adapter.Diagnostics(ctx, filePath)
 	}
 }
-
