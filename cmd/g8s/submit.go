@@ -22,7 +22,7 @@ func runSubmit(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
-	model := fs.String("model", "", "target worker model (defaults to first ready provider's first model)")
+	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to gemini-3.8-flash-high)")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
@@ -80,9 +80,14 @@ func runSubmit(args []string) {
 	}
 	defer store.Close()
 
+	effectiveModel := *model
+	if effectiveModel == "" {
+		effectiveModel = "gemini-3.8-flash-high"
+	}
+
 	payloadMap := map[string]any{
 		"prompt":     prompt,
-		"model":      *model,
+		"model":      effectiveModel,
 		"role":       *role,
 		"permission": *permission,
 		"timeout":    *timeout,
@@ -110,7 +115,7 @@ func runSubmit(args []string) {
 		ParentTaskID:   parentIDPtr,
 		Priority:       *priority,
 		MaxAttempts:    *maxAttempts,
-		Model:          *model,
+		Model:          effectiveModel,
 		Payload:        payload,
 		Role:           *role,
 		Permission:     *permission,
