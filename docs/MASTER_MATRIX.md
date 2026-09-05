@@ -89,16 +89,31 @@
 
 ---
 
-## 5. Strategic 5-Phase Evolution Roadmap
+## 5. Strategic Evolution Roadmap (v0.6.1 snapshot)
 
 ```
- v0.1.0-alpha          v0.1.0-beta             v0.1.0                 v0.5.0                 v1.0.0
- (Foundation)         (Capabilities)        (Public Launch)     (Distributed Fleet)     (Enterprise GA)
-      │                     │                     │                     │                     │
-      ├─────────────────────┼─────────────────────┼─────────────────────┼─────────────────────┤
-      ▼                     ▼                     ▼                     ▼                     ▼
-• Pure-Go Harness     • 1:N Governor        • LSP Blast Radius    • Remote Nodes via    • Formal Security
-• SQLite WAL Queue    • Stdio MCP Server    • Multi-OS Daemons      mTLS / Tailscale      Audit Signoff
-• Write Receipts      • AGY/Claude/Gemini   • Homebrew & Releases • Distributed Locks   • CNCF / Linux
-• 38 Parity Tests     • Ollama Integration  • Public GitHub Repo  • Multi-Host Fleet      Foundation
+  M1-M3 (DONE)         M4 (CURRENT)         M5 (NEXT)              M6 (FUTURE)              v1.0.0 GA
+  Foundation+CP+MCP   v0.6.1                Robustness+Evals       Distributed Fleet         Enterprise GA
+       │                  │                     │                      │                       │
+       ├──────────────────┼─────────────────────┼──────────────────────┼───────────────────────┤
+       ▼                  ▼                     ▼                      ▼                       ▼
+• Pure-Go Harness    • Gemini 3.8 Flash    • Closed-Loop          • Remote Worker Nodes    • Concern B+C
+• SQLite WAL Queue     (High) Worker         Telemetry (#253)      via mTLS                  landed
+• Write Receipts     • FSM Orchestrator    • Adversarial Eval     • Distributed Locks      • D9 Audit
+• 38 Parity Tests    • Lego Mounts           Harness (#254)        • Enterprise Security      Signoff
+• Stdio MCP Server   • Knowledge Vault     • Provider Reliability   Signoff                 • CNCF / Linux
+• OS Daemons           FTS5 (DELTA-11)       Index (PRI)                                       Foundation
+• DX Init Wizard     • Two-Tier Orch.
 ```
+
+### 5.1 Version Train (v0.6.1 → v1.0.0)
+
+| Version | Theme | Scope | Source |
+|---|---|---|---|
+| **v0.6.1** | Released 2026-09 | 3.8 Flash upgrade, effort injection, dual-remote release | tag `v0.6.1` |
+| **v0.7.0** | Dynamic Provider | Config-driven model manifest, 9router adapter, `g8s providers` subcommand | spec `docs/superpowers/specs/2026-09-04-dynamic-provider-manifest-design.md` |
+| **v0.8.0** | Concern A | Supervisor-driven fix loop (planner, enforcer, reviewer, RCA, escalator, metrics) | `docs/goals/g8s-orchestration-roadmap` T020 |
+| **v0.8.1** | Governance | DoR/DoD overhaul, roadmap refresh, Iron Laws cross-ref | #255 |
+| **v0.9.0** | Robustness+Evals | Closed-loop telemetry events+query (#253, scope-reduced), adversarial probe catalog + `g8s eval` stub (#254, scope-reduced) | #253, #254 |
+| **v0.9.1** | M5 deferred | Pre-flight injection (telemetry → brief), pre-flight hook (probes → registration) | #253, #254 follow-ups |
+| **v1.0.0** | GA | Concern B (receipt evolution), Concern C (optimizer), D9 formal audit | charter + #241 |
