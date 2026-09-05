@@ -10,3 +10,6 @@
 ## 2025-08-29 - Avoid strings.Builder and rune slice casting for simple substring extraction
 **Learning:** Using `strings.Builder` and converting a string to `[]rune` to extract a substring by rune indexes allocates multiple times: once for the rune slice, and again for `builder.String()`. We can bypass this by tracking the starting index and byte size of the runes using `utf8.DecodeRuneInString` and slicing the original string directly, avoiding multiple allocations.
 **Action:** Use `utf8.DecodeRuneInString` inside a loop over a string to find accurate slice bounds for multibyte characters rather than casting the string to a rune slice or relying on a builder, and slice the original string.
+## 2025-02-18 - Avoid strings.ToLower for Prefix Checks in Loops
+**Learning:** Using `strings.ToLower()` followed by `strings.HasPrefix()` or `strings.HasSuffix()` in tight loops (like process scanning) causes unnecessary heap allocations on every iteration.
+**Action:** Use a length guard and `strings.EqualFold()` on a string slice (e.g., `len(s) >= 3 && strings.EqualFold(s[:3], "foo")`) for a zero-allocation case-insensitive comparison.
