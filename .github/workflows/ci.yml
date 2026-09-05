@@ -65,6 +65,20 @@ jobs:
       - name: Build smoke (all packages, including cmd/g8s which has no tests)
         run: go build ./...
 
+      - name: Dogfood self-test (g8s exercises itself)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="$(mktemp -d)/g8s"
+          go build -o "$BIN" ./cmd/g8s
+          # Exercise built binary without invoking a real worker. This catches:
+          # binary entry-point regressions, subcommand routing breaks, and JSON
+          # envelope contract drift that go test alone misses. Worker dispatch
+          # (agy/9router) is intentionally NOT invoked here — those require
+          # network access and live credentials which CI does not have.
+          "$BIN" version --json >/dev/null
+          "$BIN" --help >/dev/null
+
       - name: Build Windows Installers (NSIS & WiX MSI)
         if: matrix.os == 'windows-latest'
         shell: bash
