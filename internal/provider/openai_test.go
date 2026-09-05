@@ -67,8 +67,8 @@ func TestOpenAIProvider_SpawnSuccess(t *testing.T) {
 
 	p := NewOpenAIProvider("test-ai", srv.URL, "")
 	spec := Spec{
-		Model:  "gpt-4o-mini",
-		Brief:  "Review this module",
+		Model:   "gpt-4o-mini",
+		Brief:   "Review this module",
 		Timeout: 5 * time.Second,
 	}
 
