@@ -234,11 +234,30 @@ func runPermissions(args []string) {
 
 // runProviders lists detected AI agent CLI providers and their availability status.
 func runProviders(args []string) {
-	fs := flag.NewFlagSet("providers", flag.ExitOnError)
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		runProvidersList(args)
+		return
+	}
+	switch args[0] {
+	case "list":
+		runProvidersList(args[1:])
+	case "recommend":
+		runProvidersRecommend(args[1:])
+	case "init":
+		runProvidersInit(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown providers subcommand: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, "Run 'g8s providers' for usage.")
+		os.Exit(2)
+	}
+}
+
+func runProvidersList(args []string) {
+	fs := flag.NewFlagSet("providers list", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args); err != nil {
-		exitUsage("providers", "", *traceID, err.Error(), "", *jsonl)
+		exitUsage("providers list", "", *traceID, err.Error(), "", *jsonl)
 	}
 
 	reg := provider.NewRegistry()
@@ -248,7 +267,7 @@ func runProviders(args []string) {
 		env := cli.NewEnvelope("providers_list", "providers", "", statuses)
 		env.TraceID = *traceID
 		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
-			exitRuntime("providers", "", *traceID, cli.CodeIO, err, "", *jsonl)
+			exitRuntime("providers list", "", *traceID, cli.CodeIO, err, "", *jsonl)
 		}
 		return
 	}
@@ -265,6 +284,105 @@ func runProviders(args []string) {
 		td = append(td, []string{st.Name, st.Status, bin, detail})
 	}
 	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+}
+
+func runProvidersRecommend(args []string) {
+	fs := flag.NewFlagSet("providers recommend", flag.ExitOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		exitUsage("providers recommend", "", *traceID, err.Error(), "", *jsonl)
+	}
+
+	reg := provider.NewRegistry()
+	cat := reg.Recommend(context.Background())
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("providers_recommend", "providers", "", cat)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("providers recommend", "", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		return
+	}
+
+	fmt.Println("Built-in provider catalog:")
+	for _, c := range cat {
+		fmt.Printf("\n  %s  [%s]\n", c.Name, c.Class)
+		fmt.Printf("    %s\n", c.Description)
+		if c.BaseURL != "" {
+			fmt.Printf("    base_url: %s\n", c.BaseURL)
+		}
+		if c.AuthEnv != "" {
+			fmt.Printf("    auth_env: %s\n", c.AuthEnv)
+		}
+		if len(c.Models) > 0 {
+			fmt.Printf("    models:   %v\n", c.Models)
+		}
+		fmt.Printf("    install:  %s\n", c.InstallHint)
+	}
+}
+
+func runProvidersInit(args []string) {
+	fs := flag.NewFlagSet("providers init", flag.ExitOnError)
+	output := fs.String("output", "", "output path (default: $XDG_CONFIG_HOME/g8s/providers.json or ~/.config/g8s/providers.json)")
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		exitUsage("providers init", "", *traceID, err.Error(), "", *jsonl)
+	}
+
+	if *output == "" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			exitRuntime("providers init", "", *traceID, cli.CodeIO, fmt.Errorf("locate config dir: %w", err), "", *jsonl)
+		}
+		*output = filepath.Join(dir, "g8s", "providers.json")
+	}
+
+	template := `{
+  "providers": [
+    {
+      "class": "platform_dispatch",
+      "name": "agy",
+      "slots": 4,
+      "models": [
+        {"id": "Gemini 3.8 Flash (High)"}
+      ]
+    },
+    {
+      "class": "api_call",
+      "name": "9router",
+      "base_url": "http://localhost:20128/v1",
+      "auth_env": "OPENAI_API_KEY",
+      "slots": 8,
+      "models": [
+        {"id": "gpt-4o-mini"},
+        {"id": "claude-3.5-sonnet"},
+        {"id": "gemini-2.0-flash"}
+      ]
+    }
+  ]
+}
+`
+
+	if err := os.MkdirAll(filepath.Dir(*output), 0o700); err != nil {
+		exitRuntime("providers init", "", *traceID, cli.CodeIO, fmt.Errorf("create config dir: %w", err), "", *jsonl)
+	}
+	if err := os.WriteFile(*output, []byte(template), 0o600); err != nil {
+		exitRuntime("providers init", "", *traceID, cli.CodeIO, fmt.Errorf("write config: %w", err), "", *jsonl)
+	}
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("providers_init", "providers", "", map[string]string{"path": *output})
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("providers init", "", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		return
+	}
+	fmt.Printf("Wrote starter providers.json to %s\n", *output)
+	fmt.Println("Edit the file to register your fleet; g8s picks it up on next dispatch.")
 }
 
 // runMCPServer serves the stdio JSON-RPC MCP surface until stdin closes.

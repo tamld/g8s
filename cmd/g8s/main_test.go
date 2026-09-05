@@ -237,7 +237,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	}
 
 	// 1. Submit a task
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	submitOut, err := submitCmd.CombinedOutput()
 	if err != nil {
@@ -304,7 +304,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	}
 
 	// Submit second task
-	submitCmd2 := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-2", "--prompt", "failing prompt", "--json")
+	submitCmd2 := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-2", "--prompt", "failing prompt", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd2.Env = envVars
 	submitOut2, err := submitCmd2.CombinedOutput()
 	if err != nil {
@@ -429,7 +429,7 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 		"PATH=" + os.Getenv("PATH"),
 	}
 
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	if out, err := submitCmd.CombinedOutput(); err != nil {
 		t.Fatalf("submit failed: %v\nOutput: %s", err, string(out))
@@ -457,7 +457,7 @@ func TestNoColorInPipe(t *testing.T) {
 	envVars := append(os.Environ(), "G8S_DB="+dbPath)
 
 	// 1. Submit with --json through pipe (exec.Command pipes stdout by default)
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "no-color-task", "--prompt", "test ansi", "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "no-color-task", "--prompt", "test ansi", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	submitOut, err := submitCmd.CombinedOutput()
 	if err != nil {
@@ -488,7 +488,7 @@ func TestSubmitPromptFromFile(t *testing.T) {
 		t.Fatalf("write prompt file: %v", err)
 	}
 
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "file-prompt-task", "--prompt-file", promptFile, "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "file-prompt-task", "--prompt-file", promptFile, "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	submitOut, err := submitCmd.CombinedOutput()
 	if err != nil {
@@ -526,7 +526,7 @@ func TestSubmitPromptFromStdin(t *testing.T) {
 	envVars := append(os.Environ(), "G8S_DB="+dbPath)
 
 	promptContent := "prompt piped through stdin stream"
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "stdin-prompt-task", "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "stdin-prompt-task", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	submitCmd.Stdin = strings.NewReader(promptContent)
 	submitOut, err := submitCmd.CombinedOutput()
@@ -564,7 +564,7 @@ func TestSubmitPromptFileError(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test.db")
 	envVars := append(os.Environ(), "G8S_DB="+dbPath)
 
-	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "bad-file-task", "--prompt-file", "/nonexistent/path/to/prompt.txt", "--json")
+	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "bad-file-task", "--prompt-file", "/nonexistent/path/to/prompt.txt", "--json", "--model", "gemini-3.8-flash-high")
 	submitCmd.Env = envVars
 	out, err := submitCmd.CombinedOutput()
 	if err == nil {

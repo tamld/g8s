@@ -19,8 +19,10 @@ import (
 
 // Defaults mirrored from the Python baseline.
 const (
-	// DefaultModel is used when RunOptions.Model is empty.
-	DefaultModel = "Gemini 3.8 Flash (High)"
+	// DefaultModel is used when RunOptions.Model is empty AND the registry
+	// cannot resolve a default. Empty means "no fallback — caller must
+	// supply a model via providers.json or explicit --model flag" (DELTA-10).
+	DefaultModel = ""
 	// ReadOnlyContractExit is the process exit code reported when a worker
 	// that was supposed to stay read-only produced side effects anyway.
 	ReadOnlyContractExit = 3
@@ -30,9 +32,10 @@ const (
 	TruncationMarker = "\n<OUTPUT_TRUNCATED>\n"
 	// ReplacementRune substitutes invalid UTF-8 bytes during decode.
 	ReplacementRune = "\uFFFD"
-	// DefaultEffort pins reasoning effort to "high" for Gemini 3.8 Flash
-	// (High), the worker's primary model. Override per-task via RunOptions.
-	DefaultEffort = "high"
+	// DefaultEffort is used when RunOptions.Effort is empty AND the
+	// registry has no default. Empty means "no fallback — caller must
+	// supply effort explicitly" (DELTA-10).
+	DefaultEffort = ""
 )
 
 var windowsExecutableSuffixes = []string{".exe", ".cmd", ".bat"}

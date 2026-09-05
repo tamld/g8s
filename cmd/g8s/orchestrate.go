@@ -375,7 +375,7 @@ func runOrchestrate(args []string) {
 	dod := fs.String("dod", "", "optional DoD for brief (overrides DoD in file)")
 	fromIntent := fs.String("from-intent", "", "free-text natural language intent")
 	fromFile := fs.String("from-file", "", "path to file containing natural language intent")
-	model := fs.String("model", "gemini-3.8-flash-high", "target worker model")
+	model := fs.String("model", "", "target worker model (defaults to first ready provider's first model)")
 	providerName := fs.String("provider", "agy", "agent provider backend (e.g. agy, codex, claude, ollama)")
 	role := fs.String("role", "collector", "worker role contract")
 	permission := fs.String("permission", "read_only", "permission profile")
@@ -427,6 +427,11 @@ func runOrchestrate(args []string) {
 	effectiveIssuer := *issuedBy
 	if effectiveIssuer == "" {
 		effectiveIssuer = *actor
+	}
+
+	effectiveModel := *model
+	if effectiveModel == "" {
+		effectiveModel = "gemini-3.8-flash-high"
 	}
 	if effectiveIssuer == "" {
 		effectiveIssuer = "sisyphus"
@@ -494,7 +499,7 @@ func runOrchestrate(args []string) {
 			Brief:        briefTitle,
 			BriefPayload: briefContent,
 			N:            *blindConverge,
-			Model:        *model,
+			Model:        effectiveModel,
 			Timeout:      *timeout,
 			Repo:         cwd,
 			AddDirs:      dirs,
@@ -594,7 +599,7 @@ func runOrchestrate(args []string) {
 			MaxAttempts:      *maxAttempts,
 			MaxApproaches:    *maxApproaches,
 			Timeout:          *timeout,
-			Model:            *model,
+			Model:            effectiveModel,
 			Role:             *role,
 			Permission:       *permission,
 			AddDirs:          dirs,
@@ -630,7 +635,7 @@ func runOrchestrate(args []string) {
 			TaskDescription: *taskDesc,
 			Role:            *role,
 			Permission:      *permission,
-			Model:           *model,
+			Model:           effectiveModel,
 			AddDirs:         dirs,
 			SelfTestMode:    true,
 			Timeout:         *timeout,

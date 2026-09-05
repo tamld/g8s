@@ -60,6 +60,8 @@ Thumbs.db
 .sisyphus/
 
 # Worker / orchestration runtime state (never index)
+.g8s/
+.omo/
 .agy/
 agy-*.log
 agy-*.brief

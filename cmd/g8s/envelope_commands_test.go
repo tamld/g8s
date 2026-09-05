@@ -127,7 +127,7 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 
 	t.Run("submit, get, tasks, cancel, lineage lifecycle", func(t *testing.T) {
 		// Submit
-		env, code, raw := runCmd("submit", "--idempotency-key", "test-key-1", "--prompt", "Implement unified envelope", "--role", "collector", "--permission", "read_only", "--actor", "lead-dev")
+		env, code, raw := runCmd("submit", "--idempotency-key", "test-key-1", "--prompt", "Implement unified envelope", "--role", "collector", "--permission", "read_only", "--actor", "lead-dev", "--model", "gemini-3.8-flash-high")
 		if code != 0 {
 			t.Fatalf("submit exit code = %d, want 0; error: %+v; raw: %s", code, env.Error, raw)
 		}
@@ -452,7 +452,7 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 
 	t.Run("backward-compatibility data field wrapper", func(t *testing.T) {
 		// Verify submit -> get -> tasks unmarshaling into wrapper struct
-		subEnv, subCode, _ := runCmd("submit", "--idempotency-key", "compat-key-1", "--prompt", "Compat check", "--role", "collector", "--permission", "read_only")
+		subEnv, subCode, _ := runCmd("submit", "--idempotency-key", "compat-key-1", "--prompt", "Compat check", "--role", "collector", "--permission", "read_only", "--model", "gemini-3.8-flash-high")
 		if subCode != 0 {
 			t.Fatalf("submit failed: %d", subCode)
 		}

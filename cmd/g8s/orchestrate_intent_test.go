@@ -231,6 +231,7 @@ func TestOrchestrateIntentSubtaskFailure(t *testing.T) {
 		MaxAttempts:   1,
 		MaxApproaches: 1,
 		Timeout:       time.Minute,
+		Model:         "gemini-3.8-flash-high",
 		AddDirs:       []string{t.TempDir()},
 	}
 
@@ -279,6 +280,7 @@ func TestOrchestrateIntentFromFile(t *testing.T) {
 		MaxAttempts:   1,
 		MaxApproaches: 1,
 		Timeout:       time.Minute,
+		Model:         "gemini-3.8-flash-high",
 		AddDirs:       []string{tempDir},
 	}
 
@@ -367,6 +369,7 @@ func TestOrchestrateWithFanOutPool(t *testing.T) {
 		MaxAttempts:   1,
 		MaxApproaches: 1,
 		Timeout:       time.Minute,
+		Model:         "gemini-3.8-flash-high",
 		AddDirs:       []string{repoDir},
 	}
 

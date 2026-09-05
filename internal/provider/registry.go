@@ -164,3 +164,40 @@ func (r *Registry) List(ctx ...context.Context) []ProviderStatus {
 	}
 	return statuses
 }
+
+// Recommend returns the built-in catalog of known providers with current
+// detection status. Compiled into the binary (catalog.go) so the CLI can
+// list what exists without a network call.
+func (r *Registry) Recommend(ctx context.Context) []CatalogEntry {
+	cat := Catalog()
+	for i := range cat {
+		_, err := r.Get(cat[i].Name)
+		if err != nil {
+			cat[i].InstallHint = "not registered: " + cat[i].InstallHint
+			continue
+		}
+		if probeErr := r.probeOne(ctx, cat[i].Name); probeErr != nil {
+			cat[i].InstallHint = "registered but unavailable: " + probeErr.Error()
+		}
+	}
+	return cat
+}
+
+// probeOne is a read-only availability probe scoped to a single registered
+// provider.
+func (r *Registry) probeOne(ctx context.Context, name string) error {
+	r.mu.RLock()
+	p, ok := r.providers[strings.ToLower(name)]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("provider %q not registered", name)
+	}
+	return p.Available(ctx)
+}
+
+// RegisterHTTP wires an OpenAI-compatible HTTP provider into the registry.
+// Convenience used by `g8s providers enable` to add 9router-like gateways
+// without recompiling.
+func (r *Registry) RegisterHTTP(name, baseURL, authEnv string) {
+	r.Register(NewOpenAIProvider(name, baseURL, authEnv))
+}

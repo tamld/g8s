@@ -45,7 +45,7 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 		req.N = 3
 	}
 	if req.Model == "" {
-		req.Model = "gemini-3.8-flash-high"
+		req.Model = ""
 	}
 	if req.Timeout == 0 {
 		req.Timeout = 5 * time.Minute
