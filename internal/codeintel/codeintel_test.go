@@ -158,3 +158,52 @@ func TestCodeIntel_Concurrency(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestMultiTierRouter_NoCapableAdapter(t *testing.T) {
+	// Red test verification: router without capable adapter returns ErrNoCapableAdapter
+	emptyRouter := NewMultiTierRouter()
+
+	_, err := emptyRouter.References(context.Background(), "file.go", "Sym")
+	if err == nil {
+		t.Fatal("expected error on empty router references, got nil")
+	}
+
+	_, err = emptyRouter.CallHierarchy(context.Background(), "file.go", "Sym")
+	if err == nil {
+		t.Fatal("expected error on empty router call hierarchy, got nil")
+	}
+}
+
+func BenchmarkMultiTierRouter_References(b *testing.B) {
+	tier1Mock := &mockAdapter{
+		name: "tier1-lsp",
+		capabilities: Capabilities{
+			CanReferences: true,
+		},
+		refLocations: []Location{{File: "test.go", Reference: 1}},
+	}
+	router := NewMultiTierRouter(tier1Mock)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = router.References(ctx, "test.go", "Sym")
+	}
+}
+
+func BenchmarkASTAdapter_Diagnostics(b *testing.B) {
+	tmp := b.TempDir()
+	filePath := filepath.Join(tmp, "bench.go")
+	_ = os.WriteFile(filePath, []byte("package bench\nfunc F() int { return 42 }\n"), 0o600)
+
+	adapter, _ := NewASTAdapter(tmp)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = adapter.Diagnostics(ctx, filePath)
+	}
+}
+
