@@ -126,6 +126,7 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("chat request failed: %w", err)
 	}
+	defer resp.Body.Close()
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -135,10 +136,8 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	if stream.err != nil {
 		stderr.WriteString(stream.err.Error())
-		_ = resp.Body.Close()
 		return newImmediateHandle(p.name, "FAILED", stream.content, stream.err.Error(), 1, start), nil
 	}
-	_ = resp.Body.Close()
 	return newImmediateHandle(p.name, "COMPLETED", stream.content, "", 0, start), nil
 }
 
@@ -193,7 +192,6 @@ func newHTTPStream(name string, resp *http.Response, _ time.Time) *httpStream {
 // immediateHandle resolves synchronously without an OS subprocess.
 // Used by HTTP providers where the "process" is the request itself.
 type immediateHandle struct {
-	mu       sync.Mutex
 	provider string
 	status   string
 	stdout   string
