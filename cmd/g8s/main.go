@@ -35,7 +35,6 @@ import (
 
 var AppName = "g8s"
 
-
 func failRuntime(err error) {
 	if err == nil {
 		return
