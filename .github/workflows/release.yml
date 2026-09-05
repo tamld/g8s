@@ -15,8 +15,6 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
-    branches-ignore:
-      - '**'
 
 permissions:
   contents: write
@@ -173,10 +171,14 @@ jobs:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
   notarize-macos:
-    name: Notarize macOS binaries (Apple ID required)
+    # DISABLED 2026-09-05: Apple Developer account resource not available.
+    # Re-enable by removing the `if: false` guard and supplying APPLE_ID,
+    # APPLE_PASSWORD, APPLE_TEAM_ID secrets. macOS darwin binaries still
+    # build + ship unsigned via build-darwin + publish jobs.
+    name: Notarize macOS binaries (DISABLED — no Apple Dev account)
     runs-on: macos-latest
     needs: build-darwin
-    if: ${{ env.APPLE_ID != '' }}
+    if: false
     steps:
       - name: Download darwin artifacts
         uses: actions/download-artifact@v7

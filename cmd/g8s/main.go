@@ -35,12 +35,6 @@ import (
 
 var AppName = "g8s"
 
-func failUsage(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "ERROR: "+msg+"\n", args...)
-	fmt.Fprintln(os.Stderr, "Run 'g8s help' for usage.")
-	os.Exit(2)
-}
-
 func failRuntime(err error) {
 	if err == nil {
 		return
