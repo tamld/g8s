@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-06
+
+### Added (Concern B: receipt provenance-and-replay context)
+- **`CanonicalEnvelope`** on `WriteReceipt`: schema URI, field order, required fields. Pins wire format at issue time so parser remains stable across producer versions. Mandatory at issuance via `WithCanonicalEnvelope()`; system validates `g8s://` prefix and non-empty field order.
+- **`RuleGraphSnapshot`** on `WriteReceipt`: ruleset version, pipeline digest (SHA256), optional ADR ref. Pins rule registry state at issue time so receipts remain replayable after the registry evolves. Mandatory at issuance; helper `WithCurrentRuleGraph()` reads from internal registry.
+- **`ProvenanceLineage`** on `WriteReceipt`: issued-by, tool version, trace ID, actor chain, source commit. Auto-populated in `IssueReceipt` from runtime context so Brain never has to hand-author `"unknown"`.
+- **`PurgeExpired(maxAge, maxRows)`** method on `*Manager`: bounded delete of consumed-or-expired receipts. Caller responsibility to schedule (cron, supervisor loop).
+- **UUID v7 primary key**: `ReceiptID` now `uuid.NewV7().String()` (RFC 9562). 48-bit ms timestamp prefix gives B-tree index locality + chronological `ORDER BY receipt_id`.
+- **Schema migration v2 → v3**: idempotent `ALTER TABLE ADD COLUMN` for 11 new nullable columns. Legacy v0.8.0 receipts remain readable.
+- **Spec delta 02 §4 (Concern B)** documenting strictness model and out-of-scope items.
+
+### Changed
+- `internal/receipt.SchemaVersion` 2 → 3.
+- `IssueReceipt` signature unchanged externally; new behavior via `IssueOption`s.
+
+## [0.8.0] - 2026-09-06
+## [0.7.0] - 2026-09-01
 ## [0.6.0] - 2026-09-01
 
 ### Added
@@ -28,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#234**: Process enumeration in cleanup uses `strings.EqualFold` on slice to avoid `strings.ToLower` allocation
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-09-06
+
+### Added
+- **Concern A — Supervisor fix loop** (DELTA-11, `internal/supervisor/`): end-to-end planning → enforcer → reviewer → RCA → escalator chain with `g8s orchestrate` self-test emitting deterministic HITL escalation. `failingStubWorker` + deterministic RCA confidence (1.0) drive `approaches_tried=3, total_attempts=9, trigger=approach_budget_exhausted`. `g8s orchestrate --self-test` exits non-zero (2) on escalation; success path returns 0.
+- **`internal/supervisor/` package** (planner, enforcer, reviewer, rca, escalator, supervisor, metrics, persist, optimizer): 8-state FSM wrapping orchestrator + harness + receipt with explicit `VerdictPass`/`VerdictFail`/`VerdictRevise` outcomes, RCA confidence threshold (0.6), per-attempt + per-approach budgets, escalation envelope (`trigger`, `envelope_summary`, `rca_summary`, `last_diff_summary`, `recommended_human_action`).
+- **`g8s supervisor metrics` command** (`cmd/g8s/supervisor_metrics.go`): aggregated per-task metrics (`approaches_tried`, `total_attempts`, `rca_confidence_avg`, `verdict_counts`, etc.) per `supervisor-fix-loop.md` §10.
+- **Test seam `selfTestWorkerOverride`**: package-level hook for tests to inject success-path stub workers when exercising self-test wiring without escalation.
+- **Unit + integration tests** (`cmd/g8s/orchestrate_self_test_test.go`): 2 tests covering stub worker failure surface and subprocess end-to-end charter verify (3/9/escalated/exit-2).
+
+### Changed
+- **`g8s orchestrate --self-test` semantics**: previously hung on real worker dispatch; now deterministic via `failingStubWorker` + RCA confidence=1.0. Charter verify target (3 approaches × 3 attempts → escalation → exit 2) reproducible in <2s.
 
 ## [0.7.0] - 2026-09-05
 
