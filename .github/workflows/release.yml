@@ -135,14 +135,17 @@ jobs:
           mkdir -p dist
           for arch in amd64 arm64; do
             GOOS=windows GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/g8s-windows-${arch}.exe ./cmd/g8s
-            (cd dist && zip g8s-windows-${arch}.zip g8s-windows-${arch}.exe)
+            # Windows runner ships tar.exe (Windows 10 1803+/Server 2019+) — use it
+            # instead of `zip` which is not preinstalled on windows-latest images.
+            # tar.gz is the dominant Windows distribution format alongside .zip.
+            (cd dist && tar -czf g8s-windows-${arch}.tar.gz g8s-windows-${arch}.exe)
           done
 
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v7
         with:
           name: g8s-windows
-          path: dist/*.zip
+          path: dist/*.tar.gz
           retention-days: 7
 
   publish:
