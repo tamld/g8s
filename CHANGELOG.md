@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-06
+
+### Added
+- **Concern A — Supervisor fix loop** (DELTA-11, `internal/supervisor/`): end-to-end planning → enforcer → reviewer → RCA → escalator chain with `g8s orchestrate` self-test emitting deterministic HITL escalation. `failingStubWorker` + deterministic RCA confidence (1.0) drive `approaches_tried=3, total_attempts=9, trigger=approach_budget_exhausted`. `g8s orchestrate --self-test` exits non-zero (2) on escalation; success path returns 0.
+- **`internal/supervisor/` package** (planner, enforcer, reviewer, rca, escalator, supervisor, metrics, persist, optimizer): 8-state FSM wrapping orchestrator + harness + receipt with explicit `VerdictPass`/`VerdictFail`/`VerdictRevise` outcomes, RCA confidence threshold (0.6), per-attempt + per-approach budgets, escalation envelope (`trigger`, `envelope_summary`, `rca_summary`, `last_diff_summary`, `recommended_human_action`).
+- **`g8s supervisor metrics` command** (`cmd/g8s/supervisor_metrics.go`): aggregated per-task metrics (`approaches_tried`, `total_attempts`, `rca_confidence_avg`, `verdict_counts`, etc.) per `supervisor-fix-loop.md` §10.
+- **Test seam `selfTestWorkerOverride`**: package-level hook for tests to inject success-path stub workers when exercising self-test wiring without escalation.
+- **Unit + integration tests** (`cmd/g8s/orchestrate_self_test_test.go`): 2 tests covering stub worker failure surface and subprocess end-to-end charter verify (3/9/escalated/exit-2).
+
+### Changed
+- **`g8s orchestrate --self-test` semantics**: previously hung on real worker dispatch; now deterministic via `failingStubWorker` + RCA confidence=1.0. Charter verify target (3 approaches × 3 attempts → escalation → exit 2) reproducible in <2s.
+
 ## [0.7.0] - 2026-09-05
 
 ### Added

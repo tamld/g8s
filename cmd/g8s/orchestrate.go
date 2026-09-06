@@ -78,6 +78,55 @@ func parseIntentSubtasks(intent string) []string {
 // orchestratorWorkerCtor is the worker factory seam for orchestrate runs.
 var orchestratorWorkerCtor = func() orchestrator.Worker { return orchestrator.NewAgyWorker() }
 
+// selfTestWorkerOverride lets tests inject a custom worker when --self-test is
+// active. nil falls back to the deterministic failing stub that drives the
+// HITL escalation chain. Tests covering self-test wiring without escalation
+// (e.g. TestOrchestratePollingFlags) install a success-path stub here.
+var selfTestWorkerOverride func() orchestrator.Worker
+
+func newFailingStubWorker() orchestrator.Worker {
+	return &failingStubWorker{}
+}
+
+type failingStubWorker struct {
+	spawns int
+}
+
+func (w *failingStubWorker) Name() string                      { return "failing-stub" }
+func (w *failingStubWorker) Available(_ context.Context) error { return nil }
+
+func (w *failingStubWorker) Spawn(_ context.Context, t orchestrator.Task) (orchestrator.Handle, error) {
+	w.spawns++
+	return &failingStubHandle{taskID: t.ID}, nil
+}
+
+type failingStubHandle struct {
+	taskID string
+}
+
+func (h *failingStubHandle) PID() int { return -1 }
+func (h *failingStubHandle) Wait(_ context.Context) (orchestrator.Receipt, error) {
+	return orchestrator.Receipt{
+		OK:              false,
+		WorkerName:      "failing-stub",
+		TaskID:          h.taskID,
+		LastError:       "synthetic_failure_for_self_test",
+		ReturnCode:      1,
+		HarnessCode:     1,
+		DurationSeconds: 0.001,
+		StartedAt:       time.Now(),
+		FinishedAt:      time.Now(),
+	}, nil
+}
+
+func (h *failingStubHandle) Cancel(_ context.Context) error { return nil }
+func (h *failingStubHandle) StdoutStream() interface {
+	Read(p []byte) (int, error)
+	Close() error
+} {
+	return nil
+}
+
 type providerWorkerAdapter struct {
 	p provider.Provider
 }
@@ -611,7 +660,23 @@ func runOrchestrate(args []string) {
 		}
 		out = res
 	} else {
-		sup := supervisor.NewSelfTestSupervisor(store, resolveWorker(), supervisor.NewStubReviewer())
+		worker := resolveWorker()
+		if *selfTest && selfTestWorkerOverride != nil {
+			worker = selfTestWorkerOverride()
+		} else if *selfTest {
+			worker = newFailingStubWorker()
+		}
+		sup := supervisor.NewSelfTestSupervisor(store, worker, supervisor.NewStubReviewer())
+		if *selfTest {
+			sup.RCAFn = func(_ context.Context, _ []supervisor.AttemptRecord) (supervisor.RCARecord, error) {
+				return supervisor.RCARecord{
+					Symptom:    "self_test_synthetic_failure",
+					RootCause:  "stub_worker",
+					Evidence:   "deterministic escalation drive for charter verify",
+					Confidence: 1.0,
+				}, nil
+			}
+		}
 		sup.Config.MaxAttemptsPerApproach = *maxAttempts
 		sup.Config.MaxApproaches = *maxApproaches
 		sup.Config.SelfTestMode = true
@@ -650,6 +715,17 @@ func runOrchestrate(args []string) {
 			TotalAttempts:    res.AttemptCount,
 			Escalated:        res.Escalated,
 			Escalation:       res.Escalation,
+		}
+		if res.Escalated {
+			if *jsonMode || *jsonl {
+				env := cli.NewEnvelope("orchestrate_result", "orchestrate", "", out)
+				env.TraceID = *traceID
+				_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			} else {
+				fmt.Fprintf(os.Stdout, "supervisor task: %s\noutcome: %s\napproaches_tried: %d\ntotal_attempts: %d\nescalated: %t\n",
+					out.SupervisorTaskID, out.Outcome, out.ApproachesTried, out.TotalAttempts, out.Escalated)
+			}
+			os.Exit(2)
 		}
 	}
 

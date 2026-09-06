@@ -291,8 +291,13 @@ func TestAggregateSupervisorMetricsWithRows(t *testing.T) {
 
 func TestOrchestratePollingFlags(t *testing.T) {
 	origCtor := orchestratorWorkerCtor
-	defer func() { orchestratorWorkerCtor = origCtor }()
+	origOverride := selfTestWorkerOverride
+	defer func() {
+		orchestratorWorkerCtor = origCtor
+		selfTestWorkerOverride = origOverride
+	}()
 	orchestratorWorkerCtor = func() orchestrator.Worker { return &trackingStubWorker{} }
+	selfTestWorkerOverride = func() orchestrator.Worker { return &trackingStubWorker{} }
 
 	dbPath := withTempDB(t)
 	t.Setenv("G8S_DB", dbPath)

@@ -104,3 +104,7 @@ coverage.out
 .heartbeat.lock
 .status/
 .status.lock
+
+# Sandbox runtime metadata (per session, never committed)
+.omo/
+.g8s/
