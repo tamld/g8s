@@ -162,16 +162,24 @@ func (s *Server) dispatchTool(ctx context.Context, args json.RawMessage) (any, *
 			},
 		}
 	}
-	return map[string]any{
+	resp := map[string]any{
 		"ok":                 result.OK,
 		"returncode":         result.ReturnCode,
 		"harness_returncode": result.HarnessReturnCode,
 		"duration_seconds":   result.DurationSeconds,
 		"command_preview":    result.CommandPreview,
 		"permission":         result.Permission,
+		"role":               result.Role,
+		"model":              result.Model,
+		"worker_binary":      result.AGYBin,
+		"add_dirs":           result.AddDirs,
 		"stdout":             result.Stdout,
 		"stderr":             result.Stderr,
-	}, nil
+	}
+	if a.ReceiptID != "" {
+		resp["receipt_id"] = a.ReceiptID
+	}
+	return resp, nil
 }
 
 // sanitizeRequestView strips prompt material from a stored request payload

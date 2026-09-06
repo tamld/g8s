@@ -589,6 +589,10 @@ func TestDispatchPassthroughSuccessEnvelopeAndOptions(t *testing.T) {
 		OK: true, ReturnCode: 0, HarnessReturnCode: 0, DurationSeconds: 1.5,
 		CommandPreview: "agy --sandbox --dangerously-skip-permissions --print-prompt <x>",
 		Permission:     "automation_read",
+		Model:          "Gemini 3.8 Flash (High)",
+		Role:           "collector",
+		AGYBin:         "/usr/local/bin/agy",
+		AddDirs:        []string{"/tmp/a", "/tmp/b"},
 		Stdout:         "worker output", Stderr: "",
 	}
 	result, rpcErr := callTool(t, s, "g8s_dispatch", map[string]any{
@@ -620,6 +624,62 @@ func TestDispatchPassthroughSuccessEnvelopeAndOptions(t *testing.T) {
 	}
 	if out["stdout"] != "worker output" {
 		t.Fatalf("stdout passthrough failed: %v", out["stdout"])
+	}
+	if out["role"] != "collector" {
+		t.Fatalf("role = %v, want collector", out["role"])
+	}
+	if out["model"] != "Gemini 3.8 Flash (High)" {
+		t.Fatalf("model = %v", out["model"])
+	}
+	if out["worker_binary"] != "/usr/local/bin/agy" {
+		t.Fatalf("worker_binary = %v", out["worker_binary"])
+	}
+	dirs, ok := out["add_dirs"].([]any)
+	if !ok || len(dirs) != 2 || dirs[0] != "/tmp/a" || dirs[1] != "/tmp/b" {
+		t.Fatalf("add_dirs = %v, want [/tmp/a /tmp/b]", out["add_dirs"])
+	}
+}
+
+func TestDispatchSuccessIncludesReceiptIDWhenProvided(t *testing.T) {
+	s, _, d := newExtServer(t)
+	d.result = dispatch.Result{OK: true, ReturnCode: 0, HarnessReturnCode: 0, DurationSeconds: 0.5}
+	result, rpcErr := callTool(t, s, "g8s_dispatch", map[string]any{
+		"prompt":     "x",
+		"role":       "collector",
+		"permission": "read_only",
+		"add_dirs":   []string{"/tmp/a"},
+		"receipt_id": "rcpt-12345",
+	})
+	if rpcErr != nil {
+		t.Fatalf("rpc error: %+v", rpcErr)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["receipt_id"] != "rcpt-12345" {
+		t.Fatalf("receipt_id = %v, want rcpt-12345", out["receipt_id"])
+	}
+}
+
+func TestDispatchSuccessOmitsReceiptIDWhenAbsent(t *testing.T) {
+	s, _, d := newExtServer(t)
+	d.result = dispatch.Result{OK: true, ReturnCode: 0, HarnessReturnCode: 0, DurationSeconds: 0.5}
+	result, rpcErr := callTool(t, s, "g8s_dispatch", map[string]any{
+		"prompt":     "x",
+		"role":       "collector",
+		"permission": "read_only",
+		"add_dirs":   []string{"/tmp/a"},
+	})
+	if rpcErr != nil {
+		t.Fatalf("rpc error: %+v", rpcErr)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(result, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := out["receipt_id"]; ok {
+		t.Fatalf("receipt_id must be absent when not provided: %v", out)
 	}
 }
 
