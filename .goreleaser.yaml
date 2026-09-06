@@ -60,6 +60,42 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+release:
+  github:
+    owner: tamld
+    name: g8s
+  draft: false
+  prerelease: auto
+  header: |
+    ## 🚀 g8s {{ .Tag }} (The Gatekeepers)
+
+    > Zero-CGO pure-Go process execution and capability harness for AI subagents.
+
+    ### 📦 Downloads & Platform Matrix
+
+    | Platform | Architecture | Binary / Archive |
+    |:---|:---|:---|
+    | **macOS (Apple Silicon)** | `darwin/arm64` (M1/M2/M3/M4) | `g8s_{{ .Version }}_darwin_arm64.tar.gz` |
+    | **macOS (Intel)** | `darwin/amd64` (x86_64) | `g8s_{{ .Version }}_darwin_amd64.tar.gz` |
+    | **Linux** | `linux/amd64` | `g8s_{{ .Version }}_linux_amd64.tar.gz` (also `.deb`, `.rpm`, `.apk`) |
+    | **Linux** | `linux/arm64` | `g8s_{{ .Version }}_linux_arm64.tar.gz` (also `.deb`, `.rpm`, `.apk`) |
+    | **Windows** | `windows/amd64` | `g8s_{{ .Version }}_windows_amd64.zip` |
+
+    ### 🔒 Verification
+    Verify artifact integrity against published SHA-256 hashes:
+    ```bash
+    sha256sum -c checksums.txt
+    ```
+
+    ### 🔄 Changes in this Release
+  footer: |
+    ---
+    ### ⚡ Quick Update
+    If you already have `g8s` installed, check your version anytime with:
+    ```bash
+    g8s version --check-update
+    ```
+
 changelog:
   sort: asc
   filters:
