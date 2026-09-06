@@ -357,7 +357,18 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 	if ttl <= 0 {
 		ttl = 10 * time.Minute // baseline default when caller omits TTL
 	}
-	rc, err := s.receipts.IssueReceipt("mcp-server", a.AllowedPaths, ttl)
+	rc, err := s.receipts.IssueReceipt("mcp-server", a.AllowedPaths, ttl,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+			SchemaURI:      "g8s://envelope/write-receipt/v1",
+			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
+			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+		}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+			RulesetVersion: "v1",
+			PipelineDigest: "mcp-server-default",
+		}),
+		receipt.WithProvenanceContext("g8s/v0.9.0", "", ""),
+	)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}

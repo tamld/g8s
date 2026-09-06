@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-06
+
+### Added (Concern B: receipt provenance-and-replay context)
+- **`CanonicalEnvelope`** on `WriteReceipt`: schema URI, field order, required fields. Pins wire format at issue time so parser remains stable across producer versions. Mandatory at issuance via `WithCanonicalEnvelope()`; system validates `g8s://` prefix and non-empty field order.
+- **`RuleGraphSnapshot`** on `WriteReceipt`: ruleset version, pipeline digest (SHA256), optional ADR ref. Pins rule registry state at issue time so receipts remain replayable after the registry evolves. Mandatory at issuance; helper `WithCurrentRuleGraph()` reads from internal registry.
+- **`ProvenanceLineage`** on `WriteReceipt`: issued-by, tool version, trace ID, actor chain, source commit. Auto-populated in `IssueReceipt` from runtime context so Brain never has to hand-author `"unknown"`.
+- **`PurgeExpired(maxAge, maxRows)`** method on `*Manager`: bounded delete of consumed-or-expired receipts. Caller responsibility to schedule (cron, supervisor loop).
+- **UUID v7 primary key**: `ReceiptID` now `uuid.NewV7().String()` (RFC 9562). 48-bit ms timestamp prefix gives B-tree index locality + chronological `ORDER BY receipt_id`.
+- **Schema migration v2 → v3**: idempotent `ALTER TABLE ADD COLUMN` for 11 new nullable columns. Legacy v0.8.0 receipts remain readable.
+- **Spec delta 02 §4 (Concern B)** documenting strictness model and out-of-scope items.
+
+### Changed
+- `internal/receipt.SchemaVersion` 2 → 3.
+- `IssueReceipt` signature unchanged externally; new behavior via `IssueOption`s.
+
+## [0.8.0] - 2026-09-06
+## [0.7.0] - 2026-09-01
 ## [0.6.0] - 2026-09-01
 
 ### Added

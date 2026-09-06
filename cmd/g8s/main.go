@@ -630,7 +630,18 @@ func runReceipt(args []string) {
 		if effectiveIssuer == "" {
 			effectiveIssuer = *actor
 		}
-		rc, err := receipts.IssueReceipt(effectiveIssuer, paths, time.Duration(*ttlSeconds)*time.Second)
+		rc, err := receipts.IssueReceipt(effectiveIssuer, paths, time.Duration(*ttlSeconds)*time.Second,
+			receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+				SchemaURI:      "g8s://envelope/write-receipt/v1",
+				FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
+				RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+			}),
+			receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+				RulesetVersion: "v1",
+				PipelineDigest: "cli-default",
+			}),
+			receipt.WithProvenanceContext("g8s/"+Version, Commit, *traceID),
+		)
 		if err != nil {
 			exitRuntime("receipt", "issue", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
