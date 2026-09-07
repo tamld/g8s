@@ -154,7 +154,7 @@ func TestRunVersionCaptureStdout(t *testing.T) {
 
 	defaultHTTPClient = &mockHTTPClient{
 		doFunc: func(req *http.Request) (*http.Response, error) {
-			body := `{"tag_name":"v0.9.0","html_url":"https://github.com/tamld/g8s/releases/tag/v0.9.0"}`
+			body := `{"tag_name":"v1.0.0","html_url":"https://github.com/tamld/g8s/releases/tag/v1.0.0"}`
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(body)),
@@ -206,7 +206,7 @@ func TestRunVersionCaptureStdout(t *testing.T) {
 	if !env.Data.CheckUpdate.UpdateAvailable {
 		t.Errorf("UpdateAvailable = false, want true")
 	}
-	if env.Data.CheckUpdate.LatestVersion != "0.9.0" {
-		t.Errorf("LatestVersion = %q, want 0.9.0", env.Data.CheckUpdate.LatestVersion)
+	if env.Data.CheckUpdate.LatestVersion != "1.0.0" {
+		t.Errorf("LatestVersion = %q, want 1.0.0", env.Data.CheckUpdate.LatestVersion)
 	}
 }

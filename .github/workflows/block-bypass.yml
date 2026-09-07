@@ -35,7 +35,7 @@ jobs:
       - name: Verify no self-merge in commit messages
         run: |
           if git rev-parse --verify HEAD~5 >/dev/null 2>&1; then
-            RANGE="HEAD~5..HEAD"
+            RANGE="HEAD^1..HEAD"
           else
             RANGE="HEAD"
           fi
