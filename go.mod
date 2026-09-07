@@ -7,7 +7,7 @@ require (
 	github.com/pterm/pterm v0.12.83
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	modernc.org/sqlite v1.57.0
+	modernc.org/sqlite v1.58.0
 )
 
 require (
