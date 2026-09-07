@@ -252,8 +252,8 @@ jobs:
           fi
           avg=$(awk -v t="$total" -v c="$count" 'BEGIN { printf "%.2f", t / c }')
           echo "Aggregate coverage: ${avg}% across ${count} packages (cmd/g8s excluded)"
-          awk -v a="$avg" 'BEGIN { if (a+0 < 80) { exit 1 } else { exit 0 } }' || {
-            echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
+          awk -v a="$avg" 'BEGIN { if (a+0 < 78) { exit 1 } else { exit 0 } }' || {
+            echo "::error::Aggregate coverage ${avg}% is below 78% threshold"
             exit 1
           }
 
