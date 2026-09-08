@@ -88,25 +88,26 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install linters (with retry)
+      - name: Install linters (with retry + proxy fallback)
         run: |
           set -euo pipefail
-          # Use reliable proxy with fallback
-          export GOPROXY=https://proxy.golang.org,direct
+          # Multiple proxy fallbacks for reliability
+          export GOPROXY=https://proxy.golang.org,https://goproxy.cn,https://proxy.golang.org,direct
           export GOSUMDB=sum.golang.org
+          export GOFLAGS="-mod=mod"
           
           install_with_retry() {
             local pkg="$1"
-            local max_attempts=3
+            local max_attempts=5
             local attempt=1
             while [ $attempt -le $max_attempts ]; do
               echo "Installing $pkg (attempt $attempt/$max_attempts)..."
-              if go install "$pkg"; then
+              if go install -v "$pkg"; then
                 echo "Successfully installed $pkg"
                 return 0
               fi
-              echo "Failed to install $pkg, waiting 10s before retry..."
-              sleep 10
+              echo "Failed to install $pkg, waiting 15s before retry..."
+              sleep 15
               attempt=$((attempt + 1))
             done
             echo "::error::Failed to install $pkg after $max_attempts attempts"
