@@ -7,7 +7,7 @@ import (
 
 func TestFanOutReceiptPropagation(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
@@ -129,7 +129,7 @@ func TestFanOutReceiptPropagation(t *testing.T) {
 
 func TestDriveReceiptLakePropagation(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
