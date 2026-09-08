@@ -34,7 +34,7 @@ linters-settings:
       - internal/supervisor
       - reference
   govulncheck:
-    mode: extract
+    mode: Extract
   gocognit:
     min-complexity: 15
   revive:
