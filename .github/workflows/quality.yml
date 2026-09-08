@@ -91,6 +91,10 @@ jobs:
       - name: Install linters (with retry)
         run: |
           set -euo pipefail
+          # Use reliable proxy with fallback
+          export GOPROXY=https://proxy.golang.org,direct
+          export GOSUMDB=sum.golang.org
+          
           install_with_retry() {
             local pkg="$1"
             local max_attempts=3
@@ -101,19 +105,20 @@ jobs:
                 echo "Successfully installed $pkg"
                 return 0
               fi
-              echo "Failed to install $pkg, waiting 5s before retry..."
-              sleep 5
+              echo "Failed to install $pkg, waiting 10s before retry..."
+              sleep 10
               attempt=$((attempt + 1))
             done
             echo "::error::Failed to install $pkg after $max_attempts attempts"
             return 1
           }
-          install_with_retry mvdan.cc/gofumpt@latest
+          # Use pinned versions for reliability
+          install_with_retry mvdan.cc/gofumpt@v0.8.0
           install_with_retry honnef.co/go/tools/cmd/staticcheck@v0.7.0
-          install_with_retry github.com/kisielk/errcheck@latest
-          install_with_retry github.com/securego/gosec/v2/cmd/gosec@latest
-          install_with_retry golang.org/x/vuln/cmd/govulncheck@latest
-          install_with_retry github.com/uudashr/gocognit/cmd/gocognit@latest
+          install_with_retry github.com/kisielk/errcheck@v1.7.1
+          install_with_retry github.com/securego/gosec/v2/cmd/gosec@v2.22.0
+          install_with_retry golang.org/x/vuln/cmd/govulncheck@v1.1.0
+          install_with_retry github.com/uudashr/gocognit/cmd/gocognit@v1.2.0
 
       - name: Cache modules
         uses: actions/cache@v6
