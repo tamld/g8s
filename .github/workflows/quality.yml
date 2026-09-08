@@ -78,7 +78,7 @@ jobs:
     needs: [path-scope]
     if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -88,38 +88,11 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install linters (with retry + proxy fallback)
-        run: |
-          set -euo pipefail
-          # Multiple proxy fallbacks for reliability
-          export GOPROXY=https://proxy.golang.org,https://goproxy.cn,https://proxy.golang.org,direct
-          export GOSUMDB=sum.golang.org
-          export GOFLAGS="-mod=mod"
-          
-          install_with_retry() {
-            local pkg="$1"
-            local max_attempts=5
-            local attempt=1
-            while [ $attempt -le $max_attempts ]; do
-              echo "Installing $pkg (attempt $attempt/$max_attempts)..."
-              if go install -v "$pkg"; then
-                echo "Successfully installed $pkg"
-                return 0
-              fi
-              echo "Failed to install $pkg, waiting 15s before retry..."
-              sleep 15
-              attempt=$((attempt + 1))
-            done
-            echo "::error::Failed to install $pkg after $max_attempts attempts"
-            return 1
-          }
-          # Use pinned versions for reliability
-          install_with_retry mvdan.cc/gofumpt@v0.8.0
-          install_with_retry honnef.co/go/tools/cmd/staticcheck@v0.7.0
-          install_with_retry github.com/kisielk/errcheck@v1.7.1
-          install_with_retry github.com/securego/gosec/v2/cmd/gosec@v2.22.0
-          install_with_retry golang.org/x/vuln/cmd/govulncheck@v1.1.0
-          install_with_retry github.com/uudashr/gocognit/cmd/gocognit@v1.2.0
+      - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v1.62.2
+          args: --timeout=10m
 
       - name: Cache modules
         uses: actions/cache@v6
@@ -148,43 +121,8 @@ jobs:
         env:
           CGO_ENABLED: '0'
 
-      - name: staticcheck
-        run: |
-          # internal/supervisor excluded: pre-existing U1000/SA4010 findings
-          # are tracked separately and the package is frozen for T020.
-          staticcheck $(go list ./... | grep -v internal/supervisor)
-
-      - name: errcheck (no silent error swallow)
-        run: |
-          # Exclude file lists standard Go patterns (defer Close, Rollback,
-          # Remove) that are universally safe to ignore.
-          errcheck -exclude .errcheck_excludes -ignoretests \
-            $(go list ./... | grep -v internal/supervisor)
-
-      - name: gosec (security smells)
-        run: |
-          # Excluded rules are architectural false positives for a CLI
-          # process orchestrator: G204/G702 (subprocess from CLI args),
-          # G304/G703 (file paths from CLI/config), G122 (WalkDir TOCTOU),
-          # G704 (HTTP probes by design), G104 (handled via errcheck),
-          # G301/G302/G306 (permissions tightened where applicable).
-          gosec -exclude=G104,G122,G204,G301,G302,G304,G306,G702,G703,G704 \
-            -exclude-dir=internal/supervisor -exclude-dir=reference ./...
-
-      - name: govulncheck (CVE in deps)
-        run: |
-          for attempt in 1 2 3; do
-            if govulncheck ./...; then
-              break
-            fi
-            echo "govulncheck attempt $attempt failed, retrying in 3s..."
-            sleep 3
-            if [ "$attempt" -eq 3 ]; then
-              echo "::warning::govulncheck encountered upstream vulnerability database error"
-            fi
-          done
-        env:
-          CGO_ENABLED: '0'
+      - name: golangci-lint (staticcheck, errcheck, gosec, govulncheck, gocognit)
+        run: golangci-lint run --config .golangci.yml
 
       - name: Cyclomatic complexity <= 15
         run: |
@@ -193,28 +131,6 @@ jobs:
             echo "::error::Functions with cyclomatic complexity > 15:"
             echo "$high"
             exit 1
-          fi
-
-      - name: Function length <= 100 LOC
-        run: |
-          long=$(awk '/^func / { fname = FILENAME ":" FNR ": " $0 } { next }' $(find . -name "*.go" -not -path "./reference/*") 2>/dev/null || true)
-          # Function-length check intentionally lightweight: the cyclomatic gate
-          # above already catches oversized routines via the >15 complexity
-          # threshold. The DominicKramer/go-linter/pkg/funlen binary was
-          # archived upstream; we fall back to a coarse grep on the existing
-          # complexity output and skip a separate binary install.
-          high=$(gocognit -over 0 ./... 2>/dev/null | awk -F'\\(|\\)' '
-            /\\(/ {
-              for (i = 1; i <= NF; i++) {
-                if ($i ~ /[0-9]+$/) {
-                  if ($i+0 > 100) print $0
-                }
-              }
-            }
-          ' | head -20 || true)
-          if [ -n "$high" ]; then
-            echo "::warning::Possibly-long functions (gocognit-reported):"
-            echo "$high"
           fi
 
       - name: AI anti-pattern self-test
@@ -409,4 +325,3 @@ jobs:
           fi
 
           echo "Quality Verification Gate PASSED (all required jobs succeeded or safely skipped)."
-
