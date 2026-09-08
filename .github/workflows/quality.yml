@@ -122,7 +122,7 @@ jobs:
           CGO_ENABLED: '0'
 
       - name: golangci-lint (staticcheck, errcheck, gosec, govulncheck, gocognit)
-        run: golangci-lint run --config .golangci.yml
+        run: golangci-lint run
 
       - name: Cyclomatic complexity <= 15
         run: |
