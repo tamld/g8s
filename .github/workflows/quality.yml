@@ -91,7 +91,7 @@ jobs:
       - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.62.2
+          version: v2.0.2
           args: --timeout=10m
 
       - name: Cache modules
