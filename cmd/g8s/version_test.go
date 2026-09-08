@@ -152,7 +152,7 @@ func TestRunVersionCaptureStdout(t *testing.T) {
 	origClient := defaultHTTPClient
 	defer func() { defaultHTTPClient = origClient }()
 
-defaultHTTPClient = &mockHTTPClient{
+	defaultHTTPClient = &mockHTTPClient{
 		doFunc: func(req *http.Request) (*http.Response, error) {
 			body := `{"tag_name":"v0.10.0","html_url":"https://github.com/tamld/g8s/releases/tag/v0.10.0"}`
 			return &http.Response{
