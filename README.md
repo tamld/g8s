@@ -208,3 +208,4 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 ## 📄 License
 
 Distributed under the **MIT License**. Copyright (c) 2026 TamLD. See [LICENSE](LICENSE) for details.
+# Trigger
