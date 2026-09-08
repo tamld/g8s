@@ -87,15 +87,14 @@ type WriteReceipt struct {
 | Field | Caller provides | System provides | Strictness |
 |---|---|---|---|
 | `CanonicalEnvelope` | `WithCanonicalEnvelope(env)` | — | **Mandatory**: `IssueReceipt` returns `ErrEnvelopeRequired` if omitted AND caller is a Brain-tier caller (MCP server, supervisor). Field validation: `SchemaURI` must start with `g8s://`; `FieldOrder` non-empty. |
-| `RuleGraphSnapshot` | `WithRuleGraph(rs)` or `WithCurrentRuleGraph()` helper | `WithCurrentRuleGraph()` reads from internal ruleset registry | **Mandatory**: same as above. Helper ensures Brain never has to hand-author the snapshot. |
+| `RuleGraphSnapshot` | `WithRuleGraph(rs)` | — | **Mandatory**: same as above. Caller (CLI/MCP server) builds the snapshot from its own pipeline metadata; Brain-tier callers must not omit it. |
 | `ProvenanceLineage` | — | Auto-populated in `IssueReceipt` from runtime context (caller identity, build ldflags, OTel span, git HEAD) | **Auto-fill**: zero friction for Brain. Brain should not write `"unknown"` because system knows better. |
 
-### 4.4 Primary Key: UUID v4 → UUID v7
+### 4.4 Primary Key: UUID v4 (retained)
 
-- `ReceiptID` switches from `uuid.NewString()` (v4) to `uuid.NewV7().String()` (RFC 9562 v7).
-- 48-bit ms-precision timestamp prefix → B-tree index locality improves → faster inserts under load.
-- Lexically sortable → `ORDER BY receipt_id` is chronological → audit replay skips an extra `ORDER BY created_at` index.
-- Library: `github.com/google/uuid v1.6+` (already in `go.mod`, already used in `internal/cli/envelope.go`).
+- `ReceiptID` remains `uuid.NewString()` (RFC 4122 v4). UUID v7 was considered during Concern B design but deferred: the B3 pre-consume decode reorder + B4 NULL/empty handling provided sufficient correctness, and v7's time-ordering was not load-bearing for any current consumer.
+- Chronological ordering remains available via `ORDER BY created_at` (indexed in `write_receipts`).
+- Library: `github.com/google/uuid v1.6+` (already in `go.mod`).
 
 ### 4.5 Schema Migration: v2 → v3
 

@@ -72,7 +72,7 @@ func (o *okHandle) StdoutStream() interface {
 
 func TestFanOutSuccess(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
@@ -200,7 +200,7 @@ func TestDefaultRegistryNotNil(t *testing.T) {
 func TestNewPoolDefaults(t *testing.T) {
 	// Initialize a git repo so NewPool passes its validity check.
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")

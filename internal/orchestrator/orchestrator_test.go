@@ -182,7 +182,7 @@ func setupGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	cmds := [][]string{
-		{"git", "init", "-q"},
+		{"git", "init", "-q", "-b", "master"},
 		{"git", "config", "user.email", "test@test"},
 		{"git", "config", "user.name", "test"},
 		{"git", "config", "commit.gpgsign", "false"},

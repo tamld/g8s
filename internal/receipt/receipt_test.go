@@ -70,9 +70,9 @@ func newTestManagerWithClock(t *testing.T, clock func() time.Time) *Manager {
 
 func mustIssue(t *testing.T, m *Manager, issuer string, paths []string, ttl time.Duration) *WriteReceipt {
 	t.Helper()
-	r, err := m.IssueReceipt(issuer, paths, ttl, WithConcernBDisabled())
+	r, err := m.IssueReceipt(issuer, paths, ttl, withConcernBDisabled())
 	if err != nil {
-		t.Fatalf("IssueReceipt(%q, %v, %v, WithConcernBDisabled()): unexpected error: %v", issuer, paths, ttl, err)
+		t.Fatalf("IssueReceipt(%q, %v, %v, withConcernBDisabled()): unexpected error: %v", issuer, paths, ttl, err)
 	}
 	return r
 }
@@ -421,7 +421,7 @@ func TestConcurrentConsumeSingleWinner(t *testing.T) {
 
 func TestIssueRejectsEmptyAllowedPaths(t *testing.T) {
 	m := newTestManager(t)
-	_, err := m.IssueReceipt(validIssuer, []string{}, time.Minute, WithConcernBDisabled())
+	_, err := m.IssueReceipt(validIssuer, []string{}, time.Minute, withConcernBDisabled())
 	if !errors.Is(err, ErrEmptyPaths) {
 		t.Fatalf("error = %v, want ErrEmptyPaths", err)
 	}
@@ -442,7 +442,7 @@ func TestIssueRejectsInvalidTTLs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestManager(t)
-			_, err := m.IssueReceipt(validIssuer, []string{"z/**"}, tc.ttl, WithConcernBDisabled())
+			_, err := m.IssueReceipt(validIssuer, []string{"z/**"}, tc.ttl, withConcernBDisabled())
 			if !errors.Is(err, ErrTTLBounds) {
 				t.Fatalf("ttl=%v error = %v, want ErrTTLBounds", tc.ttl, err)
 			}
@@ -457,7 +457,7 @@ func TestIssueAcceptsBoundaryTTLs(t *testing.T) {
 	for _, ttl := range []time.Duration{time.Second, 3600 * time.Second} {
 		func() {
 			m := newTestManager(t)
-			r, err := m.IssueReceipt(validIssuer, []string{"boundary/**"}, ttl, WithConcernBDisabled())
+			r, err := m.IssueReceipt(validIssuer, []string{"boundary/**"}, ttl, withConcernBDisabled())
 			if err != nil {
 				t.Fatalf("ttl=%v rejected: %v", ttl, err)
 			}
@@ -508,7 +508,7 @@ func TestIssueThousandReceiptsUnderOneSecond(t *testing.T) {
 
 	start := time.Now()
 	for i := 0; i < 1000; i++ {
-		if _, err := m.IssueReceipt(validIssuer, []string{"bulk/**"}, time.Minute, WithConcernBDisabled()); err != nil {
+		if _, err := m.IssueReceipt(validIssuer, []string{"bulk/**"}, time.Minute, withConcernBDisabled()); err != nil {
 			t.Fatalf("issue #%d failed: %v", i, err)
 		}
 	}
@@ -700,7 +700,7 @@ func TestAnyCallerMayIssueReceipts(t *testing.T) {
 	// receipts; containment relies on filesystem permissions (0600) and
 	// upstream harness gating.
 	m := newTestManager(t)
-	r, err := m.IssueReceipt("worker-rogue", []string{"self-issued/**"}, time.Minute, WithConcernBDisabled())
+	r, err := m.IssueReceipt("worker-rogue", []string{"self-issued/**"}, time.Minute, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("direct worker issuance must succeed by design: %v", err)
 	}
@@ -795,7 +795,7 @@ func TestDirectDatabaseTamperIsKnownLimitation(t *testing.T) {
 func TestRevokeConsumedReceiptReturnsFalseAndRowPersists(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, WithConcernBDisabled())
+	rc, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestRevokeUnknownReceiptReturnsFalse(t *testing.T) {
 func TestRevokedReceiptCannotBeRevalidated(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, _ := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, WithConcernBDisabled())
+	rc, _ := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, withConcernBDisabled())
 	if ok, err := m.RevokeReceipt(rc.ReceiptID); err != nil || !ok {
 		t.Fatalf("first revoke: %v %v", ok, err)
 	}
@@ -843,7 +843,7 @@ func TestRevokedReceiptCannotBeRevalidated(t *testing.T) {
 	if !strings.Contains(err.Error(), "write receipt not found") {
 		t.Fatalf("error text mismatch: %v", err)
 	}
-	reissued, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, WithConcernBDisabled())
+	reissued, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("reissue: %v", err)
 	}
@@ -857,7 +857,7 @@ func TestExpiryMathUsesInjectedClockExactly(t *testing.T) {
 	clock := newFakeClock(base)
 	m := newTestManagerWithClock(t, clock.Now)
 	defer m.Close()
-	rc, err := m.IssueReceipt("brain", []string{"docs/**"}, 10*time.Second, WithConcernBDisabled())
+	rc, err := m.IssueReceipt("brain", []string{"docs/**"}, 10*time.Second, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -886,9 +886,9 @@ func TestListActiveExcludesConsumedAndExpiredAcrossHandles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open consumer: %v", err)
 	}
-	consumedRc, _ := consumer.IssueReceipt("brain", []string{"a/**"}, time.Minute, WithConcernBDisabled())
-	expiredRc, _ := consumer.IssueReceipt("brain", []string{"b/**"}, 5*time.Second, WithConcernBDisabled())
-	liveRc, _ := consumer.IssueReceipt("brain", []string{"c/**"}, time.Minute, WithConcernBDisabled())
+	consumedRc, _ := consumer.IssueReceipt("brain", []string{"a/**"}, time.Minute, withConcernBDisabled())
+	expiredRc, _ := consumer.IssueReceipt("brain", []string{"b/**"}, 5*time.Second, withConcernBDisabled())
+	liveRc, _ := consumer.IssueReceipt("brain", []string{"c/**"}, time.Minute, withConcernBDisabled())
 	if _, err := consumer.ValidateAndConsume(consumedRc.ReceiptID, "w"); err != nil {
 		t.Fatalf("consume: %v", err)
 	}
@@ -926,8 +926,8 @@ func TestTwoManagersOnSameDatabaseValidateIndependently(t *testing.T) {
 	}
 	defer worker.Close()
 
-	forBrain, _ := brain.IssueReceipt("brain", []string{"x/**"}, time.Minute, WithConcernBDisabled())
-	forWorker, _ := worker.IssueReceipt("worker-a", []string{"y/**"}, time.Minute, WithConcernBDisabled())
+	forBrain, _ := brain.IssueReceipt("brain", []string{"x/**"}, time.Minute, withConcernBDisabled())
+	forWorker, _ := worker.IssueReceipt("worker-a", []string{"y/**"}, time.Minute, withConcernBDisabled())
 
 	gotBrain, err := worker.ValidateAndConsume(forBrain.ReceiptID, "task-b")
 	if err != nil || gotBrain.Issuer != "brain" {
@@ -942,7 +942,7 @@ func TestTwoManagersOnSameDatabaseValidateIndependently(t *testing.T) {
 func TestConcurrentValidateSameReceiptExactlyOneWinner(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, _ := m.IssueReceipt("brain", []string{"z/**"}, time.Minute, WithConcernBDisabled())
+	rc, _ := m.IssueReceipt("brain", []string{"z/**"}, time.Minute, withConcernBDisabled())
 
 	const racers = 2
 	winner := make(chan struct{}, racers)
@@ -987,7 +987,7 @@ func TestBrainIssueWorkerConsumeLeavesNoActiveReceipts(t *testing.T) {
 	}
 	defer worker.Close()
 
-	rc, err := brain.IssueReceipt("brain", []string{"out/**"}, time.Minute, WithConcernBDisabled())
+	rc, err := brain.IssueReceipt("brain", []string{"out/**"}, time.Minute, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestBrainIssueWorkerConsumeLeavesNoActiveReceipts(t *testing.T) {
 func TestTenGoroutinesSingleUseReceiptOneSuccess(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, _ := m.IssueReceipt("brain", []string{"s/**"}, time.Minute, WithConcernBDisabled())
+	rc, _ := m.IssueReceipt("brain", []string{"s/**"}, time.Minute, withConcernBDisabled())
 
 	const n = 10
 	var successes, consumedFailures int32
@@ -1047,7 +1047,7 @@ func TestExpiredReceiptInvisibleToFreshHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prev session: %v", err)
 	}
-	stale, _ := prev.IssueReceipt("brain", []string{"old/**"}, 30*time.Second, WithConcernBDisabled())
+	stale, _ := prev.IssueReceipt("brain", []string{"old/**"}, 30*time.Second, withConcernBDisabled())
 	prev.Close()
 
 	clock.Advance(time.Hour)
@@ -1074,7 +1074,7 @@ func TestExpiredReceiptInvisibleToFreshHandle(t *testing.T) {
 func TestEndToEndIssueGatePromptDrainsActive(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, err := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute, WithConcernBDisabled())
+	rc, err := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -1102,7 +1102,7 @@ func TestEndToEndIssueGatePromptDrainsActive(t *testing.T) {
 func TestEndToEndRevokeThenGateRejectsWithNotFound(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, _ := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute, WithConcernBDisabled())
+	rc, _ := m.IssueReceipt("brain", []string{"reports/**"}, time.Minute, withConcernBDisabled())
 	if _, err := m.RevokeReceipt(rc.ReceiptID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
@@ -1115,7 +1115,7 @@ func TestEndToEndRevokeThenGateRejectsWithNotFound(t *testing.T) {
 func TestEndToEndIssueThenConsumeViaGateDrainsList(t *testing.T) {
 	m := newTestManager(t)
 	defer m.Close()
-	rc, _ := m.IssueReceipt("brain", []string{"g/**"}, time.Minute, WithConcernBDisabled())
+	rc, _ := m.IssueReceipt("brain", []string{"g/**"}, time.Minute, withConcernBDisabled())
 	active, _ := m.ListActiveReceipts()
 	if len(active) != 1 {
 		t.Fatalf("pre-consume list = %d, want 1", len(active))
@@ -1383,7 +1383,7 @@ func TestReceiptMigrationIdempotent(t *testing.T) {
 		RCAConfidence: 0.75,
 		ADRPath:       "docs/decisions/0002-test.md",
 	}
-	r1, err := m1.IssueReceipt("brain", []string{"app/**"}, time.Minute, WithSupervisorMeta(meta), WithConcernBDisabled())
+	r1, err := m1.IssueReceipt("brain", []string{"app/**"}, time.Minute, WithSupervisorMeta(meta), withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue receipt on m1: %v", err)
 	}
@@ -1437,7 +1437,7 @@ func TestReceiptSupervisorMetaRoundTrip(t *testing.T) {
 	}
 
 	// 1. Issue receipt with WithSupervisorMeta.
-	r, err := m.IssueReceipt(validIssuer, []string{"src/**", "tests/**"}, time.Hour, WithSupervisorMeta(meta), WithConcernBDisabled())
+	r, err := m.IssueReceipt(validIssuer, []string{"src/**", "tests/**"}, time.Hour, WithSupervisorMeta(meta), withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("IssueReceipt with SupervisorMeta: %v", err)
 	}
@@ -1505,7 +1505,7 @@ func TestVerifyReceiptExpired(t *testing.T) {
 	clock := newFakeClock(base)
 	m := newTestManagerWithClock(t, clock.Now)
 
-	r, err := m.IssueReceipt("brain", []string{"exp/**"}, 30*time.Second, WithConcernBDisabled())
+	r, err := m.IssueReceipt("brain", []string{"exp/**"}, 30*time.Second, withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("issue receipt: %v", err)
 	}
@@ -1622,7 +1622,7 @@ func TestReceiptErrorBranchesOnClosedDB(t *testing.T) {
 	// Close the underlying DB to simulate database errors.
 	_ = m.Close()
 
-	if _, err := m.IssueReceipt("brain", []string{"x/**"}, time.Minute, WithConcernBDisabled()); err == nil {
+	if _, err := m.IssueReceipt("brain", []string{"x/**"}, time.Minute, withConcernBDisabled()); err == nil {
 		t.Error("IssueReceipt on closed DB must return error")
 	}
 	if _, err := m.ValidateAndConsume(r.ReceiptID, "w"); err == nil {
@@ -1726,7 +1726,7 @@ func TestPartialSupervisorSchemaMigration(t *testing.T) {
 		AttemptIdx:    0,
 		RCAConfidence: 0.8,
 		ADRPath:       "docs/decisions/0002-test.md",
-	}), WithConcernBDisabled())
+	}), withConcernBDisabled())
 	if err != nil {
 		t.Fatalf("IssueReceipt on migrated partial db: %v", err)
 	}
@@ -1849,7 +1849,7 @@ func TestReceiptIDsAreUnique(t *testing.T) {
 	m := newTestManager(t)
 	seen := make(map[string]struct{})
 	for i := 0; i < 100; i++ {
-		r, err := m.IssueReceipt("brain", []string{"a/**"}, time.Minute, WithConcernBDisabled())
+		r, err := m.IssueReceipt("brain", []string{"a/**"}, time.Minute, withConcernBDisabled())
 		if err != nil {
 			t.Fatalf("IssueReceipt[%d]: %v", i, err)
 		}
@@ -1872,7 +1872,7 @@ func TestLegacyReceiptsRemainReadableAfterMigration(t *testing.T) {
 		}
 		r, err := m.IssueReceipt("brain", []string{"legacy/**"}, time.Minute,
 			WithSupervisorMeta(&SupervisorMeta{ApproachIdx: 1, AttemptIdx: 2, RCAConfidence: 0.5, ADRPath: "x"}),
-			WithConcernBDisabled(),
+			withConcernBDisabled(),
 		)
 		if err != nil {
 			t.Fatalf("legacy IssueReceipt: %v", err)
@@ -1910,7 +1910,7 @@ func TestPurgeExpiredBoundedAndConditional(t *testing.T) {
 	m := newTestManagerWithClock(t, clk.Now)
 
 	mkReceipt := func(label string, ttl time.Duration) string {
-		r, err := m.IssueReceipt("brain-"+label, []string{label + "/**"}, ttl, WithConcernBDisabled())
+		r, err := m.IssueReceipt("brain-"+label, []string{label + "/**"}, ttl, withConcernBDisabled())
 		if err != nil {
 			t.Fatalf("IssueReceipt %s: %v", label, err)
 		}
@@ -1945,7 +1945,7 @@ func TestPurgeExpiredRespectsMaxRows(t *testing.T) {
 	clk := newFakeClock(time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
 	m := newTestManagerWithClock(t, clk.Now)
 	for i := 0; i < 10; i++ {
-		r, err := m.IssueReceipt("brain", []string{"x/**"}, time.Hour, WithConcernBDisabled())
+		r, err := m.IssueReceipt("brain", []string{"x/**"}, time.Hour, withConcernBDisabled())
 		if err != nil {
 			t.Fatalf("IssueReceipt: %v", err)
 		}
