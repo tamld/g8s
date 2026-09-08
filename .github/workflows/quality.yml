@@ -83,12 +83,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Go
+      - name: Setup Go (1.24 for golangci-lint compatibility)
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.24'
 
-      - name: Install golangci-lint v2.4.0 (built with Go 1.25, bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+      - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.4.0
