@@ -88,10 +88,10 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install golangci-lint v1 (built with Go 1.25, bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+      - name: Install golangci-lint v2.2.0 (built with Go 1.25, bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64.8
+          version: v2.2.0
           args: --timeout=10m
 
       - name: Cache modules
