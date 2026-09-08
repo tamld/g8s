@@ -53,7 +53,7 @@ func (h *stubHandle) StdoutStream() interface {
 
 func TestDriveFullLifecycleHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
@@ -119,7 +119,7 @@ func TestDriveFullLifecycleHappyPath(t *testing.T) {
 
 func TestDriveEscalationOnFailedReceipt(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
@@ -237,7 +237,7 @@ func TestDriveEscalationOnFanOutError(t *testing.T) {
 
 func TestDriveMultipleWorkersAllOK(t *testing.T) {
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init", "-q")
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
 	mustRunGit(t, dir, "config", "user.email", "test@example.com")
 	mustRunGit(t, dir, "config", "user.name", "Test")
 	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")

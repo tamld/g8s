@@ -153,7 +153,8 @@ type issueOptions struct {
 
 // requireConcernBDefault is the strictness default for IssueReceipt: callers
 // MUST provide CanonicalEnvelope and RuleGraphSnapshot. Use
-// WithConcernBDisabled to opt out (legacy callers, internal tests).
+// withConcernBDisabled to opt out (in-package legacy migration scaffolding
+// and tests only; the option is unexported by design).
 const requireConcernBDefault = true
 
 // WithSupervisorMeta attaches supervisor-tier provenance metadata to the issued receipt.
@@ -179,19 +180,11 @@ func WithRuleGraph(rs *RuleGraphSnapshot) IssueOption {
 	}
 }
 
-// WithCurrentRuleGraph is a convenience wrapper that returns a WithRuleGraph
-// option pre-populated with the provided snapshot. Designed for callers that
-// already have a snapshot from an internal ruleset registry.
-func WithCurrentRuleGraph(rs *RuleGraphSnapshot) IssueOption {
-	return WithRuleGraph(rs)
-}
-
-// WithConcernBDisabled opts out of the Concern B (provenance-and-replay)
-// enforcement. By default, IssueReceipt rejects calls missing
-// CanonicalEnvelope or RuleGraphSnapshot. Use this only for legacy callers,
-// internal tests, or pre-migration migration scaffolding. Production
-// callers (CLI, MCP server) MUST NOT use this option.
-func WithConcernBDisabled() IssueOption {
+// withConcernBDisabled opts out of the Concern B (provenance-and-replay)
+// enforcement. Unexported: callers outside this package cannot bypass the
+// default-on invariant. Used only by legacy migration scaffolding and
+// in-package tests that exercise non-Brain-tier receipt issuance.
+func withConcernBDisabled() IssueOption {
 	return func(o *issueOptions) {
 		o.requireConcernB = false
 	}
@@ -664,7 +657,7 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 
 	// Decode JSON + envelope fields BEFORE consuming so corrupted payloads
 	// return an error without burning the receipt (B3 adversarial blocker).
-	r, err := scanIntoReceipt(row, receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
+	r, err := scanIntoReceipt(receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 		rulesetVersion, pipelineDigest, adrRefVal,
@@ -765,7 +758,7 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scan active receipt: %w", err)
 		}
-		r, err := scanIntoReceipt(rows, receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
+		r, err := scanIntoReceipt(receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
 			approachIdx, attemptIdx, rcaConfidence, adrPath,
 			envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 			rulesetVersion, pipelineDigest, adrRefVal,
@@ -839,7 +832,7 @@ func (m *Manager) VerifyReceipt(receiptID string) (*WriteReceipt, error) {
 		return nil, &ExpiredError{ReceiptID: receiptID, Elapsed: now.Sub(expiry)}
 	}
 
-	r, err := scanIntoReceipt(row, receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
+	r, err := scanIntoReceipt(receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 		rulesetVersion, pipelineDigest, adrRefVal,
@@ -873,13 +866,11 @@ const receiptSelectColumns = `issuer, allowed_paths_json, expires_at, consumed, 
 		ruleset_version, pipeline_digest, adr_ref,
 		issued_by, tool_version, trace_id, actor_chain_json, source_commit`
 
-// scanIntoReceipt scans one row into a WriteReceipt and the provided aux
-// pointers (consumed, createdAt, pathsJSON). Returns sql.ErrNoRows pass-through
-// for callers to detect NotFoundError.
+// scanIntoReceipt hydrates a WriteReceipt from the already-scanned column
+// values. Caller is responsible for executing the SELECT and passing the
+// scanned scalars; this function performs JSON unmarshal + derived struct
+// population only.
 func scanIntoReceipt(
-	row interface {
-		Scan(dest ...any) error
-	},
 	receiptID string,
 	pathsJSON string,
 	expiresAt float64,
@@ -913,11 +904,6 @@ func scanIntoReceipt(
 		ExpiresAt:    unixToTime(expiresAt),
 		Consumed:     consumed == 1,
 		CreatedAt:    unixToTime(createdAt),
-	}
-
-	var issuer string
-	if issuedBy.Valid {
-		issuer = issuedBy.String
 	}
 
 	if approachIdx.Valid || attemptIdx.Valid || rcaConfidence.Valid || adrPath.Valid {
@@ -963,9 +949,6 @@ func scanIntoReceipt(
 	if storedTask.Valid {
 		tid := storedTask.String
 		r.ConsumerTaskID = &tid
-	}
-	if issuer != "" && r.Issuer == "" {
-		r.Issuer = issuer
 	}
 	return r, nil
 }
