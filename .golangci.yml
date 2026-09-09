@@ -7,4 +7,3 @@ linters:
     - gosec
     - govulncheck
     - gocognit
-  disable-all: true
