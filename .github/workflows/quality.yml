@@ -83,15 +83,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Go (1.24 for golangci-lint compatibility)
+      - name: Setup Go (1.25 for golangci-lint compatibility)
         uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version: '1.25'
 
       - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.4.0
+          version: v1.64.5
           args: --timeout=10m
 
       - name: Cache modules
@@ -121,7 +121,7 @@ jobs:
         env:
           CGO_ENABLED: '0'
 
-      - name: golangci-lint (staticcheck, errcheck, gosec, govulncheck, gocognit)
+      - name: golangci-lint (staticcheck, errcheck, gosec, gocognit)
         run: golangci-lint run
 
       - name: Cyclomatic complexity <= 15
