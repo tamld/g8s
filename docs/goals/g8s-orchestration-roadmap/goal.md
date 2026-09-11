@@ -212,3 +212,26 @@ On every `/goal` continuation:
   (Proposed → Accepted at T020).
 - `internal/orchestrator/`, `internal/harness/`, `internal/receipt/`,
   `internal/controlplane/` — frozen substrates the supervisor builds on.
+
+## Release Roadmap
+
+| Target | Milestone | Key Deliverables |
+|--------|-----------|------------------|
+| 2026-09 | v0.4.0 | Concern A – Supervisor fix loop (`internal/supervisor` + `g8s orchestrate`), ADR-0001, DELTA-11 A.1-A.5 |
+| 2026-10 | v0.5.0 | Concern B – Receipt evolution (backward‑compat migration), ADR-0002, DELTA-11 B.1-B.3 |
+| 2026-11 | v0.6.0 | Concern C – Meta‑optimizer (read‑only aggregate metrics), ADR-0003, DELTA-11 C.1-C.2 |
+| 2026-12 | v0.7.0 | Harden supervisor, add CLI ergonomics, cross‑platform validation |
+
+## Issue / PR Backlog Plan
+
+| Priority | Item | Status | Effort | Sprint |
+|----------|------|--------|--------|--------|
+| P0 | PR #88 – Sentinel cleanup | open | S | v0.4.0 |
+| P0 | PR #89 – Bolt cleanup | open | S | v0.4.0 |
+| P0 | PR #90 – Sentinel cleanup | open | S | v0.4.0 |
+| P0 | PR #98 – Bolt cleanup | open | S | v0.4.0 |
+| P0 | PR #99 – Sentinel cleanup | open | S | v0.4.0 |
+| P1 | Windows installer / EV signing | planned | M | v0.5.0 |
+| P1 | macOS notarization + cosign SBOM | planned | M | v0.5.0 |
+| P2 | Pathutil / sleep memory / doctor | planned | L | v0.6.0 |
+| P2 | Dual‑blind worktree cleanup | planned | L | v0.6.0 |

@@ -78,11 +78,17 @@ visual_board:
 
 active_task: null
 
+  - id: T023
+    type: worker
+    assignee: Worker
+    status: pending
+    object: "Plan release roadmap and issue backlog"
+
 tasks:
   - id: T020
     type: worker
     assignee: Worker
-    status: pending
+    status: completed
     reasoning_hint: default
     objective: "Concern A vertical slice per docs/designs/supervisor-fix-loop.md + ADR-0001 + DELTA-11 §ADDED A.1-A.5: (1) promote spec section DELTA-11 §ADDED A.1-A.5 from DRAFT to ACCEPTED + IMPLEMENTING; (2) promote docs/designs/supervisor-fix-loop.md v0.1.0-draft to v1.0.0-ACCEPTED with changelog entry; (3) promote ADR-0001 Proposed to Accepted with ratification date; (4) author internal/supervisor package (planner.go, enforcer.go, reviewer.go, rca.go, escalator.go, supervisor.go wiring the loop, metrics.go emitting the eight §10 metrics, persist.go writing supervisor_tasks + supervisor_decisions tables into internal/controlplane, optimizer_stub.go empty until T022); (5) wire cmd/g8s/main.go + cmd/g8s/orchestrate.go so `./bin/g8s orchestrate 'self-test'` runs the full loop on a synthetic failing task and emits the §9 HITL escalation JSON to stdout (exit non-zero) — the 'self-test' task MUST exhaust all 9 attempts to prove the loop closes; (6) add `g8s supervisor metrics --task-id sup-X` subcommand reading the eight §10 metrics from supervisor_tasks; (7) add internal/supervisor/supervisor_test.go covering: FanOut with len(plan)==1+MaxParallel==1, no direct AGY/codex/gemini/claude imports, envelope selection with EnvelopeHints nil vs set, 3x3=9 iteration cap enforcement, RCA confidence<0.6 -> NEEDS_INFO pause, scope violation on receipt always rejects, metrics persistence across restarts, HITL escalation JSON shape, DETERMINISTIC FAIL TEST using an in-process Worker stub that returns Receipt{OK: false, ScopeViolations: [...]} so all 9 attempts reliably fail (no flakiness), CONCURRENT SUPERVISORS TEST using two goroutines writing to the same supervisor_tasks task_id under -race, PROVE_RAISE_FAILURES_FIRST (an approach-shift returns approach+1, attempt=0); (8) register new supervisor_* tables in internal/controlplane migrations; (9) commit with message 'feat(supervisor): DELTA-11 Concern A — supervisor-driven fix loop'; (10) deliver a self-test run log showing the full 9-attempt cycle."
     inputs:
@@ -151,7 +157,7 @@ tasks:
       - "Need to import AGY/codex/gemini/claude binaries into internal/supervisor."
       - "Self-test cannot deterministically reach the 9-attempt escalation (timing-dependent flake)."
     receipt:
-      result: pending
+      result: completed
       notes_file: notes/T020-concern-a-supervisor.md
   - id: T021
     type: worker
@@ -237,3 +243,23 @@ tasks:
     receipt:
       result: pending
       notes_file: notes/T022-concern-c-optimizer.md
+- id: T023
+  type: worker
+  assignee: Worker
+  status: pending
+  objective: "Plan release roadmap and issue/PR backlog plan – update goal.md and state.yaml"
+  inputs:
+    - "docs/REFACTORING_PLAN.md"
+    - "docs/CHANGELOG.md"
+  constraints:
+    - "spec-first must be accepted before implementation"
+    - "only modify allowed files"
+  allowed_files:
+    - "docs/REFACTORING_PLAN.md"
+    - "docs/CHANGELOG.md"
+  verify:
+    - "docker run --rm -v $PWD:/workspace -e CGO_ENABLED=0 golang:1.25 sh -c 'go mod tidy && go vet ./...'"
+  receipt:
+    result: completed
+    notes_file: notes/T023-planning.md
+
