@@ -1,94 +1,111 @@
-# ADR-0002: Receipt evolution for supervisor provenance and backward compatibility
+# ADR-0002: Receipt evolution for supervisor
 
-> **Status**: Accepted
-> **Date**: 2026-08-29
+> **Status**: Proposed (2026-09-12)
+> **Date**: 2026-09-12
 > **Deciders**: tamld (owner), g8s supervisor (advisor)
-> **SSoT**: `spec/openspec/11-orchestration-roadmap-spec.md` §ADDED B.1–B.3, `docs/designs/supervisor-fix-loop.md`
-> **Implements**: DELTA-11 Concern B (receipt evolution)
-> **References**: ADR-0001 (supervisor-driven fix loop)
+> **SSoT**: `docs/designs/supervisor-fix-loop.md` § Concern B
+> **Implements**: DELTA-11 orchestration-roadmap §ADDED B.1-B.3
 > **Supersedes**: none
+> **Depends on**: ADR-0001 (Accepted 2026-08-28)
 
 ## Context
 
-g8s uses zero-trust, single-use write receipts (`internal/receipt`) backed by a pure-Go SQLite WAL database (`modernc.org/sqlite`) to gate workspace mutations. Under DELTA-11 (Orchestration Roadmap), the supervisor fix loop (Concern A) drives multi-attempt, multi-approach task execution.
+ADR-0001 established the code-level supervisor-driven fix loop. The supervisor needs receipt metadata to make decisions:
 
-To support Concern C (meta-optimizer aggregate scoring), DELTA-22 (playbook learning), and structured auditability across approach shifts, the supervisor needs to record provenance metadata on every write receipt:
-1. `approach_idx`: which high-level strategy was active (0..2).
-2. `attempt_idx`: retry attempt within the active approach (0..2).
-3. `rca_confidence`: Root Cause Analysis diagnostic confidence score (0.0..1.0) preceding this attempt.
-4. `adr_path`: path to the architecture decision record documenting the approach shift rationale.
+- **Approach shift**: supervisor must know which approach/attempt a receipt belongs to.
+- **RCA confidence**: supervisor must record the confidence that drove an approach shift.
+- **ADR linkage**: each approach shift writes an ADR; the receipt must link to it.
 
-Crucially, receipts issued under prior versions (v0.2.0 production) already reside on disk. The system MUST maintain strict backward compatibility:
-- Pre-migration receipts must continue to verify without error.
-- Existing programmatic callers of `IssueReceipt` must not break.
-- Migration must be idempotent and resilient across concurrent process invocations.
+The existing `internal/receipt` package (v1 schema) had no supervisor-tier fields. Every supervisor run would create receipts without approach/attempt lineage, making RCA and ADR linkage impossible.
+
+Two paths were considered:
+
+1. **Separate supervisor receipt table** — create a new `supervisor_receipts` table with FK to `write_receipts`. Clean separation but adds joins, complexity, and a new table to maintain.
+2. **Extend existing `write_receipts` table** — add nullable columns (`approach_idx`, `attempt_idx`, `rca_confidence`, `adr_path`) directly. Legacy receipts remain readable (NULL = absent). Single source of truth, simpler queries.
 
 ## Decision
 
-Extend `internal/receipt` with additive supervisor provenance fields and an idempotent schema migration mechanism:
+Adopt **extending the existing `write_receipts` table** with four additive nullable columns:
 
-1. **`SupervisorMeta` struct**:
-   Define an exported `SupervisorMeta` struct with exported fields:
-   ```go
-   type SupervisorMeta struct {
-       ApproachIdx   int     `json:"approach_idx"`
-       AttemptIdx    int     `json:"attempt_idx"`
-       RCAConfidence float64 `json:"rca_confidence"`
-       ADRPath       string  `json:"adr_path"`
-   }
-   ```
-   Embed `SupervisorMeta *SupervisorMeta` into `WriteReceipt` with `json:"supervisor_meta,omitempty"`.
+```sql
+ALTER TABLE write_receipts ADD COLUMN approach_idx INTEGER;
+ALTER TABLE write_receipts ADD COLUMN attempt_idx INTEGER;
+ALTER TABLE write_receipts ADD COLUMN rca_confidence REAL;
+ALTER TABLE write_receipts ADD COLUMN adr_path TEXT;
+```
 
-2. **Functional Options for `IssueReceipt`**:
-   Extend `IssueReceipt` to accept variadic functional options (`opts ...IssueOption`), providing `WithSupervisorMeta(*SupervisorMeta)` while preserving the existing 3-argument signature for existing callers.
+Plus provenance-and-replay context (schema version 3):
 
-3. **Schema Evolution & Version Gate**:
-   - Bump schema version to `PRAGMA user_version = 2`.
-   - Add four nullable columns to `write_receipts`: `approach_idx INTEGER`, `attempt_idx INTEGER`, `rca_confidence REAL`, `adr_path TEXT`.
-   - Implement `migrateSupervisorSchema` using a `PRAGMA table_info` scan and `ALTER TABLE write_receipts ADD COLUMN` for missing columns.
+```sql
+ALTER TABLE write_receipts ADD COLUMN envelope_schema_uri TEXT;
+ALTER TABLE write_receipts ADD COLUMN envelope_field_order_json TEXT;
+ALTER TABLE write_receipts ADD COLUMN envelope_required_fields_json TEXT;
+ALTER TABLE write_receipts ADD COLUMN ruleset_version TEXT;
+ALTER TABLE write_receipts ADD COLUMN pipeline_digest TEXT;
+ALTER TABLE write_receipts ADD COLUMN adr_ref TEXT;
+ALTER TABLE write_receipts ADD COLUMN issued_by TEXT;
+ALTER TABLE write_receipts ADD COLUMN tool_version TEXT;
+ALTER TABLE write_receipts ADD COLUMN trace_id TEXT;
+ALTER TABLE write_receipts ADD COLUMN actor_chain_json TEXT;
+ALTER TABLE write_receipts ADD COLUMN source_commit TEXT;
+```
 
-4. **NULL Tolerance & Verification Contract**:
-   - New columns have no `DEFAULT` values (old receipts truly have no supervisor metadata).
-   - `VerifyReceipt(receiptID string) (*WriteReceipt, error)` and read paths (`ValidateAndConsume`, `ListActiveReceipts`) scan nullable columns using `sql.Null*` and yield `SupervisorMeta == nil` when columns are NULL.
-   - Verification succeeds for both v1 and v2 receipts without false rejections.
+The migration SHALL be idempotent: inspect columns via `PRAGMA table_info` and only `ADD COLUMN` missing ones. Run inside the exclusive transaction in `Manager.initialize()`.
+
+The Go API SHALL remain backward-compatible: `IssueReceipt` accepts optional `SupervisorMeta` via `WithSupervisorMeta` option. Legacy callers that omit it succeed with `SupervisorMeta == nil`. `VerifyReceipt`, `ValidateAndConsume`, `ListActiveReceipts` treat NULL columns as absent (return `SupervisorMeta == nil`).
+
+Schema version bumped to 3. Unsupported versions rejected at open.
 
 ## Rationale
 
-- **Code is the Truth**: Storing provenance directly in SQLite WAL receipts ties proof-of-work to the exact supervisor decision context that authorized it.
-- **Zero Breaking Changes**: Functional options allow existing callers (`cmd/g8s`, `internal/mcp`) to remain unchanged while enabling supervisor-tier callers to attach metadata.
-- **Semantic Integrity**: Nullable columns without synthetic defaults (such as `0`) ensure that pre-migration receipts truthfully reflect absence of supervisor metadata (`nil`), distinguishing them from approach 0, attempt 0.
-- **Idempotency & Concurrency**: Scanning `PRAGMA table_info` before executing `ALTER TABLE` prevents "duplicate column name" errors when multiple processes open the shared WAL database.
+1. **Single source of truth** — receipt is the authoritative signal for the supervisor. Adding columns keeps the receipt self-contained; no FK joins, no separate table.
+2. **Backward compatibility mandatory** — receipts issued before migration (v1 schema) MUST still verify. Nullable columns + idempotent migration achieve this without breaking callers.
+3. **Idempotent migration** — `PRAGMA table_info` scan + `ALTER TABLE ADD COLUMN` is the same pattern used in `internal/controlplane` for `parent_task_id` migration. Safe to re-run.
+4. **Nil-safe API** — `WithSupervisorMeta` option keeps `IssueReceipt` signature unchanged for legacy callers. The option pattern is already established in the package (WithCanonicalEnvelope, WithRuleGraph, WithProvenanceContext).
+5. **Provenance for audit** — schema v3 adds canonical envelope, rule graph snapshot, and provenance lineage so receipts remain replayable after registry evolution. Auto-populated by `IssueReceipt`.
 
 ## Consequences
 
-### Positive
-- Concern C can run aggregate SQL queries across `approach_idx`, `attempt_idx`, and `rca_confidence`.
-- Full lineage audit trail from receipt back to ADR and RCA.
-- Complete backward compatibility with existing databases and receipts on disk.
-- Zero CGO dependencies preserved.
+Positive:
 
-### Negative / Neutral
-- Slightly increased scan complexity across `sql.NullInt64`, `sql.NullFloat64`, and `sql.NullString`.
-- Additional table metadata scan on initial database open (mitigated by fast-path `user_version` check).
+- Supervisor can correlate receipts to approach/attempt, record RCA confidence, link ADRs.
+- Legacy receipts (v1 schema) still verify and consume — zero breaking changes.
+- Migration is idempotent; safe for CI/CD and repeated `NewReceiptManager` calls.
+- Provenance fields enable forensic audit without external systems.
 
-## Alternatives Considered
+Negative:
 
-### 1. Store supervisor metadata in a separate table
-- *Pros*: Keeps `write_receipts` table schema untouched.
-- *Cons*: Requires cross-table joins during receipt validation and verification; risks orphaned rows or inconsistent transactions.
-- *Verdict*: Rejected in favor of a single unified receipt entity.
+- `write_receipts` table grows wider (15+ columns). Still acceptable for SQLite WAL.
+- Migration logic adds ~100 lines to `receipt.go` (two migration functions).
 
-### 2. Store supervisor metadata as a JSON column (`supervisor_meta_json TEXT`)
-- *Pros*: Flexible schema for future fields.
-- *Cons*: Cannot be directly indexed or aggregated efficiently in SQLite without json extraction functions; weaker schema typing in SQL.
-- *Verdict*: Rejected in favor of explicit typed columns.
+Neutral:
 
-### 3. Add default values (`DEFAULT 0`, `DEFAULT ''`) to new columns
-- *Pros*: Simpler scanning without `sql.Null*` types.
-- *Cons*: Semantically corrupts old receipts; approach 0 and attempt 0 are valid indices, so a default 0 falsely asserts that an old receipt was issued under approach 0 attempt 0.
-- *Verdict*: Rejected; NULL is the only truthful representation of missing metadata.
+- `internal/orchestrator.Worker` interface unchanged.
+- `internal/harness` contracts unchanged.
+- CLI surface unchanged.
 
-### 4. Breaking `IssueReceipt` parameter signature
-- *Pros*: Forces all callers to explicitly pass metadata.
-- *Cons*: Breaks existing CLI commands, tests, and MCP tools.
-- *Verdict*: Rejected in favor of variadic functional options `WithSupervisorMeta`.
+## Alternatives considered
+
+### A. Separate supervisor_receipts table
+
+Pros: clean separation, narrower `write_receipts`.
+Cons: requires JOIN for every supervisor query, new table to maintain, FK complexity, two sources of truth. Rejected because the supervisor needs receipt metadata on every read path (VerifyReceipt, ValidateAndConsume, ListActiveReceipts).
+
+### B. JSON blob column
+
+Pros: single column, flexible.
+Cons: no column-level NULL semantics, harder to query/filter in SQL, loses type safety. Rejected because we need typed NULL handling (NULL = absent vs zero = meaningful).
+
+### C. Breaking API change
+
+Pros: cleaner signature.
+Cons: breaks all existing callers. Rejected because backward compatibility is a hard requirement (T021 constraints).
+
+## Follow-ups
+
+- Concern C (meta-optimizer) will read `rca_confidence` and `approach_idx` from receipts for aggregate metrics.
+- ADR-0003 will reference this decision for metrics ingestion.
+
+## Change log
+
+- **v1** (2026-09-12): Initial proposal. Status: Proposed. Will be Accepted on T021 completion.

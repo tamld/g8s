@@ -6,6 +6,8 @@
 **Depends on**: DELTA-09 worker-supervisor (APPLIED)
 **Supersedes**: none
 
+**Promotion**: Concern B (B.1-B.3) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T021. Implementation status: IMPLEMENTING.
+
 Port of the orchestration strategy sketched in
 `docs/designs/supervisor-fix-loop.md` to the OpenSpec delta format. This
 delta introduces a **supervisor-driven fix loop** that wraps the existing
@@ -171,6 +173,58 @@ ingests these metrics via that subcommand.
 
 **Implementation Status**: IMPLEMENTING (T020)
 
+### Requirement: Receipt schema extends with supervisor metadata (Concern B.1)
+
+The receipt schema SHALL add four additive columns to the `write_receipts` table:
+- `approach_idx` (INTEGER) — supervisor approach index (0-based)
+- `attempt_idx` (INTEGER) — supervisor attempt index within the approach (0-based)
+- `rca_confidence` (REAL) — RCA confidence score [0, 1] that drove the approach shift
+- `adr_path` (TEXT) — filesystem path to the ADR written for this approach shift
+
+These columns SHALL be nullable so that receipts issued before the migration remain readable. The `SupervisorMeta` struct SHALL be added to `WriteReceipt` as an optional field.
+
+#### Scenario: receipt issued with supervisor metadata
+- Supervisor calls `IssueReceipt` with `WithSupervisorMeta(&SupervisorMeta{ApproachIdx: 0, AttemptIdx: 1, RCAConfidence: 0.85, ADRPath: "docs/decisions/0002-shift.md"})`.
+- The returned `WriteReceipt` has `SupervisorMeta` populated and all four columns written to the row.
+
+**Implementation Status**: IMPLEMENTING (T021)
+
+### Requirement: Backward-compatible migration via idempotent ALTER TABLE (Concern B.2)
+
+The migration from schema version 1 to version 2 SHALL be idempotent:
+- It SHALL inspect `write_receipts` columns via `PRAGMA table_info`.
+- For each missing column in `{approach_idx, attempt_idx, rca_confidence, adr_path}`, it SHALL execute `ALTER TABLE write_receipts ADD COLUMN <col> <type>`.
+- Re-running the migration on an already-migrated database SHALL be a no-op (no errors, no duplicate columns).
+- The migration SHALL run inside the exclusive transaction in `Manager.initialize()`.
+
+#### Scenario: fresh database
+- `NewReceiptManager` creates the table with all columns present. Migration is a no-op.
+
+#### Scenario: legacy v1 database
+- Opening a v1 database (user_version = 1) triggers migration. All four columns are added. `user_version` is bumped to 2.
+
+**Implementation Status**: IMPLEMENTING (T021)
+
+### Requirement: IssueReceipt signature extension with nil-safe SupervisorMeta (Concern B.3)
+
+`IssueReceipt` SHALL accept an optional `SupervisorMeta` via `WithSupervisorMeta` option. The option SHALL be nil-safe: callers that do not pass it (or pass `nil`) MUST still succeed. Legacy callers using the old signature (no `SupervisorMeta`) MUST continue to work without modification.
+
+`VerifyReceipt`, `ValidateAndConsume`, and `ListActiveReceipts` SHALL read the four new columns when present and populate `SupervisorMeta` if any column is non-NULL. If all four are NULL, `SupervisorMeta` SHALL be `nil`.
+
+#### Scenario: legacy caller
+- Old code calls `m.IssueReceipt("brain", []string{"src/**"}, time.Hour)` without `WithSupervisorMeta`.
+- Returns a valid receipt with `SupervisorMeta == nil`.
+
+#### Scenario: new caller with metadata
+- New code calls `m.IssueReceipt("brain", []string{"src/**"}, time.Hour, WithSupervisorMeta(meta))`.
+- Returns a valid receipt with `SupervisorMeta` populated.
+
+#### Scenario: explicit NULL columns
+- A row has `approach_idx = NULL, attempt_idx = NULL, rca_confidence = NULL, adr_path = NULL`.
+- `VerifyReceipt` returns `SupervisorMeta == nil` (not zero values, not error).
+
+**Implementation Status**: IMPLEMENTING (T021)
+
 ### Requirement: AIC contract defines automated review surface via orchestrate-aic (§ADDED 18.1)
 
 `g8s orchestrate-aic` SHALL accept `--pr <number>` (required, positive integer)
@@ -245,6 +299,7 @@ None.
 
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
 - 2026-08-29: DELTA-18 AIC integration and from-intent orchestration added (§ADDED 18.1, 18.2). Marked IMPLEMENTED (T022).
+- 2026-09-12: Concern B promoted DRAFT → ACCEPTED (T021). §ADDED B.1-B.3 (receipt schema extension, idempotent migration, nil-safe IssueReceipt signature) marked IMPLEMENTING.
 
 ## Change log
 
@@ -252,4 +307,5 @@ None.
   design doc.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
 - **v1.1.0-ACCEPTED** (2026-08-29): Added DELTA-18 requirements for AIC automated review integration (`g8s orchestrate-aic`) and `--from-intent` / `--from-file` sub-task FanOut orchestration (§ADDED 18.1, §ADDED 18.2). Marked IMPLEMENTED.
+- **v1.2.0-ACCEPTED** (2026-09-12): Promoted Concern B from DRAFT → ACCEPTED as part of T021. Added §ADDED B.1-B.3 (receipt schema extension with supervisor metadata, idempotent ALTER TABLE migration, nil-safe IssueReceipt signature extension). Implementation already exists in `internal/receipt` (SchemaVersion 3, SupervisorMeta, migrateSupervisorSchema, migrateConcernBSchema). No behavioral changes; promotion reflects owner ratification to begin Concern C.
 

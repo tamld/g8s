@@ -1,9 +1,9 @@
 # Supervisor-Driven Fix Loop
 
-> **Version**: v1.0.0-ACCEPTED
-> **Last Changed**: 2026-08-28
-> **Status**: ACCEPTED — Concern A implementation in progress (T020)
-> **Scope**: Concern A of the orchestration roadmap. Concerns B (Receipt design) and C (Meta-optimizer) are tracked separately.
+> **Version**: v1.1.0-ACCEPTED
+> **Last Changed**: 2026-09-12
+> **Status**: ACCEPTED — Concern A complete (T020), Concern B complete (T021)
+> **Scope**: Concerns A and B of the orchestration roadmap. Concern C (Meta-optimizer) is tracked separately.
 
 ---
 
@@ -42,10 +42,65 @@ This document proposes a **supervisor-driven fix loop** that wraps the existing 
 
 ### Non-Goals
 
-- **N1**. This document does **not** redesign the Receipt schema — that is Concern B.
-- **N2**. This document does **not** introduce a meta-optimizer — that is Concern C.
-- **N3**. This document does **not** add a UI. CLI and JSON output only.
-- **N4**. This document does **not** change `internal/orchestrator` Worker interface. The supervisor sits above it.
+- **N1**. This document does **not** introduce a meta-optimizer — that is Concern C.
+- **N2**. This document does **not** add a UI. CLI and JSON output only.
+- **N3**. This document does **not** change `internal/orchestrator` Worker interface. The supervisor sits above it.
+
+---
+
+## Concern B: Receipt Evolution for Supervisor
+
+This section specifies the receipt schema extensions required for the supervisor to make decisions (approach shift, RCA confidence, ADR linkage, attempt lineage).
+
+### B.1 Additive Supervisor Metadata Columns
+
+The `write_receipts` table SHALL be extended with four nullable columns:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `approach_idx` | INTEGER | Supervisor approach index (0-based) |
+| `attempt_idx` | INTEGER | Supervisor attempt index within approach (0-based) |
+| `rca_confidence` | REAL | RCA confidence [0, 1] that drove the approach shift |
+| `adr_path` | TEXT | Filesystem path to the ADR written for this approach shift |
+
+All columns are nullable so that receipts issued before the migration remain readable. The Go struct `SupervisorMeta` encapsulates these fields and is an optional field on `WriteReceipt`.
+
+### B.2 Idempotent Backward-Compatible Migration
+
+The migration from schema version 1 → 2 SHALL:
+1. Inspect `write_receipts` columns via `PRAGMA table_info`.
+2. For each missing column in the set above, execute `ALTER TABLE write_receipts ADD COLUMN <col> <type>`.
+3. Run inside the exclusive transaction in `Manager.initialize()`.
+4. Be idempotent: re-running on an already-migrated database is a no-op.
+
+The migration is implemented in `migrateSupervisorSchema` and is invoked automatically on `NewReceiptManager`.
+
+### B.3 Nil-Safe IssueReceipt Signature Extension
+
+`IssueReceipt` SHALL accept an optional `SupervisorMeta` via the unexported `WithSupervisorMeta` option:
+- Callers that do not pass it (legacy code) MUST succeed with `SupervisorMeta == nil`.
+- `VerifyReceipt`, `ValidateAndConsume`, and `ListActiveReceipts` SHALL read the four columns when present.
+- If all four columns are NULL, `SupervisorMeta` SHALL be `nil` (not zero values, not error).
+
+### B.4 Provenance-and-Replay Context (Schema Version 3)
+
+Schema version 3 adds provenance-and-replay context for forensic audit:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `envelope_schema_uri` | TEXT | Canonical envelope SchemaURI (g8s://) |
+| `envelope_field_order_json` | TEXT | JSON-encoded field order array |
+| `envelope_required_fields_json` | TEXT | JSON-encoded required fields array |
+| `ruleset_version` | TEXT | Rule registry version at issue time |
+| `pipeline_digest` | TEXT | Pipeline digest at issue time |
+| `adr_ref` | TEXT | ADR reference from rule graph |
+| `issued_by` | TEXT | Issuer identity |
+| `tool_version` | TEXT | Tool version (e.g., g8s v0.9.1) |
+| `trace_id` | TEXT | Distributed trace ID |
+| `actor_chain_json` | TEXT | JSON-encoded actor chain |
+| `source_commit` | TEXT | Source commit SHA at issue time |
+
+These are populated via `WithCanonicalEnvelope`, `WithRuleGraph`, and `WithProvenanceContext` options. The migration is implemented in `migrateConcernBSchema`.
 
 ---
 
@@ -332,3 +387,4 @@ Concern C ingests these metrics to retune envelope selection, iteration caps, an
 ## Changelog
 
 - v1.0.0-ACCEPTED (2026-08-28): Promoted from v0.1.0-draft. Implementation tracked under T020 of g8s-orchestration-roadmap goal. No behavioral changes; status reflects owner ratification of the architecture.
+- v1.1.0-ACCEPTED (2026-09-12): Added Concern B (Receipt Evolution) specification (§ Concern B). Receipt schema extensions (SupervisorMeta, provenance-and-replay context), idempotent migration, and nil-safe IssueReceipt signature are already implemented in `internal/receipt` (SchemaVersion 3). Promoted from DRAFT → ACCEPTED as part of T021.
