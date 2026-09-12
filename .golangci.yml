@@ -6,3 +6,5 @@ linters:
     - gosec
     - govulncheck
     - gocognit
+run:
+  go: "1.23.0"
