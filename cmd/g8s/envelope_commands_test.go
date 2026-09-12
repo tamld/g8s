@@ -450,6 +450,38 @@ func TestUnifiedEnvelopeCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("supervisor-metrics flag collision --task-id + --aggregate", func(t *testing.T) {
+		env, code, _ := runCmd("supervisor-metrics", "--task-id", "sup-1", "--aggregate")
+		if code != 2 {
+			t.Fatalf("flag collision exit code = %d, want 2", code)
+		}
+		if env.V != 1 || env.Kind != "error" || env.Command != "supervisor-metrics" {
+			t.Errorf("flag collision headers: %+v", env)
+		}
+		if env.Error == nil || env.Error.Code != cli.CodeUsage {
+			t.Errorf("expected E_USAGE code, got: %+v", env.Error)
+		}
+		if !strings.Contains(env.Error.Message, "cannot combine --task-id with --aggregate") {
+			t.Errorf("expected 'cannot combine --task-id with --aggregate' in error message, got: %s", env.Error.Message)
+		}
+	})
+
+	t.Run("supervisor-metrics flag collision --task-id + --json-stream", func(t *testing.T) {
+		env, code, _ := runCmd("supervisor-metrics", "--task-id", "sup-1", "--json-stream")
+		if code != 2 {
+			t.Fatalf("flag collision exit code = %d, want 2", code)
+		}
+		if env.V != 1 || env.Kind != "error" || env.Command != "supervisor-metrics" {
+			t.Errorf("flag collision headers: %+v", env)
+		}
+		if env.Error == nil || env.Error.Code != cli.CodeUsage {
+			t.Errorf("expected E_USAGE code, got: %+v", env.Error)
+		}
+		if !strings.Contains(env.Error.Message, "cannot combine --task-id with --json-stream") {
+			t.Errorf("expected 'cannot combine --task-id with --json-stream' in error message, got: %s", env.Error.Message)
+		}
+	})
+
 	t.Run("backward-compatibility data field wrapper", func(t *testing.T) {
 		// Verify submit -> get -> tasks unmarshaling into wrapper struct
 		subEnv, subCode, _ := runCmd("submit", "--idempotency-key", "compat-key-1", "--prompt", "Compat check", "--role", "collector", "--permission", "read_only", "--model", "gemini-3.8-flash-high")

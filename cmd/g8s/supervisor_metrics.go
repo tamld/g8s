@@ -38,6 +38,13 @@ func runSupervisorMetrics(args []string) {
 		exitUsage("supervisor-metrics", "", *traceID, err.Error(), "", *jsonl)
 	}
 
+	if *taskID != "" && *aggregate {
+		exitUsage("supervisor-metrics", "", *traceID, "cannot combine --task-id with --aggregate", "", *jsonl)
+	}
+	if *taskID != "" && *jsonStream {
+		exitUsage("supervisor-metrics", "", *traceID, "cannot combine --task-id with --json-stream", "", *jsonl)
+	}
+
 	if *taskID == "" && !*aggregate && !*jsonStream {
 		exitUsage("supervisor-metrics", "", *traceID, "usage: g8s supervisor-metrics --task-id <id> | --aggregate | --json-stream [--time-range <dur>] [--worker-name <name>] [--json]", "Specify --task-id, --aggregate, or --json-stream", *jsonl)
 	}

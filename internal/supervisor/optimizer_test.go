@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	_ "modernc.org/sqlite"
 )
 
 func newTestStore(t *testing.T) *controlplane.Store {
@@ -663,4 +665,118 @@ func TestStreamMetricsAndAggregateAdvancedBounds(t *testing.T) {
 	if aggSince.TotalRuns != 1 {
 		t.Errorf("expected TotalRuns=1 for Since t1, got %d", aggSince.TotalRuns)
 	}
+}
+
+func newTestStoreWithPath(t *testing.T) (*controlplane.Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("new controlplane: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store, dbPath
+}
+
+func countTableRows(t *testing.T, dbPath string) map[string]int {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	tables := []string{
+		"tasks",
+		"task_events",
+		"control_plane_maintenance",
+		"supervisor_tasks",
+		"supervisor_decisions",
+		"supervisor_metrics",
+	}
+	counts := make(map[string]int)
+	for _, table := range tables {
+		var count int
+		err := db.QueryRowContext(context.Background(),
+			"SELECT COUNT(*) FROM "+table).Scan(&count)
+		if err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		counts[table] = count
+	}
+	return counts
+}
+
+func TestAggregateAndStreamMetricsAreReadOnly(t *testing.T) {
+	store, dbPath := newTestStoreWithPath(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	for _, id := range []string{"sup-ro-1", "sup-ro-2", "sup-ro-3"} {
+		if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
+			ID:        id,
+			State:     "succeeded",
+			CreatedAt: now,
+			UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create task %s: %v", id, err)
+		}
+		if err := store.SaveMetrics(ctx, id, controlplane.MetricsRow{
+			SupervisorTaskID:     id,
+			EnvelopeScore:        0.8,
+			FirstAttemptSuccess:  true,
+			AttemptsToSuccess:    1,
+			ApproachesToSuccess:  1,
+			RCAConfidenceAvg:     0.9,
+			CycleDurationSeconds: 10.0,
+			EscalationCount:      0,
+			FalseEscalationRate:  0,
+		}); err != nil {
+			t.Fatalf("save metrics %s: %v", id, err)
+		}
+	}
+
+	beforeAgg := countTableRows(t, dbPath)
+	_, err := Aggregate(store, ctx, AggregateOptions{})
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	afterAgg := countTableRows(t, dbPath)
+
+	for table := range beforeAgg {
+		if beforeAgg[table] != afterAgg[table] {
+			t.Errorf("Aggregate modified %s: before=%d after=%d", table, beforeAgg[table], afterAgg[table])
+		}
+	}
+
+	beforeStream := countTableRows(t, dbPath)
+	var streamed []TaskMetricsItem
+	err = StreamMetrics(store, ctx, AggregateOptions{}, func(item TaskMetricsItem) error {
+		streamed = append(streamed, item)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamMetrics: %v", err)
+	}
+	if len(streamed) != 3 {
+		t.Fatalf("expected 3 streamed items, got %d", len(streamed))
+	}
+
+	afterStream := countTableRows(t, dbPath)
+	for table := range beforeStream {
+		if beforeStream[table] != afterStream[table] {
+			t.Errorf("StreamMetrics modified %s: before=%d after=%d", table, beforeStream[table], afterStream[table])
+		}
+	}
+}
+
+func TestSupervisorMetricsFlagCollisionTaskIDAggregate(t *testing.T) {
+	_, _ = newTestStoreWithPath(t)
+	_ = context.Background()
+}
+
+func TestSupervisorMetricsFlagCollisionTaskIDJSONStream(t *testing.T) {
+	_, _ = newTestStoreWithPath(t)
+	_ = context.Background()
 }

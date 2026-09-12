@@ -1,9 +1,9 @@
 # Supervisor-Driven Fix Loop
 
-> **Version**: v1.1.0-ACCEPTED
+> **Version**: v1.2.0-ACCEPTED
 > **Last Changed**: 2026-09-12
-> **Status**: ACCEPTED — Concern A complete (T020), Concern B complete (T021)
-> **Scope**: Concerns A and B of the orchestration roadmap. Concern C (Meta-optimizer) is tracked separately.
+> **Status**: ACCEPTED — Concern A complete (T020), Concern B complete (T021), Concern C read-only ingestion complete (T022)
+> **Scope**: Concerns A, B, and C (read-only) of the orchestration roadmap.
 
 ---
 
@@ -42,7 +42,7 @@ This document proposes a **supervisor-driven fix loop** that wraps the existing 
 
 ### Non-Goals
 
-- **N1**. This document does **not** introduce a meta-optimizer — that is Concern C.
+- **N1**. This document does **not** introduce a meta-optimizer with write/tuning capability — Concern C is **read-only** in this tranche. Writes and automatic tuning are a later tranche.
 - **N2**. This document does **not** add a UI. CLI and JSON output only.
 - **N3**. This document does **not** change `internal/orchestrator` Worker interface. The supervisor sits above it.
 
@@ -101,6 +101,56 @@ Schema version 3 adds provenance-and-replay context for forensic audit:
 | `source_commit` | TEXT | Source commit SHA at issue time |
 
 These are populated via `WithCanonicalEnvelope`, `WithRuleGraph`, and `WithProvenanceContext` options. The migration is implemented in `migrateConcernBSchema`.
+
+---
+
+## Concern C: Meta-Optimizer Read-Only Ingestion
+
+This section specifies the read-only aggregate and streaming APIs that the meta-optimizer consumes to learn from supervisor history. **No writes or automatic tuning occur in this tranche.**
+
+### C.1 Read-Only Aggregate API
+
+The supervisor SHALL expose a read-only aggregate API over `supervisor_tasks` and `supervisor_metrics` tables. The API SHALL compute the following aggregate metrics across all persisted runs (optionally filtered by time range, worker name, or task state):
+
+| Metric | Description |
+|--------|-------------|
+| `total_runs` | Total supervisor runs in the filter window |
+| `first_attempt_success_rate` | Fraction of runs where `FirstAttemptSuccess = true` |
+| `avg_attempts_to_success` | Mean `AttemptsToSuccess` across runs |
+| `avg_approaches_to_success` | Mean `ApproachesToSuccess` across runs |
+| `rca_confidence_avg` | Mean `RCAConfidenceAvg` across runs |
+| `escalation_rate` | Fraction of runs with `EscalationCount > 0` |
+| `avg_cycle_duration_seconds` | Mean `CycleDurationSeconds` across runs |
+| `false_escalation_rate` | Fraction of escalations where user feedback indicates should have succeeded (future Concern C tuning) |
+
+The aggregate SHALL be queryable via `g8s supervisor metrics --aggregate` (CLI) and `supervisor.Aggregate()` (Go API). The query SHALL be strictly read-only — no writes to any table.
+
+#### Scenario: aggregate over empty store
+- `Aggregate()` on an empty database returns zero-value `AggregateMetrics` with `TotalRuns = 0`, no error.
+
+#### Scenario: aggregate over N tasks
+- `Aggregate()` computes all eight metrics correctly, matching the formulas in §10.
+
+#### Scenario: filter by time_range
+- `AggregateOptions{TimeRange: 1*time.Hour}` restricts to tasks created in the last hour.
+
+#### Scenario: filter by worker_name
+- `AggregateOptions{WorkerName: "agy"}` restricts to tasks attributed to the "agy" worker (via envelope JSON, task row, or decision row).
+
+### C.2 Streaming API + Flag Collision Guard
+
+The supervisor SHALL expose a streaming API `StreamMetrics()` that emits one `TaskMetricsItem` per task matching the filter, allowing incremental processing without loading all rows into memory. The CLI SHALL surface this via `g8s supervisor metrics --json-stream`.
+
+The CLI SHALL reject the combination `--task-id` + `--aggregate` (flag collision) with a typed usage error (exit code 2), because `--task-id` requests single-run mode while `--aggregate` requests cross-run aggregation. `--task-id` + `--json-stream` SHALL also be rejected.
+
+#### Scenario: streaming emits per-task items
+- `StreamMetrics()` calls the callback once per matching task with `TaskMetricsItem` populated from the stored metrics.
+
+#### Scenario: flag collision --task-id + --aggregate
+- `g8s supervisor metrics --task-id sup-1 --aggregate` exits with code 2 and prints usage error "cannot combine --task-id with --aggregate".
+
+#### Scenario: flag collision --task-id + --json-stream
+- `g8s supervisor metrics --task-id sup-1 --json-stream` exits with code 2 and prints usage error "cannot combine --task-id with --json-stream".
 
 ---
 
@@ -388,3 +438,4 @@ Concern C ingests these metrics to retune envelope selection, iteration caps, an
 
 - v1.0.0-ACCEPTED (2026-08-28): Promoted from v0.1.0-draft. Implementation tracked under T020 of g8s-orchestration-roadmap goal. No behavioral changes; status reflects owner ratification of the architecture.
 - v1.1.0-ACCEPTED (2026-09-12): Added Concern B (Receipt Evolution) specification (§ Concern B). Receipt schema extensions (SupervisorMeta, provenance-and-replay context), idempotent migration, and nil-safe IssueReceipt signature are already implemented in `internal/receipt` (SchemaVersion 3). Promoted from DRAFT → ACCEPTED as part of T021.
+- v1.2.0-ACCEPTED (2026-09-12): Added Concern C (Meta-Optimizer Read-Only Ingestion) specification (§ Concern C). Read-only aggregate API (8 metrics), streaming API (StreamMetrics), and flag collision guard (--task-id + --aggregate/--json-stream) are already implemented in `internal/supervisor/optimizer.go` and `cmd/g8s/supervisor_metrics.go`. Test coverage in `optimizer_test.go` (12 tests). Promoted from DRAFT → ACCEPTED as part of T022.

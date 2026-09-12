@@ -7,6 +7,7 @@
 **Supersedes**: none
 
 **Promotion**: Concern B (B.1-B.3) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T021. Implementation status: IMPLEMENTING.
+**Promotion**: Concern C (C.1-C.2) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T022. Implementation status: IMPLEMENTING.
 
 Port of the orchestration strategy sketched in
 `docs/designs/supervisor-fix-loop.md` to the OpenSpec delta format. This
@@ -225,27 +226,53 @@ The migration from schema version 1 to version 2 SHALL be idempotent:
 
 **Implementation Status**: IMPLEMENTING (T021)
 
-### Requirement: AIC contract defines automated review surface via orchestrate-aic (§ADDED 18.1)
+### Requirement: Meta-optimizer read-only aggregate API (Concern C.1)
 
-`g8s orchestrate-aic` SHALL accept `--pr <number>` (required, positive integer)
-and `--intent <text>` (required, non-empty text), along with optional flags
-`--model` (defaults to `gemini-3.7-flash-high`) and `--json` (defaults to `true`).
-The wrapper SHALL fetch the PR diff via `gh pr diff <number>`, compose the diff
-with user intent, and delegate execution to `g8s orchestrate --from-intent`.
-The command SHALL emit the structured JSON envelope to stdout for automated
-review ingestion.
+The supervisor SHALL expose a read-only aggregate API over `supervisor_tasks` and `supervisor_metrics` tables. The API SHALL compute the following aggregate metrics across all persisted runs (optionally filtered by time range, worker name, or task state):
 
-#### Scenario: AIC dispatches PR review via orchestrate-aic
-- Operator or CI runs `g8s orchestrate-aic --pr 100 --intent "review security changes" --json`.
-- `gh pr diff 100` diff is captured and concatenated with intent prompt.
-- `g8s orchestrate --from-intent` runs and emits JSON envelope containing `supervisor_task_id`, `outcome`, `sub_tasks`, and `receipt_summary`.
+| Metric | Description |
+|--------|-------------|
+| `total_runs` | Total supervisor runs in the filter window |
+| `first_attempt_success_rate` | Fraction of runs where `FirstAttemptSuccess = true` |
+| `avg_attempts_to_success` | Mean `AttemptsToSuccess` across runs |
+| `avg_approaches_to_success` | Mean `ApproachesToSuccess` across runs |
+| `rca_confidence_avg` | Mean `RCAConfidenceAvg` across runs |
+| `escalation_rate` | Fraction of runs with `EscalationCount > 0` |
+| `avg_cycle_duration_seconds` | Mean `CycleDurationSeconds` across runs |
+| `false_escalation_rate` | Fraction of escalations where user feedback indicates should have succeeded (future Concern C tuning) |
 
-#### Scenario: missing PR or intent exits with usage error
-- `g8s orchestrate-aic --pr 0` or missing `--intent` exits with code 2 and usage diagnostic.
+The aggregate SHALL be queryable via `g8s supervisor metrics --aggregate` (CLI) and `supervisor.Aggregate()` (Go API). The query SHALL be strictly read-only — no writes to any table.
 
-**Implementation Status**: IMPLEMENTED (T022/DELTA-18)
+#### Scenario: aggregate over empty store
+- `Aggregate()` on an empty database returns zero-value `AggregateMetrics` with `TotalRuns = 0`, no error.
 
-### Requirement: Orchestration from intent maps free-text to FanOut sub-tasks (§ADDED 18.2)
+#### Scenario: aggregate over N tasks
+- `Aggregate()` computes all eight metrics correctly, matching the formulas in §10 of `docs/designs/supervisor-fix-loop.md`.
+
+#### Scenario: filter by time_range
+- `AggregateOptions{TimeRange: 1*time.Hour}` restricts to tasks created in the last hour.
+
+#### Scenario: filter by worker_name
+- `AggregateOptions{WorkerName: "agy"}` restricts to tasks attributed to the "agy" worker (via envelope JSON, task row, or decision row).
+
+**Implementation Status**: IMPLEMENTING (T022)
+
+### Requirement: Meta-optimizer read-only streaming + flag collision guard (Concern C.2)
+
+The supervisor SHALL expose a streaming API `StreamMetrics()` that emits one `TaskMetricsItem` per task matching the filter, allowing incremental processing without loading all rows into memory. The CLI SHALL surface this via `g8s supervisor metrics --json-stream`.
+
+The CLI SHALL reject the combination `--task-id` + `--aggregate` (flag collision) with a typed usage error (exit code 2), because `--task-id` requests single-run mode while `--aggregate` requests cross-run aggregation. `--task-id` + `--json-stream` SHALL also be rejected.
+
+#### Scenario: streaming emits per-task items
+- `StreamMetrics()` calls the callback once per matching task with `TaskMetricsItem` populated from the stored metrics.
+
+#### Scenario: flag collision --task-id + --aggregate
+- `g8s supervisor metrics --task-id sup-1 --aggregate` exits with code 2 and prints usage error "cannot combine --task-id with --aggregate".
+
+#### Scenario: flag collision --task-id + --json-stream
+- `g8s supervisor metrics --task-id sup-1 --json-stream` exits with code 2 and prints usage error "cannot combine --task-id with --json-stream".
+
+**Implementation Status**: IMPLEMENTING (T022)
 
 `g8s orchestrate` SHALL accept `--from-intent <text>` or `--from-file <path>` as
 alternative entry points to `--self-test`. The intent text SHALL be split into
@@ -300,6 +327,7 @@ None.
 - 2026-08-28: Concern A promoted DRAFT → ACCEPTED (T020). §ADDED A.1-A.5 (the five Requirement: blocks) marked IMPLEMENTING.
 - 2026-08-29: DELTA-18 AIC integration and from-intent orchestration added (§ADDED 18.1, 18.2). Marked IMPLEMENTED (T022).
 - 2026-09-12: Concern B promoted DRAFT → ACCEPTED (T021). §ADDED B.1-B.3 (receipt schema extension, idempotent migration, nil-safe IssueReceipt signature) marked IMPLEMENTING.
+- 2026-09-12: Concern C promoted DRAFT → ACCEPTED (T022). §ADDED C.1-C.2 (read-only aggregate API, streaming + flag collision guard) marked IMPLEMENTING.
 
 ## Change log
 
@@ -308,4 +336,5 @@ None.
 - **v1.0.0-ACCEPTED** (2026-08-28): Promoted from v0.1.0-draft as part of T020 (g8s-orchestration-roadmap goal). Status DRAFT → ACCEPTED. §ADDED Requirements (six blocks: A supervisor package, B envelope selection, C iteration policy, D RCA+ADR pair, E receipt evidence, F meta-optimizer metrics) marked IMPLEMENTING. No behavioral or scenario changes; promotion reflects owner ratification to begin implementation.
 - **v1.1.0-ACCEPTED** (2026-08-29): Added DELTA-18 requirements for AIC automated review integration (`g8s orchestrate-aic`) and `--from-intent` / `--from-file` sub-task FanOut orchestration (§ADDED 18.1, §ADDED 18.2). Marked IMPLEMENTED.
 - **v1.2.0-ACCEPTED** (2026-09-12): Promoted Concern B from DRAFT → ACCEPTED as part of T021. Added §ADDED B.1-B.3 (receipt schema extension with supervisor metadata, idempotent ALTER TABLE migration, nil-safe IssueReceipt signature extension). Implementation already exists in `internal/receipt` (SchemaVersion 3, SupervisorMeta, migrateSupervisorSchema, migrateConcernBSchema). No behavioral changes; promotion reflects owner ratification to begin Concern C.
+- **v1.3.0-ACCEPTED** (2026-09-12): Promoted Concern C from DRAFT → ACCEPTED as part of T022. Added §ADDED C.1-C.2 (meta-optimizer read-only aggregate API with 8 metrics, streaming API, flag collision guard for --task-id + --aggregate/--json-stream). Implementation already exists in `internal/supervisor/optimizer.go` (Aggregate, StreamMetrics, AggregateOptions) and `cmd/g8s/supervisor_metrics.go` (CLI flags). Test coverage in `optimizer_test.go` (12 tests). No behavioral changes; promotion reflects owner ratification for read-only meta-optimizer ingestion.
 
