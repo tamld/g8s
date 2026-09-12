@@ -162,7 +162,7 @@ tasks:
   - id: T021
     type: worker
     assignee: Worker
-    status: pending
+    status: completed
     reasoning_hint: default
     objective: "Concern B vertical slice per docs/designs/supervisor-fix-loop.md + DELTA-11 §ADDED B.1-B.3: (1) promote spec section DELTA-11 §ADDED B.1-B.3 from DRAFT to ACCEPTED + IMPLEMENTING (these sections may not yet exist in the draft — author them per the receipt-evolution design: B.1 additive receipt columns approach_idx/attempt_idx/rca_confidence/adr_path; B.2 backward-compat migration via PRAGMA table_info check + ALTER TABLE add-column-if-missing; B.3 receipt.IssueReceipt signature extension with SupervisorMeta struct + VerifyReceipt() reads new columns but tolerates absence); (2) author ADR-0002 'Receipt evolution for supervisor' under docs/decisions/0002-receipt-evolution-for-supervisor.md with Status=Proposed → Accepted at end of task, referencing ADR-0001 + DELTA-11 §ADDED B; (3) extend internal/receipt/receipt.go: add SupervisorMeta struct, extend IssueReceipt to accept optional SupervisorMeta (nil-safe), extend VerifyReceipt/read paths to read new columns when present, add column-existence helper, add migration runner that adds missing columns via ALTER TABLE (idempotent); (4) extend internal/receipt/receipt_test.go with backward-compat test: insert a receipt using OLD IssueReceipt signature (no SupervisorMeta) and verify VerifyReceipt still returns OK; with migration test: insert using new signature after migration, verify new columns read back; NULL HANDLING TEST: insert receipt with new columns populated to NULL, verify VerifyReceipt treats NULL as absent (not zero, not error); (5) commit 'feat(receipt): DELTA-11 Concern B — receipt evolution with backward-compat migration'."
     inputs:
@@ -196,7 +196,7 @@ tasks:
       - "Need files outside allowed_files."
       - "Verification fails twice."
     receipt:
-      result: pending
+      result: completed
       notes_file: notes/T021-concern-b-receipt.md
   - id: T022
     type: worker
