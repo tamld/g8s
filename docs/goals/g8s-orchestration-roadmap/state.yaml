@@ -201,7 +201,7 @@ tasks:
   - id: T022
     type: worker
     assignee: Worker
-    status: pending
+    status: completed
     reasoning_hint: default
     objective: "Concern C vertical slice per docs/designs/supervisor-fix-loop.md + DELTA-11 §ADDED C.1-C.2: (1) promote spec section DELTA-11 §ADDED C.1-C.2 from DRAFT to ACCEPTED + IMPLEMENTING (these sections may not yet exist — author them: C.1 read-only metrics consumer exposing `envelope_score_avg`, `first_attempt_success_rate`, `attempts_to_success_avg`, `approaches_to_success_avg`, `rca_confidence_avg`, `cycle_duration_seconds_avg`, `escalation_rate`, `false_escalation_rate` aggregated across N supervisor_tasks; C.2 hooks for tuning — stub optimizer that consumes Concern A metrics and proposes suggested bounds without applying them; Concern C is READ-ONLY for this tranche, writes go in a later tranche); (2) author ADR-0003 'Meta-optimizer read-only ingestion' under docs/decisions/0003-meta-optimizer-read-only.md with Status=Proposed → Accepted, referencing ADR-0001 + ADR-0002 + DELTA-11 §ADDED C; (3) replace internal/supervisor/optimizer_stub.go with internal/supervisor/optimizer.go: read-only query over supervisor_tasks table exposing aggregate metrics; (4) wire `./bin/g8s supervisor metrics --aggregate` flag that returns the Concern C aggregate view (defaults to per-task view from T020); (5) add internal/supervisor/optimizer_test.go covering: aggregate over empty table (zeros), aggregate over N tasks, no writes happen (READ-ONLY ASSERTION: snapshot row-counts of ALL SIX tables before and after — supervisor_tasks, supervisor_decisions, write_receipts, tasks, task_events, control_plane_maintenance — and assert equality), schema/version mismatch returns typed error, --aggregate vs --task-id FLAG COLLISION test (using both flags must produce a typed usage error); (6) commit 'feat(supervisor): DELTA-11 Concern C — read-only meta-optimizer'."
     inputs:
@@ -241,7 +241,7 @@ tasks:
       - "Verification fails twice."
       - "--aggregate and --task-id flags do not produce a typed usage error when combined."
     receipt:
-      result: pending
+      result: completed
       notes_file: notes/T022-concern-c-optimizer.md
 - id: T023
   type: worker
