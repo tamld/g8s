@@ -217,21 +217,49 @@ On every `/goal` continuation:
 
 | Target | Milestone | Key Deliverables |
 |--------|-----------|------------------|
-| 2026-09 | v0.4.0 | Concern A – Supervisor fix loop (`internal/supervisor` + `g8s orchestrate`), ADR-0001, DELTA-11 A.1-A.5 |
-| 2026-10 | v0.5.0 | Concern B – Receipt evolution (backward‑compat migration), ADR-0002, DELTA-11 B.1-B.3 |
-| 2026-11 | v0.6.0 | Concern C – Meta‑optimizer (read‑only aggregate metrics), ADR-0003, DELTA-11 C.1-C.2 |
-| 2026-12 | v0.7.0 | Harden supervisor, add CLI ergonomics, cross‑platform validation |
+| 2026-09-15 | v0.2.0 | **Concern A + B + C complete** — Supervisor fix loop (`internal/supervisor`), Receipt evolution (Schema v3, backward-compat), Meta-optimizer read-only ingestion. ADR-0001/0002/0003. DELTA-11 A.1-A.5, B.1-B.3, C.1-C.2. DELTA-18 AIC + from-intent. |
+| 2026-10-15 | v0.3.0 | Autopilot scheduler (cron tick + priority queue), Meta-optimizer write tranche (`Optimizer.Propose()`), False escalation feedback loop, Configurable priority weights. |
+| 2026-11-15 | v0.4.0 | Observability: OpenTelemetry + structured logging, Prometheus `/metrics` endpoint, Receipt lake compaction/retention. |
+| 2026-12-15 | v1.0.0 | GA Release: 6-month ct122 stability, Security audit (OWASP+STRIDE), Documentation audit + migration guide, Windows service hardening, Plugin ecosystem docs. |
 
 ## Issue / PR Backlog Plan
 
+### v0.3.0 — Autopilot & Tuning (Target: 2026-10-15)
+
+| ID | Title | Type | Priority | Labels | Sprint |
+|----|-------|------|----------|--------|--------|
+| #1 | Autopilot scheduler: cron tick + priority queue | Feature | P0 | autopilot, scheduler | v0.3.0 |
+| #2 | Meta-optimizer write tranche: Optimizer.Propose() | Feature | P0 | meta-optimizer, tuning | v0.3.0 |
+| #3 | False escalation feedback loop | Feature | P1 | meta-optimizer, feedback | v0.3.0 |
+| #4 | Configurable priority weights (YAML) | Feature | P1 | autopilot, config | v0.3.0 |
+| #5 | Supervisor daemon mode (`g8s serve`) | Feature | P2 | daemon, cli | v0.3.0 |
+
+### v0.4.0 — Observability & Hardening (Target: 2026-11-15)
+
+| ID | Title | Type | Priority | Labels | Sprint |
+|----|-------|------|----------|--------|--------|
+| #6 | Structured logging + OpenTelemetry | Feature | P1 | observability, logging | v0.4.0 |
+| #7 | Prometheus `/metrics` endpoint | Feature | P1 | observability, metrics | v0.4.0 |
+| #8 | Web UI supervisor dashboard | Feature | P2 | ui, dashboard | v0.4.0 |
+| #9 | Windows service (kardianos/service) | Feature | P2 | windows, service | v0.4.0 |
+| #10 | Receipt lake compaction/retention | Feature | P2 | receipt, maintenance | v0.4.0 |
+
+### v1.0.0 — GA Release (Target: 2026-12-15)
+
+| ID | Title | Type | Priority | Labels | Sprint |
+|----|-------|------|----------|--------|--------|
+| #11 | Documentation audit & migration guide | Docs | P0 | docs, migration | v1.0.0 |
+| #12 | 6-month stability validation on ct122 | Chore | P0 | stability, homelab | v1.0.0 |
+| #13 | Performance benchmarks & regression suite | Feature | P1 | benchmark, perf | v1.0.0 |
+| #14 | Security audit (OWASP + STRIDE) | Security | P1 | security, audit | v1.0.0 |
+| #15 | Plugin ecosystem documentation | Docs | P2 | plugin, ecosystem | v1.0.0 |
+
+### Legacy PRs (from prior board)
+
 | Priority | Item | Status | Effort | Sprint |
 |----------|------|--------|--------|--------|
-| P0 | PR #88 – Sentinel cleanup | open | S | v0.4.0 |
-| P0 | PR #89 – Bolt cleanup | open | S | v0.4.0 |
-| P0 | PR #90 – Sentinel cleanup | open | S | v0.4.0 |
-| P0 | PR #98 – Bolt cleanup | open | S | v0.4.0 |
-| P0 | PR #99 – Sentinel cleanup | open | S | v0.4.0 |
-| P1 | Windows installer / EV signing | planned | M | v0.5.0 |
-| P1 | macOS notarization + cosign SBOM | planned | M | v0.5.0 |
-| P2 | Pathutil / sleep memory / doctor | planned | L | v0.6.0 |
-| P2 | Dual‑blind worktree cleanup | planned | L | v0.6.0 |
+| P0 | PR #88 – Sentinel cleanup | open | S | v0.3.0 |
+| P0 | PR #89 – Bolt cleanup | open | S | v0.3.0 |
+| P0 | PR #90 – Sentinel cleanup | open | S | v0.3.0 |
+| P0 | PR #98 – Bolt cleanup | open | S | v0.3.0 |
+| P0 | PR #99 – Sentinel cleanup | open | S | v0.3.0 |
