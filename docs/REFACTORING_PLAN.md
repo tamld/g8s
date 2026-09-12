@@ -87,3 +87,68 @@ reference/python/                                     g8s/ (Pure Go)
 * [x] Run side-by-side verification: Go `g8s` vs Python `reference/` on identical workloads. Executed 2026-08-25 against the v0.1.0 candidate — all five parity-matrix rows pass or are documented deviations (see docs/RELEASE_READINESS.md).
 * [x] Achieve $\ge 140$ passing Go tests: 187 test functions green under dual-pass verification (CGO_ENABLED=0 full suite and CGO_ENABLED=1 race detector with zero reports).
 * [x] Configure multi-OS automated build with GoReleaser. Config present since `eb5b14d`; snapshot smoke verified in T019 producing darwin/linux/windows amd64+arm64 archives (modernized v2 formats schema, commit `c73e0b1`).
+
+---
+
+## 4. Release Roadmap
+
+### v0.2.0 — Orchestration MVP (Current Sprint)
+**Target**: 2026-09-15  
+**Scope**: DELTA-11 Concerns A, B, C (read-only) + DELTA-18 AIC/from-intent
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Supervisor-driven fix loop (Concern A) | ✅ Complete | T020: planner, enforcer, reviewer, rca, escalator |
+| Receipt evolution (Concern B) | ✅ Complete | T021: Schema v3, SupervisorMeta, idempotent migration, nil-safe API |
+| Meta-optimizer read-only (Concern C) | ✅ Complete | T022: Aggregate/StreamMetrics API, flag collision guard |
+| AIC contract (`orchestrate-aic`) | ✅ Complete | DELTA-18 §18.1: `--pr` + `--intent` → JSON envelope |
+| From-intent orchestration | ✅ Complete | DELTA-18 §18.2: `--from-intent` / `--from-file` → FanOut |
+| Dual-pass gates (CGO=0 + CGO=1 -race) | ✅ Green | All 31 packages |
+| GoReleaser cross-platform artifacts | ✅ Configured | darwin/linux/windows amd64+arm64 |
+
+**Release artifacts**:
+- `g8s_v0.2.0_darwin_amd64.tar.gz`
+- `g8s_v0.2.0_darwin_arm64.tar.gz`
+- `g8s_v0.2.0_linux_amd64.tar.gz`
+- `g8s_v0.2.0_linux_arm64.tar.gz`
+- `g8s_v0.2.0_windows_amd64.zip`
+- `g8s_v0.2.0_windows_arm64.zip`
+
+**Acceptance criteria**:
+- [ ] `./bin/g8s orchestrate "self-test"` escalates at 9 attempts deterministically
+- [ ] `./bin/g8s supervisor metrics --aggregate` returns 8 metrics on seeded data
+- [ ] `./bin/g8s orchestrate-aic --pr 1 --intent "test"` emits JSON envelope
+- [ ] No race detector warnings, no CGO dependencies
+
+---
+
+### v0.3.0 — Autopilot & Tuning (Next Sprint)
+**Target**: 2026-10-15  
+**Scope**: Autopilot scheduler + meta-optimizer write/tuning tranche
+
+| Issue | Description | Priority |
+|-------|-------------|----------|
+| #1 | Autopilot scheduler: cron tick scanning GH issues, CI failures, lints | P0 |
+| #2 | Meta-optimizer write tranche: `Optimizer.Propose()` applies tuned configs | P0 |
+| #3 | `false_escalation_rate` feedback loop: user marks escalations | P1 |
+| #4 | Priority queue weights tunable via config file | P1 |
+| #5 | Daemon mode: long-lived supervisor process | P2 |
+
+---
+
+### v0.4.0 — Observability & Hardening (Future)
+**Target**: 2026-11-15
+
+| Issue | Description | Priority |
+|-------|-------------|----------|
+| #6 | Structured logging + OpenTelemetry integration | P1 |
+| #7 | Prometheus metrics endpoint (`/metrics`) | P1 |
+| #8 | Web UI for supervisor task dashboard | P2 |
+| #9 | Windows service hardening (kardianos/service integration) | P2 |
+| #10 | Receipt lake compaction / retention policies | P2 |
+
+---
+
+### v1.0.0 — GA Release
+**Target**: 2026-12-15  
+**Criteria**: All P0/P1 issues resolved, ≥6 months stable on ct122 homelab, documentation complete, migration guide from Python baseline published.
