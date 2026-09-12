@@ -78,8 +78,8 @@ gh release view --repo tamld/g8s --json tagName,publishedAt
 Output:
 ```json
 {
-  "tagName": "v0.4.0",
-  "publishedAt": "2026-08-30T..."
+  "tagName": "v0.2.0",
+  "publishedAt": "2026-09-15T..."
 }
 ```
 

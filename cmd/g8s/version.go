@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	Version   = "0.9.1"
+	Version   = "0.2.0"
 	Commit    = "unknown" // -ldflags "-X main.Commit=$(git rev-parse HEAD)"
 	BuildTime = "unknown" // -ldflags "-X main.BuildTime=$(date -u)"
 )
