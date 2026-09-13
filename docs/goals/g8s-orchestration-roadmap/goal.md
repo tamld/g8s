@@ -218,41 +218,43 @@ On every `/goal` continuation:
 | Target | Milestone | Key Deliverables |
 |--------|-----------|------------------|
 | 2026-09-15 | v0.2.0 | **Concern A + B + C complete** — Supervisor fix loop (`internal/supervisor`), Receipt evolution (Schema v3, backward-compat), Meta-optimizer read-only ingestion. ADR-0001/0002/0003. DELTA-11 A.1-A.5, B.1-B.3, C.1-C.2. DELTA-18 AIC + from-intent. |
-| 2026-10-15 | v0.3.0 | Autopilot scheduler (cron tick + priority queue), Meta-optimizer write tranche (`Optimizer.Propose()`), False escalation feedback loop, Configurable priority weights. |
-| 2026-11-15 | v0.4.0 | Observability: OpenTelemetry + structured logging, Prometheus `/metrics` endpoint, Receipt lake compaction/retention. |
+| 2026-10-15 | v0.3.0 | **Autopilot + Daemon + HTTP API** — Autopilot scheduler, Meta-optimizer write (`Optimizer.Propose()`), Daemon mode (`g8s serve`), HTTP API + OpenAPI spec (`/api/v1/*`, `/metrics`, `/healthz`), Export Go API docs. ADR-0004/0005. |
+| 2026-11-15 | v0.4.0 | Observability: Structured logging (slog + trace_id), Prometheus text endpoint (`/metrics` zero deps), Receipt lake compaction/retention, Windows service. |
 | 2026-12-15 | v1.0.0 | GA Release: 6-month ct122 stability, Security audit (OWASP+STRIDE), Documentation audit + migration guide, Windows service hardening, Plugin ecosystem docs. |
 
 ## Issue / PR Backlog Plan
 
-### v0.3.0 — Autopilot & Tuning (Target: 2026-10-15)
+### v0.3.0 — Autopilot & Daemon (Target: 2026-10-15)
 
 | ID | Title | Type | Priority | Labels | Sprint |
 |----|-------|------|----------|--------|--------|
 | #1 | Autopilot scheduler: cron tick + priority queue | Feature | P0 | autopilot, scheduler | v0.3.0 |
 | #2 | Meta-optimizer write tranche: Optimizer.Propose() | Feature | P0 | meta-optimizer, tuning | v0.3.0 |
-| #3 | False escalation feedback loop | Feature | P1 | meta-optimizer, feedback | v0.3.0 |
-| #4 | Configurable priority weights (YAML) | Feature | P1 | autopilot, config | v0.3.0 |
-| #5 | Supervisor daemon mode (`g8s serve`) | Feature | P2 | daemon, cli | v0.3.0 |
+| #3 | Daemon mode (`g8s serve`): long-lived process + HTTP API | Feature | P0 | daemon, cli | v0.3.0 |
+| #4 | HTTP API + OpenAPI spec: /api/v1/*, /metrics, /healthz | Feature | P0 | api, openapi | v0.3.0 |
+| #5 | Export Go API docs + semantic versioning | Feature | P1 | docs, api | v0.3.0 |
+| #6 | False escalation feedback loop | Feature | P1 | meta-optimizer, feedback | v0.3.0 |
+| #7 | Configurable priority weights (YAML) | Feature | P1 | autopilot, config | v0.3.0 |
+| #8 | Windows service hardening (kardianos/service) | Feature | P2 | windows, service | v0.3.0 |
 
 ### v0.4.0 — Observability & Hardening (Target: 2026-11-15)
 
 | ID | Title | Type | Priority | Labels | Sprint |
 |----|-------|------|----------|--------|--------|
-| #6 | Structured logging + OpenTelemetry | Feature | P1 | observability, logging | v0.4.0 |
-| #7 | Prometheus `/metrics` endpoint | Feature | P1 | observability, metrics | v0.4.0 |
-| #8 | Web UI supervisor dashboard | Feature | P2 | ui, dashboard | v0.4.0 |
-| #9 | Windows service (kardianos/service) | Feature | P2 | windows, service | v0.4.0 |
-| #10 | Receipt lake compaction/retention | Feature | P2 | receipt, maintenance | v0.4.0 |
+| #9 | Structured logging (slog + trace_id correlation) | Feature | P1 | observability, logging | v0.4.0 |
+| #10 | Prometheus text endpoint (`/metrics`) — zero deps | Feature | P1 | observability, metrics | v0.4.0 |
+| #11 | Receipt lake compaction/retention | Feature | P2 | receipt, maintenance | v0.4.0 |
+| #12 | Windows service hardening (kardianos/service) | Feature | P2 | windows, service | v0.4.0 |
 
 ### v1.0.0 — GA Release (Target: 2026-12-15)
 
 | ID | Title | Type | Priority | Labels | Sprint |
 |----|-------|------|----------|--------|--------|
-| #11 | Documentation audit & migration guide | Docs | P0 | docs, migration | v1.0.0 |
-| #12 | 6-month stability validation on ct122 | Chore | P0 | stability, homelab | v1.0.0 |
-| #13 | Performance benchmarks & regression suite | Feature | P1 | benchmark, perf | v1.0.0 |
-| #14 | Security audit (OWASP + STRIDE) | Security | P1 | security, audit | v1.0.0 |
-| #15 | Plugin ecosystem documentation | Docs | P2 | plugin, ecosystem | v1.0.0 |
+| #13 | Documentation audit & migration guide | Docs | P0 | docs, migration | v1.0.0 |
+| #14 | 6-month stability validation on ct122 | Chore | P0 | stability, homelab | v1.0.0 |
+| #15 | Performance benchmarks & regression suite | Feature | P1 | benchmark, perf | v1.0.0 |
+| #16 | Security audit (OWASP + STRIDE) | Security | P1 | security, audit | v1.0.0 |
+| #17 | Plugin ecosystem documentation | Docs | P2 | plugin, ecosystem | v1.0.0 |
 
 ### Legacy PRs (from prior board)
 

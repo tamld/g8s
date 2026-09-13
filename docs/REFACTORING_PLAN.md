@@ -122,17 +122,20 @@ reference/python/                                     g8s/ (Pure Go)
 
 ---
 
-### v0.3.0 — Autopilot & Tuning (Next Sprint)
+### v0.3.0 — Autopilot & Daemon (Next Sprint)
 **Target**: 2026-10-15  
-**Scope**: Autopilot scheduler + meta-optimizer write/tuning tranche
+**Scope**: Autopilot scheduler + meta-optimizer write/tuning + daemon mode + HTTP API
 
 | Issue | Description | Priority |
 |-------|-------------|----------|
 | #1 | Autopilot scheduler: cron tick scanning GH issues, CI failures, lints | P0 |
 | #2 | Meta-optimizer write tranche: `Optimizer.Propose()` applies tuned configs | P0 |
-| #3 | `false_escalation_rate` feedback loop: user marks escalations | P1 |
-| #4 | Priority queue weights tunable via config file | P1 |
-| #5 | Daemon mode: long-lived supervisor process | P2 |
+| #3 | Daemon mode (`g8s serve`): long-lived supervisor process + HTTP API | P0 |
+| #4 | HTTP API + OpenAPI spec: `/api/v1/tasks`, `/api/v1/receipts`, `/api/v1/supervisor`, `/metrics`, `/healthz` | P0 |
+| #5 | `false_escalation_rate` feedback loop: user marks escalations | P1 |
+| #6 | Priority queue weights tunable via config file | P1 |
+| #7 | Export Go API docs + semantic versioning policy | P1 |
+| #8 | Windows service hardening (kardianos/service integration) | P2 |
 
 ---
 
@@ -141,11 +144,10 @@ reference/python/                                     g8s/ (Pure Go)
 
 | Issue | Description | Priority |
 |-------|-------------|----------|
-| #6 | Structured logging + OpenTelemetry integration | P1 |
-| #7 | Prometheus metrics endpoint (`/metrics`) | P1 |
-| #8 | Web UI for supervisor task dashboard | P2 |
-| #9 | Windows service hardening (kardianos/service integration) | P2 |
-| #10 | Receipt lake compaction / retention policies | P2 |
+| #9 | Structured logging (slog + trace_id correlation) | P1 |
+| #10 | Prometheus text endpoint (`/metrics`) — zero deps | P1 |
+| #11 | Receipt lake compaction / retention policies | P2 |
+| #12 | Windows service hardening (kardianos/service integration) | P2 |
 
 ---
 

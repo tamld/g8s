@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Autopilot scheduler** (Issue #1): Cron-based supervisor trigger scanning GitHub issues (`agy-fix`, `good-first-issue` labels), failing CI runs, static analysis findings, and stale `@agy-fix-me` TODOs. Priority queue: severity × confidence × cost-inverse.
 - **Meta-optimizer write tranche** (Issue #2): `Optimizer.Propose(currentConfig, metrics)` applies tuned iteration caps, RCA confidence thresholds, and envelope selection weights. Separated from read-only ingestion (v0.2.0).
-- **False escalation feedback** (Issue #3): CLI flag to mark escalations as "should have worked" → updates `false_escalation_rate` metric for optimizer learning.
-- **Configurable priority weights** (Issue #4): YAML config for autopilot priority queue weights (severity, confidence, cost-inverse).
+- **Daemon mode** (Issue #3): Long-lived `g8s serve` process with graceful shutdown, replacing per-invocation CLI topology.
+- **HTTP API + OpenAPI spec** (Issue #4): `/api/v1/tasks`, `/api/v1/receipts`, `/api/v1/supervisor`, `/metrics`, `/healthz` for remote access and daemon management.
+- **Export Go API docs + semantic versioning** (Issue #5): Public `internal/*` package documentation with versioning policy.
 
 ### Changed
-- **Supervisor daemon mode** (Issue #5): Long-lived `g8s serve` process with graceful shutdown, replacing per-invocation CLI topology.
+- **False escalation feedback** (Issue #6): CLI flag to mark escalations as "should have worked" → updates `false_escalation_rate` metric for optimizer learning.
+- **Configurable priority weights** (Issue #7): YAML config for autopilot priority queue weights (severity, confidence, cost-inverse).
 
 ### Fixed
 - None yet.
@@ -95,35 +97,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Issue/PR Backlog
 
-### v0.3.0 — Autopilot & Tuning (Target: 2026-10-15)
+### v0.3.0 — Autopilot & Daemon (Target: 2026-10-15)
 
 | ID | Title | Type | Priority | Labels | Assignee |
 |----|-------|------|----------|--------|----------|
 | #1 | Autopilot scheduler: cron tick + priority queue | Feature | P0 | autopilot, scheduler | — |
 | #2 | Meta-optimizer write tranche: Optimizer.Propose() | Feature | P0 | meta-optimizer, tuning | — |
-| #3 | False escalation feedback loop | Feature | P1 | meta-optimizer, feedback | — |
-| #4 | Configurable priority weights (YAML) | Feature | P1 | autopilot, config | — |
-| #5 | Supervisor daemon mode (`g8s serve`) | Feature | P2 | daemon, cli | — |
+| #3 | Daemon mode (`g8s serve`): long-lived process + HTTP API | Feature | P0 | daemon, cli | — |
+| #4 | HTTP API + OpenAPI spec: /api/v1/*, /metrics, /healthz | Feature | P0 | api, openapi | — |
+| #5 | Export Go API docs + semantic versioning | Feature | P1 | docs, api | — |
+| #6 | False escalation feedback loop | Feature | P1 | meta-optimizer, feedback | — |
+| #7 | Configurable priority weights (YAML) | Feature | P1 | autopilot, config | — |
+| #8 | Windows service hardening (kardianos/service) | Feature | P2 | windows, service | — |
 
 ### v0.4.0 — Observability & Hardening (Target: 2026-11-15)
 
 | ID | Title | Type | Priority | Labels | Assignee |
 |----|-------|------|----------|--------|----------|
-| #6 | Structured logging + OpenTelemetry | Feature | P1 | observability, logging | — |
-| #7 | Prometheus `/metrics` endpoint | Feature | P1 | observability, metrics | — |
-| #8 | Web UI supervisor dashboard | Feature | P2 | ui, dashboard | — |
-| #9 | Windows service (kardianos/service) | Feature | P2 | windows, service | — |
-| #10 | Receipt lake compaction/retention | Feature | P2 | receipt, maintenance | — |
+| #9 | Structured logging (slog + trace_id correlation) | Feature | P1 | observability, logging | — |
+| #10 | Prometheus text endpoint (`/metrics`) — zero deps | Feature | P1 | observability, metrics | — |
+| #11 | Receipt lake compaction/retention | Feature | P2 | receipt, maintenance | — |
+| #12 | Windows service hardening (kardianos/service) | Feature | P2 | windows, service | — |
 
 ### v1.0.0 — GA Release (Target: 2026-12-15)
 
 | ID | Title | Type | Priority | Labels | Assignee |
 |----|-------|------|----------|--------|----------|
-| #11 | Documentation audit & migration guide | Docs | P0 | docs, migration | — |
-| #12 | 6-month stability validation on ct122 | Chore | P0 | stability, homelab | — |
-| #13 | Performance benchmarks & regression suite | Feature | P1 | benchmark, perf | — |
-| #14 | Security audit (OWASP + STRIDE) | Security | P1 | security, audit | — |
-| #15 | Plugin ecosystem documentation | Docs | P2 | plugin, ecosystem | — |
+| #13 | Documentation audit & migration guide | Docs | P0 | docs, migration | — |
+| #14 | 6-month stability validation on ct122 | Chore | P0 | stability, homelab | — |
+| #15 | Performance benchmarks & regression suite | Feature | P1 | benchmark, perf | — |
+| #16 | Security audit (OWASP + STRIDE) | Security | P1 | security, audit | — |
+| #17 | Plugin ecosystem documentation | Docs | P2 | plugin, ecosystem | — |
 
 ---
 
