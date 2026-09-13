@@ -357,7 +357,7 @@ func migrateReceiptLake(conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns for receipt lake: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var name, colType string

@@ -64,7 +64,7 @@ func TestDriveFullLifecycleHappyPath(t *testing.T) {
 		receipt: Receipt{OK: true, CommitSHA: "abc123"},
 	}
 	reg := NewRegistry()
-	reg.Register("stub", func() Worker { return worker })
+	_ = reg.Register("stub", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
