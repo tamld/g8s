@@ -702,7 +702,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetOrphanDir] {
 		items, err := sweepOrphanWorktreeDirs(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] orphan-dir sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] orphan-dir sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOrphanDir] = len(items)
@@ -713,7 +713,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetOrphanBranch] {
 		items, err := sweepOrphanBranches(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] orphan-branch sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] orphan-branch sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOrphanBranch] = len(items)
@@ -724,7 +724,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetStaleReceipt] {
 		items, err := sweepStaleReceipts(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] stale-receipt sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] stale-receipt sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetStaleReceipt] = len(items)
