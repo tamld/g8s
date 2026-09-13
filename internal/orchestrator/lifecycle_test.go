@@ -130,7 +130,7 @@ func TestDriveEscalationOnFailedReceipt(t *testing.T) {
 		receipt: Receipt{OK: false, ReturnCode: 1, CommitSHA: "def456"},
 	}
 	reg := NewRegistry()
-	reg.Register("fail-stub", func() Worker { return worker })
+	_ = reg.Register("fail-stub", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
@@ -208,7 +208,7 @@ func TestDriveEscalationOnFanOutError(t *testing.T) {
 	// When all workers fail to spawn, FanOut returns an error.
 	// The FSM should go PLAN → SPAWN → MONITOR → RECEIPT → ESCALATE.
 	reg := NewRegistry()
-	reg.Register("bad", func() Worker {
+	_ = reg.Register("bad", func() Worker {
 		return &alwaysFail{fakeWorker: fakeWorker{name: "bad", available: true}}
 	})
 
