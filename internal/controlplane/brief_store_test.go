@@ -136,7 +136,9 @@ func TestBriefStoreValidationAndMissing(t *testing.T) {
 
 func TestBriefStoreMigrationFromV5(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	// Simulate v5 schema: drop briefs table and set PRAGMA user_version = 5
 	raw := openRawDB(t, path)
@@ -144,7 +146,9 @@ func TestBriefStoreMigrationFromV5(t *testing.T) {
 	if _, err := raw.Exec("PRAGMA user_version = 5"); err != nil {
 		t.Fatalf("set user_version = 5: %v", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
 
 	// Reopen with NewControlPlane, migrating to v6
 	migratedStore, err := NewControlPlane(path, nil)
