@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -681,7 +682,7 @@ func newTestStoreWithPath(t *testing.T) (*controlplane.Store, string) {
 
 func countTableRows(t *testing.T, dbPath string) map[string]int {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)")
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(dbPath)+"?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
