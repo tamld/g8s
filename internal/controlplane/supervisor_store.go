@@ -290,7 +290,7 @@ func (s *Store) GetSupervisorTaskWorker(ctx context.Context, supervisorTaskID st
 		supervisorTaskID,
 	)
 	if err == nil {
-		defer decRows.Close()
+		defer func() { _ = decRows.Close() }()
 		for decRows.Next() {
 			var payload string
 			if scanErr := decRows.Scan(&payload); scanErr == nil && payload != "" {

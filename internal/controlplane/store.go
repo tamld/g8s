@@ -1054,7 +1054,7 @@ func (s *Store) ReconcileExpired(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("begin reconcile: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	count, err := reconcileExpiredTx(ctx, tx, now)
 	if err != nil {
 		return 0, err
