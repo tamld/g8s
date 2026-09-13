@@ -576,7 +576,7 @@ func TestStoreLineageListActiveAndSchemaDirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := applyBaseSchema(conn); err != nil {
 		t.Fatalf("applyBaseSchema: %v", err)
@@ -710,7 +710,7 @@ func TestStoreLineageListActiveAndSchemaDirect(t *testing.T) {
 
 func TestStoreDetailedCoverageBranches(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	raw := openRawDB(t, path)
 	now := float64(time.Now().UnixNano()) / 1e9
