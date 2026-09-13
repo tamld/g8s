@@ -25,7 +25,7 @@ func newTestStore(t *testing.T) (*Store, string) {
 	if err != nil {
 		t.Fatalf("NewControlPlane: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store, path
 }
 
@@ -35,7 +35,7 @@ func openRawDB(t *testing.T, path string) *sql.DB {
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -86,7 +86,7 @@ func TestFreshDatabaseSchemaExact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info(tasks): %v", err)
 	}
-	defer colRows.Close()
+	defer func() { _ = colRows.Close() }()
 	var got []string
 	for colRows.Next() {
 		var cid int
