@@ -123,7 +123,7 @@ func eventsTx(tx *sql.Tx, taskID string) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	events := []map[string]any{}
 	for rows.Next() {
@@ -489,7 +489,7 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
