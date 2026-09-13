@@ -49,7 +49,7 @@ func TestFreshDatabaseSchemaExact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query sqlite_master: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	objects := map[string]string{}
 	for rows.Next() {
 		var name, kind string
@@ -163,7 +163,9 @@ func TestLegacyV1DatabaseMigratesParentColumn(t *testing.T) {
 			hasParent = true
 		}
 	}
-	colRows.Close()
+	if err := colRows.Close(); err != nil {
+		t.Fatalf("close colRows: %v", err)
+	}
 	if !hasParent {
 		t.Errorf("parent_task_id missing after migration from v1")
 	}
