@@ -529,7 +529,7 @@ func TestMigrateSupervisorSchemaMissingColumns(t *testing.T) {
 
 func TestReconcileExpiredFailedTask(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	raw := openRawDB(t, path)
 
@@ -566,7 +566,7 @@ func TestReconcileExpiredFailedTask(t *testing.T) {
 
 func TestStoreLineageListActiveAndSchemaDirect(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	raw := openRawDB(t, path)
 	now := float64(time.Now().UnixNano()) / 1e9
