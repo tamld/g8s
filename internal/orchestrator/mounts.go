@@ -258,7 +258,7 @@ func (mw *MountedWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		SessionID:  t.ID,
 		Prompt:     t.Prompt,
 		WorktreeID: t.Worktree.ID,
-		WorkerName: mw.Worker.Name(),
+		WorkerName: mw.Name(),
 		Iter:       t.Iter,
 		Task:       t,
 	}
