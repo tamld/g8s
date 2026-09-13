@@ -243,7 +243,7 @@ func TestActiveTaskCountIgnoresListPageSize(t *testing.T) {
 	raw := openRawDB(t, path)
 	const total = 201
 	for i := 0; i < total; i++ {
-		state := StateQueued
+		var state string
 		if i%2 == 0 {
 			state = StateLeased
 		} else {

@@ -31,7 +31,6 @@ type StubPersistence struct {
 	tasks      map[string]controlplane.SupervisorTaskRow
 	decisions  map[string][]controlplane.SupervisorDecisionRow
 	nextDecID  int
-	nextTaskID int
 	clock      func() time.Time
 }
 

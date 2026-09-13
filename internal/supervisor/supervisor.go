@@ -208,7 +208,6 @@ func (s *Supervisor) Run(ctx context.Context, req RunRequest) (RunResult, error)
 	startWall := s.Clock()
 
 	attempts := make([]AttemptRecord, 0, s.Config.MaxAttemptsPerApproach*s.Config.MaxApproaches)
-	confidences := make([]float64, 0, s.Config.MaxApproaches)
 	var lastReceipt *orchestrator.Receipt
 
 	maxAttempts := s.Config.MaxAttemptsPerApproach
@@ -258,7 +257,7 @@ outcomeLoop:
 		if err != nil {
 			return RunResult{}, fmt.Errorf("supervisor: rca: %w", err)
 		}
-		confidences = append(confidences, rcaRec.Confidence)
+		// NOTE: confidences tracking was removed as it's not used.
 
 		if rcaRec.Confidence < 0.6 {
 			// Low confidence: pause (NEEDS_INFO) instead of escalating.

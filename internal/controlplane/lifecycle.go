@@ -62,9 +62,8 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	if permission == "" {
 		permission = "read_only"
 	}
-	timeout := req.Timeout
-	if timeout == "" {
-		timeout = "5m0s"
+	if req.Timeout == "" {
+		req.Timeout = "5m0s"
 	}
 
 	if strings.TrimSpace(req.Model) == "" {
