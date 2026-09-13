@@ -198,7 +198,7 @@ func CleanupWorktrees(ctx context.Context, opts CleanupOptions) (*CleanupReport,
 				Branch: entry.Branch,
 				Reason: "uncommitted changes present",
 			})
-			fmt.Fprintf(opts.Writer, "[skip] Worktree %s has uncommitted changes\n", entry.Path)
+			_, _ = fmt.Fprintf(opts.Writer, "[skip] Worktree %s has uncommitted changes\n", entry.Path)
 			continue
 		}
 
@@ -211,7 +211,7 @@ func CleanupWorktrees(ctx context.Context, opts CleanupOptions) (*CleanupReport,
 
 	if opts.DryRun {
 		for _, cand := range candidates {
-			fmt.Fprintf(opts.Writer, "[dry-run] Would remove worktree %s (branch: %s, age: %s)\n", cand.Path, cand.Branch, cand.Age.Round(time.Second))
+			_, _ = fmt.Fprintf(opts.Writer, "[dry-run] Would remove worktree %s (branch: %s, age: %s)\n", cand.Path, cand.Branch, cand.Age.Round(time.Second))
 			report.Removed = append(report.Removed, cand)
 		}
 		return report, nil
@@ -219,7 +219,7 @@ func CleanupWorktrees(ctx context.Context, opts CleanupOptions) (*CleanupReport,
 
 	for _, cand := range candidates {
 		if err := opts.Runner.WorktreeRemove(ctx, absRepo, cand.Path); err != nil {
-			fmt.Fprintf(opts.Writer, "[error] Failed to remove worktree %s: %v\n", cand.Path, err)
+			_, _ = fmt.Fprintf(opts.Writer, "[error] Failed to remove worktree %s: %v\n", cand.Path, err)
 			report.Skipped = append(report.Skipped, SkippedWorktree{
 				Path:   cand.Path,
 				Branch: cand.Branch,
@@ -227,15 +227,15 @@ func CleanupWorktrees(ctx context.Context, opts CleanupOptions) (*CleanupReport,
 			})
 			continue
 		}
-		fmt.Fprintf(opts.Writer, "[removed] Worktree %s (branch: %s)\n", cand.Path, cand.Branch)
+		_, _ = fmt.Fprintf(opts.Writer, "[removed] Worktree %s (branch: %s)\n", cand.Path, cand.Branch)
 		report.Removed = append(report.Removed, cand)
 	}
 
 	pruneOut, err := opts.Runner.WorktreePrune(ctx, absRepo)
 	if err != nil {
-		fmt.Fprintf(opts.Writer, "[warn] Worktree prune failed: %v\n", err)
+		_, _ = fmt.Fprintf(opts.Writer, "[warn] Worktree prune failed: %v\n", err)
 	} else if strings.TrimSpace(pruneOut) != "" {
-		fmt.Fprintf(opts.Writer, "[prune] %s\n", strings.TrimSpace(pruneOut))
+		_, _ = fmt.Fprintf(opts.Writer, "[prune] %s\n", strings.TrimSpace(pruneOut))
 		report.Pruned = strings.TrimSpace(pruneOut)
 	}
 
