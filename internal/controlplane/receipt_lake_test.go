@@ -496,7 +496,7 @@ func TestMigrateSupervisorSchemaMissingColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := migrateSupervisorSchema(conn); err != nil {
 		t.Fatalf("migrateSupervisorSchema: %v", err)
@@ -519,7 +519,9 @@ func TestMigrateSupervisorSchemaMissingColumns(t *testing.T) {
 			hasParent = true
 		}
 	}
-	colRows.Close()
+	if err := colRows.Close(); err != nil {
+		t.Fatalf("close colRows: %v", err)
+	}
 	if !hasParent {
 		t.Errorf("expected parent_task_id restored")
 	}
