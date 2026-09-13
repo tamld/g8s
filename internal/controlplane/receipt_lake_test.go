@@ -13,7 +13,7 @@ import (
 
 func TestReceiptLakeMigrationIdempotent(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Verify schema version is bumped to 5
 	raw := openRawDB(t, path)
@@ -30,7 +30,7 @@ func TestReceiptLakeMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info(tasks): %v", err)
 	}
-	defer colRows.Close()
+	defer func() { _ = colRows.Close() }()
 	cols := map[string]string{}
 	for colRows.Next() {
 		var cid int
@@ -68,7 +68,9 @@ func TestReceiptLakeMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	reopened.Close()
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close reopened: %v", err)
+	}
 
 	// Idempotency: Explicitly run migrateReceiptLake twice directly on the connection
 	conn, err := raw.Conn(context.Background())
@@ -87,7 +89,9 @@ func TestReceiptLakeMigrationIdempotent(t *testing.T) {
 
 func TestReceiptLakeMigrationFromV4(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	// Simulate a v4 schema: drop the new columns and set user_version = 4
 	raw := openRawDB(t, path)
@@ -100,14 +104,16 @@ func TestReceiptLakeMigrationFromV4(t *testing.T) {
 	if _, err := raw.Exec("PRAGMA user_version = 4"); err != nil {
 		t.Fatalf("set user_version = 4: %v", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
 
 	// Open with NewControlPlane, which should detect v4 and migrate to v5
 	migratedStore, err := NewControlPlane(path, nil)
 	if err != nil {
 		t.Fatalf("open and migrate v4 db: %v", err)
 	}
-	defer migratedStore.Close()
+	defer func() { _ = migratedStore.Close() }()
 
 	check := openRawDB(t, path)
 	var version int
@@ -123,7 +129,7 @@ func TestReceiptLakeMigrationFromV4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info(tasks): %v", err)
 	}
-	defer colRows.Close()
+	defer func() { _ = colRows.Close() }()
 	cols := map[string]bool{}
 	for colRows.Next() {
 		var cid int

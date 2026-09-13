@@ -688,7 +688,7 @@ func (s *Store) Events(_ context.Context, taskID string) ([]TaskEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	events := []TaskEvent{}
 	for rows.Next() {
