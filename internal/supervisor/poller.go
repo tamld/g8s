@@ -119,7 +119,6 @@ func (p *HeartbeatPoller) PollOnce(ctx context.Context, taskID, sessionID string
 		for _, item := range list {
 			if item != nil && item.PID == pid {
 				hb = item
-				err = nil
 				break
 			}
 		}

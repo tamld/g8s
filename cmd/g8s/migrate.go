@@ -85,13 +85,11 @@ func MigrateData(from, to string, dryRun, force bool) (*MigrateReport, error) {
 		}
 
 		if info.IsDir() {
-			items, filesCount, bytesCount, err := migrateDirectory(srcPath, filepath.Join(absTo, cand), dryRun, force)
+			items, filesCount, bytesCount, _ := migrateDirectory(srcPath, filepath.Join(absTo, cand), dryRun, force)
 			report.Items = append(report.Items, items...)
 			report.TotalFiles += filesCount
 			report.TotalBytes += bytesCount
-			if err != nil {
-				// directory migration error recorded in items
-			}
+			// directory migration error recorded in items
 		} else {
 			destPath := filepath.Join(absTo, cand)
 			item := migrateFile(srcPath, destPath, info.Size(), dryRun, force)
