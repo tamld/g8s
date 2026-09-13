@@ -193,14 +193,14 @@ func TestBriefStoreMigrationFromV5(t *testing.T) {
 
 func TestBriefStoreMigrationIdempotent(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	raw := openRawDB(t, path)
 	conn, err := raw.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("acquire raw connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := applyBriefsSchema(conn); err != nil {
 		t.Fatalf("applyBriefsSchema rerun failed: %v", err)
