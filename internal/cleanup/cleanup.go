@@ -735,7 +735,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetClosedPRBranch] {
 		items, err := sweepClosedPRBranches(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] closed-pr-branch sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] closed-pr-branch sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetClosedPRBranch] = len(items)
@@ -746,7 +746,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetOldTag] {
 		items, err := sweepOldTags(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] old-tag sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] old-tag sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOldTag] = len(items)
