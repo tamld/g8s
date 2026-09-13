@@ -261,7 +261,9 @@ func TestActiveTaskCountIgnoresListPageSize(t *testing.T) {
 		}
 		insertRawTask(t, raw, fmt.Sprintf("task-%03d", i), state, float64(i))
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
 
 	count, err := store.ActiveTaskCount(context.Background())
 	if err != nil {
@@ -322,7 +324,7 @@ func newTestStoreWithClock(t *testing.T, clock *fakeClock) (*Store, string) {
 	if err != nil {
 		t.Fatalf("NewControlPlane: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store, path
 }
 
