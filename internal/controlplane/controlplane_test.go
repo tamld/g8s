@@ -1191,5 +1191,7 @@ func TestEventLogMigrationFromV6(t *testing.T) {
 	if v != SchemaVersion {
 		t.Errorf("user_version = %d, want %d", v, SchemaVersion)
 	}
-	check.Close()
+	if err := check.Close(); err != nil {
+		t.Fatalf("close check: %v", err)
+	}
 }

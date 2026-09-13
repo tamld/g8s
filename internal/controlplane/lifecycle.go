@@ -226,7 +226,7 @@ func (s *Store) BuildReceipt(_ context.Context, taskID string) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	payload, _, err := buildReceiptTx(tx, task)
 	if err != nil {
 		return nil, err
