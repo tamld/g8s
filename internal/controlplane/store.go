@@ -319,16 +319,16 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 			var dflt sql.NullString
 			var pk int
 			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return fmt.Errorf("scan %s columns: %w", table, err)
 			}
 			present[name] = struct{}{}
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("iterate %s columns: %w", table, err)
 		}
-		rows.Close()
+		_ = rows.Close()
 		for col := range cols {
 			if _, ok := present[col]; ok {
 				continue
