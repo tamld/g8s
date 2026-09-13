@@ -815,7 +815,7 @@ func TestStoreDetailedCoverageBranches(t *testing.T) {
 
 func TestStoreCanceledContextErrorsAndClosedConnErrors(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	cancCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -882,15 +882,17 @@ func TestStoreCanceledContextErrorsAndClosedConnErrors(t *testing.T) {
 
 func TestMigrateTasksTableMissingParent(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 	raw := openRawDB(t, path)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	_, _ = raw.Exec("ALTER TABLE tasks DROP COLUMN parent_task_id")
 	conn, err := raw.Conn(context.Background())
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := migrateTasksTable(conn); err != nil {
 		t.Fatalf("migrateTasksTable: %v", err)
 	}
@@ -898,9 +900,11 @@ func TestMigrateTasksTableMissingParent(t *testing.T) {
 
 func TestMigrateReceiptLakeMissingColumns(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 	raw := openRawDB(t, path)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	for _, col := range []string{"orchestrator_id", "worktree_id", "worker_name", "iter"} {
 		_, _ = raw.Exec("ALTER TABLE tasks DROP COLUMN " + col)
 	}
@@ -908,7 +912,7 @@ func TestMigrateReceiptLakeMissingColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := migrateReceiptLake(conn); err != nil {
 		t.Fatalf("migrateReceiptLake: %v", err)
 	}
@@ -923,7 +927,7 @@ func TestStoreAdditionalCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControlPlane nil clock: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	// 2. checkSchemaVersion validation directly
