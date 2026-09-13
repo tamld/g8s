@@ -499,7 +499,7 @@ func TestConcurrentClaimHasSingleWinner(t *testing.T) {
 				errs <- err
 				return
 			}
-			defer racer.Close()
+			defer func() { _ = racer.Close() }()
 			<-release
 			claimed, err := racer.ClaimTask(context.Background(), fmt.Sprintf("worker-%d", i), 10)
 			if err != nil {
@@ -1164,20 +1164,24 @@ func TestEventLogStoreMethods(t *testing.T) {
 
 func TestEventLogMigrationFromV6(t *testing.T) {
 	s, path := newTestStore(t)
-	s.Close()
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	// Drop event_log and set version to 6
 	raw := openRawDB(t, path)
 	if _, err := raw.Exec("DROP TABLE IF EXISTS event_log; PRAGMA user_version = 6;"); err != nil {
 		t.Fatalf("downgrade to v6: %v", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
 
 	migrated, err := NewControlPlane(path, nil)
 	if err != nil {
 		t.Fatalf("open and migrate v6: %v", err)
 	}
-	defer migrated.Close()
+	defer func() { _ = migrated.Close() }()
 
 	check := openRawDB(t, path)
 	var v int
