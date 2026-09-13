@@ -474,7 +474,7 @@ func TestMigrateSupervisorSchemaMissingColumns(t *testing.T) {
 	}
 
 	raw := openRawDB(t, path)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	ctx := context.Background()
 
 	// Drop parent_task_id from supervisor_tasks, payload_json from supervisor_decisions,
@@ -926,11 +926,11 @@ func TestStoreAdditionalCoverage(t *testing.T) {
 
 	// 2. checkSchemaVersion validation directly
 	raw := openRawDB(t, dbPath)
-	conn, err := raw.Conn(ctx)
+conn, err := raw.Conn(ctx)
 	if err != nil {
-		t.Fatalf("conn: %v", err)
+		t.Fatalf("acquire conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	for v := 0; v <= SchemaVersion; v++ {
 		_, _ = conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", v))
