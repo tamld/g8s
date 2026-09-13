@@ -112,7 +112,7 @@ func (a *alwaysFail) Spawn(ctx context.Context, t Task) (Handle, error) {
 func TestFanOutSpawnError(t *testing.T) {
 	worker := &alwaysFail{fakeWorker: fakeWorker{name: "bad", available: true}}
 	reg := NewRegistry()
-	reg.Register("bad", func() Worker { return worker })
+	_ = reg.Register("bad", func() Worker { return worker })
 
 	_, err := FanOut(context.Background(), []TaskSpec{
 		{TaskID: "x", Task: Task{ID: "x"}},
@@ -182,7 +182,7 @@ func TestGitDiffNameOnlyNonRepo(t *testing.T) {
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	r.Register("only", func() Worker { return fakeWorker{name: "only", available: true} })
+	_ = r.Register("only", func() Worker { return fakeWorker{name: "only", available: true} })
 	if _, ok := r.Get("only"); !ok {
 		t.Error("Get should find registered factory")
 	}
