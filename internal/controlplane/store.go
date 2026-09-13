@@ -900,7 +900,7 @@ func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSec
 	if err != nil {
 		return nil, fmt.Errorf("begin claim: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := reconcileExpiredTx(ctx, tx, now); err != nil {
 		return nil, err
@@ -966,7 +966,7 @@ func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
 	if err != nil {
 		return false
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	res, err := tx.Exec(`
 		UPDATE tasks SET state = 'RUNNING', updated_at = ?
 		WHERE task_id = ? AND state = 'LEASED'
