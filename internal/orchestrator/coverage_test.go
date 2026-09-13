@@ -36,7 +36,7 @@ func TestFanOutMissingRegistry(t *testing.T) {
 
 func TestFanOutAllFailToSpawn(t *testing.T) {
 	reg := NewRegistry()
-	reg.Register("nope", func() Worker { return fakeWorker{name: "nope", available: false} })
+	_ = reg.Register("nope", func() Worker { return fakeWorker{name: "nope", available: false} })
 	_, err := FanOut(context.Background(), []TaskSpec{{TaskID: "t1"}}, FanOutOptions{Registry: reg, Pool: &Pool{}})
 	if err == nil {
 		t.Fatal("expected all-fail error")
@@ -80,7 +80,7 @@ func TestFanOutSuccess(t *testing.T) {
 
 	worker := &alwaysSpawnOK{fakeWorker: fakeWorker{name: "ok", available: true}}
 	reg := NewRegistry()
-	reg.Register("ok", func() Worker { return worker })
+	_ = reg.Register("ok", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
