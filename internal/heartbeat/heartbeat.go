@@ -278,7 +278,7 @@ func (s *Store) Record(sessionID string, payload any, extra ...any) (*Heartbeat,
 	}
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("write temp heartbeat file: %w", err)
 	}

@@ -783,7 +783,7 @@ func TestDurableRoundTripAgainstRealStoreOmitsPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	issuer := &fakeIssuer{rc: &receipt.WriteReceipt{ReceiptID: "rc-d"}}
 	providers := &fakeProviders{}
