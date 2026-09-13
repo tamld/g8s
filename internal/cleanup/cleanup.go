@@ -680,7 +680,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetGhostProcess] {
 		items, err := sweepGhostProcesses(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] ghost-process sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] ghost-process sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetGhostProcess] = len(items)
@@ -691,7 +691,7 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 	if targetSet[TargetOrphanWT] {
 		items, err := sweepOrphanWorktrees(ctx, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Writer, "[warn] orphan-wt sweep error: %v\n", err)
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] orphan-wt sweep error: %v\n", err)
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOrphanWT] = len(items)
