@@ -407,7 +407,7 @@ func (r *PoolRegistry) probeHTTP(ctx context.Context, url string) HealthStatus {
 	if err != nil {
 		return StatusUnavailable
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return StatusDegraded
 	}

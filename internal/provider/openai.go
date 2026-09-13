@@ -126,7 +126,7 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("chat request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
