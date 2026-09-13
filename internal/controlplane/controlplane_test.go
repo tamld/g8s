@@ -123,7 +123,9 @@ func TestFreshDatabaseFilePermissionsRestricted(t *testing.T) {
 
 func TestLegacyV1DatabaseMigratesParentColumn(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	raw := openRawDB(t, path)
 	if _, err := raw.Exec("ALTER TABLE tasks DROP COLUMN parent_task_id"); err != nil {
@@ -132,13 +134,15 @@ func TestLegacyV1DatabaseMigratesParentColumn(t *testing.T) {
 	if _, err := raw.Exec("PRAGMA user_version = 1"); err != nil {
 		t.Fatalf("set legacy version: %v", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
 
 	reopened, err := NewControlPlane(path, nil)
 	if err != nil {
 		t.Fatalf("reopen migrated database: %v", err)
 	}
-	defer reopened.Close()
+	defer func() { _ = reopened.Close() }()
 
 	check := openRawDB(t, path)
 	colRows, err := check.Query("PRAGMA table_info(tasks)")
