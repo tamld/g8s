@@ -265,7 +265,7 @@ func TestReceiptLakeMetricQuery(t *testing.T) {
 
 func TestStoreEdgeCasesAndValidation(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	// deref test
@@ -352,7 +352,7 @@ func TestStoreEdgeCasesAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, "PRAGMA user_version = -1"); err == nil {
 		if err := checkSchemaVersion(conn); err == nil {
 			t.Errorf("checkSchemaVersion with negative version should error")
@@ -362,7 +362,7 @@ func TestStoreEdgeCasesAndValidation(t *testing.T) {
 
 func TestStoreLifecycleAndClaimBranches(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	// 1. SubmitTask parent not found
