@@ -70,7 +70,7 @@ func (s *Store) ListActiveBriefs(ctx context.Context) ([]BriefRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: list active briefs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []BriefRow
 	for rows.Next() {

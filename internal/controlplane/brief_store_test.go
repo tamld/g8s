@@ -155,7 +155,7 @@ func TestBriefStoreMigrationFromV5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open and migrate v5 db: %v", err)
 	}
-	defer migratedStore.Close()
+	defer func() { _ = migratedStore.Close() }()
 
 	check := openRawDB(t, path)
 	var version int
@@ -171,7 +171,7 @@ func TestBriefStoreMigrationFromV5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info(briefs): %v", err)
 	}
-	defer colRows.Close()
+	defer func() { _ = colRows.Close() }()
 	cols := map[string]string{}
 	for colRows.Next() {
 		var cid int
