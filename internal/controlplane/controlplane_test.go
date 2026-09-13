@@ -180,13 +180,17 @@ func TestLegacyV1DatabaseMigratesParentColumn(t *testing.T) {
 
 func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	raw := openRawDB(t, path)
 	if _, err := raw.Exec("PRAGMA user_version = 9"); err != nil {
 		t.Fatalf("set future version: %v", err)
 	}
-	raw.Close()
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
