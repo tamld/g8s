@@ -48,11 +48,11 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	s := &Store{db: db, clock: clock}
 	if err := s.initialize(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	if err := os.Chmod(dbPath, 0o600); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("restrict control-plane database permissions: %w", err)
 	}
 	return s, nil
@@ -849,7 +849,7 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	if err != nil {
 		return nil, fmt.Errorf("begin submit: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := checkParentTask(ctx, tx, req.ParentTaskID); err != nil {
 		return nil, err
