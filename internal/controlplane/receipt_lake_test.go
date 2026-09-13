@@ -1040,7 +1040,9 @@ func TestInitializeMigrationErrorRollback(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	_, _ = raw1.Exec("CREATE VIEW tasks AS SELECT 1 AS id")
-	raw1.Close()
+	if err := raw1.Close(); err != nil {
+		t.Fatalf("close raw1: %v", err)
+	}
 
 	if _, err := NewControlPlane(db1, nil); err == nil {
 		t.Errorf("NewControlPlane on view tasks should fail during initialize")
@@ -1054,7 +1056,9 @@ func TestInitializeMigrationErrorRollback(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	_, _ = raw2.Exec("CREATE VIEW supervisor_tasks AS SELECT 1 AS id")
-	raw2.Close()
+	if err := raw2.Close(); err != nil {
+		t.Fatalf("close raw2: %v", err)
+	}
 
 	if _, err := NewControlPlane(db2, nil); err == nil {
 		t.Errorf("NewControlPlane on view supervisor_tasks should fail during initialize")
@@ -1068,7 +1072,9 @@ func TestInitializeMigrationErrorRollback(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	_, _ = raw3.Exec("CREATE TABLE idx_tasks_orchestrator_iter (x TEXT)")
-	raw3.Close()
+	if err := raw3.Close(); err != nil {
+		t.Fatalf("close raw3: %v", err)
+	}
 
 	if _, err := NewControlPlane(db3, nil); err == nil {
 		t.Errorf("NewControlPlane on colliding table index should fail during initialize")
