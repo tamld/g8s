@@ -406,7 +406,7 @@ func TestStoreLifecycleAndClaimBranches(t *testing.T) {
 
 	// 3. ClaimTask candidate == nil
 	emptyStore, _ := newTestStore(t)
-	defer emptyStore.Close()
+	defer func() { _ = emptyStore.Close() }()
 	candidate, err := emptyStore.ClaimTask(ctx, "worker-1", 30)
 	if err != nil || candidate != nil {
 		t.Errorf("ClaimTask on empty queue want (nil, nil), got (%v, %v)", candidate, err)
@@ -469,7 +469,9 @@ func TestStoreLifecycleAndClaimBranches(t *testing.T) {
 
 func TestMigrateSupervisorSchemaMissingColumns(t *testing.T) {
 	store, path := newTestStore(t)
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	raw := openRawDB(t, path)
 	defer raw.Close()
