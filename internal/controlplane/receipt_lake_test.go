@@ -77,7 +77,7 @@ func TestReceiptLakeMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire raw connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := migrateReceiptLake(conn); err != nil {
 		t.Fatalf("migrateReceiptLake rerun 1 failed: %v", err)
@@ -151,7 +151,7 @@ func TestReceiptLakeMigrationFromV4(t *testing.T) {
 
 func TestReceiptLakeMetricQuery(t *testing.T) {
 	store, path := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	raw := openRawDB(t, path)
 
