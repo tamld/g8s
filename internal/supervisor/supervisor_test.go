@@ -3,7 +3,6 @@ package supervisor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
@@ -541,13 +540,3 @@ func TestRCALowConfidencePauses(t *testing.T) {
 		t.Errorf("expected nil Escalation on pause, got %+v", res.Escalation)
 	}
 }
-
-// Helper used in tests; avoids importing fmt at the test site.
-func mustContain(t *testing.T, s, substr string) {
-	t.Helper()
-	if !strings.Contains(s, substr) {
-		t.Errorf("expected %q to contain %q", s, substr)
-	}
-}
-
-var _ = fmt.Sprintf // keep fmt referenced even if no test uses it

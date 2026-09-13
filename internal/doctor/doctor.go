@@ -81,7 +81,7 @@ func (d *Doctor) detectInstallSource() string {
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s`,
 		registry.QUERY_VALUE)
 	if err == nil {
-		defer func() { _ = key.Close() }()
+		defer key.Close()
 		return "msi-or-nsis"
 	}
 	return "zip-or-manual"
@@ -96,7 +96,7 @@ func (d *Doctor) detectInstallPath() string {
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\g8s`,
 		registry.QUERY_VALUE)
 	if err == nil {
-		defer func() { _ = key.Close() }()
+		defer key.Close()
 		if loc, err := key.GetStringValue("InstallLocation"); err == nil && loc != "" {
 			return loc
 		}

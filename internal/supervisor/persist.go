@@ -27,12 +27,11 @@ var ErrUnknownSupervisorTask = errors.New("supervisor: unknown supervisor task")
 
 // StubPersistence is the in-process implementation used by tests. It is safe for concurrent use.
 type StubPersistence struct {
-	mu         sync.Mutex
-	tasks      map[string]controlplane.SupervisorTaskRow
-	decisions  map[string][]controlplane.SupervisorDecisionRow
-	nextDecID  int
-	nextTaskID int
-	clock      func() time.Time
+	mu        sync.Mutex
+	tasks     map[string]controlplane.SupervisorTaskRow
+	decisions map[string][]controlplane.SupervisorDecisionRow
+	nextDecID int
+	clock     func() time.Time
 }
 
 // NewStubPersistence returns an empty in-memory store.

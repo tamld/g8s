@@ -62,7 +62,7 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("no model server at %s", host)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("no model server at %s (status %d)", host, resp.StatusCode)
@@ -95,7 +95,7 @@ func (o *OllamaProvider) Version(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no model server at %s", host)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
 		var verResp struct {

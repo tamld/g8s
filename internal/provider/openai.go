@@ -68,7 +68,7 @@ func (p *OpenAIProvider) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("no model server at %s: %w", p.baseURL, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("no model server at %s (status %d)", p.baseURL, resp.StatusCode)
 	}
@@ -126,7 +126,7 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("chat request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}

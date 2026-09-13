@@ -448,7 +448,11 @@ func TestAgyWorkerWithMounts_SkillInjection(t *testing.T) {
 	mountedWorker := worker.WithMounts(*reg)
 
 	// Verify worker delegates Inject
-	res, err := mountedWorker.(SkillMount).Inject("my prompt")
+	skillMount, ok := mountedWorker.(SkillMount)
+	if !ok {
+		t.Fatalf("mountedWorker does not implement SkillMount: %T", mountedWorker)
+	}
+	res, err := skillMount.Inject("my prompt")
 	if err != nil {
 		t.Fatalf("Inject error: %v", err)
 	}

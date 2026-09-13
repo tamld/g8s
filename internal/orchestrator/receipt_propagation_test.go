@@ -18,7 +18,7 @@ func TestFanOutReceiptPropagation(t *testing.T) {
 		receipt: Receipt{OK: true, CommitSHA: "headsha"},
 	}
 	reg := NewRegistry()
-	reg.Register("agy", func() Worker { return worker })
+	_ = reg.Register("agy", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestDriveReceiptLakePropagation(t *testing.T) {
 		receipt: Receipt{OK: true, CommitSHA: "headsha"},
 	}
 	reg := NewRegistry()
-	reg.Register("agy", func() Worker { return worker })
+	_ = reg.Register("agy", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {

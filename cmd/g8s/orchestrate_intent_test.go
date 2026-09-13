@@ -356,7 +356,7 @@ func TestOrchestrateWithFanOutPool(t *testing.T) {
 
 	worker := &trackingStubWorker{}
 	reg := orchestrator.NewRegistry()
-	reg.Register("tracking-stub", func() orchestrator.Worker { return worker })
+	_ = reg.Register("tracking-stub", func() orchestrator.Worker { return worker })
 
 	opts := orchestrateOptions{
 		Store:         store,

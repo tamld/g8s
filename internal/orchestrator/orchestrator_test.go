@@ -13,11 +13,11 @@ import (
 func TestRegistryPickReturnsFirstAvailable(t *testing.T) {
 	r := NewRegistry()
 	called := 0
-	r.Register("a", func() Worker {
+	_ = r.Register("a", func() Worker {
 		called++
 		return fakeWorker{name: "a", available: true}
 	})
-	r.Register("b", func() Worker {
+	_ = r.Register("b", func() Worker {
 		called++
 		return fakeWorker{name: "b", available: true}
 	})
@@ -33,8 +33,8 @@ func TestRegistryPickReturnsFirstAvailable(t *testing.T) {
 
 func TestRegistryPickSkipsUnavailable(t *testing.T) {
 	r := NewRegistry()
-	r.Register("a", func() Worker { return fakeWorker{name: "a", available: false} })
-	r.Register("b", func() Worker { return fakeWorker{name: "b", available: true} })
+	_ = r.Register("a", func() Worker { return fakeWorker{name: "a", available: false} })
+	_ = r.Register("b", func() Worker { return fakeWorker{name: "b", available: true} })
 
 	w, err := r.Pick(context.Background())
 	if err != nil {
@@ -57,9 +57,9 @@ func TestRegistryErrorsOnDuplicate(t *testing.T) {
 
 func TestRegistryNamesSorted(t *testing.T) {
 	r := NewRegistry()
-	r.Register("z", func() Worker { return fakeWorker{name: "z"} })
-	r.Register("a", func() Worker { return fakeWorker{name: "a"} })
-	r.Register("m", func() Worker { return fakeWorker{name: "m"} })
+	_ = r.Register("z", func() Worker { return fakeWorker{name: "z"} })
+	_ = r.Register("a", func() Worker { return fakeWorker{name: "a"} })
+	_ = r.Register("m", func() Worker { return fakeWorker{name: "m"} })
 
 	got := strings.Join(r.Names(), ",")
 	if got != "a,m,z" {

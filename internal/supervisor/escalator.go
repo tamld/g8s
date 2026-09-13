@@ -56,7 +56,7 @@ func BuildEscalation(
 			lastReceipt.CommitSHA, len(lastReceipt.FilesModified), len(lastReceipt.ScopeViolations))
 	}
 
-	recommended := "review evidence and re-scope"
+	var recommended string
 	if rca.Confidence >= 0.6 {
 		recommended = "inspect RCA summary, then either re-scope the task or escalate to a higher-tier Brain"
 	} else {

@@ -253,11 +253,9 @@ func TestActiveTaskCountIgnoresListPageSize(t *testing.T) {
 	raw := openRawDB(t, path)
 	const total = 201
 	for i := 0; i < total; i++ {
-		state := StateQueued
+		state := StateRunning
 		if i%2 == 0 {
 			state = StateLeased
-		} else {
-			state = StateRunning
 		}
 		insertRawTask(t, raw, fmt.Sprintf("task-%03d", i), state, float64(i))
 	}
@@ -688,7 +686,10 @@ func TestReceiptHashIsReproducibleFromUnsignedPayload(t *testing.T) {
 	if receipt["signed"] != false {
 		t.Errorf("signed = %v, want false (unsigned receipts only in v0.1)", receipt["signed"])
 	}
-	stored := receipt["receipt_hash"].(string)
+	stored, ok := receipt["receipt_hash"].(string)
+	if !ok {
+		t.Fatalf("receipt_hash not string: %v", receipt["receipt_hash"])
+	}
 
 	unsigned := map[string]any{}
 	for key, value := range receipt {

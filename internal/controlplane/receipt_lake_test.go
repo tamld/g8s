@@ -932,7 +932,7 @@ func TestStoreAdditionalCoverage(t *testing.T) {
 
 	// 2. checkSchemaVersion validation directly
 	raw := openRawDB(t, dbPath)
-conn, err := raw.Conn(ctx)
+	conn, err := raw.Conn(ctx)
 	if err != nil {
 		t.Fatalf("acquire conn: %v", err)
 	}

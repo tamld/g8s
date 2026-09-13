@@ -220,7 +220,7 @@ func TestFanOutMaxParallelCaps(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	r.Register("fanout", func() Worker { return fanOutWorker{} })
+	_ = r.Register("fanout", func() Worker { return fanOutWorker{} })
 
 	plan := []TaskSpec{
 		{TaskID: "t1", Task: Task{ID: "t1"}},

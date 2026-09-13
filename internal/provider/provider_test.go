@@ -374,14 +374,16 @@ func TestLoadProvidersJSONSameNameSameClassReplaces(t *testing.T) {
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server2.Close()
 	content1 := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server1.URL + `","auth_env":"","models":[{"id":"m1"}],"slots":1}]}`
-	content2 := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server2.URL + `","auth_env":"","models":[{"id":"m2"}],"slots":2}]}`
-	os.WriteFile(path, []byte(content1), 0o600)
+	if err := os.WriteFile(path, []byte(content1), 0o600); err != nil {
+		t.Fatalf("write content1: %v", err)
+	}
 
 	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
 		t.Fatalf("first load: %v", err)
 	}
 
+	content2 := `{"providers":[{"class":"api_call","name":"dup","base_url":"` + server2.URL + `","auth_env":"","models":[{"id":"m2"}],"slots":2}]}`
 	if err := os.WriteFile(path, []byte(content2), 0o600); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
@@ -399,7 +401,9 @@ func TestLoadProvidersJSONSameNameDifferentClassErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
 	content := `{"providers":[{"class":"api_call","name":"clash","base_url":"` + server.URL + `","auth_env":"","models":[{"id":"m"}],"slots":1}]}`
-	os.WriteFile(path, []byte(content), 0o600)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
 
 	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
@@ -425,7 +429,9 @@ func TestApiCallAuthEnvUnsetFailsClosedWithoutHTTP(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "providers.json")
 	content := `{"providers":[{"class":"api_call","name":"locked","base_url":"` + server.URL + `","auth_env":"PARITY_TEST_MISSING_KEY","models":[{"id":"m"}],"slots":1}]}`
-	os.WriteFile(path, []byte(content), 0o600)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
 
 	r := NewPoolRegistry(DefaultConfigs(), nil, stubLookPath(nil))
 	if err := r.LoadProvidersJSON(path); err != nil {
@@ -458,7 +464,9 @@ func TestSelectForModelPrefersApiCallOverPlatformDispatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "providers.json")
 	content := `{"providers":[{"class":"api_call","name":"pool","base_url":"` + okServer.URL + `","auth_env":"","models":[{"id":"shared-model"}],"slots":1}]}`
-	os.WriteFile(path, []byte(content), 0o600)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
 
 	r := NewPoolRegistry(nil, nil, stubLookPath(map[string]string{"cli-dispatch": "/bin/cli"}))
 	if err := r.LoadProvidersJSON(path); err != nil {
@@ -466,7 +474,9 @@ func TestSelectForModelPrefersApiCallOverPlatformDispatch(t *testing.T) {
 	}
 	path2 := filepath.Join(dir, "p2.json")
 	content2 := `{"providers":[{"class":"platform_dispatch","name":"cli-dispatch","models":[{"id":"shared-model"}],"slots":1}]}`
-	os.WriteFile(path2, []byte(content2), 0o600)
+	if err := os.WriteFile(path2, []byte(content2), 0o600); err != nil {
+		t.Fatalf("write content2: %v", err)
+	}
 	if err := r.LoadProvidersJSON(path2); err != nil {
 		t.Fatalf("load platform_dispatch: %v", err)
 	}

@@ -48,11 +48,11 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	s := &Store{db: db, clock: clock}
 	if err := s.initialize(); err != nil {
-		_ = db.Close()
+		db.Close()
 		return nil, err
 	}
 	if err := os.Chmod(dbPath, 0o600); err != nil {
-		_ = db.Close()
+		db.Close()
 		return nil, fmt.Errorf("restrict control-plane database permissions: %w", err)
 	}
 	return s, nil
@@ -72,7 +72,7 @@ func (s *Store) initialize() error {
 	if err != nil {
 		return fmt.Errorf("pin initialization connection: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer conn.Close()
 
 	// Fast-path: if database already matches current schema version, skip exclusive lock
 	var version int
@@ -210,7 +210,7 @@ func migrateTasksTable(conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns: %w", err)
 	}
-	defer func() { _ = parentRows.Close() }()
+	defer parentRows.Close()
 	for parentRows.Next() {
 		var cid int
 		var name, colType string
@@ -319,16 +319,16 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 			var dflt sql.NullString
 			var pk int
 			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-				_ = rows.Close()
+				rows.Close()
 				return fmt.Errorf("scan %s columns: %w", table, err)
 			}
 			present[name] = struct{}{}
 		}
 		if err := rows.Err(); err != nil {
-			_ = rows.Close()
+			rows.Close()
 			return fmt.Errorf("iterate %s columns: %w", table, err)
 		}
-		_ = rows.Close()
+		rows.Close()
 		for col := range cols {
 			if _, ok := present[col]; ok {
 				continue
@@ -357,7 +357,7 @@ func migrateReceiptLake(conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns for receipt lake: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, colType string
@@ -849,7 +849,7 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	if err != nil {
 		return nil, fmt.Errorf("begin submit: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	if err := checkParentTask(ctx, tx, req.ParentTaskID); err != nil {
 		return nil, err
@@ -900,7 +900,7 @@ func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSec
 	if err != nil {
 		return nil, fmt.Errorf("begin claim: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	if _, err := reconcileExpiredTx(ctx, tx, now); err != nil {
 		return nil, err
@@ -966,7 +966,7 @@ func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
 	if err != nil {
 		return false
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 	res, err := tx.Exec(`
 		UPDATE tasks SET state = 'RUNNING', updated_at = ?
 		WHERE task_id = ? AND state = 'LEASED'
@@ -1054,7 +1054,7 @@ func (s *Store) ReconcileExpired(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("begin reconcile: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 	count, err := reconcileExpiredTx(ctx, tx, now)
 	if err != nil {
 		return 0, err

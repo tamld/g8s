@@ -1047,7 +1047,7 @@ func sweepStaleReceipts(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, 
 	if err != nil {
 		return nil, fmt.Errorf("open db for receipt cleanup: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer db.Close()
 
 	nowUnix := float64(cfg.Clock().Unix())
 	rows, err := db.QueryContext(ctx, "SELECT receipt_id, expires_at FROM write_receipts WHERE consumed = 0 AND expires_at < ?", nowUnix)
@@ -1055,7 +1055,7 @@ func sweepStaleReceipts(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, 
 		// Table might not exist yet
 		return nil, nil
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	var staleIDs []string
 	for rows.Next() {

@@ -514,7 +514,10 @@ func TestDispatchRejectsWorkspaceWriteBeforeDispatcherRuns(t *testing.T) {
 	if rpcErr == nil || rpcErr.Data == nil {
 		t.Fatalf("want blocked_by_policy error, got %+v", rpcErr)
 	}
-	data := rpcErr.Data.(map[string]any)
+	data, ok := rpcErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("rpcErr.Data not map[string]any: %T", rpcErr.Data)
+	}
 	if data["status"] != "blocked_by_policy" {
 		t.Fatalf("status = %v, want blocked_by_policy", data["status"])
 	}
@@ -573,7 +576,10 @@ func TestDispatchReportsSetupRequiredWhenBinaryMissing(t *testing.T) {
 	if rpcErr == nil || rpcErr.Data == nil {
 		t.Fatalf("want setup_required error, got %+v", rpcErr)
 	}
-	data := rpcErr.Data.(map[string]any)
+	data, ok := rpcErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("rpcErr.Data not map[string]any: %T", rpcErr.Data)
+	}
 	if data["status"] != "setup_required" {
 		t.Fatalf("status = %v, want setup_required", data["status"])
 	}
@@ -618,8 +624,9 @@ func TestDispatchPassthroughSuccessEnvelopeAndOptions(t *testing.T) {
 	if out["ok"] != true || out["returncode"] != float64(0) || out["duration_seconds"] != 1.5 || out["permission"] != "automation_read" {
 		t.Fatalf("envelope mismatch: %s", result)
 	}
-	if !strings.Contains(out["command_preview"].(string), "--sandbox") ||
-		!strings.Contains(out["command_preview"].(string), "--dangerously-skip-permissions") {
+	cmdPreview, ok := out["command_preview"].(string)
+	if !ok || !strings.Contains(cmdPreview, "--sandbox") ||
+		!strings.Contains(cmdPreview, "--dangerously-skip-permissions") {
 		t.Fatalf("command_preview must keep sandbox and permission flags: %v", out["command_preview"])
 	}
 	if out["stdout"] != "worker output" {
@@ -702,7 +709,10 @@ func TestDispatchSurfacesContractViolationAsError(t *testing.T) {
 	if rpcErr == nil || rpcErr.Data == nil {
 		t.Fatalf("want contract_violation error, got %+v", rpcErr)
 	}
-	data := rpcErr.Data.(map[string]any)
+	data, ok := rpcErr.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("rpcErr.Data not map[string]any: %T", rpcErr.Data)
+	}
 	if data["status"] != "contract_violation" {
 		t.Fatalf("status = %v, want contract_violation", data["status"])
 	}
@@ -763,7 +773,8 @@ func TestSubmitDurableGuardsBlockWriteAndNoSandbox(t *testing.T) {
 	if rpcErr == nil || rpcErr.Data == nil {
 		t.Fatalf("want blocked_by_policy on submit, got %+v", rpcErr)
 	}
-	if rpcErr.Data.(map[string]any)["status"] != "blocked_by_policy" {
+	submitData, ok := rpcErr.Data.(map[string]any)
+	if !ok || submitData["status"] != "blocked_by_policy" {
 		t.Fatalf("submit status = %v", rpcErr.Data)
 	}
 	_, rpcErr = callTool(t, s, "g8s_submit", map[string]any{

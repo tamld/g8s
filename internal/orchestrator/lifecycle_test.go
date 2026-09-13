@@ -250,7 +250,7 @@ func TestDriveMultipleWorkersAllOK(t *testing.T) {
 		spawns:  &spawnCount,
 	}
 	reg := NewRegistry()
-	reg.Register("multi", func() Worker { return worker })
+	_ = reg.Register("multi", func() Worker { return worker })
 
 	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
 	if err != nil {

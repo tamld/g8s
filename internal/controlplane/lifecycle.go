@@ -62,10 +62,6 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	if permission == "" {
 		permission = "read_only"
 	}
-	timeout := req.Timeout
-	if timeout == "" {
-		timeout = "5m0s"
-	}
 
 	if strings.TrimSpace(req.Model) == "" {
 		return errors.New("request.model is required")
@@ -123,7 +119,7 @@ func eventsTx(tx *sql.Tx, taskID string) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	events := []map[string]any{}
 	for rows.Next() {
@@ -226,7 +222,7 @@ func (s *Store) BuildReceipt(_ context.Context, taskID string) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 	payload, _, err := buildReceiptTx(tx, task)
 	if err != nil {
 		return nil, err
@@ -267,7 +263,7 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -404,7 +400,7 @@ func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -489,7 +485,7 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -562,7 +558,7 @@ func (s *Store) ResumeTask(ctx context.Context, taskID string, resumedPayload js
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -633,7 +629,7 @@ func (s *Store) BeginMaintenance(owner string, ttlSeconds float64) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer tx.Rollback()
 
 	now := float64(s.clock().UnixNano()) / 1e9
 	var currentExpires sql.NullFloat64
@@ -688,7 +684,7 @@ func (s *Store) Events(_ context.Context, taskID string) ([]TaskEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 
 	events := []TaskEvent{}
 	for rows.Next() {
