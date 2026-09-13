@@ -1,8 +1,20 @@
 GO ?= go
 
-.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check
+.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check pre-push pre-push-fast lint setup-hooks
 
 all: build
+
+pre-push:
+	@bash tools/pre_push.sh
+
+pre-push-fast:
+	@bash tools/pre_push.sh --fast
+
+lint:
+	@GOWORK=off GOTOOLCHAIN=go1.25.0 golangci-lint run
+
+setup-hooks:
+	@bash tools/setup_hooks.sh
 
 build:
 	@$(GO) build ./...
