@@ -400,10 +400,9 @@ func TestConcurrentConsumeSingleWinner(t *testing.T) {
 
 	winners := 0
 	for err := range errs {
-		switch {
-		case err == nil:
+		if err == nil {
 			winners++
-		default:
+		} else {
 			var reused *AlreadyConsumedError
 			if !errors.As(err, &reused) {
 				t.Errorf("loser error = %v, want AlreadyConsumedError", err)

@@ -163,7 +163,7 @@ func TestWikiBlockSitsBetweenPolicyAndForbiddenSections(t *testing.T) {
 	policyIdx := strings.Index(prompt, "Mutation policy:")
 	wikiIdx := strings.Index(prompt, "Wiki engine policy")
 	forbiddenIdx := strings.Index(prompt, "Forbidden for this role:")
-	if policyIdx < 0 || wikiIdx < 0 || forbiddenIdx < 0 || !(policyIdx < wikiIdx && wikiIdx < forbiddenIdx) {
+	if policyIdx < 0 || wikiIdx < 0 || forbiddenIdx < 0 || policyIdx >= wikiIdx || wikiIdx >= forbiddenIdx {
 		t.Fatalf("section order broken: policy=%d wiki=%d forbidden=%d", policyIdx, wikiIdx, forbiddenIdx)
 	}
 }

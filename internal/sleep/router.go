@@ -42,9 +42,10 @@ func (r *StderrRouter) Route(_ context.Context, event Event, isSleeping bool) er
 	}
 
 	prefix := "[EVENT]"
-	if event.Severity == SeverityCritical {
+	switch event.Severity {
+	case SeverityCritical:
 		prefix = "🚨 [CRITICAL ALERT]"
-	} else if event.Severity == SeverityWarning {
+	case SeverityWarning:
 		prefix = "⚠️ [WARNING]"
 	}
 

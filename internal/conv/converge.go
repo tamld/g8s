@@ -290,13 +290,13 @@ func RunSpotChecker(solutions []*Solution) []SpotCheckIssue {
 func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# %s\n\n", report.Title))
-	sb.WriteString(fmt.Sprintf("> **Convergence Protocol**: Dual-Blind Multi-Agent Synthesis (%d Independent Workers)\n\n", report.ParticipantCount))
+	fmt.Fprintf(&sb, "# %s\n\n", report.Title)
+	fmt.Fprintf(&sb, "> **Convergence Protocol**: Dual-Blind Multi-Agent Synthesis (%d Independent Workers)\n\n", report.ParticipantCount)
 	sb.WriteString("---\n\n")
 
 	sb.WriteString("## 1. Executive Summary & Synthesis\n\n")
-	sb.WriteString(fmt.Sprintf("Synthesized from %d independent proposals without shared memory or cross-talk. ", report.ParticipantCount))
-	sb.WriteString(fmt.Sprintf("Identified %d areas of consensus and %d resolved divergences.\n\n", len(report.CommonGround), len(report.Divergences)))
+	fmt.Fprintf(&sb, "Synthesized from %d independent proposals without shared memory or cross-talk. ", report.ParticipantCount)
+	fmt.Fprintf(&sb, "Identified %d areas of consensus and %d resolved divergences.\n\n", len(report.CommonGround), len(report.Divergences))
 
 	// Common Ground Section
 	sb.WriteString("## 2. Common Ground (Consensus Architecture)\n\n")
@@ -304,11 +304,11 @@ func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) str
 		sb.WriteString("No universal consensus found across all proposals; detailed divergence resolution applied below.\n\n")
 	} else {
 		for _, cg := range report.CommonGround {
-			sb.WriteString(fmt.Sprintf("### %s\n", cg.Heading))
-			sb.WriteString(fmt.Sprintf("*Agreed by: %s*\n\n", strings.Join(cg.AgreedBy, ", ")))
+			fmt.Fprintf(&sb, "### %s\n", cg.Heading)
+			fmt.Fprintf(&sb, "*Agreed by: %s*\n\n", strings.Join(cg.AgreedBy, ", "))
 			if len(cg.KeyPoints) > 0 {
 				for _, kp := range cg.KeyPoints {
-					sb.WriteString(fmt.Sprintf("- %s\n", kp))
+					fmt.Fprintf(&sb, "- %s\n", kp)
 				}
 				sb.WriteString("\n")
 			} else if cg.Summary != "" {
@@ -323,9 +323,9 @@ func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) str
 		sb.WriteString("All workers converged on identical architectural patterns.\n\n")
 	} else {
 		for _, div := range report.Divergences {
-			sb.WriteString(fmt.Sprintf("### Topic: %s\n", div.Topic))
-			sb.WriteString(fmt.Sprintf("**Selected Decision**: %s (Proposed by `%s`)\n\n", div.Topic, div.SelectedWorker))
-			sb.WriteString(fmt.Sprintf("**Rationale**: %s\n\n", div.RationaleReason))
+			fmt.Fprintf(&sb, "### Topic: %s\n", div.Topic)
+			fmt.Fprintf(&sb, "**Selected Decision**: %s (Proposed by `%s`)\n\n", div.Topic, div.SelectedWorker)
+			fmt.Fprintf(&sb, "**Rationale**: %s\n\n", div.RationaleReason)
 			sb.WriteString("```markdown\n" + div.SelectedChoice + "\n```\n\n")
 		}
 	}
@@ -337,7 +337,7 @@ func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) str
 	} else {
 		sb.WriteString("⚠️ **Spot-checker Warnings Flagged**:\n\n")
 		for _, warn := range report.SpotCheckWarnings {
-			sb.WriteString(fmt.Sprintf("- **[%s]** %s\n", warn.Category, warn.Message))
+			fmt.Fprintf(&sb, "- **[%s]** %s\n", warn.Category, warn.Message)
 		}
 		sb.WriteString("\n")
 	}
@@ -345,7 +345,7 @@ func renderConvergedMarkdown(report *ConvergedReport, solutions []*Solution) str
 	// Unified Specification Output
 	sb.WriteString("## 5. Unified Implementation Specification\n\n")
 	for normKey, content := range report.UnifiedSections {
-		sb.WriteString(fmt.Sprintf("### %s\n\n", titleCase(normKey)))
+		fmt.Fprintf(&sb, "### %s\n\n", titleCase(normKey))
 		sb.WriteString(content + "\n\n")
 	}
 

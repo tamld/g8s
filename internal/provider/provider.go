@@ -282,7 +282,7 @@ func (r *PoolRegistry) probe(ctx context.Context, name string) ProviderInfo {
 			binPath = override
 		}
 	}
-	if binPath == "" && !(cfg.IsLocal && name == "ollama") {
+	if binPath == "" && (!cfg.IsLocal || name != "ollama") {
 		if resolved, err := r.lookPath(cfg.Binary); err == nil {
 			binPath = resolved
 		}

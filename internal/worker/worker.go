@@ -124,12 +124,12 @@ func WithStreamCallback(fn StreamCallback) Option {
 func substituteTemplate(tmpl []string, prompt, model, timeout string) []string {
 	out := make([]string, len(tmpl))
 	for i, part := range tmpl {
-		switch {
-		case part == "{prompt}":
+		switch part {
+		case "{prompt}":
 			out[i] = prompt
-		case part == "{model}":
+		case "{model}":
 			out[i] = model
-		case part == "{timeout}":
+		case "{timeout}":
 			out[i] = timeout
 		default:
 			out[i] = part
@@ -589,9 +589,10 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 // prompt file in, structured result file out, explicit scope roots attached.
 func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) []string {
 	noSandbox := req.NoSandbox
-	if req.Permission == "workspace_write" {
+	switch req.Permission {
+	case "workspace_write":
 		noSandbox = true
-	} else if req.Permission == "read_only" || req.Permission == "automation_read" {
+	case "read_only", "automation_read":
 		noSandbox = false
 	}
 	return dispatch.BuildWorkerArgv(dispatch.BuildWorkerArgvOptions{

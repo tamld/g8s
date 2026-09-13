@@ -1,29 +1,44 @@
+version: "2"
+run:
+  issues-exit-code: 1
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    exclude-functions:
-      - (*database/sql.Rows).Close
-      - (*database/sql.Tx).Rollback
-      - (*os.File).Close
-      - (io.Closer).Close
-      - (*net/http.Response).Body.Close
-      - (*database/sql.DB).Close
-      - (*database/sql.Conn).Close
-      - (github.com/pterm/pterm.TablePrinter).Render
-      - (*golang.org/x/sys/windows/registry.Key).Close
-      - (io.ReadCloser).Close
-      - os.Remove
-
-run:
-  timeout: 10m
-  issues-exit-code: 1
+  settings:
+    errcheck:
+      check-type-assertions: true
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (*net/http.Response).Body.Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Conn).Close
+        - (github.com/pterm/pterm.TablePrinter).Render
+        - (*golang.org/x/sys/windows/registry.Key).Close
+        - (io.ReadCloser).Close
+        - os.Remove
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -55,9 +55,10 @@ func DetectIDEs(homeDir string) ([]DetectedIDE, error) {
 
 	// 1. Cursor
 	cursorPath := filepath.Join(homeDir, ".cursor", "mcp.json")
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		cursorPath = filepath.Join(homeDir, "Library", "Application Support", "Cursor", "User", "globalStorage", "cursor.mcp", "mcp.json")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
 			appData = filepath.Join(homeDir, "AppData", "Roaming")
@@ -68,9 +69,10 @@ func DetectIDEs(homeDir string) ([]DetectedIDE, error) {
 
 	// 2. Claude Desktop
 	claudePath := filepath.Join(homeDir, ".config", "Claude", "claude_desktop_config.json")
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		claudePath = filepath.Join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
 			appData = filepath.Join(homeDir, "AppData", "Roaming")
