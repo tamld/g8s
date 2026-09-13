@@ -267,7 +267,7 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -404,7 +404,7 @@ func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
