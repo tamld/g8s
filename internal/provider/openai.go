@@ -68,7 +68,7 @@ func (p *OpenAIProvider) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("no model server at %s: %w", p.baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("no model server at %s (status %d)", p.baseURL, resp.StatusCode)
 	}
