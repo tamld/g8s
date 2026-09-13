@@ -562,7 +562,7 @@ func (s *Store) ResumeTask(ctx context.Context, taskID string, resumedPayload js
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
 	task, err := scanTask(row)
@@ -633,7 +633,7 @@ func (s *Store) BeginMaintenance(owner string, ttlSeconds float64) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := float64(s.clock().UnixNano()) / 1e9
 	var currentExpires sql.NullFloat64
