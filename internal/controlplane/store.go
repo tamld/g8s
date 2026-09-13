@@ -72,7 +72,7 @@ func (s *Store) initialize() error {
 	if err != nil {
 		return fmt.Errorf("pin initialization connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Fast-path: if database already matches current schema version, skip exclusive lock
 	var version int
@@ -210,7 +210,7 @@ func migrateTasksTable(conn *sql.Conn) error {
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns: %w", err)
 	}
-	defer parentRows.Close()
+	defer func() { _ = parentRows.Close() }()
 	for parentRows.Next() {
 		var cid int
 		var name, colType string
