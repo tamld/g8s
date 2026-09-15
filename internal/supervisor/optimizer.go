@@ -59,8 +59,8 @@ func NewHeuristicOptimizer() *HeuristicOptimizer {
 		MaxAttemptsPerApproach:        10,
 		MinApproaches:                 1,
 		MaxApproaches:                 10,
-		TargetFirstAttemptSuccessRate: 0.5,  // Target 50% first-attempt success
-		TargetEscalationRate:          0.1,  // Target <10% escalation rate
+		TargetFirstAttemptSuccessRate: 0.5, // Target 50% first-attempt success
+		TargetEscalationRate:          0.1, // Target <10% escalation rate
 	}
 }
 

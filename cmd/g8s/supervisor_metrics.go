@@ -176,9 +176,9 @@ func runUpdateFalseEscalation(args []string) {
 
 	if *jsonMode || *jsonl {
 		env := cli.NewEnvelope("supervisor_metrics_update_false", "supervisor-metrics-update-false", "", map[string]any{
-			"task_id":       *taskID,
-			"is_false":      *isFalse,
-			"updated":       true,
+			"task_id":  *taskID,
+			"is_false": *isFalse,
+			"updated":  true,
 		})
 		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)

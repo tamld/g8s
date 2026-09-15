@@ -276,7 +276,7 @@ func OpenAPISpec() map[string]any {
 						"content": map[string]any{
 							"application/json": map[string]any{
 								"schema": map[string]any{
-									"type": "object",
+									"type":     "object",
 									"required": []string{"is_false"},
 									"properties": map[string]any{
 										"is_false": map[string]any{"type": "boolean", "description": "Whether the escalation was false"},
@@ -383,7 +383,7 @@ func OpenAPISpec() map[string]any {
 					},
 				},
 				"SubmitTaskRequest": map[string]any{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"idempotency_key"},
 					"properties": map[string]any{
 						"idempotency_key":  map[string]any{"type": "string"},
@@ -403,50 +403,50 @@ func OpenAPISpec() map[string]any {
 				"Receipt": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"receipt_id":   map[string]any{"type": "string"},
-						"issuer":       map[string]any{"type": "string"},
-						"allowed_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"expires_at":   map[string]any{"type": "string", "format": "date-time"},
-						"consumed":     map[string]any{"type": "boolean"},
+						"receipt_id":       map[string]any{"type": "string"},
+						"issuer":           map[string]any{"type": "string"},
+						"allowed_paths":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"expires_at":       map[string]any{"type": "string", "format": "date-time"},
+						"consumed":         map[string]any{"type": "boolean"},
 						"consumer_task_id": map[string]any{"type": "string", "nullable": true},
-						"created_at":   map[string]any{"type": "string", "format": "date-time"},
+						"created_at":       map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 				"SupervisorTask": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"id":            map[string]any{"type": "string"},
-						"state":         map[string]any{"type": "string"},
-						"envelope_json": map[string]any{"type": "string"},
-						"approach_idx":  map[string]any{"type": "integer"},
-						"attempt_idx":   map[string]any{"type": "integer"},
+						"id":             map[string]any{"type": "string"},
+						"state":          map[string]any{"type": "string"},
+						"envelope_json":  map[string]any{"type": "string"},
+						"approach_idx":   map[string]any{"type": "integer"},
+						"attempt_idx":    map[string]any{"type": "integer"},
 						"parent_task_id": map[string]any{"type": "string", "nullable": true},
-						"created_at":    map[string]any{"type": "string", "format": "date-time"},
-						"updated_at":    map[string]any{"type": "string", "format": "date-time"},
+						"created_at":     map[string]any{"type": "string", "format": "date-time"},
+						"updated_at":     map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 				"AggregateMetrics": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"total_runs":                   map[string]any{"type": "integer"},
-						"first_attempt_success_rate":   map[string]any{"type": "number"},
-						"avg_attempts_to_success":      map[string]any{"type": "number"},
-						"avg_approaches_to_success":    map[string]any{"type": "number"},
-						"escalation_rate":              map[string]any{"type": "number"},
-						"avg_cycle_duration_seconds":   map[string]any{"type": "number"},
+						"total_runs":                 map[string]any{"type": "integer"},
+						"first_attempt_success_rate": map[string]any{"type": "number"},
+						"avg_attempts_to_success":    map[string]any{"type": "number"},
+						"avg_approaches_to_success":  map[string]any{"type": "number"},
+						"escalation_rate":            map[string]any{"type": "number"},
+						"avg_cycle_duration_seconds": map[string]any{"type": "number"},
 					},
 				},
 				"Brief": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"id":          map[string]any{"type": "string"},
-						"title":       map[string]any{"type": "string"},
-						"payload_md":  map[string]any{"type": "string"},
-						"dod_md":      map[string]any{"type": "string"},
-						"issued_by":   map[string]any{"type": "string"},
-						"issued_at":   map[string]any{"type": "string", "format": "date-time"},
-						"expires_at":  map[string]any{"type": "string", "format": "date-time"},
-						"status":      map[string]any{"type": "string"},
+						"id":         map[string]any{"type": "string"},
+						"title":      map[string]any{"type": "string"},
+						"payload_md": map[string]any{"type": "string"},
+						"dod_md":     map[string]any{"type": "string"},
+						"issued_by":  map[string]any{"type": "string"},
+						"issued_at":  map[string]any{"type": "string", "format": "date-time"},
+						"expires_at": map[string]any{"type": "string", "format": "date-time"},
+						"status":     map[string]any{"type": "string"},
 					},
 				},
 				"Error": map[string]any{
@@ -468,7 +468,7 @@ func (s *Server) HandleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(OpenAPISpec())
+	_ = json.NewEncoder(w).Encode(OpenAPISpec())
 }
 
 // HandleOpenAPIUI handles GET /openapi (serves a simple HTML page with Swagger UI).
@@ -505,5 +505,5 @@ func (s *Server) HandleOpenAPIUI(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+	_, _ = w.Write([]byte(html))
 }

@@ -182,8 +182,8 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "ok",
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
 		"service": "g8s",
 	})
 }
@@ -203,15 +203,15 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
-			"error": err.Error(),
+			"error":  err.Error(),
 		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "ready",
 	})
 }
@@ -295,7 +295,7 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	_ = json.NewEncoder(w).Encode(task)
 }
 
 // handleReceipts handles GET /api/v1/receipts.
@@ -307,7 +307,7 @@ func (s *Server) handleReceipts(w http.ResponseWriter, r *http.Request) {
 
 	// For now, return empty list - receipts are in a separate DB
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]string{})
+	_ = json.NewEncoder(w).Encode([]string{})
 }
 
 // handleReceiptByID handles GET /api/v1/receipts/{id}.
@@ -318,7 +318,7 @@ func (s *Server) handleReceiptByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
 }
 
 // handleSupervisor handles GET /api/v1/supervisor.
@@ -336,7 +336,7 @@ func (s *Server) handleSupervisor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks)
+	_ = json.NewEncoder(w).Encode(tasks)
 }
 
 // handleSupervisorByID handles GET /api/v1/supervisor/{id}.
@@ -365,7 +365,7 @@ func (s *Server) handleSupervisorByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	_ = json.NewEncoder(w).Encode(task)
 }
 
 // handleSupervisorMetrics handles GET /api/v1/supervisor/metrics.
@@ -383,7 +383,7 @@ func (s *Server) handleSupervisorMetrics(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(agg)
+	_ = json.NewEncoder(w).Encode(agg)
 }
 
 // handleSupervisorUpdateFalseEscalation handles POST /api/v1/supervisor/false-escalation/{id}.
@@ -420,7 +420,7 @@ func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"task_id":  taskID,
 		"is_false": req.IsFalse,
 		"updated":  true,
@@ -442,7 +442,7 @@ func (s *Server) handleBriefs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(briefs)
+	_ = json.NewEncoder(w).Encode(briefs)
 }
 
 // handleBriefByID handles GET /api/v1/briefs/{id}.
@@ -471,7 +471,7 @@ func (s *Server) handleBriefByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(brief)
+	_ = json.NewEncoder(w).Encode(brief)
 }
 
 // listTasks handles GET /api/v1/tasks.
@@ -483,7 +483,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	limit := 50
 	if limitStr != "" {
-		fmt.Sscanf(limitStr, "%d", &limit)
+		_, _ = fmt.Sscanf(limitStr, "%d", &limit)
 	}
 
 	filter := controlplane.TaskFilter{Limit: limit}
@@ -498,7 +498,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"tasks": tasks,
 		"count": len(tasks),
 	})
@@ -521,5 +521,5 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(task)
+	_ = json.NewEncoder(w).Encode(task)
 }

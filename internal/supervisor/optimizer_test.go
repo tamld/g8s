@@ -88,9 +88,9 @@ func TestHeuristicOptimizer_Propose_LowFirstAttemptSuccess(t *testing.T) {
 	metrics := make([]Metrics, 15)
 	for i := 0; i < 15; i++ {
 		metrics[i] = Metrics{
-			FirstAttemptSuccess: false,
-			AttemptsToSuccess:   3,
-			ApproachesToSuccess: 2,
+			FirstAttemptSuccess:  false,
+			AttemptsToSuccess:    3,
+			ApproachesToSuccess:  2,
 			CycleDurationSeconds: 100,
 		}
 	}
