@@ -155,6 +155,41 @@ func (s *Store) SaveMetrics(ctx context.Context, supervisorTaskID string, m Metr
 	return nil
 }
 
+// UpdateFalseEscalationRate updates the false_escalation_rate for a supervisor task.
+// Called when a human operator indicates an escalation was false (the task
+// should have succeeded without escalation). The rate is computed as
+// (number of false escalations) / (total escalations).
+func (s *Store) UpdateFalseEscalationRate(ctx context.Context, supervisorTaskID string, isFalseEscalation bool) error {
+	if strings.TrimSpace(supervisorTaskID) == "" {
+		return errors.New("controlplane: metrics supervisor_task_id is required")
+	}
+
+	m, err := s.GetMetrics(ctx, supervisorTaskID)
+	if err != nil {
+		return err
+	}
+
+	falseEscalationCount := m.FalseEscalationRate * float64(m.EscalationCount)
+	if isFalseEscalation {
+		falseEscalationCount++
+	}
+
+	var newRate float64
+	if m.EscalationCount > 0 {
+		newRate = falseEscalationCount / float64(m.EscalationCount)
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE supervisor_metrics SET false_escalation_rate = ? WHERE supervisor_task_id = ?`,
+		newRate, supervisorTaskID,
+	)
+	if err != nil {
+		return fmt.Errorf("controlplane: update false escalation rate: %w", err)
+	}
+
+	return nil
+}
+
 // GetMetrics returns the persisted bundle, or ErrUnknownSupervisorTask.
 func (s *Store) GetMetrics(ctx context.Context, supervisorTaskID string) (MetricsRow, error) {
 	if strings.TrimSpace(supervisorTaskID) == "" {
