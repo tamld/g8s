@@ -86,7 +86,7 @@ jobs:
       - name: Setup Go (1.25 for golangci-lint compatibility with go.mod)
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         uses: golangci/golangci-lint-action@v9
@@ -284,7 +284,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Verify Cross-Platform Compilation
         run: |

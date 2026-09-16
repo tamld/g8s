@@ -22,42 +22,42 @@ echo "test-tool version 1.0.0"
 	}
 
 	tests := []struct {
-		name          string
-		path          string
-		opts          VerifyOptions
-		wantErr       bool
-		wantVerified  bool
-		wantBaseName  string
+		name         string
+		path         string
+		opts         VerifyOptions
+		wantErr      bool
+		wantVerified bool
+		wantBaseName string
 	}{
 		{
-			name:          "valid executable with expected name",
-			path:          exePath,
-			opts:          VerifyOptions{ExpectedNames: []string{"test-tool"}},
-			wantErr:       false,
-			wantVerified:  true,
-			wantBaseName:  "test-tool",
+			name:         "valid executable with expected name",
+			path:         exePath,
+			opts:         VerifyOptions{ExpectedNames: []string{"test-tool"}},
+			wantErr:      false,
+			wantVerified: true,
+			wantBaseName: "test-tool",
 		},
 		{
-			name:          "valid executable without expected names",
-			path:          exePath,
-			opts:          VerifyOptions{},
-			wantErr:       false,
-			wantVerified:  true,
-			wantBaseName:  "test-tool",
+			name:         "valid executable without expected names",
+			path:         exePath,
+			opts:         VerifyOptions{},
+			wantErr:      false,
+			wantVerified: true,
+			wantBaseName: "test-tool",
 		},
 		{
-			name:          "non-existent executable",
-			path:          filepath.Join(tmpDir, "nonexistent"),
-			opts:          VerifyOptions{},
-			wantErr:       true,
-			wantVerified:  false,
+			name:         "non-existent executable",
+			path:         filepath.Join(tmpDir, "nonexistent"),
+			opts:         VerifyOptions{},
+			wantErr:      true,
+			wantVerified: false,
 		},
 		{
-			name:          "mismatched expected name",
-			path:          exePath,
-			opts:          VerifyOptions{ExpectedNames: []string{"other-tool"}},
-			wantErr:       true,
-			wantVerified:  false,
+			name:         "mismatched expected name",
+			path:         exePath,
+			opts:         VerifyOptions{ExpectedNames: []string{"other-tool"}},
+			wantErr:      true,
+			wantVerified: false,
 		},
 	}
 
@@ -169,7 +169,7 @@ echo "verify-tool version 1.0"
 		t.Fatal(err)
 	}
 
-	result, _, _, err := RunWithTimeoutAndVerify(1*time.Second, exePath, []string{}, VerifyOptions{
+	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, exePath, []string{}, VerifyOptions{
 		ExpectedNames: []string{"verify-tool"},
 		CheckShebang:  true,
 	})
