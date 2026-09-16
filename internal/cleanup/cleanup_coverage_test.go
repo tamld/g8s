@@ -2,9 +2,9 @@ package cleanup
 
 import (
 	"context"
+	"syscall"
 	"testing"
 	"time"
-    "syscall"
 )
 
 func TestMockProcessManager_FindGhostProcesses(t *testing.T) {

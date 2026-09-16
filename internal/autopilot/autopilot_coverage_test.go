@@ -2,8 +2,8 @@ package autopilot
 
 import (
 	"context"
+	"log"
 	"testing"
-    "log"
 )
 
 func TestPriorityQueueCoverage(t *testing.T) {
@@ -11,10 +11,10 @@ func TestPriorityQueueCoverage(t *testing.T) {
 
 	// Enqueue an item
 	item := &WorkItem{
-		ID: "item1",
-		Severity: 1.0,
+		ID:         "item1",
+		Severity:   1.0,
 		Confidence: 1.0,
-		Cost: 1.0,
+		Cost:       1.0,
 	}
 	pq.Enqueue(item)
 
@@ -38,15 +38,15 @@ func TestPriorityQueueCoverage(t *testing.T) {
 
 func TestSchedulerStartCoverage(t *testing.T) {
 	config := DefaultConfig()
-    config.Cron = "0 0 * * * *"
+	config.Cron = "0 0 * * * *"
 	sched, err := NewScheduler(config, func(ctx context.Context, item *WorkItem) error { return nil })
-    if err != nil {
-        t.Fatalf("unexpected err: %v", err)
-    }
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
 
 	sched.SetLogger(log.Default())
 	_ = sched.GetQueue()
 	_ = sched.GetConfig()
-    _ = sched.IsRunning()
+	_ = sched.IsRunning()
 	_ = sched.Start()
 }
