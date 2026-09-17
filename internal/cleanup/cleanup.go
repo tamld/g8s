@@ -265,9 +265,10 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 			continue
 		}
 
-		// Performance optimization: Avoid strings.ToLower() allocation by slicing and using strings.EqualFold
-		isAgy := len(binName) >= 3 && strings.EqualFold(binName[:3], "agy")
-		isClaude := len(binName) >= 6 && strings.EqualFold(binName[:6], "claude")
+		// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+		// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+		isAgy := strings.EqualFold(binName, "agy") || (len(binName) >= 3 && strings.EqualFold(binName[:3], "agy"))
+		isClaude := strings.EqualFold(binName, "claude") || (len(binName) >= 6 && strings.EqualFold(binName[:6], "claude"))
 		if !isAgy && !isClaude {
 			continue
 		}
