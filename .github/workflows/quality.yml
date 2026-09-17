@@ -168,50 +168,54 @@ jobs:
           CGO_ENABLED: '1'
         shell: bash
         run: |
-          # Sum the per-package coverage reported by 'go test -cover' and
-          # check the aggregate against the 80% threshold. The previous
-          # implementation grabbed the first package's coverage which is
-          # almost always the smallest (e.g. cmd/g8s at ~9%) and gated
-          # every push. We now exclude cmd/g8s from the average because
-          # the CLI binary is a thin dispatcher; end-to-end coverage
-          # there is exercised by the integration suites, not unit tests.
+          # Use coverprofile for reliable coverage extraction (works with Go 1.26+ condensed output)
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
-          
-          # Run tests with coverage, disable cache to ensure fresh run
-          echo "=== Running go test with coverage ==="
-          go test -count=1 -cover ./... 2>&1 | tee /tmp/go_test_output.txt
+          go test -count=1 -coverprofile="$COV_FILE" ./... 2>&1
           TEST_EXIT=${PIPESTATUS[0]}
-          echo "=== go test exit code: $TEST_EXIT ==="
-          cat /tmp/go_test_output.txt
-          
           if [ $TEST_EXIT -ne 0 ]; then
             echo "::error::go test failed with exit code $TEST_EXIT"
             exit 1
           fi
           
-          grep -E 'coverage: [0-9.]+%' /tmp/go_test_output.txt > "$COV_FILE"
-          echo "=== DEBUG: coverage file ===" && cat "$COV_FILE"
-          echo "=== DEBUG: coverage file line count ===" && wc -l "$COV_FILE"
+          # Get per-package coverage, excluding cmd/g8s
+          COV_DATA=$(mktemp)
+          go tool cover -func="$COV_FILE" | grep -v 'github.com/tamld/g8s/cmd/g8s' > "$COV_DATA"
           
-          total=0
-          count=0
-          while IFS= read -r line; do
-            if echo "$line" | grep -q 'github.com/tamld/g8s/cmd/g8s'; then
-              continue
-            fi
-            pct=$(echo "$line" | grep -oE 'coverage: [0-9.]+%' | awk '{print $2}' | tr -d '%')
-            if [ -n "$pct" ]; then
-              total=$(awk -v t="$total" -v p="$pct" 'BEGIN { printf "%.4f", t + p }')
-              count=$((count + 1))
-            fi
-          done < "$COV_FILE"
-          if [ "$count" -eq 0 ]; then
-            echo "::error::coverage extraction failed (count=0)"
+          # Calculate average coverage across packages (excluding cmd/g8s)
+          # Each line: package/function/file:lineno	coverage%
+          # We need the package-level coverage (last line for each package)
+          awk '
+            /^[^:]+:[0-9]+:[0-9]+/ { next }  # skip function lines
+            /^[^:]+:$/ { next }  # skip package headers
+            /total:/ { next }  # skip total
+            {
+              # Line format: package.go:lineno	func	coverage%
+              # The last line for each package has the package coverage
+              split($0, a, "\t")
+              if (length(a) == 3) {
+                pkg_cov = a[3]
+                gsub(/%/, "", pkg_cov)
+                total += pkg_cov
+                count++
+              }
+            }
+            END {
+              if (count == 0) exit 1
+              avg = total / count
+              printf "%.2f\n%d\n", avg, count
+            }
+          ' "$COV_DATA" > /tmp/cov_result.txt
+          
+          if [ ! -s /tmp/cov_result.txt ]; then
+            echo "::error::coverage calculation failed"
             exit 1
           fi
-          avg=$(awk -v t="$total" -v c="$count" 'BEGIN { printf "%.2f", t / c }')
+          
+          read avg count < /tmp/cov_result.txt
           echo "Aggregate coverage: ${avg}% across ${count} packages (cmd/g8s excluded)"
+          
+          # Check threshold
           awk -v a="$avg" 'BEGIN { if (a+0 < 80) { exit 1 } else { exit 0 } }' || {
             echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
             exit 1
