@@ -177,10 +177,23 @@ jobs:
           # there is exercised by the integration suites, not unit tests.
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
-          go test -cover ./... 2>&1 | tee /tmp/go_test_output.txt | grep -E 'coverage: [0-9.]+%' > "$COV_FILE"
-          echo "=== DEBUG: go test output ===" && cat /tmp/go_test_output.txt
+          
+          # Run tests with coverage, disable cache to ensure fresh run
+          echo "=== Running go test with coverage ==="
+          go test -count=1 -cover ./... 2>&1 | tee /tmp/go_test_output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          echo "=== go test exit code: $TEST_EXIT ==="
+          cat /tmp/go_test_output.txt
+          
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "::error::go test failed with exit code $TEST_EXIT"
+            exit 1
+          fi
+          
+          grep -E 'coverage: [0-9.]+%' /tmp/go_test_output.txt > "$COV_FILE"
           echo "=== DEBUG: coverage file ===" && cat "$COV_FILE"
           echo "=== DEBUG: coverage file line count ===" && wc -l "$COV_FILE"
+          
           total=0
           count=0
           while IFS= read -r line; do
