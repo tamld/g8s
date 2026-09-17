@@ -182,8 +182,8 @@ jobs:
           
           # Extract per-package coverage from 'ok' lines, excluding cmd/g8s
           awk '
-            /^ok\t/ && !/cmd\/g8s/ {
-              # Line format: ok\tgithub.com/tamld/g8s/pkg\t(time)\tcoverage: XX.X% of statements
+            /^ok[ \t]/ && !/cmd\/g8s/ {
+              # Line format: ok[ \t]github.com/tamld/g8s/pkg[ \t](time)[ \t]coverage: XX.X% of statements
               for (i = 1; i <= NF; i++) {
                 if ($i ~ /^coverage:/) {
                   pct = $(i+1)
