@@ -914,7 +914,7 @@ func TestVerifyExecutableIdentity(t *testing.T) {
 	// Create a fake python3 that's actually a Node script
 	tmpDir := t.TempDir()
 	fakePython := filepath.Join(tmpDir, "python3")
-	
+
 	// Create a script that mimics Node.js --version output (contains "node")
 	content := `#!/bin/sh
 echo "node v20.0.0"
