@@ -14,10 +14,10 @@ func TestAnalyzeGenericFileCoverage(t *testing.T) {
 	}
 
 	targetFile := filepath.Join(tempDir, "config.yaml")
-	_ = os.WriteFile(targetFile, []byte("key: value"), 0644)
+	_ = os.WriteFile(targetFile, []byte("key: value"), 0o644)
 
 	otherFile := filepath.Join(tempDir, "main.go")
-	_ = os.WriteFile(otherFile, []byte("import \"config.yaml\""), 0644)
+	_ = os.WriteFile(otherFile, []byte("import \"config.yaml\""), 0o644)
 
 	report, err := analyzer.analyzeGenericFile("config.yaml", targetFile)
 	if err != nil {

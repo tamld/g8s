@@ -68,7 +68,7 @@ func VerifyExecutable(path string, opts VerifyOptions) (VerifyResult, error) {
 		return VerifyResult{}, ErrExecutableNotFound
 	}
 
-	if info.Mode()&0111 == 0 {
+	if info.Mode()&0o111 == 0 {
 		return VerifyResult{}, ErrExecutableNotFound
 	}
 

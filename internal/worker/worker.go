@@ -261,7 +261,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		return nil, err
 	}
 
-var cmd *exec.Cmd
+	var cmd *exec.Cmd
 	if opts.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 		cmd = exec.CommandContext(ctx, opts.Argv[0], opts.Argv[1:]...)

@@ -570,12 +570,6 @@ func runCommand(opts RunOptions, command []string, cmdTimeout time.Duration) (Ex
 	return execRunnerWithTimeout(command, cmdTimeout)
 }
 
-// execRunner captures separate streams through bounded byte slices and maps
-// non-zero exits onto ReturnCode instead of an error.
-func execRunner(command []string) (ExecResult, error) {
-	return execRunnerWithTimeout(command, 0)
-}
-
 // execRunnerWithTimeout executes a command with an optional timeout.
 func execRunnerWithTimeout(command []string, timeout time.Duration) (ExecResult, error) {
 	var ctx context.Context

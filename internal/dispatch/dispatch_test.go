@@ -868,21 +868,21 @@ func TestValidateGate(t *testing.T) {
 
 func TestExecRunnerWithTimeout(t *testing.T) {
 	tests := []struct {
-		name         string
-		command      []string
-		timeout      time.Duration
+		name          string
+		command       []string
+		timeout       time.Duration
 		expectTimeout bool
 	}{
 		{
-			name:         "command completes before timeout",
-			command:      []string{"sh", "-c", "echo hello"},
-			timeout:      1 * time.Second,
+			name:          "command completes before timeout",
+			command:       []string{"sh", "-c", "echo hello"},
+			timeout:       1 * time.Second,
 			expectTimeout: false,
 		},
 		{
-			name:         "command times out",
-			command:      []string{"sleep", "10"},
-			timeout:      100 * time.Millisecond,
+			name:          "command times out",
+			command:       []string{"sleep", "10"},
+			timeout:       100 * time.Millisecond,
 			expectTimeout: true,
 		},
 	}
@@ -914,7 +914,7 @@ func TestVerifyExecutableIdentity(t *testing.T) {
 	// Create a fake python3 that's actually a Node script
 	tmpDir := t.TempDir()
 	fakePython := filepath.Join(tmpDir, "python3")
-	
+
 	// Create a script that mimics Node.js --version output (contains "node")
 	content := `#!/bin/sh
 echo "node v20.0.0"

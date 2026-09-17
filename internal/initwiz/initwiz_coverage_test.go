@@ -10,10 +10,10 @@ func TestDetectIDEsCoverage(t *testing.T) {
 	tempDir := t.TempDir()
 
 	cursorDir := filepath.Join(tempDir, ".cursor")
-	_ = os.MkdirAll(cursorDir, 0755)
+	_ = os.MkdirAll(cursorDir, 0o755)
 
 	mcpPath := filepath.Join(cursorDir, "mcp.json")
-	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers": {"g8s": {}}}`), 0644)
+	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers": {"g8s": {}}}`), 0o644)
 
 	ides, err := DetectIDEs(tempDir)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestCheckIDECoverage(t *testing.T) {
 
 	// Create invalid json
 	mcpPath := filepath.Join(tempDir, "mcp.json")
-	_ = os.WriteFile(mcpPath, []byte(`{invalid`), 0644)
+	_ = os.WriteFile(mcpPath, []byte(`{invalid`), 0o644)
 
 	checkIDE(IDECursor, "Cursor IDE", mcpPath)
 }
