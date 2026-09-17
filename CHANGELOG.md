@@ -46,6 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-18
+
+### Security
+- **Fix SQLite connection string injection** (CVE-risk): Wrapped `dbPath` in `url.PathEscape()` before embedding in SQLite file URI. Prevents injection via crafted file paths containing `?` or `&` characters. (PR #281)
+
+### Changed
+- **Go toolchain upgraded to 1.26.0**: All CI workflows updated from 1.25 to 1.26.0 to match `go.mod` requirement. (commit f849527)
+- **Test timeout increased**: Extended test timeout to accommodate race detector on slower CI runners.
+
+### Performance
+- **Process cleanup optimizations** (PR #282, #285, #286): Replaced `strings.ToLower` allocations with zero-allocation `strings.EqualFold` on substring slices in ghost process detection loop. 4x reduction in comparison time (142ns → 31ns).
+
+### Fixed
+- **Dependency updates**: modernc.org/sqlite 1.57.0 → 1.58.0, actions/upload-artifact v4 → v7, golang.org/x/term v0.45.0 → v0.46.0.
+- **CI gate stability**: Fixed pre-push verification harness formatting and errcheck issues.
+
 ## [0.3.0] - 2026-09-14
 
 ### Added
