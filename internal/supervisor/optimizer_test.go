@@ -168,6 +168,9 @@ func TestHeuristicOptimizer_RespectsBounds(t *testing.T) {
 	metrics := []Metrics{
 		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
 		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
 	}
 
 	result := opt.Propose(cfg, metrics)
