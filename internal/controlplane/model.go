@@ -216,12 +216,6 @@ type TaskFilter struct {
 	Limit int
 }
 
-// BriefFilter narrows ListBriefs results; zero value lists every status.
-type BriefFilter struct {
-	Status *string
-	Limit  int
-}
-
 // ControlPlane is the DELTA-03 public contract. Maintenance, reconciliation,
 // and event accessors remain concrete-type APIs (judge decision D3): they are
 // operational surfaces beyond the minimum delegation interface.

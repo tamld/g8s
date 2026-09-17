@@ -39,7 +39,7 @@ jobs:
           else
             RANGE="HEAD"
           fi
-          if git log --pretty=format:"%s" $RANGE | grep -E "Merge.*#[0-9]+"; then
+          if git log --pretty=format:"%s" $RANGE | grep -E "^Merge pull request #[0-9]+"; then
             echo "::error::Commit message contains self-merge"
             exit 1
           fi

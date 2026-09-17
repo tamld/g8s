@@ -29,7 +29,8 @@ cd "$REPO_ROOT"
 # Ensure tools in GOPATH/bin are available
 GOPATH_BIN="$(go env GOPATH)/bin"
 export PATH="$GOPATH_BIN:$PATH"
-export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+export GOWORK=off
+export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.25.0}"
 
 FAST_MODE=0
 AUTO_FIX=0

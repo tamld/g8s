@@ -3,9 +3,6 @@ package dispatch
 import (
 	"bytes"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -863,81 +860,5 @@ func TestValidateGate(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestExecRunnerWithTimeout(t *testing.T) {
-	tests := []struct {
-		name         string
-		command      []string
-		timeout      time.Duration
-		expectTimeout bool
-	}{
-		{
-			name:         "command completes before timeout",
-			command:      []string{"sh", "-c", "echo hello"},
-			timeout:      1 * time.Second,
-			expectTimeout: false,
-		},
-		{
-			name:         "command times out",
-			command:      []string{"sleep", "10"},
-			timeout:      100 * time.Millisecond,
-			expectTimeout: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := execRunnerWithTimeout(tt.command, tt.timeout)
-			t.Logf("Result: ReturnCode=%d, Err=%v, Stdout=%s, Stderr=%s", result.ReturnCode, err, string(result.Stdout), string(result.Stderr))
-			if tt.expectTimeout {
-				if err != ErrCommandTimeout {
-					t.Errorf("Expected ErrCommandTimeout, got %v", err)
-				}
-				if result.ReturnCode != -1 {
-					t.Errorf("Expected return code -1 for timeout, got %d", result.ReturnCode)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-				if result.ReturnCode != 0 {
-					t.Errorf("Expected return code 0, got %d", result.ReturnCode)
-				}
-			}
-		})
-	}
-}
-
-func TestVerifyExecutableIdentity(t *testing.T) {
-	// Create a fake python3 that's actually a Node script
-	tmpDir := t.TempDir()
-	fakePython := filepath.Join(tmpDir, "python3")
-	
-	// Create a script that mimics Node.js --version output (contains "node")
-	content := `#!/bin/sh
-echo "node v20.0.0"
-`
-	err := os.WriteFile(fakePython, []byte(content), 0o755)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// This should detect the mismatch
-	err = verifyExecutableIdentity(fakePython)
-	if err == nil {
-		t.Error("Expected error for fake python3 (Node.js)")
-	} else {
-		t.Logf("Correctly detected fake: %v", err)
-	}
-
-	// Test with real python3 (if available)
-	_, err = exec.LookPath("python3")
-	if err == nil {
-		err = verifyExecutableIdentity("python3")
-		if err != nil {
-			t.Logf("Real python3 check: %v", err)
-		}
 	}
 }

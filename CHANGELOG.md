@@ -46,24 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-09-14
-
-### Added
-- **Autopilot Scheduler** (`internal/autopilot/`): Cron-based supervisor trigger with priority queue using `container/heap` (max-heap via min-heap `Less` function). Includes `WorkHandler`, GitHub issue scanner, and TODO comment scanner with configurable cron expression, scan interval, and priority weights (staleness, complexity, label, dependency, activity).
-- **Meta-Optimizer Write Tranche** (`internal/supervisor/optimizer.go`): `HeuristicOptimizer.Propose()` computes aggregate metrics from run history and tunes `MaxAttemptsPerApproach`, `MaxApproaches`, `SilenceThreshold` based on first-attempt success rate, escalation rate, and average cycle duration. Includes 10 comprehensive test cases.
-- **Daemon Mode / HTTP API Server** (`internal/server/`, `cmd/g8s/serve.go`): `g8s serve` command starts HTTP server on `:8080` (configurable). Endpoints: `/healthz`, `/readyz`, `/metrics` (Prometheus text format), `/api/v1/tasks` (list/create/get), `/api/v1/receipts` (list/get), `/api/v1/supervisor` (list/get/metrics), `/api/v1/supervisor/false-escalation/{id}` (update false escalation), `/api/v1/briefs` (list/get).
-- **OpenAPI 3.0 Specification** (`internal/server/openapi.go`): Full OpenAPI spec at `/openapi.json` with Swagger UI at `/openapi`. Covers all API v1 endpoints with schemas for Task, SubmitTaskRequest, Receipt, SupervisorTask, AggregateMetrics, Brief, and Error.
-- **Brief Filtering** (`internal/controlplane/brief_store.go`): Added `ListBriefs(ctx, BriefFilter)` with status filter and limit support.
-- **False Escalation Feedback Loop** (`internal/controlplane/supervisor_store.go`, `cmd/g8s/supervisor_metrics.go`): Added `UpdateFalseEscalationRate` to update `false_escalation_rate` when a human operator marks an escalation as false. CLI command `g8s supervisor-metrics-update-false --task-id <id> --false` and HTTP API `POST /api/v1/supervisor/false-escalation/{id}`. Feeds into `HeuristicOptimizer` for improved tuning.
-
-### Changed
-- **`internal/supervisor/optimizer.go`**: Replaced `StubOptimizer` with `HeuristicOptimizer` as default; `Aggregate` and `StreamMetrics` now strictly read-only query layer over `supervisor_tasks` and `supervisor_metrics`.
-- **Control Plane**: Extended `BriefRow` and `ControlPlane` interface with `ListBriefs` and `BriefFilter`.
-
-### Fixed
-- **Priority Queue**: Fixed max-heap ordering in `internal/autopilot/priority.go` (`Less` returns `p1.Score > p2.Score` for correct max-heap via `container/heap` min-heap).
-- **Dual-pass CI**: All 31 packages pass with `CGO_ENABLED=0` and `CGO_ENABLED=1 -race` (zero data races).
-
 ## [0.8.0] - 2026-09-06
 
 ### Added
