@@ -166,6 +166,7 @@ jobs:
       - name: Coverage threshold >= 80%
         env:
           CGO_ENABLED: '1'
+        shell: bash
         run: |
           # Sum the per-package coverage reported by 'go test -cover' and
           # check the aggregate against the 80% threshold. The previous
