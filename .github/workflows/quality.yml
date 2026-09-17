@@ -171,8 +171,10 @@ jobs:
           # Use coverprofile for reliable coverage extraction (works with Go 1.26+ condensed output)
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
+          echo "=== Running go test with coverprofile ==="
           go test -count=1 -coverprofile="$COV_FILE" ./... 2>&1
           TEST_EXIT=${PIPESTATUS[0]}
+          echo "=== go test exit code: $TEST_EXIT ==="
           if [ $TEST_EXIT -ne 0 ]; then
             echo "::error::go test failed with exit code $TEST_EXIT"
             exit 1
@@ -180,18 +182,17 @@ jobs:
           
           # Get per-package coverage, excluding cmd/g8s
           COV_DATA=$(mktemp)
+          echo "=== Running go tool cover ==="
           go tool cover -func="$COV_FILE" | grep -v 'github.com/tamld/g8s/cmd/g8s' > "$COV_DATA"
+          echo "=== Coverage data lines: $(wc -l < "$COV_DATA") ==="
+          cat "$COV_DATA"
           
           # Calculate average coverage across packages (excluding cmd/g8s)
-          # Each line: package/function/file:lineno	coverage%
-          # We need the package-level coverage (last line for each package)
           awk '
-            /^[^:]+:[0-9]+:[0-9]+/ { next }  # skip function lines
-            /^[^:]+:$/ { next }  # skip package headers
-            /total:/ { next }  # skip total
+            /^[^:]+:[0-9]+:[0-9]+/ { next }
+            /^[^:]+:$/ { next }
+            /total:/ { next }
             {
-              # Line format: package.go:lineno	func	coverage%
-              # The last line for each package has the package coverage
               split($0, a, "\t")
               if (length(a) == 3) {
                 pkg_cov = a[3]
@@ -207,6 +208,9 @@ jobs:
             }
           ' "$COV_DATA" > /tmp/cov_result.txt
           
+          echo "=== Coverage result ==="
+          cat /tmp/cov_result.txt
+          
           if [ ! -s /tmp/cov_result.txt ]; then
             echo "::error::coverage calculation failed"
             exit 1
@@ -215,7 +219,6 @@ jobs:
           read avg count < /tmp/cov_result.txt
           echo "Aggregate coverage: ${avg}% across ${count} packages (cmd/g8s excluded)"
           
-          # Check threshold
           awk -v a="$avg" 'BEGIN { if (a+0 < 80) { exit 1 } else { exit 0 } }' || {
             echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
             exit 1
