@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 // CreateBrief inserts a new briefs row.
 func (s *Store) CreateBrief(ctx context.Context, b BriefRow) error {
 	if strings.TrimSpace(b.ID) == "" {
@@ -63,12 +67,31 @@ func (s *Store) GetBrief(ctx context.Context, id string) (BriefRow, error) {
 
 // ListActiveBriefs returns all briefs with status = 'active' ordered chronologically by issued_at ASC.
 func (s *Store) ListActiveBriefs(ctx context.Context) ([]BriefRow, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, payload_md, dod_md, issued_by, issued_at, expires_at, status
-		 FROM briefs WHERE status = 'active' ORDER BY issued_at ASC`,
-	)
+	return s.ListBriefs(ctx, BriefFilter{Status: stringPtr("active")})
+}
+
+// ListBriefs returns briefs matching the filter, ordered chronologically by issued_at ASC.
+func (s *Store) ListBriefs(ctx context.Context, filter BriefFilter) ([]BriefRow, error) {
+	query := `SELECT id, title, payload_md, dod_md, issued_by, issued_at, expires_at, status FROM briefs`
+	args := []any{}
+
+	if filter.Status != nil {
+		query += " WHERE status = ?"
+		args = append(args, *filter.Status)
+	}
+
+	query += " ORDER BY issued_at ASC"
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	query += " LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: list active briefs: %w", err)
+		return nil, fmt.Errorf("controlplane: list briefs: %w", err)
 	}
 	defer rows.Close()
 
@@ -81,7 +104,7 @@ func (s *Store) ListActiveBriefs(ctx context.Context) ([]BriefRow, error) {
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("controlplane: iterate active briefs: %w", err)
+		return nil, fmt.Errorf("controlplane: iterate briefs: %w", err)
 	}
 	return out, nil
 }

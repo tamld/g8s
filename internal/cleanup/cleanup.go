@@ -265,7 +265,8 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 			continue
 		}
 
-		// ⚡ Bolt: Zero-allocation case-insensitive prefix check (replaces strings.HasPrefix(strings.ToLower(...)))
+		// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+		// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
 		isAgy := strings.EqualFold(binName, "agy") || (len(binName) >= 3 && strings.EqualFold(binName[:3], "agy"))
 		isClaude := strings.EqualFold(binName, "claude") || (len(binName) >= 6 && strings.EqualFold(binName[:6], "claude"))
 		if !isAgy && !isClaude {
