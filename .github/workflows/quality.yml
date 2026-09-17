@@ -175,6 +175,9 @@ jobs:
           # every push. We now exclude cmd/g8s from the average because
           # the CLI binary is a thin dispatcher; end-to-end coverage
           # there is exercised by the integration suites, not unit tests.
+          COV_FILE=$(mktemp)
+          trap 'rm -f "$COV_FILE"' EXIT
+          go test -cover ./... 2>&1 | grep -E 'coverage: [0-9.]+%' > "$COV_FILE"
           total=0
           count=0
           while IFS= read -r line; do
@@ -186,7 +189,7 @@ jobs:
               total=$(awk -v t="$total" -v p="$pct" 'BEGIN { printf "%.4f", t + p }')
               count=$((count + 1))
             fi
-          done < <(go test -cover ./... 2>&1 | grep -E 'coverage: [0-9.]+%')
+          done < "$COV_FILE"
           if [ "$count" -eq 0 ]; then
             echo "::error::coverage extraction failed"
             exit 1
