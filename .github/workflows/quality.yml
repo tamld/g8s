@@ -168,11 +168,11 @@ jobs:
           CGO_ENABLED: '1'
         shell: bash
         run: |
-          # Use coverprofile for reliable coverage extraction (works with Go 1.26+ condensed output)
+          # Use -v flag for per-package coverage (Go 1.26+ condensed output needs -v)
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
-          echo "=== Running go test with coverprofile ==="
-          go test -count=1 -coverprofile="$COV_FILE" ./... 2>&1
+          echo "=== Running go test with coverage (-v for per-package) ==="
+          go test -count=1 -v -cover ./... 2>&1 | tee "$COV_FILE"
           TEST_EXIT=${PIPESTATUS[0]}
           echo "=== go test exit code: $TEST_EXIT ==="
           if [ $TEST_EXIT -ne 0 ]; then
@@ -180,25 +180,18 @@ jobs:
             exit 1
           fi
           
-          # Get per-package coverage, excluding cmd/g8s
-          COV_DATA=$(mktemp)
-          echo "=== Running go tool cover ==="
-          go tool cover -func="$COV_FILE" | grep -v 'github.com/tamld/g8s/cmd/g8s' > "$COV_DATA"
-          echo "=== Coverage data lines: $(wc -l < "$COV_DATA") ==="
-          cat "$COV_DATA"
-          
-          # Calculate average coverage across packages (excluding cmd/g8s)
+          # Extract per-package coverage from 'ok' lines, excluding cmd/g8s
           awk '
-            /^[^:]+:[0-9]+:[0-9]+/ { next }
-            /^[^:]+:$/ { next }
-            /total:/ { next }
-            {
-              split($0, a, "\t")
-              if (length(a) == 3) {
-                pkg_cov = a[3]
-                gsub(/%/, "", pkg_cov)
-                total += pkg_cov
-                count++
+            /^ok\t/ && !/cmd\/g8s/ {
+              # Line format: ok\tgithub.com/tamld/g8s/pkg\t(time)\tcoverage: XX.X% of statements
+              for (i = 1; i <= NF; i++) {
+                if ($i ~ /^coverage:/) {
+                  pct = $(i+1)
+                  gsub(/%/, "", pct)
+                  total += pct
+                  count++
+                  break
+                }
               }
             }
             END {
@@ -206,13 +199,10 @@ jobs:
               avg = total / count
               printf "%.2f\n%d\n", avg, count
             }
-          ' "$COV_DATA" > /tmp/cov_result.txt
-          
-          echo "=== Coverage result ==="
-          cat /tmp/cov_result.txt
+          ' "$COV_FILE" > /tmp/cov_result.txt
           
           if [ ! -s /tmp/cov_result.txt ]; then
-            echo "::error::coverage calculation failed"
+            echo "::error::coverage extraction failed"
             exit 1
           fi
           
