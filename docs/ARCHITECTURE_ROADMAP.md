@@ -21,7 +21,7 @@ The following table defines the non-negotiable architectural boundaries, runtime
 
 | Subsystem / Layer | Technical Choice / Dependency | Version / Standard | Rationales & Architectural Constraints |
 | :--- | :--- | :--- | :--- |
-| **Core Language** | Go | `1.25.0` (toolchain `go1.25.0`+) | High concurrency, predictable memory footprints, sub-millisecond execution latency. |
+| **Core Language** | Go | `1.26.0` (toolchain `go1.26.0`+) | High concurrency, predictable memory footprints, sub-millisecond execution latency. |
 | **Compilation Standard** | Pure-Go (`CGO_ENABLED=0`) | Zero CGO | Eliminates dynamic C runtime links, cross-compilation toolchain pain, and shared library vulnerabilities. |
 | **Embedded Database** | `modernc.org/sqlite` | Pure-Go SQLite engine | File-based state management, SQLite WAL mode, `PRAGMA busy_timeout=5000`, `0600` POSIX file security. |
 | **CLI & Flag Parsing** | Standard Library `flag.FlagSet` | Pure Go standard | Lightweight, zero-allocation subcommand dispatch with deterministic flag validation. |

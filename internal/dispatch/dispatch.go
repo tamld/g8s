@@ -8,9 +8,12 @@ package dispatch
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -471,6 +474,12 @@ func Run(opts RunOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+
+	// Verify executable identity (detect fake scripts like python3 -> Node)
+	if err := verifyExecutableIdentity(binary); err != nil {
+		return Result{}, err
+	}
+
 	if err := validateGate(opts); err != nil {
 		return Result{}, err
 	}
@@ -496,7 +505,16 @@ func Run(opts RunOptions) (Result, error) {
 	}
 	started := clock()
 
-	execResult, err := runCommand(opts, command)
+	// Parse timeout for per-command enforcement
+	var cmdTimeout time.Duration
+	if timeout != "" {
+		parsed, err := time.ParseDuration(timeout)
+		if err == nil {
+			cmdTimeout = parsed
+		}
+	}
+
+	execResult, err := runCommand(opts, command, cmdTimeout)
 	if err != nil {
 		return Result{}, err
 	}
@@ -545,22 +563,37 @@ func Run(opts RunOptions) (Result, error) {
 }
 
 // runCommand dispatches through the injected runner or the real exec runner.
-func runCommand(opts RunOptions, command []string) (ExecResult, error) {
+func runCommand(opts RunOptions, command []string, cmdTimeout time.Duration) (ExecResult, error) {
 	if opts.Runner != nil {
 		return opts.Runner(command)
 	}
-	return execRunner(command)
+	return execRunnerWithTimeout(command, cmdTimeout)
 }
 
-// execRunner captures separate streams through bounded byte slices and maps
-// non-zero exits onto ReturnCode instead of an error.
-func execRunner(command []string) (ExecResult, error) {
-	cmd := exec.Command(command[0], command[1:]...)
+// execRunnerWithTimeout executes a command with an optional timeout.
+func execRunnerWithTimeout(command []string, timeout time.Duration) (ExecResult, error) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+	} else {
+		ctx = context.Background()
+	}
+
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	result := ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+
+	// Check for timeout first (context cancellation)
+	if ctx.Err() == context.DeadlineExceeded {
+		result.ReturnCode = -1
+		return result, ErrCommandTimeout
+	}
+
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
 		result.ReturnCode = exitErr.ExitCode()
@@ -571,4 +604,52 @@ func execRunner(command []string) (ExecResult, error) {
 	}
 	result.ReturnCode = 0
 	return result, nil
+}
+
+// ErrCommandTimeout indicates a command execution timed out.
+var ErrCommandTimeout = errors.New("command execution timeout")
+
+// verifyExecutableIdentity checks if the executable is what it claims to be.
+// It detects fake scripts (e.g., python3 that's actually a Node script).
+func verifyExecutableIdentity(path string) error {
+	cmd := exec.Command(path, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		cmd = exec.Command(path, "-version")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return nil
+		}
+	}
+
+	outputStr := strings.ToLower(string(output))
+	base := strings.ToLower(filepath.Base(path))
+
+	switch base {
+	case "python3", "python", "python2":
+		if strings.Contains(outputStr, "node") || strings.Contains(outputStr, "javascript") {
+			return fmt.Errorf("executable identity mismatch: %s appears to be Node.js, not Python", path)
+		}
+		if !strings.Contains(outputStr, "python") {
+			return nil
+		}
+	case "node", "npm", "npx":
+		if strings.Contains(outputStr, "python") {
+			return fmt.Errorf("executable identity mismatch: %s appears to be Python, not Node.js", path)
+		}
+	case "go", "golang":
+		if !strings.Contains(outputStr, "go") && !strings.Contains(outputStr, "golang") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Go", path)
+		}
+	case "ruby":
+		if !strings.Contains(outputStr, "ruby") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Ruby", path)
+		}
+	case "java":
+		if !strings.Contains(outputStr, "java") && !strings.Contains(outputStr, "openjdk") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Java", path)
+		}
+	}
+
+	return nil
 }

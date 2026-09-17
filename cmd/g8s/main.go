@@ -129,6 +129,8 @@ func main() {
 		runOrchestrateAIC(os.Args[2:])
 	case "supervisor-metrics":
 		runSupervisorMetrics(os.Args[2:])
+	case "supervisor-metrics-update-false":
+		runUpdateFalseEscalation(os.Args[2:])
 	case "brief-issue":
 		runBriefIssue(os.Args[2:])
 	case "brief-consume":
@@ -151,6 +153,10 @@ func main() {
 		runWake(os.Args[2:])
 	case "providers":
 		runProviders(os.Args[2:])
+	case "autopilot":
+		runAutopilot(os.Args[2:])
+	case "serve":
+		runServe(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -1356,6 +1362,7 @@ func printUsage() {
 	fmt.Println("  orchestrate  Run the supervisor self-test loop against the real agy worker")
 	fmt.Println("  orchestrate-aic  Run AIC automated PR review orchestrator (g8s orchestrate-aic --pr <num> --intent <text>)")
 	fmt.Println("  supervisor-metrics  Print supervisor telemetry (--task-id | --aggregate)")
+	fmt.Println("  supervisor-metrics-update-false  Mark escalation as false (g8s supervisor-metrics-update-false --task-id <id> --false)")
 	fmt.Println("  brief-issue  Issue a structured task brief with DoD and TTL (g8s brief-issue ...)")
 	fmt.Println("  brief-consume Consume an active brief by ID (g8s brief-consume --id <id>)")
 	fmt.Println("  converge     Synthesize N independent solution.md proposals into a converged design")
@@ -1370,6 +1377,8 @@ func printUsage() {
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  providers    List detected agent providers and availability status")
+	fmt.Println("  autopilot    Manage cron-based supervisor trigger (g8s autopilot start|status|trigger)")
+	fmt.Println("  serve        Run daemon mode with HTTP API server (g8s serve [--address :8080])")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")

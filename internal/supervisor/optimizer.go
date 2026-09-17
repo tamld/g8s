@@ -8,14 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
 )
 
-// Optimizer proposes a new SupervisorConfig from a run history. T022 will
-// replace the stub with a bayesian- or bandit-style search.
+// Optimizer proposes a new SupervisorConfig from a run history.
 type Optimizer interface {
 	Propose(currentConfig SupervisorConfig, metrics []Metrics) SupervisorConfig
 }
@@ -33,6 +33,144 @@ func NewStubOptimizer() *StubOptimizer { return &StubOptimizer{} }
 func (s *StubOptimizer) Propose(currentConfig SupervisorConfig, metrics []Metrics) SupervisorConfig {
 	_ = metrics
 	return currentConfig
+}
+
+// HeuristicOptimizer uses simple heuristics to tune SupervisorConfig based on
+// aggregate metrics. It implements a rule-based approach suitable for v0.3.0.
+type HeuristicOptimizer struct {
+	// MinAttemptsPerApproach is the minimum allowed attempts per approach.
+	MinAttemptsPerApproach int
+	// MaxAttemptsPerApproach is the maximum allowed attempts per approach.
+	MaxAttemptsPerApproach int
+	// MinApproaches is the minimum allowed approaches.
+	MinApproaches int
+	// MaxApproaches is the maximum allowed approaches.
+	MaxApproaches int
+	// TargetFirstAttemptSuccessRate is the target for first attempt success.
+	TargetFirstAttemptSuccessRate float64
+	// TargetEscalationRate is the maximum acceptable escalation rate.
+	TargetEscalationRate float64
+}
+
+// NewHeuristicOptimizer creates a new heuristic optimizer with sensible defaults.
+func NewHeuristicOptimizer() *HeuristicOptimizer {
+	return &HeuristicOptimizer{
+		MinAttemptsPerApproach:        1,
+		MaxAttemptsPerApproach:        10,
+		MinApproaches:                 1,
+		MaxApproaches:                 10,
+		TargetFirstAttemptSuccessRate: 0.5, // Target 50% first-attempt success
+		TargetEscalationRate:          0.1, // Target <10% escalation rate
+	}
+}
+
+// Propose analyzes metrics and returns a tuned SupervisorConfig.
+func (o *HeuristicOptimizer) Propose(currentConfig SupervisorConfig, metrics []Metrics) SupervisorConfig {
+	if len(metrics) == 0 {
+		return currentConfig // No data, keep current config
+	}
+
+	// Compute aggregate metrics from the slice
+	agg := computeAggregateFromSlice(metrics)
+
+	newConfig := currentConfig
+
+	// Tune MaxAttemptsPerApproach based on avg attempts to success
+	// If avg attempts is high, increase budget; if low, decrease
+	if agg.AvgAttemptsToSuccess > 0 {
+		targetAttempts := int(math.Ceil(agg.AvgAttemptsToSuccess * 1.5))
+		targetAttempts = clamp(targetAttempts, o.MinAttemptsPerApproach, o.MaxAttemptsPerApproach)
+		newConfig.MaxAttemptsPerApproach = targetAttempts
+	}
+
+	// Tune MaxApproaches based on avg approaches to success
+	if agg.AvgApproachesToSuccess > 0 {
+		targetApproaches := int(math.Ceil(agg.AvgApproachesToSuccess * 1.5))
+		targetApproaches = clamp(targetApproaches, o.MinApproaches, o.MaxApproaches)
+		newConfig.MaxApproaches = targetApproaches
+	}
+
+	// Tune based on first attempt success rate
+	// If first attempt success is low, we might need more attempts per approach
+	if agg.FirstAttemptSuccessRate < o.TargetFirstAttemptSuccessRate && agg.TotalRuns > 10 {
+		// Increase attempts per approach to give more chances
+		newConfig.MaxAttemptsPerApproach = min(newConfig.MaxAttemptsPerApproach+1, o.MaxAttemptsPerApproach)
+	}
+
+	// Tune based on escalation rate
+	// If escalation rate is high, increase approaches budget
+	if agg.EscalationRate > o.TargetEscalationRate && agg.TotalRuns > 5 {
+		newConfig.MaxApproaches = min(newConfig.MaxApproaches+1, o.MaxApproaches)
+	}
+
+	// Tune silence threshold based on avg cycle duration
+	// If cycles are taking long, increase silence threshold
+	if agg.AvgCycleSeconds > 0 {
+		targetSilence := time.Duration(agg.AvgCycleSeconds*2) * time.Second
+		targetSilence = clampDuration(targetSilence, 60*time.Second, 3600*time.Second)
+		if targetSilence > currentConfig.SilenceThreshold {
+			newConfig.SilenceThreshold = targetSilence
+		}
+	}
+
+	return newConfig
+}
+
+// computeAggregateFromSlice computes aggregate metrics from a slice of Metrics.
+func computeAggregateFromSlice(metrics []Metrics) AggregateMetrics {
+	if len(metrics) == 0 {
+		return AggregateMetrics{}
+	}
+
+	var firstAttemptSuccessCount int
+	var escalationCount int
+	var sumAttempts float64
+	var sumApproaches float64
+	var sumCycleSeconds float64
+
+	for _, m := range metrics {
+		if m.FirstAttemptSuccess {
+			firstAttemptSuccessCount++
+		}
+		sumAttempts += float64(m.AttemptsToSuccess)
+		sumApproaches += float64(m.ApproachesToSuccess)
+		if m.EscalationCount > 0 {
+			escalationCount++
+		}
+		sumCycleSeconds += m.CycleDurationSeconds
+	}
+
+	totalRuns := len(metrics)
+	denom := float64(totalRuns)
+
+	return AggregateMetrics{
+		TotalRuns:               totalRuns,
+		FirstAttemptSuccessRate: float64(firstAttemptSuccessCount) / denom,
+		AvgAttemptsToSuccess:    sumAttempts / denom,
+		AvgApproachesToSuccess:  sumApproaches / denom,
+		EscalationRate:          float64(escalationCount) / denom,
+		AvgCycleSeconds:         sumCycleSeconds / denom,
+	}
+}
+
+func clamp(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func clampDuration(value, min, max time.Duration) time.Duration {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 // AggregateMetrics holds statistical aggregations across supervisor runs.

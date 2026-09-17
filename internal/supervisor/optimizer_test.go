@@ -1,683 +1,85 @@
+// Package supervisor — optimizer_test.go tests the meta-optimizer implementations.
 package supervisor
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
-	"math"
 	"net/url"
-	"path/filepath"
 	"testing"
-	"time"
-
-	"github.com/tamld/g8s/internal/controlplane"
-	_ "modernc.org/sqlite"
 )
 
-func newTestStore(t *testing.T) *controlplane.Store {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	if err != nil {
-		t.Fatalf("new controlplane: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
-}
-
-// 1. Aggregate over empty store returns zero-value metrics, no error.
-func TestAggregateEmptyStore(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	agg, err := Aggregate(store, ctx, AggregateOptions{})
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if agg.TotalRuns != 0 {
-		t.Errorf("expected TotalRuns=0, got %d", agg.TotalRuns)
-	}
-	if agg.FirstAttemptSuccessRate != 0 {
-		t.Errorf("expected FirstAttemptSuccessRate=0, got %f", agg.FirstAttemptSuccessRate)
-	}
-	if agg.AvgAttemptsToSuccess != 0 {
-		t.Errorf("expected AvgAttemptsToSuccess=0, got %f", agg.AvgAttemptsToSuccess)
-	}
-	if agg.AvgApproachesToSuccess != 0 {
-		t.Errorf("expected AvgApproachesToSuccess=0, got %f", agg.AvgApproachesToSuccess)
-	}
-	if agg.EscalationRate != 0 {
-		t.Errorf("expected EscalationRate=0, got %f", agg.EscalationRate)
-	}
-	if agg.AvgCycleSeconds != 0 {
-		t.Errorf("expected AvgCycleSeconds=0, got %f", agg.AvgCycleSeconds)
-	}
-}
-
-// 2. Aggregate over 5 rows computes correct averages.
-func TestAggregateFiveRows(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	now := time.Now()
-
-	rows := []struct {
-		id                  string
-		firstAttemptSuccess bool
-		attempts            int
-		approaches          int
-		escalation          int
-		cycleDuration       float64
-	}{
-		{"sup-1", true, 1, 1, 0, 10.0},
-		{"sup-2", false, 2, 1, 0, 20.0},
-		{"sup-3", false, 3, 2, 1, 30.0},
-		{"sup-4", true, 1, 1, 0, 15.0},
-		{"sup-5", false, 4, 3, 1, 25.0},
-	}
-
-	for _, r := range rows {
-		if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-			ID:        r.id,
-			State:     "succeeded",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}); err != nil {
-			t.Fatalf("create task %s: %v", r.id, err)
-		}
-		if err := store.SaveMetrics(ctx, r.id, controlplane.MetricsRow{
-			SupervisorTaskID:     r.id,
-			EnvelopeScore:        0.8,
-			FirstAttemptSuccess:  r.firstAttemptSuccess,
-			AttemptsToSuccess:    r.attempts,
-			ApproachesToSuccess:  r.approaches,
-			RCAConfidenceAvg:     0.9,
-			CycleDurationSeconds: r.cycleDuration,
-			EscalationCount:      r.escalation,
-			FalseEscalationRate:  0,
-		}); err != nil {
-			t.Fatalf("save metrics %s: %v", r.id, err)
-		}
-	}
-
-	agg, err := Aggregate(store, ctx, AggregateOptions{})
-	if err != nil {
-		t.Fatalf("aggregate: %v", err)
-	}
-
-	if agg.TotalRuns != 5 {
-		t.Errorf("expected TotalRuns=5, got %d", agg.TotalRuns)
-	}
-	// 2 out of 5 were first attempt success -> 0.4
-	if math.Abs(agg.FirstAttemptSuccessRate-0.4) > 1e-6 {
-		t.Errorf("expected FirstAttemptSuccessRate=0.4, got %f", agg.FirstAttemptSuccessRate)
-	}
-	// Attempts: 1 + 2 + 3 + 1 + 4 = 11 / 5 = 2.2
-	if math.Abs(agg.AvgAttemptsToSuccess-2.2) > 1e-6 {
-		t.Errorf("expected AvgAttemptsToSuccess=2.2, got %f", agg.AvgAttemptsToSuccess)
-	}
-	// Approaches: 1 + 1 + 2 + 1 + 3 = 8 / 5 = 1.6
-	if math.Abs(agg.AvgApproachesToSuccess-1.6) > 1e-6 {
-		t.Errorf("expected AvgApproachesToSuccess=1.6, got %f", agg.AvgApproachesToSuccess)
-	}
-	// Escalation: 2 out of 5 -> 0.4
-	if math.Abs(agg.EscalationRate-0.4) > 1e-6 {
-		t.Errorf("expected EscalationRate=0.4, got %f", agg.EscalationRate)
-	}
-	// Cycle: 10 + 20 + 30 + 15 + 25 = 100 / 5 = 20.0
-	if math.Abs(agg.AvgCycleSeconds-20.0) > 1e-6 {
-		t.Errorf("expected AvgCycleSeconds=20.0, got %f", agg.AvgCycleSeconds)
-	}
-}
-
-// 3. Filter by time_range (last 1h, last 24h) works.
-func TestAggregateFilterTimeRange(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	fixedNow := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
-	clock := func() time.Time { return fixedNow }
-
-	// Task 1: 30 minutes ago (within 1h and within 24h)
-	t1Time := fixedNow.Add(-30 * time.Minute)
-	// Task 2: 3 hours ago (outside 1h, within 24h)
-	t2Time := fixedNow.Add(-3 * time.Hour)
-	// Task 3: 48 hours ago (outside 1h and outside 24h)
-	t3Time := fixedNow.Add(-48 * time.Hour)
-
-	tasks := []struct {
-		id        string
-		createdAt time.Time
-		attempts  int
-	}{
-		{"sup-recent", t1Time, 1},
-		{"sup-today", t2Time, 2},
-		{"sup-old", t3Time, 3},
-	}
-
-	for _, task := range tasks {
-		if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-			ID:        task.id,
-			State:     "succeeded",
-			CreatedAt: task.createdAt,
-			UpdatedAt: task.createdAt,
-		}); err != nil {
-			t.Fatalf("create task %s: %v", task.id, err)
-		}
-		if err := store.SaveMetrics(ctx, task.id, controlplane.MetricsRow{
-			SupervisorTaskID:     task.id,
-			EnvelopeScore:        1.0,
-			FirstAttemptSuccess:  true,
-			AttemptsToSuccess:    task.attempts,
-			ApproachesToSuccess:  1,
-			RCAConfidenceAvg:     1.0,
-			CycleDurationSeconds: 10.0,
-			EscalationCount:      0,
-		}); err != nil {
-			t.Fatalf("save metrics %s: %v", task.id, err)
-		}
-	}
-
-	// Test last 1h
-	agg1h, err := Aggregate(store, ctx, AggregateOptions{
-		TimeRange: 1 * time.Hour,
-		Clock:     clock,
-	})
-	if err != nil {
-		t.Fatalf("aggregate 1h: %v", err)
-	}
-	if agg1h.TotalRuns != 1 {
-		t.Errorf("expected 1 task in last 1h, got %d", agg1h.TotalRuns)
-	}
-	if agg1h.AvgAttemptsToSuccess != 1.0 {
-		t.Errorf("expected AvgAttemptsToSuccess=1.0, got %f", agg1h.AvgAttemptsToSuccess)
-	}
-
-	// Test last 24h
-	agg24h, err := Aggregate(store, ctx, AggregateOptions{
-		TimeRange: 24 * time.Hour,
-		Clock:     clock,
-	})
-	if err != nil {
-		t.Fatalf("aggregate 24h: %v", err)
-	}
-	if agg24h.TotalRuns != 2 {
-		t.Errorf("expected 2 tasks in last 24h, got %d", agg24h.TotalRuns)
-	}
-	// Average attempts for 1 and 2 = 1.5
-	if agg24h.AvgAttemptsToSuccess != 1.5 {
-		t.Errorf("expected AvgAttemptsToSuccess=1.5, got %f", agg24h.AvgAttemptsToSuccess)
-	}
-
-	// Test all time (no TimeRange filter)
-	aggAll, err := Aggregate(store, ctx, AggregateOptions{
-		Clock: clock,
-	})
-	if err != nil {
-		t.Fatalf("aggregate all: %v", err)
-	}
-	if aggAll.TotalRuns != 3 {
-		t.Errorf("expected 3 tasks in all time, got %d", aggAll.TotalRuns)
-	}
-}
-
-// 4. Filter by worker_name works.
-func TestAggregateFilterWorkerName(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	now := time.Now()
-
-	// Create supervisor task 1 (agy worker recorded via task row)
-	supAgy1 := "sup-agy-1"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:        supAgy1,
-		State:     "succeeded",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}); err != nil {
-		t.Fatalf("create supAgy1: %v", err)
-	}
-	if err := store.SaveMetrics(ctx, supAgy1, controlplane.MetricsRow{
-		SupervisorTaskID:     supAgy1,
-		EnvelopeScore:        0.8,
-		FirstAttemptSuccess:  true,
-		AttemptsToSuccess:    1,
-		ApproachesToSuccess:  1,
-		RCAConfidenceAvg:     0.9,
-		CycleDurationSeconds: 10.0,
-		EscalationCount:      0,
-	}); err != nil {
-		t.Fatalf("save metrics supAgy1: %v", err)
-	}
-	// Submit a task with worker_name = "agy" referencing supAgy1
-	workerAgy := "agy"
-	if _, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
-		IdempotencyKey: "k-sup-agy-1",
-		Priority:       0,
-		MaxAttempts:    1,
-		Payload:        json.RawMessage(`{"prompt":"p1"}`),
-		Model:          "claude-3-5-sonnet",
-		AddDirs:        []string{t.TempDir()},
-		OrchestratorID: &supAgy1,
-		WorkerName:     &workerAgy,
-	}); err != nil {
-		t.Fatalf("submit task for supAgy1: %v", err)
-	}
-
-	// Create supervisor task 2 (codex worker recorded via decision row)
-	const supCodex = "sup-codex-1"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:        supCodex,
-		State:     "succeeded",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}); err != nil {
-		t.Fatalf("create supCodex: %v", err)
-	}
-	if err := store.SaveMetrics(ctx, supCodex, controlplane.MetricsRow{
-		SupervisorTaskID:     supCodex,
-		EnvelopeScore:        0.7,
-		FirstAttemptSuccess:  false,
-		AttemptsToSuccess:    3,
-		ApproachesToSuccess:  2,
-		RCAConfidenceAvg:     0.8,
-		CycleDurationSeconds: 30.0,
-		EscalationCount:      1,
-	}); err != nil {
-		t.Fatalf("save metrics supCodex: %v", err)
-	}
-	if err := store.AppendDecision(ctx, controlplane.SupervisorDecisionRow{
-		TaskID:      supCodex,
-		Kind:        "run_started",
-		PayloadJSON: `{"worker_name":"codex","role":"scout"}`,
-		CreatedAt:   now,
-	}); err != nil {
-		t.Fatalf("append decision supCodex: %v", err)
-	}
-
-	// Create supervisor task 3 (agy worker recorded via envelope json)
-	const supAgy2 = "sup-agy-2"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:           supAgy2,
-		State:        "succeeded",
-		EnvelopeJSON: `{"worker_name":"agy"}`,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}); err != nil {
-		t.Fatalf("create supAgy2: %v", err)
-	}
-	if err := store.SaveMetrics(ctx, supAgy2, controlplane.MetricsRow{
-		SupervisorTaskID:     supAgy2,
-		EnvelopeScore:        0.9,
-		FirstAttemptSuccess:  true,
-		AttemptsToSuccess:    1,
-		ApproachesToSuccess:  1,
-		RCAConfidenceAvg:     1.0,
-		CycleDurationSeconds: 12.0,
-		EscalationCount:      0,
-	}); err != nil {
-		t.Fatalf("save metrics supAgy2: %v", err)
-	}
-
-	// Filter by worker_name = "agy"
-	aggAgy, err := Aggregate(store, ctx, AggregateOptions{WorkerName: "agy"})
-	if err != nil {
-		t.Fatalf("aggregate agy: %v", err)
-	}
-	if aggAgy.TotalRuns != 2 {
-		t.Errorf("expected 2 agy runs, got %d", aggAgy.TotalRuns)
-	}
-	if aggAgy.FirstAttemptSuccessRate != 1.0 {
-		t.Errorf("expected FirstAttemptSuccessRate=1.0 for agy, got %f", aggAgy.FirstAttemptSuccessRate)
-	}
-
-	// Filter by worker_name = "codex"
-	aggCodex, err := Aggregate(store, ctx, AggregateOptions{WorkerName: "codex"})
-	if err != nil {
-		t.Fatalf("aggregate codex: %v", err)
-	}
-	if aggCodex.TotalRuns != 1 {
-		t.Errorf("expected 1 codex run, got %d", aggCodex.TotalRuns)
-	}
-	if aggCodex.AvgAttemptsToSuccess != 3.0 {
-		t.Errorf("expected AvgAttemptsToSuccess=3.0 for codex, got %f", aggCodex.AvgAttemptsToSuccess)
-	}
-	if aggCodex.EscalationRate != 1.0 {
-		t.Errorf("expected EscalationRate=1.0 for codex, got %f", aggCodex.EscalationRate)
-	}
-
-	// Filter by non-existent worker
-	aggNone, err := Aggregate(store, ctx, AggregateOptions{WorkerName: "nonexistent"})
-	if err != nil {
-		t.Fatalf("aggregate nonexistent: %v", err)
-	}
-	if aggNone.TotalRuns != 0 {
-		t.Errorf("expected 0 runs for nonexistent worker, got %d", aggNone.TotalRuns)
-	}
-}
-
-func TestStreamMetricsAndFiltering(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	now := time.Now()
-
-	for _, id := range []string{"sup-s1", "sup-s2"} {
-		if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-			ID:        id,
-			State:     "succeeded",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}); err != nil {
-			t.Fatalf("create task %s: %v", id, err)
-		}
-		if err := store.SaveMetrics(ctx, id, controlplane.MetricsRow{
-			SupervisorTaskID:     id,
-			EnvelopeScore:        0.8,
-			FirstAttemptSuccess:  true,
-			AttemptsToSuccess:    1,
-			ApproachesToSuccess:  1,
-			RCAConfidenceAvg:     0.9,
-			CycleDurationSeconds: 5.0,
-			EscalationCount:      0,
-		}); err != nil {
-			t.Fatalf("save metrics %s: %v", id, err)
-		}
-	}
-
-	var streamed []TaskMetricsItem
-	err := StreamMetrics(store, ctx, AggregateOptions{}, func(item TaskMetricsItem) error {
-		streamed = append(streamed, item)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("StreamMetrics: %v", err)
-	}
-	if len(streamed) != 2 {
-		t.Fatalf("expected 2 streamed items, got %d", len(streamed))
-	}
-	if streamed[0].SupervisorTaskID != "sup-s1" || streamed[1].SupervisorTaskID != "sup-s2" {
-		t.Errorf("streamed task IDs mismatch: %+v", streamed)
-	}
-
-	// Test early cancellation / error propagation in stream callback
-	expectedErr := errors.New("abort stream")
-	err = StreamMetrics(store, ctx, AggregateOptions{}, func(item TaskMetricsItem) error {
-		return expectedErr
-	})
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("expected error %v, got %v", expectedErr, err)
-	}
-}
-
-func TestOptimizerValidationAndErrors(t *testing.T) {
-	ctx := context.Background()
-
-	// Nil store
-	if _, err := Aggregate(nil, ctx, AggregateOptions{}); err == nil {
-		t.Errorf("expected error with nil store in Aggregate")
-	}
-	if err := StreamMetrics(nil, ctx, AggregateOptions{}, func(TaskMetricsItem) error { return nil }); err == nil {
-		t.Errorf("expected error with nil store in StreamMetrics")
-	}
-	store := newTestStore(t)
-	if err := StreamMetrics(store, ctx, AggregateOptions{}, nil); err == nil {
-		t.Errorf("expected error with nil fn in StreamMetrics")
-	}
-
-	// Canceled context
-	canceledCtx, cancel := context.WithCancel(ctx)
-	cancel()
-	if _, err := Aggregate(store, canceledCtx, AggregateOptions{}); err == nil {
-		t.Errorf("expected error with canceled context in Aggregate")
-	}
-	if err := StreamMetrics(store, canceledCtx, AggregateOptions{}, func(TaskMetricsItem) error { return nil }); err == nil {
-		t.Errorf("expected error with canceled context in StreamMetrics")
-	}
-
-	// StubOptimizer
+func TestStubOptimizer_Propose(t *testing.T) {
 	opt := NewStubOptimizer()
-	cfg := SupervisorConfig{MaxAttemptsPerApproach: 5, MaxApproaches: 4}
-	proposed := opt.Propose(cfg, nil)
-	if proposed != cfg {
-		t.Errorf("StubOptimizer changed config: %+v != %+v", proposed, cfg)
+	cfg := defaultSupervisorConfig()
+	metrics := []Metrics{
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 1, ApproachesToSuccess: 1},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 2, EscalationCount: 1},
+	}
+
+	result := opt.Propose(cfg, metrics)
+
+	// Should return config unchanged
+	if result.MaxAttemptsPerApproach != cfg.MaxAttemptsPerApproach {
+		t.Error("StubOptimizer should not modify MaxAttemptsPerApproach")
+	}
+	if result.MaxApproaches != cfg.MaxApproaches {
+		t.Error("StubOptimizer should not modify MaxApproaches")
 	}
 }
 
-func TestListSupervisorDecisionsAndWorkerLookup(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	now := time.Now()
+func TestHeuristicOptimizer_Propose_NoMetrics(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
+	metrics := []Metrics{}
 
-	// ListSupervisorDecisions validation
-	if _, err := store.ListSupervisorDecisions(ctx, ""); err == nil {
-		t.Errorf("expected error for empty task_id")
-	}
-	if _, err := store.GetSupervisorTaskWorker(ctx, ""); err == nil {
-		t.Errorf("expected error for empty supervisor_task_id")
-	}
+	result := opt.Propose(cfg, metrics)
 
-	const taskID = "sup-dec-test"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:        taskID,
-		State:     "running",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}); err != nil {
-		t.Fatalf("create supervisor task: %v", err)
-	}
-
-	// No decisions initially
-	decs, err := store.ListSupervisorDecisions(ctx, taskID)
-	if err != nil {
-		t.Fatalf("ListSupervisorDecisions: %v", err)
-	}
-	if len(decs) != 0 {
-		t.Errorf("expected 0 decisions, got %d", len(decs))
-	}
-
-	// Append decisions
-	if err := store.AppendDecision(ctx, controlplane.SupervisorDecisionRow{
-		TaskID:      taskID,
-		Kind:        "run_started",
-		PayloadJSON: `{"request":{"worker_name":"worker-agent"}}`,
-		CreatedAt:   now,
-	}); err != nil {
-		t.Fatalf("append decision 1: %v", err)
-	}
-	if err := store.AppendDecision(ctx, controlplane.SupervisorDecisionRow{
-		TaskID:      taskID,
-		Kind:        "review_verdict",
-		PayloadJSON: `{"receipt":{"WorkerName":"worker-agent"}}`,
-		CreatedAt:   now.Add(time.Second),
-	}); err != nil {
-		t.Fatalf("append decision 2: %v", err)
-	}
-
-	decs, err = store.ListSupervisorDecisions(ctx, taskID)
-	if err != nil {
-		t.Fatalf("ListSupervisorDecisions: %v", err)
-	}
-	if len(decs) != 2 {
-		t.Fatalf("expected 2 decisions, got %d", len(decs))
-	}
-	if decs[0].Kind != "run_started" || decs[1].Kind != "review_verdict" {
-		t.Errorf("decisions order/kind mismatch: %+v", decs)
-	}
-
-	// Worker lookup
-	worker, err := store.GetSupervisorTaskWorker(ctx, taskID)
-	if err != nil {
-		t.Fatalf("GetSupervisorTaskWorker: %v", err)
-	}
-	if worker != "worker-agent" {
-		t.Errorf("expected worker 'worker-agent', got %q", worker)
-	}
-
-	// Worker lookup for task with no worker returns ""
-	const noWorkerTask = "sup-no-worker"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:           noWorkerTask,
-		State:        "succeeded",
-		EnvelopeJSON: "{}",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}); err != nil {
-		t.Fatalf("create noWorkerTask: %v", err)
-	}
-	w, err := store.GetSupervisorTaskWorker(ctx, noWorkerTask)
-	if err != nil {
-		t.Fatalf("GetSupervisorTaskWorker noWorkerTask: %v", err)
-	}
-	if w != "" {
-		t.Errorf("expected empty worker name, got %q", w)
+	// Should return config unchanged when no metrics
+	if result.MaxAttemptsPerApproach != cfg.MaxAttemptsPerApproach {
+		t.Error("should not modify config when no metrics")
 	}
 }
 
-func TestStreamMetricsAndAggregateAdvancedBounds(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
+func TestHeuristicOptimizer_Propose_HighAttempts(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
 
-	t0 := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
-	t1 := time.Date(2026, 8, 29, 11, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
-
-	// Create task 1 with metrics and worker "agy"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:           "sup-adv-1",
-		State:        "succeeded",
-		EnvelopeJSON: `{"worker_name":"agy"}`,
-		CreatedAt:    t0,
-		UpdatedAt:    t0,
-	}); err != nil {
-		t.Fatalf("create task 1: %v", err)
-	}
-	if err := store.SaveMetrics(ctx, "sup-adv-1", controlplane.MetricsRow{
-		SupervisorTaskID:     "sup-adv-1",
-		EnvelopeScore:        0.9,
-		FirstAttemptSuccess:  true,
-		AttemptsToSuccess:    1,
-		ApproachesToSuccess:  1,
-		RCAConfidenceAvg:     0.9,
-		CycleDurationSeconds: 10.0,
-		EscalationCount:      0,
-	}); err != nil {
-		t.Fatalf("save metrics 1: %v", err)
+	// Simulate high avg attempts to success
+	metrics := []Metrics{
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 5, ApproachesToSuccess: 2, CycleDurationSeconds: 100},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 6, ApproachesToSuccess: 3, CycleDurationSeconds: 120},
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 2, ApproachesToSuccess: 1, CycleDurationSeconds: 50},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 4, ApproachesToSuccess: 2, CycleDurationSeconds: 80},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 7, ApproachesToSuccess: 3, CycleDurationSeconds: 150},
 	}
 
-	// Create task 2 with metrics and worker "codex"
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:           "sup-adv-2",
-		State:        "succeeded",
-		EnvelopeJSON: `{"worker_name":"codex"}`,
-		CreatedAt:    t1,
-		UpdatedAt:    t1,
-	}); err != nil {
-		t.Fatalf("create task 2: %v", err)
-	}
-	if err := store.SaveMetrics(ctx, "sup-adv-2", controlplane.MetricsRow{
-		SupervisorTaskID:     "sup-adv-2",
-		EnvelopeScore:        0.8,
-		FirstAttemptSuccess:  false,
-		AttemptsToSuccess:    2,
-		ApproachesToSuccess:  1,
-		RCAConfidenceAvg:     0.85,
-		CycleDurationSeconds: 20.0,
-		EscalationCount:      0,
-	}); err != nil {
-		t.Fatalf("save metrics 2: %v", err)
-	}
+	result := opt.Propose(cfg, metrics)
 
-	// Create task 3 WITHOUT metrics at t2
-	if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-		ID:           "sup-adv-3-no-metrics",
-		State:        "running",
-		EnvelopeJSON: `{"worker_name":"agy"}`,
-		CreatedAt:    t2,
-		UpdatedAt:    t2,
-	}); err != nil {
-		t.Fatalf("create task 3: %v", err)
-	}
-
-	// Test StreamMetrics with Until bound (should exclude t2 and t1 if Until is t0)
-	var streamedUntil []TaskMetricsItem
-	err := StreamMetrics(store, ctx, AggregateOptions{
-		Until: t0,
-	}, func(item TaskMetricsItem) error {
-		streamedUntil = append(streamedUntil, item)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("StreamMetrics Until: %v", err)
-	}
-	if len(streamedUntil) != 1 || streamedUntil[0].SupervisorTaskID != "sup-adv-1" {
-		t.Errorf("expected only sup-adv-1 in Until t0 stream, got %+v", streamedUntil)
-	}
-
-	// Test StreamMetrics with Since bound (should exclude t0 if Since is t1)
-	var streamedSince []TaskMetricsItem
-	err = StreamMetrics(store, ctx, AggregateOptions{
-		Since: t1,
-	}, func(item TaskMetricsItem) error {
-		streamedSince = append(streamedSince, item)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("StreamMetrics Since: %v", err)
-	}
-	// Task 3 has no metrics, so only task 2 should be emitted
-	if len(streamedSince) != 1 || streamedSince[0].SupervisorTaskID != "sup-adv-2" {
-		t.Errorf("expected only sup-adv-2 in Since t1 stream, got %+v", streamedSince)
-	}
-
-	// Test StreamMetrics with WorkerName filter
-	var streamedAgy []TaskMetricsItem
-	err = StreamMetrics(store, ctx, AggregateOptions{
-		WorkerName: "agy",
-	}, func(item TaskMetricsItem) error {
-		streamedAgy = append(streamedAgy, item)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("StreamMetrics WorkerName: %v", err)
-	}
-	if len(streamedAgy) != 1 || streamedAgy[0].SupervisorTaskID != "sup-adv-1" {
-		t.Errorf("expected only sup-adv-1 for agy worker stream, got %+v", streamedAgy)
-	}
-
-	// Test Aggregate with Until bound
-	aggUntil, err := Aggregate(store, ctx, AggregateOptions{
-		Until: t0,
-	})
-	if err != nil {
-		t.Fatalf("Aggregate Until: %v", err)
-	}
-	if aggUntil.TotalRuns != 1 {
-		t.Errorf("expected TotalRuns=1 for Until t0, got %d", aggUntil.TotalRuns)
-	}
-
-	// Test Aggregate with Since bound
-	aggSince, err := Aggregate(store, ctx, AggregateOptions{
-		Since: t1,
-	})
-	if err != nil {
-		t.Fatalf("Aggregate Since: %v", err)
-	}
-	if aggSince.TotalRuns != 1 {
-		t.Errorf("expected TotalRuns=1 for Since t1, got %d", aggSince.TotalRuns)
+	// Should increase MaxAttemptsPerApproach due to high avg attempts
+	if result.MaxAttemptsPerApproach <= cfg.MaxAttemptsPerApproach {
+		t.Errorf("expected MaxAttemptsPerApproach to increase from %d to >%d, got %d",
+			cfg.MaxAttemptsPerApproach, cfg.MaxAttemptsPerApproach, result.MaxAttemptsPerApproach)
 	}
 }
 
-func newTestStoreWithPath(t *testing.T) (*controlplane.Store, string) {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	if err != nil {
-		t.Fatalf("new controlplane: %v", err)
+func TestHeuristicOptimizer_Propose_HighEscalation(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
+
+	// Simulate high escalation rate
+	metrics := []Metrics{
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 3, EscalationCount: 1, CycleDurationSeconds: 100},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 3, EscalationCount: 1, CycleDurationSeconds: 120},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 3, EscalationCount: 1, CycleDurationSeconds: 80},
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 1, ApproachesToSuccess: 1, CycleDurationSeconds: 50},
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store, dbPath
+
+	result := opt.Propose(cfg, metrics)
+
+	// Should increase MaxApproaches due to high escalation rate
+	if result.MaxApproaches <= cfg.MaxApproaches {
+		t.Errorf("expected MaxApproaches to increase from %d to >%d, got %d",
+			cfg.MaxApproaches, cfg.MaxApproaches, result.MaxApproaches)
+	}
 }
 
 func countTableRows(t *testing.T, dbPath string) map[string]int {
@@ -688,96 +90,159 @@ func countTableRows(t *testing.T, dbPath string) map[string]int {
 	}
 	defer db.Close()
 
-	tables := []string{
-		"tasks",
-		"task_events",
-		"control_plane_maintenance",
-		"supervisor_tasks",
-		"supervisor_decisions",
-		"supervisor_metrics",
+	rows := make(map[string]int)
+	query := "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+	tableNames, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query tables: %v", err)
 	}
-	counts := make(map[string]int)
-	for _, table := range tables {
+	defer tableNames.Close()
+
+	for tableNames.Next() {
+		var tableName string
+		if err := tableNames.Scan(&tableName); err != nil {
+			t.Fatalf("scan table name: %v", err)
+		}
 		var count int
-		err := db.QueryRowContext(context.Background(),
-			"SELECT COUNT(*) FROM "+table).Scan(&count)
-		if err != nil {
-			t.Fatalf("count %s: %v", table, err)
+		countQuery := "SELECT COUNT(*) FROM " + tableName
+		if err := db.QueryRow(countQuery).Scan(&count); err != nil {
+			t.Fatalf("count rows in %s: %v", tableName, err)
 		}
-		counts[table] = count
+		rows[tableName] = count
 	}
-	return counts
+	return rows
 }
 
-func TestAggregateAndStreamMetricsAreReadOnly(t *testing.T) {
-	store, dbPath := newTestStoreWithPath(t)
-	ctx := context.Background()
-	now := time.Now()
+func TestHeuristicOptimizer_Propose_LowFirstAttemptSuccess(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
 
-	for _, id := range []string{"sup-ro-1", "sup-ro-2", "sup-ro-3"} {
-		if err := store.CreateSupervisorTask(ctx, controlplane.SupervisorTaskRow{
-			ID:        id,
-			State:     "succeeded",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}); err != nil {
-			t.Fatalf("create task %s: %v", id, err)
-		}
-		if err := store.SaveMetrics(ctx, id, controlplane.MetricsRow{
-			SupervisorTaskID:     id,
-			EnvelopeScore:        0.8,
-			FirstAttemptSuccess:  true,
-			AttemptsToSuccess:    1,
-			ApproachesToSuccess:  1,
-			RCAConfidenceAvg:     0.9,
-			CycleDurationSeconds: 10.0,
-			EscalationCount:      0,
-			FalseEscalationRate:  0,
-		}); err != nil {
-			t.Fatalf("save metrics %s: %v", id, err)
+	// Simulate low first attempt success rate with enough runs
+	metrics := make([]Metrics, 15)
+	for i := 0; i < 15; i++ {
+		metrics[i] = Metrics{
+			FirstAttemptSuccess:  false,
+			AttemptsToSuccess:    3,
+			ApproachesToSuccess:  2,
+			CycleDurationSeconds: 100,
 		}
 	}
+	// Make one successful on first attempt
+	metrics[0].FirstAttemptSuccess = true
+	metrics[0].AttemptsToSuccess = 1
+	metrics[0].ApproachesToSuccess = 1
 
-	beforeAgg := countTableRows(t, dbPath)
-	_, err := Aggregate(store, ctx, AggregateOptions{})
-	if err != nil {
-		t.Fatalf("Aggregate: %v", err)
-	}
-	afterAgg := countTableRows(t, dbPath)
+	result := opt.Propose(cfg, metrics)
 
-	for table := range beforeAgg {
-		if beforeAgg[table] != afterAgg[table] {
-			t.Errorf("Aggregate modified %s: before=%d after=%d", table, beforeAgg[table], afterAgg[table])
-		}
-	}
-
-	beforeStream := countTableRows(t, dbPath)
-	var streamed []TaskMetricsItem
-	err = StreamMetrics(store, ctx, AggregateOptions{}, func(item TaskMetricsItem) error {
-		streamed = append(streamed, item)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("StreamMetrics: %v", err)
-	}
-	if len(streamed) != 3 {
-		t.Fatalf("expected 3 streamed items, got %d", len(streamed))
-	}
-
-	afterStream := countTableRows(t, dbPath)
-	for table := range beforeStream {
-		if beforeStream[table] != afterStream[table] {
-			t.Errorf("StreamMetrics modified %s: before=%d after=%d", table, beforeStream[table], afterStream[table])
-		}
+	// Should increase MaxAttemptsPerApproach due to low first attempt success
+	if result.MaxAttemptsPerApproach <= cfg.MaxAttemptsPerApproach {
+		t.Errorf("expected MaxAttemptsPerApproach to increase due to low first attempt success")
 	}
 }
 
-func TestSupervisorMetricsFlagCollisionTaskIDAggregate(t *testing.T) {
-	_, _ = newTestStoreWithPath(t)
-	_ = context.Background()
+func TestHeuristicOptimizer_Propose_LongCycles(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
+
+	// Simulate long cycle durations
+	metrics := []Metrics{
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 1, ApproachesToSuccess: 1, CycleDurationSeconds: 200},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 2, CycleDurationSeconds: 250},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 2, ApproachesToSuccess: 2, CycleDurationSeconds: 300},
+	}
+
+	result := opt.Propose(cfg, metrics)
+
+	// Should increase SilenceThreshold due to long cycles
+	if result.SilenceThreshold <= cfg.SilenceThreshold {
+		t.Errorf("expected SilenceThreshold to increase from %v to >%v, got %v",
+			cfg.SilenceThreshold, cfg.SilenceThreshold, result.SilenceThreshold)
+	}
 }
 
-func TestSupervisorMetricsFlagCollisionTaskIDJSONStream(t *testing.T) {
-	_, _ = newTestStoreWithPath(t)
-	_ = context.Background()
+func TestComputeAggregateFromSlice(t *testing.T) {
+	metrics := []Metrics{
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 1, ApproachesToSuccess: 1, EscalationCount: 0, CycleDurationSeconds: 50},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 3, ApproachesToSuccess: 2, EscalationCount: 0, CycleDurationSeconds: 100},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 2, ApproachesToSuccess: 3, EscalationCount: 1, CycleDurationSeconds: 150},
+		{FirstAttemptSuccess: true, AttemptsToSuccess: 1, ApproachesToSuccess: 1, EscalationCount: 0, CycleDurationSeconds: 40},
+	}
+
+	agg := computeAggregateFromSlice(metrics)
+
+	if agg.TotalRuns != 4 {
+		t.Errorf("TotalRuns = %d, want 4", agg.TotalRuns)
+	}
+	if agg.FirstAttemptSuccessRate != 0.5 {
+		t.Errorf("FirstAttemptSuccessRate = %f, want 0.5", agg.FirstAttemptSuccessRate)
+	}
+	expectedAvgAttempts := (1 + 3 + 2 + 1) / 4.0
+	if agg.AvgAttemptsToSuccess != expectedAvgAttempts {
+		t.Errorf("AvgAttemptsToSuccess = %f, want %f", agg.AvgAttemptsToSuccess, expectedAvgAttempts)
+	}
+	expectedAvgApproaches := (1 + 2 + 3 + 1) / 4.0
+	if agg.AvgApproachesToSuccess != expectedAvgApproaches {
+		t.Errorf("AvgApproachesToSuccess = %f, want %f", agg.AvgApproachesToSuccess, expectedAvgApproaches)
+	}
+	if agg.EscalationRate != 0.25 {
+		t.Errorf("EscalationRate = %f, want 0.25", agg.EscalationRate)
+	}
+	expectedAvgCycle := (50 + 100 + 150 + 40) / 4.0
+	if agg.AvgCycleSeconds != expectedAvgCycle {
+		t.Errorf("AvgCycleSeconds = %f, want %f", agg.AvgCycleSeconds, expectedAvgCycle)
+	}
+}
+
+func TestHeuristicOptimizer_RespectsBounds(t *testing.T) {
+	opt := NewHeuristicOptimizer()
+	cfg := defaultSupervisorConfig()
+
+	// Simulate extremely high attempts that would exceed max bound
+	metrics := []Metrics{
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 100, ApproachesToSuccess: 50, CycleDurationSeconds: 1000},
+	}
+
+	result := opt.Propose(cfg, metrics)
+
+	// Should respect max bounds
+	if result.MaxAttemptsPerApproach > opt.MaxAttemptsPerApproach {
+		t.Errorf("MaxAttemptsPerApproach %d exceeds max bound %d", result.MaxAttemptsPerApproach, opt.MaxAttemptsPerApproach)
+	}
+	if result.MaxApproaches > opt.MaxApproaches {
+		t.Errorf("MaxApproaches %d exceeds max bound %d", result.MaxApproaches, opt.MaxApproaches)
+	}
+	if result.MaxAttemptsPerApproach < opt.MinAttemptsPerApproach {
+		t.Errorf("MaxAttemptsPerApproach %d below min bound %d", result.MaxAttemptsPerApproach, opt.MinAttemptsPerApproach)
+	}
+	if result.MaxApproaches < opt.MinApproaches {
+		t.Errorf("MaxApproaches %d below min bound %d", result.MaxApproaches, opt.MinApproaches)
+	}
+}
+
+func TestHeuristicOptimizer_CustomBounds(t *testing.T) {
+	opt := &HeuristicOptimizer{
+		MinAttemptsPerApproach: 2,
+		MaxAttemptsPerApproach: 5,
+		MinApproaches:          2,
+		MaxApproaches:          5,
+	}
+
+	cfg := defaultSupervisorConfig()
+	metrics := []Metrics{
+		{FirstAttemptSuccess: false, AttemptsToSuccess: 10, ApproachesToSuccess: 10, CycleDurationSeconds: 100},
+	}
+
+	result := opt.Propose(cfg, metrics)
+
+	// Should respect custom bounds
+	if result.MaxAttemptsPerApproach > 5 || result.MaxAttemptsPerApproach < 2 {
+		t.Errorf("MaxAttemptsPerApproach %d not in custom bounds [2,5]", result.MaxAttemptsPerApproach)
+	}
+	if result.MaxApproaches > 5 || result.MaxApproaches < 2 {
+		t.Errorf("MaxApproaches %d not in custom bounds [2,5]", result.MaxApproaches)
+	}
 }

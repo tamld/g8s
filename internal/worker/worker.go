@@ -71,6 +71,7 @@ type SpawnOptions struct {
 	Stderr     io.Writer
 	ResultPath string
 	RunDir     string
+	Timeout    time.Duration
 }
 
 // Runner spawns worker processes; tests inject fakes so no real binaries run.
@@ -254,7 +255,20 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	if len(opts.Argv) == 0 {
 		return nil, errors.New("empty argv")
 	}
-	cmd := exec.Command(opts.Argv[0], opts.Argv[1:]...)
+
+	// Verify executable identity (detect fake scripts like python3 -> Node)
+	if err := verifyExecutableIdentity(opts.Argv[0]); err != nil {
+		return nil, err
+	}
+
+	var cmd *exec.Cmd
+	if opts.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+		cmd = exec.CommandContext(ctx, opts.Argv[0], opts.Argv[1:]...)
+		_ = cancel
+	} else {
+		cmd = exec.Command(opts.Argv[0], opts.Argv[1:]...)
+	}
 	configureSysProcAttr(cmd)
 	cmd.Dir = opts.Dir
 	cmd.Stdout = opts.Stdout
@@ -299,6 +313,14 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	if req.Permission == "" {
 		req.Permission = dispatch.DefaultPermission
+	}
+
+	// Parse per-command timeout for process execution
+	var cmdTimeout time.Duration
+	if req.Timeout != "" {
+		if parsed, err := time.ParseDuration(req.Timeout); err == nil {
+			cmdTimeout = parsed
+		}
 	}
 
 	runDir := filepath.Join(s.runRoot, task.TaskID, fmt.Sprintf("attempt-%d", task.Attempts))
@@ -355,6 +377,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		Stderr:     errWriter,
 		ResultPath: resultPath,
 		RunDir:     runDir,
+		Timeout:    cmdTimeout,
 	})
 
 	if spawnErr != nil {
@@ -773,6 +796,51 @@ func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
 		"stdout": dispatch.SanitizeOutput(stdout),
 		"stderr": dispatch.SanitizeOutput(stderr),
 	}
+}
+
+// verifyExecutableIdentity checks if the executable is what it claims to be.
+// It detects fake scripts (e.g., python3 that's actually a Node script).
+func verifyExecutableIdentity(path string) error {
+	cmd := exec.Command(path, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		cmd = exec.Command(path, "-version")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return nil
+		}
+	}
+
+	outputStr := strings.ToLower(string(output))
+	base := strings.ToLower(filepath.Base(path))
+
+	switch base {
+	case "python3", "python", "python2":
+		if strings.Contains(outputStr, "node") || strings.Contains(outputStr, "javascript") {
+			return fmt.Errorf("executable identity mismatch: %s appears to be Node.js, not Python", path)
+		}
+		if !strings.Contains(outputStr, "python") {
+			return nil
+		}
+	case "node", "npm", "npx":
+		if strings.Contains(outputStr, "python") {
+			return fmt.Errorf("executable identity mismatch: %s appears to be Python, not Node.js", path)
+		}
+	case "go", "golang":
+		if !strings.Contains(outputStr, "go") && !strings.Contains(outputStr, "golang") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Go", path)
+		}
+	case "ruby":
+		if !strings.Contains(outputStr, "ruby") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Ruby", path)
+		}
+	case "java":
+		if !strings.Contains(outputStr, "java") && !strings.Contains(outputStr, "openjdk") {
+			return fmt.Errorf("executable identity mismatch: %s does not appear to be Java", path)
+		}
+	}
+
+	return nil
 }
 
 func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
