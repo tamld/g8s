@@ -2,8 +2,6 @@
 package supervisor
 
 import (
-	"database/sql"
-	"net/url"
 	"testing"
 )
 
@@ -80,37 +78,6 @@ func TestHeuristicOptimizer_Propose_HighEscalation(t *testing.T) {
 		t.Errorf("expected MaxApproaches to increase from %d to >%d, got %d",
 			cfg.MaxApproaches, cfg.MaxApproaches, result.MaxApproaches)
 	}
-}
-
-func countTableRows(t *testing.T, dbPath string) map[string]int {
-	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+url.PathEscape(dbPath)+"?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	rows := make(map[string]int)
-	query := "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-	tableNames, err := db.Query(query)
-	if err != nil {
-		t.Fatalf("query tables: %v", err)
-	}
-	defer tableNames.Close()
-
-	for tableNames.Next() {
-		var tableName string
-		if err := tableNames.Scan(&tableName); err != nil {
-			t.Fatalf("scan table name: %v", err)
-		}
-		var count int
-		countQuery := "SELECT COUNT(*) FROM " + tableName
-		if err := db.QueryRow(countQuery).Scan(&count); err != nil {
-			t.Fatalf("count rows in %s: %v", tableName, err)
-		}
-		rows[tableName] = count
-	}
-	return rows
 }
 
 func TestHeuristicOptimizer_Propose_LowFirstAttemptSuccess(t *testing.T) {
