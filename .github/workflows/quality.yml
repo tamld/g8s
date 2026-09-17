@@ -177,7 +177,10 @@ jobs:
           # there is exercised by the integration suites, not unit tests.
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
-          go test -cover ./... 2>&1 | grep -E 'coverage: [0-9.]+%' > "$COV_FILE"
+          go test -cover ./... 2>&1 | tee /tmp/go_test_output.txt | grep -E 'coverage: [0-9.]+%' > "$COV_FILE"
+          echo "=== DEBUG: go test output ===" && cat /tmp/go_test_output.txt
+          echo "=== DEBUG: coverage file ===" && cat "$COV_FILE"
+          echo "=== DEBUG: coverage file line count ===" && wc -l "$COV_FILE"
           total=0
           count=0
           while IFS= read -r line; do
@@ -191,7 +194,7 @@ jobs:
             fi
           done < "$COV_FILE"
           if [ "$count" -eq 0 ]; then
-            echo "::error::coverage extraction failed"
+            echo "::error::coverage extraction failed (count=0)"
             exit 1
           fi
           avg=$(awk -v t="$total" -v c="$count" 'BEGIN { printf "%.2f", t / c }')
