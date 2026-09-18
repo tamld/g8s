@@ -1,10 +1,6 @@
+diffstat only, patch not produced. Full patch: git show -p <rev>
 package orchestrator
-
-import (
-	"encoding/json"
-	"time"
-)
-
+import "time"
 // Receipt is the worker-emitted result plus orchestrator-side metadata.
 // Persisted into the controlplane evidence lake by the orchestrator after
 // validation.
@@ -29,11 +25,7 @@ type Receipt struct {
 	ScopeViolations []string
 	StartedAt       time.Time
 	FinishedAt      time.Time
-
-	// Acceptance holds the result acceptance tracking from the worker
-	Acceptance json.RawMessage `json:"acceptance,omitempty"`
 }
-
 // TaskSpec is one slice of the plan: the task description plus metadata
 // the orchestrator uses to key receipts, worktree leases, and evidence correlation.
 type TaskSpec struct {
