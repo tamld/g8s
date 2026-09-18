@@ -1,6 +1,7 @@
-diffstat only, patch not produced. Full patch: git show -p <rev>
 package orchestrator
+
 import "time"
+
 // Receipt is the worker-emitted result plus orchestrator-side metadata.
 // Persisted into the controlplane evidence lake by the orchestrator after
 // validation.
@@ -26,6 +27,7 @@ type Receipt struct {
 	StartedAt       time.Time
 	FinishedAt      time.Time
 }
+
 // TaskSpec is one slice of the plan: the task description plus metadata
 // the orchestrator uses to key receipts, worktree leases, and evidence correlation.
 type TaskSpec struct {
