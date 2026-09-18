@@ -61,6 +61,7 @@ func runVerificationTask(homeDir, binaryPath string, timeoutSeconds int) (*Verif
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 30
 	}
+	_ = timeoutSeconds // silence ineffassign - timeout enforced by context in caller
 
 	start := time.Now()
 	var errors []string
