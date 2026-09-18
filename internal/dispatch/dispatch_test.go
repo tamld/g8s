@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -880,8 +881,14 @@ func TestExecRunnerWithTimeout(t *testing.T) {
 			expectTimeout: false,
 		},
 		{
-			name:          "command times out",
-			command:       []string{"sleep", "10"},
+			name: "command times out",
+			command: func() []string {
+				if runtime.GOOS == "windows" {
+					// Use powershell Start-Sleep on Windows since sleep might not be available
+					return []string{"powershell", "-Command", "Start-Sleep -Seconds 10"}
+				}
+				return []string{"sleep", "10"}
+			}(),
 			timeout:       100 * time.Millisecond,
 			expectTimeout: true,
 		},

@@ -1,0 +1,20 @@
+<<<<<<< SEARCH
+		{
+			name:          "command times out",
+			command:       []string{"sleep", "10"},
+			timeout:       100 * time.Millisecond,
+			expectTimeout: true,
+		},
+=======
+		{
+			name:          "command times out",
+			command:       func() []string {
+				if runtime.GOOS == "windows" {
+					return []string{"cmd", "/c", "timeout", "/t", "10", "/nobreak"}
+				}
+				return []string{"sleep", "10"}
+			}(),
+			timeout:       100 * time.Millisecond,
+			expectTimeout: true,
+		},
+>>>>>>> REPLACE
