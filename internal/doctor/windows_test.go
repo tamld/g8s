@@ -46,13 +46,15 @@ func TestWindows_DefaultPathsResolve(t *testing.T) {
 	}
 
 	dataDir := pathutil.DefaultDataDir()
-	if !strings.HasPrefix(strings.ToLower(dataDir), strings.ToLower(localAppData)) {
+	// ⚡ Bolt Optimization: Use EqualFold on sliced substring for zero-allocation case-insensitive prefix checking
+	if !(len(dataDir) >= len(localAppData) && strings.EqualFold(dataDir[:len(localAppData)], localAppData)) {
 		t.Errorf("DefaultDataDir() = %s does not start with LOCALAPPDATA %s", dataDir, localAppData)
 	}
 
 	configDir := pathutil.DefaultConfigDir()
 	appData := os.Getenv("APPDATA")
-	if appData != "" && !strings.HasPrefix(strings.ToLower(configDir), strings.ToLower(appData)) {
+	// ⚡ Bolt Optimization: Use EqualFold on sliced substring for zero-allocation case-insensitive prefix checking
+	if appData != "" && !(len(configDir) >= len(appData) && strings.EqualFold(configDir[:len(appData)], appData)) {
 		t.Errorf("DefaultConfigDir() = %s does not start with APPDATA %s", configDir, appData)
 	}
 }

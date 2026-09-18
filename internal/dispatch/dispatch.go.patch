@@ -1,0 +1,15 @@
+<<<<<<< SEARCH
+	outputStr := strings.ToLower(string(output))
+	base := strings.ToLower(filepath.Base(path))
+
+	switch base {
+=======
+	outputStr := strings.ToLower(string(output))
+	base := strings.ToLower(filepath.Base(path))
+
+	// Trim .exe or .cmd for Windows platform matching
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".cmd")
+
+	switch base {
+>>>>>>> REPLACE

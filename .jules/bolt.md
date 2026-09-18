@@ -10,3 +10,6 @@
 ## 2025-08-29 - Avoid strings.Builder and rune slice casting for simple substring extraction
 **Learning:** Using `strings.Builder` and converting a string to `[]rune` to extract a substring by rune indexes allocates multiple times: once for the rune slice, and again for `builder.String()`. We can bypass this by tracking the starting index and byte size of the runes using `utf8.DecodeRuneInString` and slicing the original string directly, avoiding multiple allocations.
 **Action:** Use `utf8.DecodeRuneInString` inside a loop over a string to find accurate slice bounds for multibyte characters rather than casting the string to a rune slice or relying on a builder, and slice the original string.
+## 2025-09-01 - Zero-allocation case-insensitive prefix checks
+**Learning:** Using `strings.HasPrefix(strings.ToLower(str), strings.ToLower(prefix))` allocates two completely new copies of strings to lowercase them. This causes massive memory allocation scaling with string length.
+**Action:** Use `len(str) >= len(prefix) && strings.EqualFold(str[:len(prefix)], prefix)` instead, which performs a zero-allocation, case-insensitive comparison using shared underlying memory.

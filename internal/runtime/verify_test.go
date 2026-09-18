@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -125,25 +126,40 @@ echo "mytool version 1.0"
 func TestVerifyCommandIdentity(t *testing.T) {
 	// Test with a known system command
 	// This will vary by system, so we just test it doesn't crash
-	_, result, err := VerifyCommandIdentity("sh", []string{"-c", "echo test"})
+	command := "sh"
+	if runtime.GOOS == "windows" {
+		command = "cmd"
+	}
+	_, result, err := VerifyCommandIdentity(command, []string{"-c", "echo test"})
 	// On most systems, sh exists
 	if err != nil {
-		t.Logf("VerifyCommandIdentity for 'sh': %v (may be expected on some systems)", err)
+		t.Logf("VerifyCommandIdentity for '%s': %v (may be expected on some systems)", command, err)
 	} else {
-		if result.BaseName != "sh" {
-			t.Errorf("Expected base name 'sh', got %s", result.BaseName)
+		expectedBaseName := command
+		if result.BaseName != expectedBaseName && result.BaseName != expectedBaseName+".exe" && result.BaseName != expectedBaseName+".cmd" {
+			t.Errorf("Expected base name '%s', got %s", expectedBaseName, result.BaseName)
 		}
 	}
 }
 
 func TestRunWithTimeout(t *testing.T) {
 	// Test command that completes quickly
-	stdout, stderr, err := RunWithTimeout(1*time.Second, "sh", "-c", "echo hello")
+	command := "sh"
+	args := []string{"-c", "echo hello"}
+	if runtime.GOOS == "windows" {
+		command = "cmd"
+		args = []string{"/c", "echo hello"}
+	}
+	stdout, stderr, err := RunWithTimeout(1*time.Second, command, args...)
 	if err != nil {
 		t.Errorf("RunWithTimeout failed: %v", err)
 	}
-	if string(stdout) != "hello\n" {
-		t.Errorf("Expected 'hello\\n', got %q", string(stdout))
+	expectedOutput := "hello\n"
+	if runtime.GOOS == "windows" {
+		expectedOutput = "hello\r\n"
+	}
+	if string(stdout) != expectedOutput {
+		t.Errorf("Expected %q, got %q", expectedOutput, string(stdout))
 	}
 	if len(stderr) != 0 {
 		t.Errorf("Expected empty stderr, got %q", string(stderr))
@@ -152,7 +168,13 @@ func TestRunWithTimeout(t *testing.T) {
 
 func TestRunWithTimeout_Timeout(t *testing.T) {
 	// Test command that times out
-	_, _, err := RunWithTimeout(100*time.Millisecond, "sh", "-c", "sleep 2")
+	command := "sh"
+	args := []string{"-c", "sleep 2"}
+	if runtime.GOOS == "windows" {
+		command = "powershell"
+		args = []string{"-Command", "Start-Sleep -Seconds 2"}
+	}
+	_, _, err := RunWithTimeout(100*time.Millisecond, command, args...)
 	if err != ErrCommandTimeout {
 		t.Errorf("Expected ErrCommandTimeout, got %v", err)
 	}
@@ -161,16 +183,31 @@ func TestRunWithTimeout_Timeout(t *testing.T) {
 func TestRunWithTimeoutAndVerify(t *testing.T) {
 	tmpDir := t.TempDir()
 	exePath := filepath.Join(tmpDir, "verify-tool")
+	if runtime.GOOS == "windows" {
+		exePath += ".cmd"
+	}
 	content := `#!/bin/sh
 echo "verify-tool version 1.0"
 `
+	if runtime.GOOS == "windows" {
+		content = `@echo off
+echo verify-tool version 1.0
+`
+	}
 	err := os.WriteFile(exePath, []byte(content), 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, exePath, []string{}, VerifyOptions{
-		ExpectedNames: []string{"verify-tool"},
+	runCommand := exePath
+	runArgs := []string{}
+	if runtime.GOOS == "windows" {
+		runCommand = "cmd"
+		runArgs = []string{"/c", exePath}
+	}
+
+	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, runCommand, runArgs, VerifyOptions{
+		ExpectedNames: []string{"verify-tool", "cmd"},
 		CheckShebang:  true,
 	})
 	if err != nil {
@@ -179,8 +216,12 @@ echo "verify-tool version 1.0"
 	if !result.Verified {
 		t.Error("Expected verified result")
 	}
-	if result.BaseName != "verify-tool" {
-		t.Errorf("Expected base name 'verify-tool', got %s", result.BaseName)
+	expectedBaseName := "verify-tool"
+	if runtime.GOOS == "windows" {
+		expectedBaseName = "cmd.exe"
+	}
+	if result.BaseName != expectedBaseName {
+		t.Errorf("Expected base name '%s', got %s", expectedBaseName, result.BaseName)
 	}
 	if result.IsScript {
 		t.Logf("Detected as script with interpreter: %s", result.Interpreter)
