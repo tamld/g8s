@@ -810,6 +810,18 @@ func runInit(args []string) {
 	} else if !*agentMode {
 		pterm.Info.Println("No supported IDE configs were updated. Use --ide=<cursor|claude|windsurf|antigravity|all> to explicitly configure.")
 	}
+
+	// Show verification result
+	if res.Verification != nil {
+		fmt.Println()
+		pterm.DefaultHeader.WithFullWidth().Println("Initialization Verification")
+		if res.Verification.Verified {
+			pterm.Success.Printf("✓ Verification PASSED (task: %s, receipt: %s, duration: %ds)\n",
+				res.Verification.TaskID, res.Verification.ReceiptID, res.Verification.DurationSecs)
+		} else {
+			pterm.Error.Printf("✗ Verification FAILED: %s\n", res.Verification.Error)
+		}
+	}
 }
 
 // runConfig manages atomic key-value configuration.

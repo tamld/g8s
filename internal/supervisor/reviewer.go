@@ -4,7 +4,10 @@
 package supervisor
 
 import (
+	"encoding/json"
+
 	"github.com/tamld/g8s/internal/orchestrator"
+	"github.com/tamld/g8s/internal/shared"
 )
 
 // Verdict is the supervisor-level classification of a worker attempt.
@@ -43,17 +46,79 @@ type ReviewOutcome struct {
 	Validated map[string]bool
 }
 
-// Reviewer is the dependency-injection seam for the receipt grader. The
-// default implementation is StubReviewer; T021 (real reviewer) will replace
-// it with one that parses receipt JSON.
+// Reviewer is the dependency-injection seam for the receipt grader.
+// RealReviewer implements structured receipt validation against TaskEnvelope.
 type Reviewer interface {
 	Validate(env TaskEnvelope, receipt orchestrator.Receipt) (map[string]bool, error)
 }
 
-// StubReviewer is the deterministic default. It grades a receipt on three
-// pass criteria (commit landed, clean scope, return-code zero) and one fail
-// criterion (any scope violation). OK=false alone is treated as REVISE so
-// the supervisor can retry within the approach budget.
+// RealReviewer validates receipts against the TaskEnvelope contract.
+// It checks each envelope field against the receipt's acceptance tracking,
+// contract check, and error tracking.
+type RealReviewer struct{}
+
+// NewRealReviewer returns a ready-to-use real reviewer.
+func NewRealReviewer() *RealReviewer { return &RealReviewer{} }
+
+// Validate performs per-field validation of a receipt against the TaskEnvelope.
+// It extracts acceptance tracking from the receipt and validates each
+// envelope field (DoR, DoD, DnD, Validateds, SRS, PRD, FSM) against
+// the receipt's ResultAcceptance, ContractCheck, and ErrorTracking.
+func (r *RealReviewer) Validate(env TaskEnvelope, receipt orchestrator.Receipt) (map[string]bool, error) {
+	out := make(map[string]bool, len(env.SelectedFields))
+
+	// Extract acceptance tracking from receipt
+	var acceptance shared.ResultAcceptance
+	if len(receipt.Acceptance) > 0 {
+		if err := json.Unmarshal(receipt.Acceptance, &acceptance); err != nil {
+			// If we can't parse acceptance, fall back to stub behavior
+			for _, f := range env.SelectedFields {
+				out[f] = receipt.OK
+			}
+			return out, nil
+		}
+	}
+
+	// If no acceptance data, fall back to OK-based validation
+	if acceptance.Accepted && acceptance.ContractCheck.Passed && acceptance.ErrorTracking.ErrorCode == "" {
+		// All checks passed - validate all envelope fields
+		for _, f := range env.SelectedFields {
+			out[f] = true
+		}
+		return out, nil
+	}
+
+	// Some checks failed - validate based on what failed
+	for _, f := range env.SelectedFields {
+		switch f {
+		case "DoR", "DoD", "Validateds":
+			// Core fields require acceptance
+			out[f] = acceptance.Accepted
+		case "DnD":
+			// DnD requires acceptance + reason
+			out[f] = acceptance.Accepted && acceptance.Reason != ""
+		case "SRS", "PRD", "FSM":
+			// Optional fields require contract check pass
+			out[f] = acceptance.ContractCheck.Passed
+		default:
+			out[f] = false
+		}
+	}
+	return out, nil
+}
+
+// mapToStruct converts a map to a struct using JSON marshaling
+func mapToStruct(m map[string]any, v any) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
+}
+
+// StubReviewer is kept for backward compatibility and testing.
+// It grades a receipt on three pass criteria (commit landed, clean scope, return-code zero).
+// OK=false alone is treated as REVISE so the supervisor can retry within the approach budget.
 type StubReviewer struct{}
 
 // NewStubReviewer returns a ready-to-use reviewer.

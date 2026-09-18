@@ -1,6 +1,9 @@
 package orchestrator
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Receipt is the worker-emitted result plus orchestrator-side metadata.
 // Persisted into the controlplane evidence lake by the orchestrator after
@@ -26,6 +29,9 @@ type Receipt struct {
 	ScopeViolations []string
 	StartedAt       time.Time
 	FinishedAt      time.Time
+
+	// Acceptance holds the result acceptance tracking from the worker
+	Acceptance json.RawMessage `json:"acceptance,omitempty"`
 }
 
 // TaskSpec is one slice of the plan: the task description plus metadata

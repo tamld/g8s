@@ -22,6 +22,7 @@ import (
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/shared"
 )
 
 // WorkerControlPlane is the narrow control-plane surface the supervisor needs.
@@ -418,7 +419,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
-// condition (cancel, timeout, lost lease, shutdown) fires.
+// condition (cancel, timeout, lost lease, shutdown, denial) fires.
 func (s *Supervisor) awaitOutcome(
 	ctx context.Context,
 	child Child,
@@ -444,6 +445,10 @@ func (s *Supervisor) awaitOutcome(
 		}
 		if t.CancelRequested {
 			return "cancelled"
+		}
+		// Check for denial/blocking conditions from control plane
+		if t.Denied != nil && *t.Denied && t.DenialReason != nil {
+			return "denied:" + string(*t.DenialReason)
 		}
 		now := s.clock()
 		if !now.Before(deadline) {
@@ -518,20 +523,39 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
+	case "denied:scope_violation", "denied:policy_violation", "denied:resource_exhausted", "denied:invalid_input", "denied:dependency_failed":
+		denialReason := strings.TrimPrefix(reason, "denied:")
+		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+			Result:    mustJSON(outcomeEnvelope(false, "denied", stdoutText, stderrText)),
+			Success:   false,
+			Retryable: false,
+			Err:       "task denied: " + denialReason,
+		})
+		if ferr != nil {
+			return nil, fmt.Errorf("finish denied attempt: %w", ferr)
+		}
 	default:
 		wr := readWorkerResult(resultPath, stdoutText, code)
-		success := code == 0 && wr.OK
+
+		// Build result acceptance with error tracking and contract check
+		acceptance := s.evaluateResultAcceptance(wr, code, stdoutText, stderrText)
+
 		if paused := s.maybePause(ctx, wr, stdoutText, taskID, workerID, token); paused {
 			break
 		}
+
 		finishErr := ""
-		if !success {
-			finishErr = firstNonEmpty(wr.Reason, wr.Status, "failed")
+		if !acceptance.Accepted {
+			finishErr = acceptance.Reason
 		}
+
+		// Include acceptance tracking in result
+		resultWithAcceptance := mustResultJSONWithAcceptance(wr, acceptance, stdoutText, stderrText)
+
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
-			Result:    mustResultJSON(wr, stdoutText, stderrText),
-			Success:   success,
-			Retryable: len(wr.ContractViolation) == 0,
+			Result:    resultWithAcceptance,
+			Success:   acceptance.Accepted,
+			Retryable: acceptance.ErrorTracking.Retryable && len(wr.ContractViolation) == 0,
 			Err:       finishErr,
 		})
 		if ferr != nil {
@@ -798,15 +822,137 @@ func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
 	}
 }
 
+// evaluateResultAcceptance evaluates a worker result against the task contract
+// and builds a ResultAcceptance with error tracking and contract check.
+func (s *Supervisor) evaluateResultAcceptance(wr workerResult, code int, stdout, stderr string) shared.ResultAcceptance {
+	acceptance := shared.ResultAcceptance{
+		Accepted:      false,
+		Reason:        "",
+		ErrorTracking: shared.ErrorTracking{},
+		ContractCheck: shared.ContractCheck{
+			Passed:          false,
+			Violations:      []string{},
+			OutputSizeBytes: int64(len(stdout) + len(stderr)),
+			DurationSecs:    0, // Would need timing info from run
+			ExitCode:        code,
+		},
+	}
+
+	// Check exit code
+	if code != 0 {
+		acceptance.Reason = fmt.Sprintf("non-zero exit code: %d", code)
+		acceptance.ErrorTracking = shared.ErrorTracking{
+			ErrorCode:    "EXIT_CODE_NON_ZERO",
+			ErrorMessage: fmt.Sprintf("worker process exited with code %d", code),
+			Retryable:    true,
+			Severity:     "medium",
+		}
+		return acceptance
+	}
+
+	// Check worker result OK
+	if !wr.OK {
+		acceptance.Reason = firstNonEmpty(wr.Reason, wr.Status, "worker reported failure")
+		acceptance.ErrorTracking = shared.ErrorTracking{
+			ErrorCode:    "WORKER_REPORTED_FAILURE",
+			ErrorMessage: wr.Reason,
+			Retryable:    len(wr.ContractViolation) == 0,
+			Severity:     "medium",
+		}
+		return acceptance
+	}
+
+	// Contract check: output size limits
+	const maxOutputBytes = 10 * 1024 * 1024 // 10MB
+	outputSize := int64(len(stdout) + len(stderr))
+	acceptance.ContractCheck.OutputSizeBytes = outputSize
+	if outputSize > maxOutputBytes {
+		acceptance.ContractCheck.Violations = append(acceptance.ContractCheck.Violations,
+			fmt.Sprintf("output size %d bytes exceeds limit %d", outputSize, maxOutputBytes))
+		acceptance.ContractCheck.Passed = false
+		acceptance.Reason = "output size exceeds contract limit"
+		acceptance.ErrorTracking = shared.ErrorTracking{
+			ErrorCode:    "OUTPUT_SIZE_EXCEEDED",
+			ErrorMessage: fmt.Sprintf("output size %d bytes exceeds limit %d", outputSize, maxOutputBytes),
+			Retryable:    false,
+			Severity:     "high",
+		}
+		return acceptance
+	}
+
+	// Contract check: required fields in worker result
+	requiredFields := []string{"ok", "status"}
+	for _, field := range requiredFields {
+		if field == "ok" && !wr.OK {
+			acceptance.ContractCheck.Violations = append(acceptance.ContractCheck.Violations, "missing required field: ok")
+		}
+		if field == "status" && wr.Status == "" {
+			acceptance.ContractCheck.Violations = append(acceptance.ContractCheck.Violations, "missing required field: status")
+		}
+	}
+	if len(acceptance.ContractCheck.Violations) > 0 {
+		acceptance.ContractCheck.Passed = false
+		acceptance.Reason = "contract validation failed: " + strings.Join(acceptance.ContractCheck.Violations, "; ")
+		acceptance.ErrorTracking = shared.ErrorTracking{
+			ErrorCode:    "CONTRACT_VIOLATION",
+			ErrorMessage: acceptance.Reason,
+			Retryable:    false,
+			Severity:     "high",
+		}
+		return acceptance
+	}
+
+	// All checks passed
+	acceptance.Accepted = true
+	acceptance.ContractCheck.Passed = true
+	acceptance.Reason = "result accepted"
+	acceptance.ErrorTracking = shared.ErrorTracking{
+		ErrorCode:    "",
+		ErrorMessage: "",
+		Retryable:    false,
+		Severity:     "low",
+	}
+	return acceptance
+}
+
+// mustResultJSONWithAcceptance extends mustResultJSON with acceptance tracking
+func mustResultJSONWithAcceptance(wr workerResult, acceptance shared.ResultAcceptance, stdout, stderr string) json.RawMessage {
+	envelope := map[string]any{
+		"ok":         wr.OK,
+		"status":     wr.Status,
+		"acceptance": acceptance,
+	}
+	if wr.Reason != "" {
+		envelope["reason"] = wr.Reason
+	}
+	if wr.Summary != "" {
+		envelope["summary"] = wr.Summary
+	}
+	if len(wr.ContractViolation) > 0 {
+		envelope["contract_violation"] = wr.ContractViolation
+	}
+	if stdout != "" {
+		envelope["stdout"] = dispatch.SanitizeOutput(stdout)
+	}
+	if stderr != "" {
+		envelope["stderr"] = dispatch.SanitizeOutput(stderr)
+	}
+	return mustJSON(envelope)
+}
+
 // verifyExecutableIdentity checks if the executable is what it claims to be.
 // It detects fake scripts (e.g., python3 that's actually a Node script).
 func verifyExecutableIdentity(path string) error {
-	cmd := exec.Command(path, "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, path, "--version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		cmd = exec.Command(path, "-version")
+		cmd = exec.CommandContext(ctx, path, "-version")
 		output, err = cmd.CombinedOutput()
 		if err != nil {
+			// If both --version and -version fail, skip verification (could be a wrapper script)
 			return nil
 		}
 	}
