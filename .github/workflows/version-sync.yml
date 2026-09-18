@@ -1,0 +1,70 @@
+name: Version Sync Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version-sync:
+    name: Version Sync Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check version consistency
+        run: |
+          # Extract version from code
+          VERSION_CODE=$(grep '^[[:space:]]*Version[[:space:]]*=' cmd/g8s/version.go | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
+          
+          # Extract latest version from CHANGELOG
+          VERSION_CHANGELOG=$(awk '/^## \[Unreleased\]/ {found=1; next} found && /^## \[/ {print $2; exit}' CHANGELOG.md | tr -d '[]')
+          
+          echo "Code version: $VERSION_CODE"
+          echo "CHANGELOG version: $VERSION_CHANGELOG"
+          
+          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_CHANGELOG" ]; then
+            echo "::error::Could not extract versions"
+            exit 1
+          fi
+          
+          if [ "$VERSION_CODE" != "$VERSION_CHANGELOG" ]; then
+            echo "::error::Version mismatch: code=$VERSION_CODE, changelog=$VERSION_CHANGELOG"
+            exit 1
+          fi
+          
+          # Check if tag exists for this version
+          if git rev-parse "refs/tags/v$VERSION_CODE" >/dev/null 2>&1; then
+            echo "Tag v$VERSION_CODE exists locally"
+          fi
+          
+          echo "✓ Version sync OK"
+
+      - name: Check Go version consistency
+        run: |
+          GO_MOD_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
+          WORKFLOW_VERSION=$(grep -h "go-version:" .github/workflows/*.yml 2>/dev/null | head -1 | sed "s/.*go-version: '\([^']*\)'.*/\1/")
+          
+          echo "go.mod version: $GO_MOD_VERSION"
+          echo "Workflow version: $WORKFLOW_VERSION"
+          
+          if [ -z "$GO_MOD_VERSION" ] || [ -z "$WORKFLOW_VERSION" ]; then
+            echo "::warning::Could not extract Go versions"
+            exit 0
+          fi
+          
+          GO_MOD_MAJOR_MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1,2)
+          
+          if [ "$GO_MOD_MAJOR_MINOR" != "$WORKFLOW_VERSION" ]; then
+            echo "::error::Go version mismatch: go.mod=$GO_MOD_VERSION (normalized: $GO_MOD_MAJOR_MINOR), workflows=$WORKFLOW_VERSION"
+            exit 1
+          fi
+          
+          echo "✓ Go version consistent"
