@@ -625,6 +625,9 @@ func verifyExecutableIdentity(path string) error {
 	outputStr := strings.ToLower(string(output))
 	base := strings.ToLower(filepath.Base(path))
 
+	// Trim .exe for Windows platform matching
+	base = strings.TrimSuffix(base, ".exe")
+
 	switch base {
 	case "python3", "python", "python2":
 		if strings.Contains(outputStr, "node") || strings.Contains(outputStr, "javascript") {

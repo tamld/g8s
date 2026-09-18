@@ -1,0 +1,9 @@
+<<<<<<< SEARCH
+	if info.Mode()&0o111 == 0 {
+		return VerifyResult{}, ErrExecutableNotFound
+	}
+=======
+	if info.Mode()&0o111 == 0 && runtime.GOOS != "windows" {
+		return VerifyResult{}, ErrExecutableNotFound
+	}
+>>>>>>> REPLACE
