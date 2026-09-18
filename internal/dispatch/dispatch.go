@@ -625,8 +625,9 @@ func verifyExecutableIdentity(path string) error {
 	outputStr := strings.ToLower(string(output))
 	base := strings.ToLower(filepath.Base(path))
 
-	// Trim .exe for Windows platform matching
+	// Trim .exe or .cmd for Windows platform matching
 	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".cmd")
 
 	switch base {
 	case "python3", "python", "python2":

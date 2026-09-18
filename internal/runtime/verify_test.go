@@ -136,7 +136,7 @@ func TestVerifyCommandIdentity(t *testing.T) {
 		t.Logf("VerifyCommandIdentity for '%s': %v (may be expected on some systems)", command, err)
 	} else {
 		expectedBaseName := command
-		if result.BaseName != expectedBaseName && result.BaseName != expectedBaseName+".exe" {
+		if result.BaseName != expectedBaseName && result.BaseName != expectedBaseName+".exe" && result.BaseName != expectedBaseName+".cmd" {
 			t.Errorf("Expected base name '%s', got %s", expectedBaseName, result.BaseName)
 		}
 	}
@@ -184,18 +184,30 @@ func TestRunWithTimeoutAndVerify(t *testing.T) {
 	tmpDir := t.TempDir()
 	exePath := filepath.Join(tmpDir, "verify-tool")
 	if runtime.GOOS == "windows" {
-		exePath += ".exe"
+		exePath += ".cmd"
 	}
 	content := `#!/bin/sh
 echo "verify-tool version 1.0"
 `
+	if runtime.GOOS == "windows" {
+		content = `@echo off
+echo verify-tool version 1.0
+`
+	}
 	err := os.WriteFile(exePath, []byte(content), 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, exePath, []string{}, VerifyOptions{
-		ExpectedNames: []string{"verify-tool"},
+	runCommand := exePath
+	runArgs := []string{}
+	if runtime.GOOS == "windows" {
+		runCommand = "cmd"
+		runArgs = []string{"/c", exePath}
+	}
+
+	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, runCommand, runArgs, VerifyOptions{
+		ExpectedNames: []string{"verify-tool", "cmd"},
 		CheckShebang:  true,
 	})
 	if err != nil {
@@ -206,7 +218,7 @@ echo "verify-tool version 1.0"
 	}
 	expectedBaseName := "verify-tool"
 	if runtime.GOOS == "windows" {
-		expectedBaseName += ".exe"
+		expectedBaseName = "cmd.exe"
 	}
 	if result.BaseName != expectedBaseName {
 		t.Errorf("Expected base name '%s', got %s", expectedBaseName, result.BaseName)

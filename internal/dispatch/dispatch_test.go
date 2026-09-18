@@ -875,8 +875,13 @@ func TestExecRunnerWithTimeout(t *testing.T) {
 		expectTimeout bool
 	}{
 		{
-			name:          "command completes before timeout",
-			command:       []string{"sh", "-c", "echo hello"},
+			name: "command completes before timeout",
+			command: func() []string {
+				if runtime.GOOS == "windows" {
+					return []string{"cmd", "/c", "echo hello"}
+				}
+				return []string{"sh", "-c", "echo hello"}
+			}(),
 			timeout:       1 * time.Second,
 			expectTimeout: false,
 		},
@@ -921,11 +926,19 @@ func TestVerifyExecutableIdentity(t *testing.T) {
 	// Create a fake python3 that's actually a Node script
 	tmpDir := t.TempDir()
 	fakePython := filepath.Join(tmpDir, "python3")
+	if runtime.GOOS == "windows" {
+		fakePython += ".cmd"
+	}
 
 	// Create a script that mimics Node.js --version output (contains "node")
 	content := `#!/bin/sh
 echo "node v20.0.0"
 `
+	if runtime.GOOS == "windows" {
+		content = `@echo off
+echo node v20.0.0
+`
+	}
 	err := os.WriteFile(fakePython, []byte(content), 0o755)
 	if err != nil {
 		t.Fatal(err)

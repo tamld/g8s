@@ -91,11 +91,14 @@ func VerifyExecutable(path string, opts VerifyOptions) (VerifyResult, error) {
 	verifiedNames := make([]string, 0)
 	if len(opts.ExpectedNames) > 0 {
 		base := filepath.Base(absPath)
+		baseCompare := strings.TrimSuffix(base, ".exe")
+		baseCompare = strings.TrimSuffix(baseCompare, ".cmd")
+
 		matched := false
 		for _, expected := range opts.ExpectedNames {
 			// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
 			// instead of strings.HasPrefix(strings.ToLower()) which allocates two new strings on the heap.
-			if strings.EqualFold(base, expected) || (len(base) >= len(expected) && strings.EqualFold(base[:len(expected)], expected)) {
+			if strings.EqualFold(baseCompare, expected) || (len(baseCompare) >= len(expected) && strings.EqualFold(baseCompare[:len(expected)], expected)) {
 				matched = true
 				verifiedNames = append(verifiedNames, expected)
 			}
