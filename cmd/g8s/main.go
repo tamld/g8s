@@ -746,17 +746,60 @@ func runReceipt(args []string) {
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 		_ = actor
 		_ = jsonMode
+		taskID := fs.String("task", "", "filter by consumer task ID")
+		since := fs.String("since", "", "filter by creation time (e.g., 24h, 7d)")
+		verdict := fs.String("verdict", "", "filter by verdict (active|consumed)")
 		if err := fs.Parse(args[1:]); err != nil {
 			exitUsage("receipt", "list", *traceID, err.Error(), "", *jsonl)
 		}
-		list, err := receipts.ListActiveReceipts()
+
+		var sinceTime time.Time
+		if *since != "" {
+			dur, err := time.ParseDuration(*since)
+			if err != nil {
+				exitUsage("receipt", "list", *traceID, fmt.Sprintf("invalid --since duration: %v", err), "", *jsonl)
+			}
+			sinceTime = time.Now().Add(-dur)
+		}
+
+		list, err := receipts.ListReceipts(*taskID, sinceTime, *verdict)
 		if err != nil {
 			exitRuntime("receipt", "list", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
-		env := cli.NewEnvelope("receipts", "receipt", "list", list)
-		env.TraceID = *traceID
-		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
-			exitRuntime("receipt", "list", *traceID, cli.CodeIO, err, "", *jsonl)
+
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("receipts", "receipt", "list", list)
+			env.TraceID = *traceID
+			if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+				exitRuntime("receipt", "list", *traceID, cli.CodeIO, err, "", *jsonl)
+			}
+			return
+		}
+
+		// Compact table output
+		var td pterm.TableData
+		td = append(td, []string{"RECEIPT ID", "ISSUER", "VERDICT", "CREATED", "EXPIRES", "PATHS"})
+		for _, r := range list {
+			verdictStr := "active"
+			if r.Consumed {
+				verdictStr = "consumed"
+			}
+			paths := strings.Join(r.AllowedPaths, ", ")
+			if len(paths) > 60 {
+				paths = paths[:57] + "..."
+			}
+			td = append(td, []string{
+				r.ReceiptID[:8] + "...",
+				r.Issuer,
+				verdictStr,
+				r.CreatedAt.Format("2006-01-02 15:04"),
+				r.ExpiresAt.Format("2006-01-02 15:04"),
+				paths,
+			})
+		}
+		pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+		if len(list) == 0 {
+			pterm.Info.Println("No receipts found matching criteria")
 		}
 
 	default:
