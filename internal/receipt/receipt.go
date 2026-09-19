@@ -207,6 +207,7 @@ type ReceiptManager interface {
 	ValidateAndConsume(receiptID string, consumerTaskID string) (*WriteReceipt, error)
 	RevokeReceipt(receiptID string) (bool, error)
 	ListActiveReceipts() ([]*WriteReceipt, error)
+	ListReceipts(taskID string, since time.Time, verdict string) ([]*WriteReceipt, error)
 	VerifyReceipt(receiptID string) (*WriteReceipt, error)
 	PurgeExpired(maxAge time.Duration, maxRows int) (int64, error)
 }
@@ -772,6 +773,89 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate active receipts: %w", err)
+	}
+	return out, nil
+}
+
+// ListReceipts returns receipts filtered by task ID, time range, and verdict.
+// If taskID is empty, no task filtering is applied.
+// If since is zero, no time filtering is applied.
+// If verdict is empty, no verdict filtering is applied.
+// This never mutates receipt state.
+func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) ([]*WriteReceipt, error) {
+	query := `SELECT receipt_id, ` + receiptSelectColumns + `
+		FROM write_receipts
+		WHERE 1=1`
+	args := []any{}
+
+	if taskID != "" {
+		query += ` AND consumer_task_id = ?`
+		args = append(args, taskID)
+	}
+	if !since.IsZero() {
+		query += ` AND created_at > ?`
+		args = append(args, timeToUnix(since))
+	}
+	if verdict != "" {
+		query += ` AND (CASE WHEN consumed = 1 THEN 'consumed' ELSE 'active' END) = ?`
+		args = append(args, verdict)
+	}
+	query += ` ORDER BY created_at ASC, receipt_id ASC`
+
+	rows, err := m.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list receipts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*WriteReceipt
+	for rows.Next() {
+		var (
+			receiptID              string
+			issuer                 string
+			pathsJSON              string
+			expiresAt              float64
+			consumed               int
+			storedTask             sql.NullString
+			createdAt              float64
+			approachIdx            sql.NullInt64
+			attemptIdx             sql.NullInt64
+			rcaConfidence          sql.NullFloat64
+			adrPath                sql.NullString
+			envelopeSchemaURI      sql.NullString
+			envelopeFieldOrderJSON sql.NullString
+			envelopeRequiredJSON   sql.NullString
+			rulesetVersion         sql.NullString
+			pipelineDigest         sql.NullString
+			adrRefVal              sql.NullString
+			issuedBy               sql.NullString
+			toolVersion            sql.NullString
+			traceID                sql.NullString
+			actorChainJSON         sql.NullString
+			sourceCommit           sql.NullString
+		)
+		if err := rows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
+			&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
+			&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
+			&rulesetVersion, &pipelineDigest, &adrRefVal,
+			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit,
+		); err != nil {
+			return nil, fmt.Errorf("scan receipt: %w", err)
+		}
+		r, err := scanIntoReceipt(receiptID, pathsJSON, expiresAt, consumed, storedTask, createdAt,
+			approachIdx, attemptIdx, rcaConfidence, adrPath,
+			envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
+			rulesetVersion, pipelineDigest, adrRefVal,
+			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+		)
+		if err != nil {
+			return nil, err
+		}
+		r.Issuer = issuer
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate receipts: %w", err)
 	}
 	return out, nil
 }
