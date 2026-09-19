@@ -797,6 +797,43 @@ func TestReadWorkerResultFallbacks(t *testing.T) {
 	}
 }
 
+func TestReadWorkerResultAGYResult(t *testing.T) {
+	// Case 1: AGY result with ERROR status
+	agyStdout := `{"type":"progress","progress":50}
+{"result":{"status":"ERROR","error":"output token limit exceeded"}}
+`
+	wr := readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	if wr.OK || wr.Status != "failed" || wr.Reason != "output token limit exceeded" {
+		t.Fatalf("expected AGY ERROR result, got %+v", wr)
+	}
+
+	// Case 2: AGY result with SUCCESS status
+	agyStdout = `{"type":"progress","progress":100}
+{"result":{"status":"SUCCESS"}}
+`
+	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	if !wr.OK || wr.Status != "succeeded" {
+		t.Fatalf("expected AGY SUCCESS result, got %+v", wr)
+	}
+
+	// Case 3: AGY result with ERROR status takes precedence over exit code 0
+	agyStdout = `{"result":{"status":"ERROR","error":"rate limited"}}
+`
+	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	if wr.OK || wr.Status != "failed" || wr.Reason != "rate limited" {
+		t.Fatalf("expected AGY ERROR to override exit code 0, got %+v", wr)
+	}
+
+	// Case 4: AGY result without status field falls through to other fallbacks
+	agyStdout = `{"type":"progress","progress":50}
+{"result":{"status":"UNKNOWN"}}
+`
+	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 1)
+	if wr.OK || wr.Status != "failed" {
+		t.Fatalf("expected fallback failure for unknown AGY status, got %+v", wr)
+	}
+}
+
 func TestExportReceiptCentralizedEvidenceLake(t *testing.T) {
 	tempEvidenceDir := t.TempDir()
 	env := newWorkerEnv(t, nil)

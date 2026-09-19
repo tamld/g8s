@@ -24,6 +24,34 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 )
 
+// agyResult represents the AGY tool's JSONL result format.
+// The AGY tool outputs a stream of JSON objects, with the final one containing
+// the result status. We parse the last valid JSON object with a "result" field.
+type agyResult struct {
+	Result struct {
+		Status string `json:"status"`
+		Error  string `json:"error,omitempty"`
+	} `json:"result"`
+}
+
+// parseAGYResult scans the captured stdout for AGY JSONL result format.
+// Returns the last AGY result found, or nil if none.
+func parseAGYResult(stdoutText string) *agyResult {
+	lines := strings.Split(stdoutText, "\n")
+	var lastResult *agyResult
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ar agyResult
+		if json.Unmarshal([]byte(line), &ar) == nil && ar.Result.Status != "" {
+			lastResult = &ar
+		}
+	}
+	return lastResult
+}
+
 // WorkerControlPlane is the narrow control-plane surface the supervisor needs.
 // *controlplane.Store satisfies it directly.
 type WorkerControlPlane interface {
@@ -577,6 +605,25 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 			Status:  "failed",
 			Reason:  reason,
 			Summary: fmt.Sprintf("child process returned error envelope: %s", reason),
+		}
+	}
+
+	// Check for AGY result format (JSONL with result.status field)
+	if agyRes := parseAGYResult(stdoutText); agyRes != nil {
+		if agyRes.Result.Status == "ERROR" {
+			return workerResult{
+				OK:      false,
+				Status:  "failed",
+				Reason:  agyRes.Result.Error,
+				Summary: fmt.Sprintf("AGY returned error result: %s", agyRes.Result.Error),
+			}
+		}
+		if agyRes.Result.Status == "SUCCESS" {
+			return workerResult{
+				OK:      true,
+				Status:  "succeeded",
+				Summary: "AGY completed successfully",
+			}
 		}
 	}
 
