@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/pathutil"
 )
 
@@ -258,7 +260,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	}
 	taskID := submitEnv.Data.TaskID
 
-	// 2. Run worker --once (should claim and succeed)
+	// 2. Run worker --once (should claim and execute)
 	workerCmd := exec.Command(binPath, "worker", "--once", "--json")
 	workerCmd.Env = envVars
 	workerOut, err := workerCmd.CombinedOutput()
@@ -266,7 +268,7 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("worker failed: %v\nOutput: %s", err, string(workerOut))
 	}
 
-	// 3. Inspect task via g8s get
+	// 3. Inspect task via g8s get - should be WORKER_COMPLETED
 	getCmd := exec.Command(binPath, "get", taskID, "--json")
 	getCmd.Env = envVars
 	getOut, err := getCmd.CombinedOutput()
@@ -283,11 +285,53 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	if err := json.Unmarshal(getOut, &getEnv); err != nil {
 		t.Fatalf("unmarshal get output: %v\nOutput: %s", err, string(getOut))
 	}
-	if getEnv.Data.State != "SUCCEEDED" {
-		t.Fatalf("task state = %q, want SUCCEEDED\nGet output: %s\nWorker output: %s", getEnv.Data.State, string(getOut), string(workerOut))
+	if getEnv.Data.State != "WORKER_COMPLETED" {
+		t.Fatalf("task state = %q, want WORKER_COMPLETED\nGet output: %s\nWorker output: %s", getEnv.Data.State, string(getOut), string(workerOut))
 	}
 
-	// 4. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
+	// 4. Supervisor accepts result via controlplane Store
+	dbPath := filepath.Join(stateDir, "g8s.db")
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("open controlplane: %v", err)
+	}
+	defer store.Close()
+
+	// Verify task exists before accepting
+	task, err := store.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("GetTask before accept: %v", err)
+	}
+	if task == nil {
+		t.Fatalf("task %s not found in controlplane", taskID)
+	}
+	t.Logf("Task state before accept: %s", task.State)
+
+	if err := store.AcceptResult(context.Background(), taskID, "supervisor-e2e"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+
+	// 5. Verify final state is SUPERVISOR_ACCEPTED
+	getCmd2 := exec.Command(binPath, "get", taskID, "--json")
+	getCmd2.Env = envVars
+	getOut2, err := getCmd2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get failed: %v\nOutput: %s", err, string(getOut2))
+	}
+	var getEnv2 struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+			State  string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getOut2, &getEnv2); err != nil {
+		t.Fatalf("unmarshal get output: %v\nOutput: %s", err, string(getOut2))
+	}
+	if getEnv2.Data.State != "SUPERVISOR_ACCEPTED" {
+		t.Fatalf("task state = %q, want SUPERVISOR_ACCEPTED\nGet output: %s", getEnv2.Data.State, string(getOut2))
+	}
+
+	// 6. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
 	errProviderJSON := `{
   "version": "1.0",
   "providers": [
@@ -326,32 +370,58 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	workerCmd2.Env = envVars
 	_ = workerCmd2.Run() // worker may exit non-zero when task fails, which is expected
 
-	// Verify task 2 is FAILED
-	getCmd2 := exec.Command(binPath, "get", taskID2, "--json")
-	getCmd2.Env = envVars
-	getOut2, err := getCmd2.CombinedOutput()
+	// Verify task 2 is WORKER_COMPLETED (worker completed execution)
+	getCmd3 := exec.Command(binPath, "get", taskID2, "--json")
+	getCmd3.Env = envVars
+	getOut3, err := getCmd3.CombinedOutput()
 	if err != nil {
-		t.Fatalf("get2 failed: %v\nOutput: %s", err, string(getOut2))
+		t.Fatalf("get3 failed: %v\nOutput: %s", err, string(getOut3))
 	}
 
-	var getEnv2 struct {
+	var getEnv3 struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+			State  string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getOut3, &getEnv3); err != nil {
+		t.Fatalf("unmarshal get3 output: %v", err)
+	}
+	if getEnv3.Data.State != "WORKER_COMPLETED" {
+		t.Fatalf("task state = %q, want WORKER_COMPLETED", getEnv3.Data.State)
+	}
+
+	// Supervisor rejects result (anti-success-theater)
+	if err := store.RejectResult(context.Background(), taskID2, "supervisor-e2e", "error envelope in stdout", ""); err != nil {
+		t.Fatalf("RejectResult: %v", err)
+	}
+
+	// Verify final state is SUPERVISOR_REJECTED
+	getCmd4 := exec.Command(binPath, "get", taskID2, "--json")
+	getCmd4.Env = envVars
+	getOut4, err := getCmd4.CombinedOutput()
+	if err != nil {
+		t.Fatalf("get4 failed: %v\nOutput: %s", err, string(getOut4))
+	}
+
+	var getEnv4 struct {
 		Data struct {
 			TaskID    string  `json:"task_id"`
 			State     string  `json:"state"`
 			LastError *string `json:"last_error"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(getOut2, &getEnv2); err != nil {
-		t.Fatalf("unmarshal get2 output: %v", err)
+	if err := json.Unmarshal(getOut4, &getEnv4); err != nil {
+		t.Fatalf("unmarshal get4 output: %v", err)
 	}
-	if getEnv2.Data.State == "SUCCEEDED" {
+	if getEnv4.Data.State == "SUCCEEDED" {
 		t.Fatalf("anti-success-theater violation: task state is SUCCEEDED despite error envelope on stdout")
 	}
-	if getEnv2.Data.State != "FAILED" {
-		t.Fatalf("task state = %q, want FAILED", getEnv2.Data.State)
+	if getEnv4.Data.State != "SUPERVISOR_REJECTED" {
+		t.Fatalf("task state = %q, want SUPERVISOR_REJECTED", getEnv4.Data.State)
 	}
-	if getEnv2.Data.LastError == nil || !strings.Contains(*getEnv2.Data.LastError, "unknown command") {
-		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv2.Data.LastError)
+	if getEnv4.Data.LastError == nil || !strings.Contains(*getEnv4.Data.LastError, "unknown command") {
+		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv4.Data.LastError)
 	}
 }
 

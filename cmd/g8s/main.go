@@ -1537,7 +1537,21 @@ func runWorker(args []string) {
 			_ = model
 		}
 		if *once {
-			if task.State == "FAILED" {
+			// Check task result for failure (non-retryable)
+			// task.State is WORKER_COMPLETED; result JSON indicates success/failure
+			isFailure := false
+			if len(task.Result) > 0 {
+				var resultMap map[string]any
+				if json.Unmarshal(task.Result, &resultMap) == nil {
+					// Check for error envelope or ok=false
+					if kind, _ := resultMap["kind"].(string); kind == "error" {
+						isFailure = true
+					} else if ok, _ := resultMap["ok"].(bool); !ok {
+						isFailure = true
+					}
+				}
+			}
+			if isFailure {
 				os.Exit(1)
 			}
 			return
