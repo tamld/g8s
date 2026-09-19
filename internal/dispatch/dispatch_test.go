@@ -353,8 +353,30 @@ func TestSanitizeGenericCredentialsAndBackticks(t *testing.T) {
 }
 
 func TestSanitizeKeywordSentence(t *testing.T) {
+	// Standalone "password" word should NOT be redacted (no assignment)
 	got := SanitizeOutput("The password should be rotated.")
-	want := "The password <REDACTED>."
+	want := "The password should be rotated."
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	// But "password=value" SHOULD be redacted
+	got = SanitizeOutput("password=secret123")
+	want = "password=<REDACTED>"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	// And "password: value" SHOULD be redacted
+	got = SanitizeOutput("password: secret123")
+	want = "password=<REDACTED>"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	// JSONL with password_hash should NOT be corrupted
+	got = SanitizeOutput(`{"password_hash": "abc123"}`)
+	want = `{"password_hash": "abc123"}`
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

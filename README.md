@@ -21,7 +21,7 @@
 
 `g8s` (pronounced **"Gates"** — short for **G**atekeeper**s**) is a standalone, single-binary runtime designed for **Two-Tier Multi-Agent Systems**. It enables high-tier "Brain" orchestrators (Claude 3.7 Sonnet / Opus, GPT-4o, DeepSeek R1) to safely delegate heavy mechanical tasks (code scanning, unit test synthesis, MCP mapping, artifact extraction) to fast, lightweight CLI workers (Antigravity `agy`, Claude Code CLI, Gemini CLI, Ollama) behind **strict role contracts, sandboxes, and cryptographic/time-limited write receipts**.
 
-**v0.2.0 (2026-09-15)** delivers the complete **DELTA-11 Orchestration Roadmap** — three concerns landed:
+**v0.9.2 (2026-09-18)** delivers the complete **DELTA-11 Orchestration Roadmap** plus **DEBT Tech Debt Cleanup** — four concerns landed:
 
 | Concern | Deliverable | Status |
 |---------|-------------|--------|
@@ -82,6 +82,23 @@
 * **📜 Decoupled Brief Dispatch Workflow**: Contract-driven brief issuance and atomic consumption (`g8s brief-issue`, `g8s brief-consume`).
 * **🔌 Stdio MCP Protocol (11 tools)**: Plugs directly into Claude Desktop, Cursor, Codex, and Windsurf via standard JSON-RPC. Tools: `g8s_dispatch`, `g8s_get_task`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`.
 * **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: one-command hardened background service installation for macOS (`launchd`); Linux (`systemd`) and Windows backends are on the roadmap.
+
+---
+
+## 🚫 Non-Goals (Explicit)
+
+What g8s will **NOT** ship, and why:
+
+| Area | Non-Goal | Rationale |
+|------|----------|-----------|
+| **Container Orchestration** | Kubernetes/nomad integration, pod scheduling, service mesh | Out of scope — g8s is a *process* harness, not a cluster orchestrator. Use k8s/nomad to run g8s workers. |
+| **Secret Management** | Vault, AWS Secrets Manager, GCP Secret Manager integration | Workers run with `read_only`/`automation_read` by design; credentials never enter the worker sandbox. If you need secrets, inject via environment *before* g8s starts. |
+| **Multi-Tenancy** | Built-in RBAC, namespaces, quotas, audit logging for SaaS | Single-tenant CLI tool. Multi-tenancy is an orchestration-layer concern (e.g., each tenant gets their own g8s binary + state dir). |
+| **GUI/Web Dashboard** | Web UI for task monitoring, receipt visualization | CLI-first. Evidence lake (JSONL receipts) + `g8s status` + `g8s receipt list/verify` provide programmatic observability. Build a dashboard on top if needed. |
+| **Worker SDK** | Go/Rust/Python SDK for custom workers | Workers are *any CLI* that speaks the AIC protocol (stdin/stdout JSON). No SDK needed — just implement the contract. |
+| **Model Hosting** | Built-in LLM serving, inference, model registry | g8s delegates to external CLIs (`agy`, `claude`, `gemini`, `ollama`). Model hosting is their problem. |
+| **Distributed Tracing** | OpenTelemetry, Jaeger, Zipkin integration | Single-binary, single-process. Add tracing at the orchestration layer if needed. |
+| **Configuration Management** | Consul, etcd, ZooKeeper for config sync | Config is local files (`providers.json`, `state dir`). GitOps for team config. |
 
 ---
 

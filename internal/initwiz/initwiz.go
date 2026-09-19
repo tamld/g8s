@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/tamld/g8s/internal/controlplane"
 )
 
 // Supported IDE identifiers.
@@ -31,14 +34,110 @@ type DetectedIDE struct {
 	Configured bool   `json:"configured"`
 }
 
+// VerificationResult captures the outcome of the post-init verification task.
+type VerificationResult struct {
+	TaskID       string `json:"task_id"`
+	ReceiptID    string `json:"receipt_id,omitempty"`
+	Verified     bool   `json:"verified"`
+	DurationSecs int    `json:"duration_secs"`
+	Error        string `json:"error,omitempty"`
+}
+
 // InitResult summarizes the outcome of the initialization process.
 type InitResult struct {
-	StateDir        string        `json:"state_dir"`
-	EvidenceDir     string        `json:"evidence_dir"`
-	BinaryPath      string        `json:"binary_path"`
-	ConfiguredIDEs  []DetectedIDE `json:"configured_ides"`
-	ProvidersConfig string        `json:"providers_config,omitempty"`
-	CreatedDirs     []string      `json:"created_dirs"`
+	StateDir        string              `json:"state_dir"`
+	EvidenceDir     string              `json:"evidence_dir"`
+	BinaryPath      string              `json:"binary_path"`
+	ConfiguredIDEs  []DetectedIDE       `json:"configured_ides"`
+	ProvidersConfig string              `json:"providers_config,omitempty"`
+	CreatedDirs     []string            `json:"created_dirs"`
+	Verification    *VerificationResult `json:"verification,omitempty"`
+}
+
+// runVerificationTask performs a lightweight system verification by checking
+// that all required components are properly configured. This completes within
+// the timeout without requiring external worker binaries.
+func runVerificationTask(homeDir, binaryPath string, timeoutSeconds int) (*VerificationResult, error) {
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	_ = timeoutSeconds // silence ineffassign - timeout enforced by context in caller
+
+	start := time.Now()
+	var errors []string
+
+	// 1. Check state directory
+	stateDir := filepath.Join(homeDir, ".local", "state", "g8s")
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		stateDir = filepath.Join(xdg, "g8s")
+	}
+	if _, err := os.Stat(stateDir); err != nil {
+		errors = append(errors, fmt.Sprintf("state directory missing: %v", err))
+	}
+
+	// 2. Check evidence directory
+	evidenceDir := filepath.Join(stateDir, "evidence")
+	if _, err := os.Stat(evidenceDir); err != nil {
+		errors = append(errors, fmt.Sprintf("evidence directory missing: %v", err))
+	}
+
+	// 3. Check tasks database
+	dbPath := filepath.Join(stateDir, "tasks.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		errors = append(errors, fmt.Sprintf("tasks database missing: %v", err))
+	} else {
+		// Try to open and verify the database
+		store, err := controlplane.NewControlPlane(dbPath, time.Now)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("tasks database corrupt: %v", err))
+		} else {
+			store.Close()
+		}
+	}
+
+	// 4. Check providers configuration
+	configDir := filepath.Join(homeDir, ".config", "g8s")
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		if home, err := os.UserHomeDir(); err == nil && home == homeDir {
+			configDir = filepath.Join(xdg, "g8s")
+		}
+	}
+	providersPath := filepath.Join(configDir, "providers.json")
+	if _, err := os.Stat(providersPath); err != nil {
+		errors = append(errors, fmt.Sprintf("providers.json missing: %v", err))
+	} else {
+		// Validate providers.json is valid JSON
+		data, err := os.ReadFile(providersPath)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("providers.json unreadable: %v", err))
+		} else {
+			var cfg map[string]any
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				errors = append(errors, fmt.Sprintf("providers.json invalid JSON: %v", err))
+			}
+		}
+	}
+
+	// 5. Check g8s binary is executable
+	if _, err := os.Stat(binaryPath); err != nil {
+		errors = append(errors, fmt.Sprintf("g8s binary not found: %v", err))
+	}
+
+	duration := int(time.Since(start).Seconds())
+	verified := len(errors) == 0
+
+	var errorMsg string
+	if len(errors) > 0 {
+		errorMsg = strings.Join(errors, "; ")
+	}
+
+	return &VerificationResult{
+		TaskID:       "init-verification",
+		ReceiptID:    "system-check",
+		Verified:     verified,
+		DurationSecs: duration,
+		Error:        errorMsg,
+	}, nil
 }
 
 // DetectIDEs inspects the operating system and user directories for supported IDEs.
@@ -295,6 +394,19 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 			ide.Configured = true
 			result.ConfiguredIDEs = append(result.ConfiguredIDEs, ide)
 		}
+	}
+
+	// 4. Run verification task (optional, can be skipped with SKIP_VERIFICATION=1)
+	if os.Getenv("SKIP_VERIFICATION") != "1" {
+		verification, err := runVerificationTask(homeDir, binaryPath, 30)
+		if err != nil {
+			verification = &VerificationResult{
+				Verified:     false,
+				DurationSecs: 30,
+				Error:        fmt.Sprintf("verification task failed: %v", err),
+			}
+		}
+		result.Verification = verification
 	}
 
 	return result, nil

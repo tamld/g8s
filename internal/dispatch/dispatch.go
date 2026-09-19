@@ -51,7 +51,9 @@ var sensitivePatterns = []struct {
 	{regexp.MustCompile(`postgresql://[^\s"\x60]+`), "postgresql://<REDACTED>"},
 	{regexp.MustCompile(`://[^\s"\x60/:]+:[^\s"\x60/@]+@`), "://<REDACTED>:<REDACTED>@"},
 	{regexp.MustCompile(`specifically \x60[^\x60]+\x60`), "specifically `<REDACTED>`"},
-	{regexp.MustCompile(`(?i)(password|credential|secret)[^.\n]{0,160}`), "${1} <REDACTED>"},
+	// Match credential assignments (key=value, key: value, key="value") but not
+	// standalone words. This avoids corrupting JSONL like {"password_hash": "..."}.
+	{regexp.MustCompile(`(?i)(password|credential|secret|token|api[_-]?key)\s*[:=]\s*["']?[^"'\s,}\]]{3,}`), "${1}=<REDACTED>"},
 }
 
 // violationPattern pairs a read-only contract detector with its class name.

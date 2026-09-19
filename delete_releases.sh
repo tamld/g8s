@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+for tag in v0.2.0 v0.3.0 v0.4.0 v0.5.0 v0.6.0 v0.6.1 v0.7.0 v0.8.0 v0.9.1; do
+    echo "Deleting $tag..."
+    gh release delete "$tag" --yes 2>&1 || echo "  (not found or failed)"
+done

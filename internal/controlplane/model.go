@@ -178,6 +178,10 @@ type Task struct {
 	WorkerName      *string         `json:"worker_name,omitempty"`
 	Iter            int             `json:"iter"`
 
+	// Denial tracking for command lifecycle handling (issue #294)
+	Denied       *bool   `json:"denied,omitempty"`
+	DenialReason *string `json:"denial_reason,omitempty"`
+
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
 	Deduplicated bool `json:"deduplicated,omitempty"`
