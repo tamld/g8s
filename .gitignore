@@ -108,3 +108,4 @@ coverage.out
 # Sandbox runtime metadata (per session, never committed)
 .omo/
 .g8s/
+g8s
