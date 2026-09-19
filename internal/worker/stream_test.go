@@ -107,8 +107,17 @@ func TestSupervisorWithStreamCallbackIntegration(t *testing.T) {
 	if resTask.TaskID != task.TaskID {
 		t.Fatalf("resTask.TaskID = %s, want %s", resTask.TaskID, task.TaskID)
 	}
-	if resTask.State != controlplane.StateSucceeded {
-		t.Fatalf("task.State = %s, want SUCCEEDED", resTask.State)
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if resTask.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("task.State = %s, want WORKER_COMPLETED", resTask.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(ctx, resTask.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	finalTask, _ := env.store.GetTask(ctx, resTask.TaskID)
+	if finalTask.State != controlplane.StateSupervisorAccepted {
+		t.Fatalf("final state = %s, want SUPERVISOR_ACCEPTED", finalTask.State)
 	}
 
 	mu.Lock()

@@ -40,7 +40,7 @@ import (
 //	    structured dispatch contracts and audit trail.
 //	v7 (DEBT-31 pure FSM validator & event log): adds event_log table for
 //	    append-only state transition audit trail.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
@@ -110,14 +110,19 @@ const TaskSchemaVersion = "agy.task.v1"
 
 // Task lifecycle states, mirroring TASK_STATES in the Python baseline and internal/state registry.
 const (
-	StateQueued    = string(state.TaskStateQueued)
-	StateLeased    = string(state.TaskStateLeased)
-	StateRunning   = string(state.TaskStateRunning)
-	StateNeedsInfo = string(state.TaskStateNeedsInfo)
-	StateBlocked   = string(state.TaskStateBlocked)
-	StateSucceeded = string(state.TaskStateSucceeded)
-	StateFailed    = string(state.TaskStateFailed)
-	StateCancelled = string(state.TaskStateCancelled)
+	StateQueued             = string(state.TaskStateQueued)
+	StateLeased             = string(state.TaskStateLeased)
+	StateRunning            = string(state.TaskStateRunning)
+	StateNeedsInfo          = string(state.TaskStateNeedsInfo)
+	StateBlocked            = string(state.TaskStateBlocked)
+	StateWorkerCompleted    = "WORKER_COMPLETED"    // Worker finished, awaiting supervisor acceptance
+	StateOutputInvalid      = "OUTPUT_INVALID"      // Worker completed but output failed validation
+	StateSupervisorAccepted = "SUPERVISOR_ACCEPTED" // Supervisor accepted the result
+	StateSupervisorRejected = "SUPERVISOR_REJECTED" // Supervisor rejected, needs revision
+	StateReviewRequired     = "REVIEW_REQUIRED"     // Needs human review before finalization
+	StateSucceeded          = string(state.TaskStateSucceeded)
+	StateFailed             = string(state.TaskStateFailed)
+	StateCancelled          = string(state.TaskStateCancelled)
 )
 
 // TaskStates enumerates every valid lifecycle state.
@@ -127,6 +132,9 @@ var TaskStates = []string{
 	StateRunning,
 	StateNeedsInfo,
 	StateBlocked,
+	StateWorkerCompleted,
+	StateSupervisorAccepted,
+	StateSupervisorRejected,
 	StateSucceeded,
 	StateFailed,
 	StateCancelled,
@@ -135,9 +143,10 @@ var TaskStates = []string{
 // FinalStates is the set of terminal states; tasks in these states are never
 // reclaimed, requeued, or counted as active.
 var FinalStates = map[string]struct{}{
-	StateSucceeded: {},
-	StateFailed:    {},
-	StateCancelled: {},
+	StateSucceeded:          {},
+	StateFailed:             {},
+	StateCancelled:          {},
+	StateSupervisorAccepted: {}, // Accepted by supervisor, ready for finalization
 }
 
 // IsValidState reports whether state is a recognized lifecycle state.
@@ -182,9 +191,61 @@ type Task struct {
 	Denied       *bool   `json:"denied,omitempty"`
 	DenialReason *string `json:"denial_reason,omitempty"`
 
+	// Result acceptance mechanism (issue #295)
+	// ErrorCallHistory tracks error calls per worker attempt for debugging
+	ErrorCallHistory []ErrorCallRecord `json:"error_call_history,omitempty"`
+	// ResultValidation stores schema/content validation results
+	ResultValidation *ResultValidation `json:"result_validation,omitempty"`
+	// SupervisorFeedback stores supervisor's edit request or additional context
+	SupervisorFeedback *SupervisorFeedback `json:"supervisor_feedback,omitempty"`
+
+	// ContractValidation tracks contract compliance (paths, tools, output size, schema)
+	ContractValidation *ContractValidation `json:"contract_validation,omitempty"`
+
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
 	Deduplicated bool `json:"deduplicated,omitempty"`
+}
+
+// ErrorCallRecord represents one error call in the task's history.
+type ErrorCallRecord struct {
+	Timestamp  float64 `json:"timestamp"`
+	WorkerID   string  `json:"worker_id"`
+	Attempt    int     `json:"attempt"`
+	ErrorType  string  `json:"error_type"`
+	ErrorMsg   string  `json:"error_msg"`
+	StackTrace string  `json:"stack_trace,omitempty"`
+}
+
+// ResultValidation stores the outcome of result schema/content validation.
+type ResultValidation struct {
+	Valid         bool              `json:"valid"`
+	SchemaErrors  []string          `json:"schema_errors,omitempty"`
+	ContentErrors []string          `json:"content_errors,omitempty"`
+	ValidatedAt   float64           `json:"validated_at"`
+	ValidatedBy   string            `json:"validated_by"`
+	Details       map[string]string `json:"details,omitempty"`
+}
+
+// SupervisorFeedback carries supervisor's decision on a worker-completed result.
+type SupervisorFeedback struct {
+	Action        string  `json:"action"` // "accept", "reject", "request_edit"
+	Reason        string  `json:"reason"`
+	AdditionalCtx string  `json:"additional_context,omitempty"`
+	Timestamp     float64 `json:"timestamp"`
+	SupervisorID  string  `json:"supervisor_id"`
+}
+
+// ContractValidation tracks the outcome of contract validation (file access, tools, output size, schema).
+type ContractValidation struct {
+	Valid              bool              `json:"valid"`
+	PathViolations     []string          `json:"path_violations,omitempty"`
+	ToolViolations     []string          `json:"tool_violations,omitempty"`
+	OutputSizeViolated bool              `json:"output_size_violated,omitempty"`
+	SchemaErrors       []string          `json:"schema_errors,omitempty"`
+	ValidatedAt        float64           `json:"validated_at"`
+	ValidatedBy        string            `json:"validated_by"`
+	Details            map[string]string `json:"details,omitempty"`
 }
 
 // SubmitTaskRequest is the payload accepted by SubmitTask.
@@ -206,6 +267,16 @@ type SubmitTaskRequest struct {
 	WorktreeID      *string         `json:"worktree_id,omitempty"`
 	WorkerName      *string         `json:"worker_name,omitempty"`
 	Iter            int             `json:"iter,omitempty"`
+
+	// Contract fields for verifiable task execution (issue #289)
+	// AllowedPaths restricts file system access to whitelisted paths
+	AllowedPaths []string `json:"allowed_paths,omitempty"`
+	// AllowedTools restricts executable tools/binaries to whitelisted names
+	AllowedTools []string `json:"allowed_tools,omitempty"`
+	// MaxOutputSize limits the result JSON size in bytes (default 1MB)
+	MaxOutputSize int64 `json:"max_output_size,omitempty"`
+	// OutputSchema is a JSON Schema (Draft 7) for validating result structure
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 }
 
 // TaskResult carries the worker outcome recorded by CompleteTask.
@@ -241,6 +312,14 @@ type ControlPlane interface {
 	ListTasks(ctx context.Context, filter TaskFilter) ([]*Task, error)
 	ListChildTasks(ctx context.Context, parentTaskID string) ([]*Task, error)
 	GetTaskLineage(ctx context.Context, taskID string) ([]*Task, error)
+
+	// Result acceptance mechanism (issue #295)
+	AcceptResult(ctx context.Context, taskID string, supervisorID string) error
+	RejectResult(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error
+	RequestEdit(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error
+	AddErrorCall(ctx context.Context, taskID string, record ErrorCallRecord) error
+	ValidateResult(ctx context.Context, taskID string, validation ResultValidation) error
+	ValidateContract(ctx context.Context, taskID string, validation ContractValidation) error
 }
 
 // canonicalJSON serializes value deterministically: map keys sorted

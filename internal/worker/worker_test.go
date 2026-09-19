@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -237,8 +238,17 @@ func TestRunOnceHappyPathSucceedsAndCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if final.State != controlplane.StateSucceeded {
-		t.Fatalf("state = %q, want SUCCEEDED", final.State)
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(context.Background(), final.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	acceptedTask, _ := env.store.GetTask(context.Background(), final.TaskID)
+	if acceptedTask.State != controlplane.StateSupervisorAccepted {
+		t.Fatalf("final state = %q, want SUPERVISOR_ACCEPTED", acceptedTask.State)
 	}
 	attemptDir := filepath.Join(env.runDir, final.TaskID, "attempt-1")
 	receiptRaw, err := os.ReadFile(filepath.Join(attemptDir, "receipt.json"))
@@ -252,7 +262,9 @@ func TestRunOnceHappyPathSucceedsAndCleansUp(t *testing.T) {
 	if err := json.Unmarshal(receiptRaw, &receiptView); err != nil {
 		t.Fatalf("decode receipt.json: %v", err)
 	}
-	if receiptView.TaskID != final.TaskID || receiptView.State != "SUCCEEDED" {
+	// Receipt is generated at WORKER_COMPLETED state (when ExportReceipt is called)
+	// Final state SUPERVISOR_ACCEPTED is in the database
+	if receiptView.TaskID != final.TaskID || receiptView.State != "WORKER_COMPLETED" {
 		t.Fatalf("receipt snapshot mismatch: %+v", receiptView)
 	}
 	if _, err := os.Stat(filepath.Join(attemptDir, "prompt.txt")); !os.IsNotExist(err) {
@@ -304,14 +316,27 @@ func TestRunOnceTimeoutFailsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if final.State != controlplane.StateFailed {
-		t.Fatalf("state = %q, want FAILED", final.State)
+	// Timeout is retryable -> transitions to WorkerCompleted with prompt kept, no receipt
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
 	}
 	if final.LastError == nil || !strings.Contains(*final.LastError, "execution deadline exceeded") {
 		t.Fatalf("last_error = %v, want deadline message", final.LastError)
 	}
 	if hang.terminated.Load() == 0 {
 		t.Fatal("timeout must terminate the child process group")
+	}
+	// Verify prompt kept for retry (no receipt sealed)
+	if final.ReceiptHash != nil {
+		t.Fatal("retryable failure must not seal a receipt")
+	}
+	// Supervisor requests edit (requeue) -> transitions to NEEDS_INFO
+	if err := env.store.RequestEdit(context.Background(), final.TaskID, "supervisor-1", "timeout, requeue", ""); err != nil {
+		t.Fatalf("RequestEdit: %v", err)
+	}
+	requeued, _ := env.store.GetTask(context.Background(), final.TaskID)
+	if requeued.State != controlplane.StateNeedsInfo {
+		t.Fatalf("state = %q, want NEEDS_INFO after supervisor requeue", requeued.State)
 	}
 }
 
@@ -356,8 +381,13 @@ func TestRunOnceCapturesLargeNonUTF8OutputWithoutDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if final.State != controlplane.StateSucceeded {
-		t.Fatalf("state = %q, want SUCCEEDED", final.State)
+	// Successful completion -> transitions to WorkerCompleted
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(context.Background(), final.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(env.runDir, final.TaskID, "attempt-1", "worker.stdout")); !os.IsNotExist(err) {
 		t.Fatal("bounded capture must delete worker.stdout")
@@ -373,14 +403,24 @@ func TestRunOnceSpawnFailureRetriesAndCleansPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if final.State != controlplane.StateQueued {
-		t.Fatalf("state = %q, want QUEUED for retryable spawn failure", final.State)
+	// Spawn failure is retryable -> transitions to WorkerCompleted with prompt kept
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED for retryable spawn failure", final.State)
 	}
 	if final.Attempts != 1 {
 		t.Fatalf("attempts = %d, want 1 consumed", final.Attempts)
 	}
+	// Verify prompt cleaned up (prompt.txt removed but request_json still has prompt_hash)
 	if _, err := os.Stat(filepath.Join(env.runDir, task.TaskID, "attempt-1", "prompt.txt")); !os.IsNotExist(err) {
 		t.Fatal("spawn failure must still remove prompt.txt")
+	}
+	// Supervisor requests edit (requeue) -> transitions to NEEDS_INFO
+	if err := env.store.RequestEdit(context.Background(), final.TaskID, "supervisor-1", "spawn failure, requeue", ""); err != nil {
+		t.Fatalf("RequestEdit: %v", err)
+	}
+	requeued, _ := env.store.GetTask(context.Background(), final.TaskID)
+	if requeued.State != controlplane.StateNeedsInfo {
+		t.Fatalf("state = %q, want NEEDS_INFO after supervisor requeue", requeued.State)
 	}
 }
 
@@ -466,6 +506,7 @@ func TestRetryProducesPerAttemptEvidenceDirs(t *testing.T) {
 	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w1", LeaseSeconds: 600}); err != nil {
 		t.Fatalf("first attempt: %v", err)
 	}
+	// First attempt times out (retryable) -> WORKER_COMPLETED, no receipt
 	// Second attempt succeeds quickly.
 	env.runner.factory = func(opts SpawnOptions) Child {
 		child := newFakeChild(0)
@@ -473,13 +514,30 @@ func TestRetryProducesPerAttemptEvidenceDirs(t *testing.T) {
 		return child
 	}
 	env.sup.clock = time.Now
+	// First attempt timed out (retryable) -> WORKER_COMPLETED, supervisor must requeue
+	if err := env.store.RequeueResult(context.Background(), task.TaskID, "supervisor-1", "timeout, requeue"); err != nil {
+		t.Fatalf("RequeueResult: %v", err)
+	}
 	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w1", LeaseSeconds: 60})
 	if err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
-	if final.State != controlplane.StateSucceeded {
-		t.Fatalf("state = %q, want SUCCEEDED", final.State)
+	if final == nil {
+		t.Fatal("RunOnce returned nil task")
 	}
+	// Successful completion -> transitions to WorkerCompleted
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(context.Background(), final.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	acceptedTask, _ := env.store.GetTask(context.Background(), final.TaskID)
+	if acceptedTask.State != controlplane.StateSupervisorAccepted {
+		t.Fatalf("final state = %q, want SUPERVISOR_ACCEPTED", acceptedTask.State)
+	}
+	// Both attempts should have receipt.json (first attempt: no receipt since retryable, second: receipt)
 	for _, attempt := range []string{"attempt-1", "attempt-2"} {
 		receiptPath := filepath.Join(env.runDir, task.TaskID, attempt, "receipt.json")
 		if _, err := os.Stat(receiptPath); err != nil {
@@ -762,8 +820,17 @@ func TestRunOnceStdoutModeSynthesizesSuccessWithoutResultFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if task.State != "SUCCEEDED" {
-		t.Fatalf("state = %q, want SUCCEEDED (stdout mode must synthesize envelope)", task.State)
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if task.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED (stdout mode must synthesize envelope)", task.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(context.Background(), task.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	acceptedTask, _ := env.store.GetTask(context.Background(), task.TaskID)
+	if acceptedTask.State != controlplane.StateSupervisorAccepted {
+		t.Fatalf("final state = %q, want SUPERVISOR_ACCEPTED", acceptedTask.State)
 	}
 }
 
@@ -897,8 +964,17 @@ func TestCommandResolverOverridesContractArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if task.State != "SUCCEEDED" {
-		t.Fatalf("state = %q, want SUCCEEDED", task.State)
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if task.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", task.State)
+	}
+	// Supervisor accepts to finalize
+	if err := env.store.AcceptResult(context.Background(), task.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	acceptedTask, _ := env.store.GetTask(context.Background(), task.TaskID)
+	if acceptedTask.State != controlplane.StateSupervisorAccepted {
+		t.Fatalf("final state = %q, want SUPERVISOR_ACCEPTED", acceptedTask.State)
 	}
 	if !resolved {
 		t.Fatalf("resolver argv not used: %v", env.runner.spawned[0].Argv)
@@ -922,14 +998,86 @@ func TestWorkerFailureDespiteExitZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if task.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", task.State)
+	}
+	// Supervisor rejects to finalize as FAILED
+	if err := env.store.RejectResult(context.Background(), task.TaskID, "supervisor-1", "error envelope in stdout", ""); err != nil {
+		t.Fatalf("RejectResult: %v", err)
+	}
+	rejectedTask, _ := env.store.GetTask(context.Background(), task.TaskID)
+	if rejectedTask.State != controlplane.StateSupervisorRejected {
+		t.Fatalf("final state = %q, want SUPERVISOR_REJECTED", rejectedTask.State)
+	}
+	if rejectedTask.LastError == nil || !strings.Contains(*rejectedTask.LastError, "unknown command") {
+		t.Fatalf("LastError = %v, want error detail", rejectedTask.LastError)
+	}
+}
 
-	if task.State == controlplane.StateSucceeded {
-		t.Fatalf("task must NOT be SUCCEEDED when stdout contains an error envelope (state: %s)", task.State)
+func TestSpawnPermissionDeniedIsNonRetryable(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	submitTask(t, env, "perm-denied-1", 1, map[string]any{})
+	env.runner.err = fmt.Errorf("exec: permission denied: /bin/fake-worker")
+
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w1", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
 	}
-	if task.State != controlplane.StateFailed {
-		t.Fatalf("task.State = %q, want FAILED", task.State)
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
 	}
-	if task.LastError == nil || !strings.Contains(*task.LastError, "unknown command") {
-		t.Fatalf("task.LastError should contain error message, got %v", task.LastError)
+	if final.LastError == nil || !strings.Contains(*final.LastError, "permission denied") {
+		t.Fatalf("last_error = %v, want permission denied message", final.LastError)
+	}
+	// Non-retryable failure should seal a receipt
+	if final.ReceiptHash == nil {
+		t.Fatal("non-retryable failure must seal a receipt")
+	}
+	// Supervisor rejects -> SUPERVISOR_REJECTED
+	if err := env.store.RejectResult(context.Background(), final.TaskID, "supervisor-1", "permission denied", ""); err != nil {
+		t.Fatalf("RejectResult: %v", err)
+	}
+}
+
+func TestSpawnExecutableIdentityMismatchFailsFast(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	submitTask(t, env, "identity-mismatch-1", 1, map[string]any{})
+	env.runner.err = fmt.Errorf("executable identity mismatch: /fake/python3 appears to be Node.js, not Python")
+
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w1", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+	if final.LastError == nil || !strings.Contains(*final.LastError, "executable identity mismatch") {
+		t.Fatalf("last_error = %v, want identity mismatch message", final.LastError)
+	}
+	// Should be non-retryable
+	if final.ReceiptHash != nil {
+		t.Fatal("identity mismatch must not seal a receipt")
+	}
+}
+
+func TestSpawnGenericFailureIsRetryable(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	submitTask(t, env, "generic-fail-1", 2, map[string]any{})
+	env.runner.err = fmt.Errorf("no such file or directory")
+
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w1", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+	// Generic spawn failure should be retryable
+	if final.ReceiptHash != nil {
+		t.Fatal("generic failure must not seal a receipt")
+	}
+	if final.LastError == nil || !strings.Contains(*final.LastError, "no such file") {
+		t.Fatalf("last_error = %v, want generic error message", final.LastError)
 	}
 }

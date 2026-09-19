@@ -39,7 +39,7 @@ func openRawDB(t *testing.T, path string) *sql.DB {
 	return db
 }
 
-const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER"
+const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER, error_call_history|TEXT, result_validation|TEXT, supervisor_feedback|TEXT, allowed_paths|TEXT, allowed_tools|TEXT, max_output_size|INTEGER, output_schema|TEXT, contract_validation|TEXT"
 
 func TestFreshDatabaseSchemaExact(t *testing.T) {
 	_, path := newTestStore(t)
@@ -651,8 +651,9 @@ func TestFinishAttemptSucceedsRedactsPromptAndSealsReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FinishAttempt: %v", err)
 	}
-	if finished.State != StateSucceeded || finished.CompletedAt == nil {
-		t.Fatalf("state=%s completedAt=%v, want SUCCEEDED with timestamp", finished.State, finished.CompletedAt)
+	// Now transitions to WorkerCompleted (awaiting supervisor acceptance)
+	if finished.State != StateWorkerCompleted || finished.CompletedAt == nil {
+		t.Fatalf("state=%s completedAt=%v, want WORKER_COMPLETED with timestamp", finished.State, finished.CompletedAt)
 	}
 	doc := requestDoc(t, finished)
 	if _, hasPrompt := doc["prompt"]; hasPrompt {
@@ -725,15 +726,25 @@ func TestRetryableFinishKeepsPromptWhileQueued(t *testing.T) {
 	mustSubmit(t, s, req)
 	claimed, _ := mustClaimStart(t, s, "worker-1")
 
-	requeued, err := s.FinishAttempt(claimed.TaskID, "worker-1", *claimed.LeaseToken, FinishAttemptParams{
+	workerCompleted, err := s.FinishAttempt(claimed.TaskID, "worker-1", *claimed.LeaseToken, FinishAttemptParams{
 		Result:    json.RawMessage(`{"status":"temporary_failure"}`),
 		Retryable: true,
 	})
 	if err != nil {
 		t.Fatalf("FinishAttempt: %v", err)
 	}
-	if requeued.State != StateQueued {
-		t.Fatalf("state = %s, want QUEUED", requeued.State)
+	// Now transitions to WorkerCompleted first
+	if workerCompleted.State != StateWorkerCompleted {
+		t.Fatalf("state = %s, want WORKER_COMPLETED", workerCompleted.State)
+	}
+	// Supervisor requests edit (requeue) - transitions to NEEDS_INFO
+	err = s.RequestEdit(context.Background(), workerCompleted.TaskID, "supervisor-1", "temporary failure, requeue", "")
+	if err != nil {
+		t.Fatalf("RequestEdit: %v", err)
+	}
+	requeued, _ := s.GetTask(context.Background(), workerCompleted.TaskID)
+	if requeued.State != StateNeedsInfo {
+		t.Fatalf("state = %s, want NEEDS_INFO (after supervisor edit request)", requeued.State)
 	}
 	if _, hasPrompt := requestDoc(t, requeued)["prompt"]; !hasPrompt {
 		t.Error("requeued task must keep its prompt for the next attempt")
@@ -766,8 +777,17 @@ func TestSpecWrappersAdoptCurrentLease(t *testing.T) {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	final, _ := s.GetTask(context.Background(), ok.TaskID)
-	if final.State != StateSucceeded {
-		t.Fatalf("CompleteTask state = %s, want SUCCEEDED", final.State)
+	// CompleteTask now transitions to WorkerCompleted (awaiting supervisor)
+	if final.State != StateWorkerCompleted {
+		t.Fatalf("CompleteTask state = %s, want WORKER_COMPLETED", final.State)
+	}
+	// Supervisor accepts to finalize
+	if err := s.AcceptResult(context.Background(), final.TaskID, "supervisor-1"); err != nil {
+		t.Fatalf("AcceptResult: %v", err)
+	}
+	final, _ = s.GetTask(context.Background(), ok.TaskID)
+	if final.State != StateSupervisorAccepted {
+		t.Fatalf("AcceptResult state = %s, want SUPERVISOR_ACCEPTED", final.State)
 	}
 
 	mustSubmit(t, s, submitReq("wrapper-fail"))
@@ -776,8 +796,17 @@ func TestSpecWrappersAdoptCurrentLease(t *testing.T) {
 		t.Fatalf("FailTask: %v", err)
 	}
 	final, _ = s.GetTask(context.Background(), fail.TaskID)
-	if final.State != StateFailed {
-		t.Fatalf("FailTask state = %s, want FAILED", final.State)
+	// FailTask now transitions to WorkerCompleted
+	if final.State != StateWorkerCompleted {
+		t.Fatalf("FailTask state = %s, want WORKER_COMPLETED", final.State)
+	}
+	// Supervisor rejects to finalize as FAILED
+	if err := s.RejectResult(context.Background(), final.TaskID, "supervisor-1", "provider crashed", ""); err != nil {
+		t.Fatalf("RejectResult: %v", err)
+	}
+	final, _ = s.GetTask(context.Background(), fail.TaskID)
+	if final.State != StateSupervisorRejected {
+		t.Fatalf("RejectResult state = %s, want SUPERVISOR_REJECTED", final.State)
 	}
 	if final.LastError == nil || !strings.Contains(*final.LastError, "(exit code 2)") {
 		t.Errorf("LastError = %v, want exit code detail", final.LastError)

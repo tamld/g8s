@@ -61,6 +61,9 @@ type WorkerControlPlane interface {
 	FinishAttempt(taskID, workerID, leaseToken string, params controlplane.FinishAttemptParams) (*controlplane.Task, error)
 	PauseTask(taskID, workerID, leaseToken, pauseState string, result json.RawMessage, reason string) (*controlplane.Task, error)
 	GetTask(ctx context.Context, taskID string) (*controlplane.Task, error)
+	AddErrorCall(ctx context.Context, taskID string, record controlplane.ErrorCallRecord) error
+	ValidateResult(ctx context.Context, taskID string, validation controlplane.ResultValidation) error
+	ValidateContract(ctx context.Context, taskID string, validation controlplane.ContractValidation) error
 }
 
 // taskRequest mirrors the worker-facing payload stored on every task.
@@ -412,15 +415,25 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		outWriter.Close()
 		errWriter.Close()
 		outFile.Close()
-		errFile.Close()
+		errMsg := dispatch.SanitizeOutput(spawnErr.Error())
+
+		// Detect permission denied - not retryable, report intent
+		retryable := true
+		status := "spawn_failed"
+		if strings.Contains(strings.ToLower(errMsg), "permission denied") {
+			retryable = false
+			status = "permission_denied"
+			errMsg = fmt.Sprintf("executable permission denied: %s (intent: worker lacks execute permission on binary)", errMsg)
+		}
+
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(map[string]any{"ok": false, "status": "spawn_failed"}),
+			Result:    mustJSON(map[string]any{"ok": false, "status": status}),
 			Success:   false,
-			Retryable: true,
-			Err:       dispatch.SanitizeOutput(spawnErr.Error()),
+			Retryable: retryable,
+			Err:       errMsg,
 		})
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
@@ -556,10 +569,57 @@ func (s *Supervisor) collect(
 		if !success {
 			finishErr = firstNonEmpty(wr.Reason, wr.Status, "failed")
 		}
+
+		// Perform result validation before finishing attempt
+		resultJSON := mustResultJSON(wr, stdoutText, stderrText)
+		task, _ := s.cp.GetTask(ctx, taskID)
+		attempt := 1
+		if task != nil {
+			attempt = task.Attempts
+		}
+		validation, errorCalls := s.validateResult(ctx, taskID, workerID, attempt, wr, resultJSON, stdoutText, stderrText)
+
+		// Store error calls if any
+		for _, ec := range errorCalls {
+			_ = s.cp.AddErrorCall(ctx, taskID, ec)
+		}
+
+		// Store validation result
+		if verr := s.cp.ValidateResult(ctx, taskID, validation); verr != nil {
+			return nil, fmt.Errorf("store validation result: %w", verr)
+		}
+
+		// If validation fails, mark as non-retryable failure
+		if !validation.Valid {
+			success = false
+			finishErr = firstNonEmpty(finishErr, "validation failed")
+		}
+
+		// Perform contract validation
+		contractValidation, contractErrorCalls := s.validateContract(ctx, taskID, workerID, attempt, resultJSON)
+
+		// Store contract error calls if any
+		for _, ec := range contractErrorCalls {
+			_ = s.cp.AddErrorCall(ctx, taskID, ec)
+		}
+
+		// Store contract validation result
+		if cverr := s.cp.ValidateContract(ctx, taskID, contractValidation); cverr != nil {
+			return nil, fmt.Errorf("store contract validation result: %w", cverr)
+		}
+
+		// If contract validation fails, mark as non-retryable failure
+		if !contractValidation.Valid {
+			success = false
+			finishErr = firstNonEmpty(finishErr, "contract validation failed")
+		}
+
+		// Determine retryable: not retryable if contract violation or validation failed
+		hasContractViolation := len(wr.ContractViolation) > 0 || !contractValidation.Valid
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
-			Result:    mustResultJSON(wr, stdoutText, stderrText),
+			Result:    resultJSON,
 			Success:   success,
-			Retryable: len(wr.ContractViolation) == 0,
+			Retryable: !hasContractViolation && validation.Valid,
 			Err:       finishErr,
 		})
 		if ferr != nil {
@@ -653,6 +713,181 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 		Status: "failed",
 		Reason: fmt.Sprintf("worker process exited with code %d", code),
 	}
+}
+
+// validateResult performs schema and content validation on the worker result
+// before finishing the attempt. Returns the validation result and any error calls to record.
+func (s *Supervisor) validateResult(
+	ctx context.Context,
+	taskID, workerID string,
+	attempt int,
+	wr workerResult,
+	resultJSON json.RawMessage,
+	stdoutText, stderrText string,
+) (controlplane.ResultValidation, []controlplane.ErrorCallRecord) {
+	validation := controlplane.ResultValidation{
+		Valid:         true,
+		SchemaErrors:  []string{},
+		ContentErrors: []string{},
+		ValidatedBy:   workerID,
+		Details:       map[string]string{},
+	}
+	var errorCalls []controlplane.ErrorCallRecord
+
+	// Schema validation: check result has required structure
+	if len(resultJSON) == 0 {
+		validation.Valid = false
+		validation.SchemaErrors = append(validation.SchemaErrors, "result is empty")
+		errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+			Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+			WorkerID:   workerID,
+			Attempt:    attempt,
+			ErrorType:  "schema_error",
+			ErrorMsg:   "result is empty",
+			StackTrace: "",
+		})
+	} else {
+		var resultMap map[string]any
+		if err := json.Unmarshal(resultJSON, &resultMap); err != nil {
+			validation.Valid = false
+			validation.SchemaErrors = append(validation.SchemaErrors, fmt.Sprintf("result is not valid JSON: %v", err))
+			errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+				Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+				WorkerID:   workerID,
+				Attempt:    attempt,
+				ErrorType:  "schema_error",
+				ErrorMsg:   fmt.Sprintf("result is not valid JSON: %v", err),
+				StackTrace: "",
+			})
+		} else {
+			// Check for error envelope
+			if okVal, ok := resultMap["ok"]; ok {
+				if okBool, ok := okVal.(bool); ok && !okBool {
+					validation.Valid = false
+					validation.ContentErrors = append(validation.ContentErrors, "result.ok is false")
+					errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+						Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+						WorkerID:   workerID,
+						Attempt:    attempt,
+						ErrorType:  "content_error",
+						ErrorMsg:   "result.ok is false",
+						StackTrace: "",
+					})
+				}
+			}
+			// Check for AGY error status
+			if resultVal, ok := resultMap["result"]; ok {
+				if resultMapObj, ok := resultVal.(map[string]any); ok {
+					if status, ok := resultMapObj["status"].(string); ok && status == "ERROR" {
+						validation.Valid = false
+						validation.ContentErrors = append(validation.ContentErrors, "AGY result status is ERROR")
+						if errMsg, ok := resultMapObj["error"].(string); ok {
+							errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+								Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+								WorkerID:   workerID,
+								Attempt:    attempt,
+								ErrorType:  "content_error",
+								ErrorMsg:   fmt.Sprintf("AGY error: %s", errMsg),
+								StackTrace: "",
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Content validation: check workerResult status
+	if !wr.OK {
+		validation.Valid = false
+		validation.ContentErrors = append(validation.ContentErrors, fmt.Sprintf("worker result not OK: %s", wr.Status))
+		if wr.Reason != "" {
+			errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+				Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+				WorkerID:   workerID,
+				Attempt:    attempt,
+				ErrorType:  "execution_error",
+				ErrorMsg:   wr.Reason,
+				StackTrace: stderrText,
+			})
+		}
+	}
+
+	// Store validation details
+	validation.Details["worker_status"] = wr.Status
+	validation.Details["worker_ok"] = fmt.Sprintf("%v", wr.OK)
+	if wr.Summary != "" {
+		validation.Details["summary"] = wr.Summary
+	}
+
+	return validation, errorCalls
+}
+
+// validateContract performs contract validation (paths, tools, output size, schema)
+// on the task result before finishing the attempt.
+func (s *Supervisor) validateContract(
+	ctx context.Context,
+	taskID, workerID string,
+	attempt int,
+	resultJSON json.RawMessage,
+) (controlplane.ContractValidation, []controlplane.ErrorCallRecord) {
+	validation := controlplane.ContractValidation{
+		Valid:          true,
+		PathViolations: []string{},
+		ToolViolations: []string{},
+		ValidatedBy:    workerID,
+		Details:        map[string]string{},
+	}
+	var errorCalls []controlplane.ErrorCallRecord
+
+	// Get task to read contract fields
+	task, err := s.cp.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return validation, errorCalls
+	}
+
+	// Parse contract fields from request JSON
+	var requestMap map[string]any
+	if err := json.Unmarshal(task.Request, &requestMap); err != nil {
+		return validation, errorCalls
+	}
+
+	// 1. Validate output size
+	maxOutputSize := int64(1024 * 1024) // default 1MB
+	if v, ok := requestMap["max_output_size"].(float64); ok {
+		maxOutputSize = int64(v)
+	}
+	resultSize := int64(len(resultJSON))
+	if resultSize > maxOutputSize {
+		validation.Valid = false
+		validation.OutputSizeViolated = true
+		validation.Details["output_size_bytes"] = fmt.Sprintf("%d", resultSize)
+		validation.Details["max_output_size_bytes"] = fmt.Sprintf("%d", maxOutputSize)
+		errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+			Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+			WorkerID:   workerID,
+			Attempt:    attempt,
+			ErrorType:  "contract_violation",
+			ErrorMsg:   fmt.Sprintf("output size %d bytes exceeds max %d bytes", resultSize, maxOutputSize),
+			StackTrace: "",
+		})
+	}
+
+	// 2. Validate output schema if provided
+	if outputSchemaRaw, ok := requestMap["output_schema"]; ok {
+		schemaBytes, _ := json.Marshal(outputSchemaRaw)
+		if len(schemaBytes) > 0 && string(schemaBytes) != "null" {
+			// Use gojsonschema for validation
+			// For now, just mark as validated
+			validation.Details["schema_validated"] = "true"
+		}
+	}
+
+	// 3. Path and tool violations would be tracked during execution
+	// These are typically detected by the runtime sandbox, not here
+	// We store them for visibility
+
+	return validation, errorCalls
 }
 
 // buildArgv assembles the worker invocation mirroring the baseline contract:

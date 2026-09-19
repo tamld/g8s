@@ -278,7 +278,8 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	}
 
 	now := float64(s.clock().UnixNano()) / 1e9
-	nextState := determineNextState(task, params)
+	_ = determineNextState(task, params) // kept for documentation of original logic
+	nextState := StateWorkerCompleted
 
 	resultCanonical, err := canonicalJSON(params.Result)
 	if err != nil {
@@ -289,18 +290,18 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 		return nil, err
 	}
 
-	isFinal := nextState == StateSucceeded || nextState == StateCancelled || nextState == StateFailed
-	var completedAt any
-	if isFinal {
-		completedAt = now
-	}
+	// Transition to WorkerCompleted instead of directly to final state
+	// Supervisor will then accept/reject the result
 	res, err := tx.Exec(
 		`UPDATE tasks SET state = ?, result_json = ?, result_hash = ?, updated_at = ?,
 		 completed_at = ?, last_error = ?, lease_owner = NULL, lease_token = NULL,
-		 lease_expires_at = NULL, receipt_hash = NULL
+		 lease_expires_at = NULL, receipt_hash = NULL,
+		 error_call_history = ?, result_validation = ?, supervisor_feedback = NULL
 		 WHERE task_id = ? AND lease_owner = ? AND lease_token = ? AND state = 'RUNNING'`,
 		nextState, resultCanonical, resultHash, now,
-		completedAt, params.Err, taskID, workerID, leaseToken)
+		now, params.Err, // Use now for completed_at
+		"[]", "{}", // empty error_call_history and result_validation for now
+		taskID, workerID, leaseToken)
 	if err != nil {
 		return nil, err
 	}
@@ -308,32 +309,45 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 		return nil, errors.New(finishStaleLeaseMsg)
 	}
 
+	isRetryable := params.Retryable && !params.Success
 	requestJSON := marshalStoredRequest(task.Request)
-	if isFinal {
+
+	fresh := *task
+	fresh.State = nextState
+	fresh.ResultHash = &resultHash
+	fresh.CompletedAt = &now
+
+	if isRetryable {
+		// Retryable: keep prompt for next attempt, don't seal receipt
+		if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
+			"next_state":  nextState,
+			"success":     params.Success,
+			"retryable":   params.Retryable,
+			"result_hash": resultHash,
+		}, now); err != nil {
+			return nil, err
+		}
+	} else {
+		// Non-retryable (success or permanent failure): redact prompt, seal receipt
 		if err := redactPayload(&requestJSON); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(`UPDATE tasks SET request_json = ? WHERE task_id = ?`, requestJSON, taskID); err != nil {
 			return nil, err
 		}
-	}
 
-	fresh := *task
-	fresh.State = nextState
-	fresh.ResultHash = &resultHash
-	if isFinal {
-		fresh.CompletedAt = &now
-	}
-	if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
-		"next_state":  nextState,
-		"success":     params.Success,
-		"retryable":   params.Retryable,
-		"result_hash": resultHash,
-	}, now); err != nil {
-		return nil, err
-	}
+		if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
+			"next_state":  nextState,
+			"success":     params.Success,
+			"retryable":   params.Retryable,
+			"result_hash": resultHash,
+		}, now); err != nil {
+			return nil, err
+		}
 
-	if isFinal {
+		// Build receipt for non-retryable WorkerCompleted state
+		// Use the redacted request for receipt
+		fresh.Request = json.RawMessage(requestJSON)
 		payload, receiptHash, err := buildReceiptTx(tx, &fresh)
 		if err != nil {
 			return nil, err
@@ -701,6 +715,242 @@ func (s *Store) Events(_ context.Context, taskID string) ([]TaskEvent, error) {
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+// AcceptResult transitions a WORKER_COMPLETED task to SUPERVISOR_ACCEPTED.
+func (s *Store) AcceptResult(ctx context.Context, taskID string, supervisorID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
+	var state string
+	if err := row.Scan(&state); err != nil {
+		return err
+	}
+	if state != StateWorkerCompleted {
+		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	feedback := SupervisorFeedback{
+		Action:       "accept",
+		Reason:       "result accepted by supervisor",
+		Timestamp:    now,
+		SupervisorID: supervisorID,
+	}
+	feedbackJSON, _ := json.Marshal(feedback)
+
+	_, err = tx.Exec(
+		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+		StateSupervisorAccepted, string(feedbackJSON), now, taskID)
+	if err != nil {
+		return err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "result_accepted", supervisorID, map[string]any{
+		"previous_state": state,
+	}, now); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// RejectResult transitions a WORKER_COMPLETED task to SUPERVISOR_REJECTED.
+func (s *Store) RejectResult(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
+	var state string
+	if err := row.Scan(&state); err != nil {
+		return err
+	}
+	if state != StateWorkerCompleted {
+		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	feedback := SupervisorFeedback{
+		Action:        "reject",
+		Reason:        reason,
+		AdditionalCtx: additionalCtx,
+		Timestamp:     now,
+		SupervisorID:  supervisorID,
+	}
+	feedbackJSON, _ := json.Marshal(feedback)
+
+	_, err = tx.Exec(
+		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+		StateSupervisorRejected, string(feedbackJSON), now, taskID)
+	if err != nil {
+		return err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "result_rejected", supervisorID, map[string]any{
+		"previous_state":     state,
+		"reason":             reason,
+		"additional_context": additionalCtx,
+	}, now); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// RequestEdit transitions a WORKER_COMPLETED task to SUPERVISOR_REJECTED with edit request.
+func (s *Store) RequestEdit(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
+	var state string
+	if err := row.Scan(&state); err != nil {
+		return err
+	}
+	if state != StateWorkerCompleted {
+		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	feedback := SupervisorFeedback{
+		Action:        "request_edit",
+		Reason:        reason,
+		AdditionalCtx: additionalCtx,
+		Timestamp:     now,
+		SupervisorID:  supervisorID,
+	}
+	feedbackJSON, _ := json.Marshal(feedback)
+
+	// Transition back to NEEDS_INFO so worker can retry with new context
+	_, err = tx.Exec(
+		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+		StateNeedsInfo, string(feedbackJSON), now, taskID)
+	if err != nil {
+		return err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "edit_requested", supervisorID, map[string]any{
+		"previous_state":     state,
+		"reason":             reason,
+		"additional_context": additionalCtx,
+	}, now); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// RequeueResult transitions a WORKER_COMPLETED task back to QUEUED for retry.
+// This is used for automatic retries of retryable failures (timeout, spawn failure).
+func (s *Store) RequeueResult(ctx context.Context, taskID string, supervisorID string, reason string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
+	var state string
+	if err := row.Scan(&state); err != nil {
+		return err
+	}
+	if state != StateWorkerCompleted {
+		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	feedback := SupervisorFeedback{
+		Action:       "requeue",
+		Reason:       reason,
+		Timestamp:    now,
+		SupervisorID: supervisorID,
+	}
+	feedbackJSON, _ := json.Marshal(feedback)
+
+	// Transition back to QUEUED for automatic retry
+	_, err = tx.Exec(
+		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+		StateQueued, string(feedbackJSON), now, taskID)
+	if err != nil {
+		return err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "requeued", supervisorID, map[string]any{
+		"previous_state": state,
+		"reason":         reason,
+	}, now); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// AddErrorCall appends an error call record to the task's error history.
+func (s *Store) AddErrorCall(ctx context.Context, taskID string, record ErrorCallRecord) error {
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return ErrUnknownTask
+	}
+
+	history := task.ErrorCallHistory
+	if history == nil {
+		history = []ErrorCallRecord{}
+	}
+	history = append(history, record)
+
+	historyJSON, err := json.Marshal(history)
+	if err != nil {
+		return err
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE tasks SET error_call_history = ?, updated_at = ? WHERE task_id = ?`,
+		string(historyJSON), now, taskID)
+	return err
+}
+
+// ValidateResult stores the result validation outcome.
+func (s *Store) ValidateResult(ctx context.Context, taskID string, validation ResultValidation) error {
+	validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
+	validationJSON, err := json.Marshal(validation)
+	if err != nil {
+		return err
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE tasks SET result_validation = ?, updated_at = ? WHERE task_id = ?`,
+		string(validationJSON), now, taskID)
+	return err
+}
+
+// ValidateContract stores the contract validation outcome.
+func (s *Store) ValidateContract(ctx context.Context, taskID string, validation ContractValidation) error {
+	validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
+	validationJSON, err := json.Marshal(validation)
+	if err != nil {
+		return err
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE tasks SET contract_validation = ?, updated_at = ? WHERE task_id = ?`,
+		string(validationJSON), now, taskID)
+	return err
 }
 
 // Compile-time guarantee that Store satisfies the full DELTA-03 interface

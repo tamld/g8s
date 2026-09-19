@@ -142,7 +142,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 6 && version != SchemaVersion) {
+	if version < 0 || (version > 7 && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -205,7 +205,8 @@ func applyBaseSchema(conn *sql.Conn) error {
 }
 
 func migrateTasksTable(conn *sql.Conn) error {
-	var hasParent int
+	var hasParent, hasErrorHistory, hasValidation, hasFeedback int
+	var hasAllowedPaths, hasAllowedTools, hasMaxOutputSize, hasOutputSchema, hasContractValidation int
 	parentRows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(tasks)")
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns: %w", err)
@@ -220,8 +221,25 @@ func migrateTasksTable(conn *sql.Conn) error {
 		if err := parentRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
 			return fmt.Errorf("scan tasks columns: %w", err)
 		}
-		if name == "parent_task_id" {
+		switch name {
+		case "parent_task_id":
 			hasParent = 1
+		case "error_call_history":
+			hasErrorHistory = 1
+		case "result_validation":
+			hasValidation = 1
+		case "supervisor_feedback":
+			hasFeedback = 1
+		case "allowed_paths":
+			hasAllowedPaths = 1
+		case "allowed_tools":
+			hasAllowedTools = 1
+		case "max_output_size":
+			hasMaxOutputSize = 1
+		case "output_schema":
+			hasOutputSchema = 1
+		case "contract_validation":
+			hasContractValidation = 1
 		}
 	}
 	if err := parentRows.Err(); err != nil {
@@ -231,6 +249,54 @@ func migrateTasksTable(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(context.Background(),
 			"ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(task_id)"); err != nil {
 			return fmt.Errorf("migrate parent_task_id column: %w", err)
+		}
+	}
+	if hasErrorHistory == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN error_call_history TEXT"); err != nil {
+			return fmt.Errorf("migrate error_call_history column: %w", err)
+		}
+	}
+	if hasValidation == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN result_validation TEXT"); err != nil {
+			return fmt.Errorf("migrate result_validation column: %w", err)
+		}
+	}
+	if hasFeedback == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN supervisor_feedback TEXT"); err != nil {
+			return fmt.Errorf("migrate supervisor_feedback column: %w", err)
+		}
+	}
+	if hasAllowedPaths == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN allowed_paths TEXT"); err != nil {
+			return fmt.Errorf("migrate allowed_paths column: %w", err)
+		}
+	}
+	if hasAllowedTools == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN allowed_tools TEXT"); err != nil {
+			return fmt.Errorf("migrate allowed_tools column: %w", err)
+		}
+	}
+	if hasMaxOutputSize == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN max_output_size INTEGER"); err != nil {
+			return fmt.Errorf("migrate max_output_size column: %w", err)
+		}
+	}
+	if hasOutputSchema == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN output_schema TEXT"); err != nil {
+			return fmt.Errorf("migrate output_schema column: %w", err)
+		}
+	}
+	if hasContractValidation == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN contract_validation TEXT"); err != nil {
+			return fmt.Errorf("migrate contract_validation column: %w", err)
 		}
 	}
 	return nil
@@ -536,7 +602,9 @@ const taskColumns = `task_id, parent_task_id, idempotency_key, schema_version, s
 	request_json, request_hash, result_json, result_hash, receipt_hash,
 	attempts, max_attempts, lease_owner, lease_token, lease_expires_at,
 	cancel_requested, created_at, updated_at, completed_at, last_error,
-	orchestrator_id, worktree_id, worker_name, iter`
+	orchestrator_id, worktree_id, worker_name, iter,
+	error_call_history, result_validation, supervisor_feedback,
+	allowed_paths, allowed_tools, max_output_size, output_schema, contract_validation`
 
 // scanTask decodes one tasks row into a Task pointer, translating JSON text
 // columns and integer booleans exactly like _decode_task in the baseline.
@@ -545,12 +613,22 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 	var requestJSON string
 	var resultJSON sql.NullString
 	var cancelRequested int
+	var errorCallHistoryJSON sql.NullString
+	var resultValidationJSON sql.NullString
+	var supervisorFeedbackJSON sql.NullString
+	var allowedPathsJSON sql.NullString
+	var allowedToolsJSON sql.NullString
+	var maxOutputSize sql.NullInt64
+	var outputSchemaJSON sql.NullString
+	var contractValidationJSON sql.NullString
 	err := scanner.Scan(
 		&t.TaskID, &t.ParentTaskID, &t.IdempotencyKey, &t.SchemaVersion, &t.State, &t.Priority,
 		&requestJSON, &t.RequestHash, &resultJSON, &t.ResultHash, &t.ReceiptHash,
 		&t.Attempts, &t.MaxAttempts, &t.LeaseOwner, &t.LeaseToken, &t.LeaseExpiresAt,
 		&cancelRequested, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt, &t.LastError,
 		&t.OrchestratorID, &t.WorktreeID, &t.WorkerName, &t.Iter,
+		&errorCallHistoryJSON, &resultValidationJSON, &supervisorFeedbackJSON,
+		&allowedPathsJSON, &allowedToolsJSON, &maxOutputSize, &outputSchemaJSON, &contractValidationJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -561,6 +639,27 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 	t.Request = json.RawMessage(requestJSON)
 	if resultJSON.Valid && resultJSON.String != "" {
 		t.Result = json.RawMessage(resultJSON.String)
+	}
+	if errorCallHistoryJSON.Valid && errorCallHistoryJSON.String != "" {
+		_ = json.Unmarshal([]byte(errorCallHistoryJSON.String), &t.ErrorCallHistory)
+	}
+	if resultValidationJSON.Valid && resultValidationJSON.String != "" {
+		_ = json.Unmarshal([]byte(resultValidationJSON.String), &t.ResultValidation)
+	}
+	if supervisorFeedbackJSON.Valid && supervisorFeedbackJSON.String != "" {
+		_ = json.Unmarshal([]byte(supervisorFeedbackJSON.String), &t.SupervisorFeedback)
+	}
+	if allowedPathsJSON.Valid && allowedPathsJSON.String != "" {
+		// Contract fields are stored in separate columns, not in request
+		_ = allowedPathsJSON
+	}
+	if allowedToolsJSON.Valid && allowedToolsJSON.String != "" {
+		_ = allowedToolsJSON
+	}
+	_ = maxOutputSize
+	_ = outputSchemaJSON
+	if contractValidationJSON.Valid && contractValidationJSON.String != "" {
+		_ = json.Unmarshal([]byte(contractValidationJSON.String), &t.ContractValidation)
 	}
 	t.CancelRequested = cancelRequested != 0
 	return &t, nil
@@ -652,7 +751,9 @@ const taskColumnsPrefixed = `t.task_id, t.parent_task_id, t.idempotency_key, t.s
 	t.request_json, t.request_hash, t.result_json, t.result_hash, t.receipt_hash,
 	t.attempts, t.max_attempts, t.lease_owner, t.lease_token, t.lease_expires_at,
 	t.cancel_requested, t.created_at, t.updated_at, t.completed_at, t.last_error,
-	t.orchestrator_id, t.worktree_id, t.worker_name, t.iter`
+	t.orchestrator_id, t.worktree_id, t.worker_name, t.iter,
+	t.error_call_history, t.result_validation, t.supervisor_feedback,
+	t.allowed_paths, t.allowed_tools, t.max_output_size, t.output_schema, t.contract_validation`
 
 // GetTaskLineage returns the full ancestry chain of a task up to the root parent,
 // starting with the root task and ending with the requested task.
@@ -740,10 +841,37 @@ func prepareSubmitRequest(req SubmitTaskRequest) (SubmitTaskRequest, string, str
 	if err := ValidateSubmitRequest(req); err != nil {
 		return req, "", "", err
 	}
+
+	// Merge contract fields into payload
 	payload := req.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage("{}")
 	}
+	var payloadMap map[string]any
+	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+		return req, "", "", fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	// Add contract fields to payload
+	if len(req.AllowedPaths) > 0 {
+		payloadMap["allowed_paths"] = req.AllowedPaths
+	}
+	if len(req.AllowedTools) > 0 {
+		payloadMap["allowed_tools"] = req.AllowedTools
+	}
+	if req.MaxOutputSize > 0 {
+		payloadMap["max_output_size"] = req.MaxOutputSize
+	}
+	if len(req.OutputSchema) > 0 {
+		payloadMap["output_schema"] = json.RawMessage(req.OutputSchema)
+	}
+
+	mergedPayload, err := json.Marshal(payloadMap)
+	if err != nil {
+		return req, "", "", fmt.Errorf("marshal merged payload: %w", err)
+	}
+	payload = mergedPayload
+
 	requestJSON, err := canonicalJSON(payload)
 	if err != nil {
 		return req, "", "", fmt.Errorf("canonicalize request: %w", err)
@@ -791,15 +919,29 @@ func checkExistingTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, r
 
 func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, requestJSON string, requestHash string, now float64) (*Task, error) {
 	taskID := uuid.NewString()
+
+	// Extract contract fields from request JSON for column storage
+	var requestMap map[string]any
+	_ = json.Unmarshal([]byte(requestJSON), &requestMap)
+	allowedPathsJSON, _ := json.Marshal(requestMap["allowed_paths"])
+	allowedToolsJSON, _ := json.Marshal(requestMap["allowed_tools"])
+	maxOutputSize := int64(0)
+	if v, ok := requestMap["max_output_size"].(float64); ok {
+		maxOutputSize = int64(v)
+	}
+	outputSchemaJSON, _ := json.Marshal(requestMap["output_schema"])
+
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks(
 			task_id, parent_task_id, idempotency_key, schema_version, state, priority,
 			request_json, request_hash, max_attempts, created_at, updated_at,
-			orchestrator_id, worktree_id, worker_name, iter
-		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			orchestrator_id, worktree_id, worker_name, iter,
+			allowed_paths, allowed_tools, max_output_size, output_schema, contract_validation
+		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, req.ParentTaskID, req.IdempotencyKey, TaskSchemaVersion,
 		req.Priority, requestJSON, requestHash, req.MaxAttempts, now, now,
-		req.OrchestratorID, req.WorktreeID, req.WorkerName, req.Iter)
+		req.OrchestratorID, req.WorktreeID, req.WorkerName, req.Iter,
+		string(allowedPathsJSON), string(allowedToolsJSON), maxOutputSize, string(outputSchemaJSON), "{}")
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
 	}
