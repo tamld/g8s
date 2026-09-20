@@ -29,10 +29,11 @@ func (s *Store) CreateSupervisorTask(ctx context.Context, st SupervisorTaskRow) 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO supervisor_tasks(
 			id, state, envelope_json, approach_idx, attempt_idx,
-			parent_task_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			parent_task_id, created_at, updated_at, session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		st.ID, st.State, st.EnvelopeJSON, st.ApproachIdx, st.AttemptIdx,
 		st.ParentTaskID, floatUnix(createdAt), floatUnix(updatedAt),
+		st.SessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("controlplane: create supervisor task: %w", err)
@@ -47,7 +48,7 @@ func (s *Store) GetSupervisorTask(ctx context.Context, id string) (SupervisorTas
 	}
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, state, envelope_json, approach_idx, attempt_idx,
-		        parent_task_id, created_at, updated_at
+		        parent_task_id, session_id, created_at, updated_at
 		 FROM supervisor_tasks WHERE id = ?`, id,
 	)
 	return scanSupervisorTaskRow(row)
@@ -82,7 +83,7 @@ func (s *Store) UpdateSupervisorTask(ctx context.Context, st SupervisorTaskRow) 
 func (s *Store) ListSupervisorTasks(ctx context.Context) ([]SupervisorTaskRow, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, state, envelope_json, approach_idx, attempt_idx,
-		        parent_task_id, created_at, updated_at
+		        parent_task_id, session_id, created_at, updated_at
 		 FROM supervisor_tasks ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -226,12 +227,13 @@ func scanSupervisorTaskRow(scanner interface{ Scan(...any) error }) (SupervisorT
 	var (
 		st        SupervisorTaskRow
 		parent    sql.NullString
+		sessionID sql.NullString
 		createdAt float64
 		updatedAt float64
 	)
 	err := scanner.Scan(
 		&st.ID, &st.State, &st.EnvelopeJSON, &st.ApproachIdx, &st.AttemptIdx,
-		&parent, &createdAt, &updatedAt,
+		&parent, &sessionID, &createdAt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SupervisorTaskRow{}, fmt.Errorf("%w: not found", ErrUnknownSupervisorTask)
@@ -242,6 +244,10 @@ func scanSupervisorTaskRow(scanner interface{ Scan(...any) error }) (SupervisorT
 	if parent.Valid {
 		v := parent.String
 		st.ParentTaskID = &v
+	}
+	if sessionID.Valid {
+		v := sessionID.String
+		st.SessionID = &v
 	}
 	st.CreatedAt = unixFloat(createdAt)
 	st.UpdatedAt = unixFloat(updatedAt)

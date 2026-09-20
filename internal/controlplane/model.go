@@ -76,6 +76,8 @@ type SupervisorTaskRow struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	ParentTaskID *string
+	// Session ownership and isolation (issue #291)
+	SessionID *string
 }
 
 // SupervisorDecisionRow is one immutable entry in the supervisor audit
@@ -190,6 +192,8 @@ type Task struct {
 	WorktreeID      *string         `json:"worktree_id,omitempty"`
 	WorkerName      *string         `json:"worker_name,omitempty"`
 	Iter            int             `json:"iter"`
+	// Session ownership and isolation (issue #291)
+	SessionID *string `json:"session_id,omitempty"`
 
 	// Denial tracking for command lifecycle handling (issue #294)
 	Denied       *bool   `json:"denied,omitempty"`

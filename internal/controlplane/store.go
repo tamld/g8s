@@ -206,7 +206,7 @@ func applyBaseSchema(conn *sql.Conn) error {
 
 func migrateTasksTable(conn *sql.Conn) error {
 	var hasParent, hasErrorHistory, hasValidation, hasFeedback int
-	var hasAllowedPaths, hasAllowedTools, hasMaxOutputSize, hasOutputSchema, hasContractValidation, hasCheckpointData int
+	var hasAllowedPaths, hasAllowedTools, hasMaxOutputSize, hasOutputSchema, hasContractValidation, hasCheckpointData, hasSessionID int
 	parentRows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(tasks)")
 	if err != nil {
 		return fmt.Errorf("inspect tasks columns: %w", err)
@@ -242,6 +242,8 @@ func migrateTasksTable(conn *sql.Conn) error {
 			hasContractValidation = 1
 		case "checkpoint_data":
 			hasCheckpointData = 1
+		case "session_id":
+			hasSessionID = 1
 		}
 	}
 	if err := parentRows.Err(); err != nil {
@@ -307,6 +309,12 @@ func migrateTasksTable(conn *sql.Conn) error {
 			return fmt.Errorf("migrate checkpoint_data column: %w", err)
 		}
 	}
+	if hasSessionID == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE tasks ADD COLUMN session_id TEXT"); err != nil {
+			return fmt.Errorf("migrate session_id column: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -367,6 +375,7 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 			"id": {}, "state": {}, "envelope_json": {},
 			"approach_idx": {}, "attempt_idx": {},
 			"parent_task_id": {}, "created_at": {}, "updated_at": {},
+			"session_id": {},
 		},
 		"supervisor_decisions": {
 			"id": {}, "task_id": {}, "kind": {},
@@ -613,7 +622,7 @@ const taskColumns = `task_id, parent_task_id, idempotency_key, schema_version, s
 	orchestrator_id, worktree_id, worker_name, iter,
 	error_call_history, result_validation, supervisor_feedback,
 	allowed_paths, allowed_tools, max_output_size, output_schema, contract_validation,
-	checkpoint_data`
+	checkpoint_data, session_id`
 
 // scanTask decodes one tasks row into a Task pointer, translating JSON text
 // columns and integer booleans exactly like _decode_task in the baseline.
@@ -631,6 +640,7 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 	var outputSchemaJSON sql.NullString
 	var contractValidationJSON sql.NullString
 	var checkpointDataJSON sql.NullString
+	var sessionIDJSON sql.NullString
 	err := scanner.Scan(
 		&t.TaskID, &t.ParentTaskID, &t.IdempotencyKey, &t.SchemaVersion, &t.State, &t.Priority,
 		&requestJSON, &t.RequestHash, &resultJSON, &t.ResultHash, &t.ReceiptHash,
@@ -640,6 +650,7 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 		&errorCallHistoryJSON, &resultValidationJSON, &supervisorFeedbackJSON,
 		&allowedPathsJSON, &allowedToolsJSON, &maxOutputSize, &outputSchemaJSON, &contractValidationJSON,
 		&checkpointDataJSON,
+		&sessionIDJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -674,6 +685,9 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 	}
 	if checkpointDataJSON.Valid && checkpointDataJSON.String != "" {
 		_ = json.Unmarshal([]byte(checkpointDataJSON.String), &t.CheckpointData)
+	}
+	if sessionIDJSON.Valid && sessionIDJSON.String != "" {
+		t.SessionID = &sessionIDJSON.String
 	}
 	t.CancelRequested = cancelRequested != 0
 	return &t, nil
@@ -768,7 +782,7 @@ const taskColumnsPrefixed = `t.task_id, t.parent_task_id, t.idempotency_key, t.s
 	t.orchestrator_id, t.worktree_id, t.worker_name, t.iter,
 	t.error_call_history, t.result_validation, t.supervisor_feedback,
 	t.allowed_paths, t.allowed_tools, t.max_output_size, t.output_schema, t.contract_validation,
-	t.checkpoint_data`
+	t.checkpoint_data, t.session_id`
 
 // GetTaskLineage returns the full ancestry chain of a task up to the root parent,
 // starting with the root task and ending with the requested task.

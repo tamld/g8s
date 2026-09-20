@@ -39,7 +39,7 @@ func openRawDB(t *testing.T, path string) *sql.DB {
 	return db
 }
 
-const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER, error_call_history|TEXT, result_validation|TEXT, supervisor_feedback|TEXT, allowed_paths|TEXT, allowed_tools|TEXT, max_output_size|INTEGER, output_schema|TEXT, contract_validation|TEXT, checkpoint_data|TEXT"
+const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER, error_call_history|TEXT, result_validation|TEXT, supervisor_feedback|TEXT, allowed_paths|TEXT, allowed_tools|TEXT, max_output_size|INTEGER, output_schema|TEXT, contract_validation|TEXT, checkpoint_data|TEXT, session_id|TEXT"
 
 func TestFreshDatabaseSchemaExact(t *testing.T) {
 	_, path := newTestStore(t)
