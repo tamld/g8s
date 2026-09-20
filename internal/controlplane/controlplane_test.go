@@ -39,7 +39,7 @@ func openRawDB(t *testing.T, path string) *sql.DB {
 	return db
 }
 
-const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER, error_call_history|TEXT, result_validation|TEXT, supervisor_feedback|TEXT, allowed_paths|TEXT, allowed_tools|TEXT, max_output_size|INTEGER, output_schema|TEXT, contract_validation|TEXT"
+const expectedTaskColumns = "task_id|TEXT, parent_task_id|TEXT, idempotency_key|TEXT, schema_version|TEXT, state|TEXT, priority|INTEGER, request_json|TEXT, request_hash|TEXT, result_json|TEXT, result_hash|TEXT, receipt_hash|TEXT, attempts|INTEGER, max_attempts|INTEGER, lease_owner|TEXT, lease_token|TEXT, lease_expires_at|REAL, cancel_requested|INTEGER, created_at|REAL, updated_at|REAL, completed_at|REAL, last_error|TEXT, orchestrator_id|TEXT, worktree_id|TEXT, worker_name|TEXT, iter|INTEGER, error_call_history|TEXT, result_validation|TEXT, supervisor_feedback|TEXT, allowed_paths|TEXT, allowed_tools|TEXT, max_output_size|INTEGER, output_schema|TEXT, contract_validation|TEXT, checkpoint_data|TEXT"
 
 func TestFreshDatabaseSchemaExact(t *testing.T) {
 	_, path := newTestStore(t)
@@ -185,7 +185,8 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 	}
 
 	raw := openRawDB(t, path)
-	if _, err := raw.Exec("PRAGMA user_version = 9"); err != nil {
+	futureVersion := SchemaVersion + 1
+	if _, err := raw.Exec(fmt.Sprintf("PRAGMA user_version = %d", futureVersion)); err != nil {
 		t.Fatalf("set future version: %v", err)
 	}
 	if err := raw.Close(); err != nil {
@@ -194,7 +195,7 @@ func TestUnsupportedSchemaVersionRejected(t *testing.T) {
 
 	if _, err := NewControlPlane(path, nil); err == nil {
 		t.Fatalf("expected rejection of future schema version")
-	} else if !strings.Contains(err.Error(), fmt.Sprintf("unsupported control-plane schema version 9; expected %d", SchemaVersion)) {
+	} else if !strings.Contains(err.Error(), fmt.Sprintf("unsupported control-plane schema version %d; expected %d", futureVersion, SchemaVersion)) {
 		t.Errorf("error mismatch: %v", err)
 	}
 }
@@ -855,7 +856,7 @@ func TestPauseValidatesStateOwnershipAndRedacts(t *testing.T) {
 	task, token := mustClaimStart(t, s, "worker-1")
 
 	if _, err := s.PauseTask(task.TaskID, "worker-1", token, "FAILED", nil, "nope"); err == nil ||
-		!strings.Contains(err.Error(), "pause state must be NEEDS_INFO or BLOCKED") {
+		!strings.Contains(err.Error(), "pause state must be NEEDS_INFO, BLOCKED, or CHECKPOINTED") {
 		t.Errorf("invalid pause state error = %v", err)
 	}
 	paused, err := s.PauseTask(task.TaskID, "worker-1", token, StateNeedsInfo,

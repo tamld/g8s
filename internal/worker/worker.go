@@ -64,6 +64,10 @@ type WorkerControlPlane interface {
 	AddErrorCall(ctx context.Context, taskID string, record controlplane.ErrorCallRecord) error
 	ValidateResult(ctx context.Context, taskID string, validation controlplane.ResultValidation) error
 	ValidateContract(ctx context.Context, taskID string, validation controlplane.ContractValidation) error
+
+	// Checkpoint/recovery for long-running tasks (issue #290)
+	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *controlplane.CheckpointData) (*controlplane.Task, error)
+	ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leaseToken string, newLeaseSeconds int) (*controlplane.Task, error)
 }
 
 // taskRequest mirrors the worker-facing payload stored on every task.

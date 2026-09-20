@@ -40,7 +40,7 @@ import (
 //	    structured dispatch contracts and audit trail.
 //	v7 (DEBT-31 pure FSM validator & event log): adds event_log table for
 //	    append-only state transition audit trail.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
@@ -120,6 +120,7 @@ const (
 	StateSupervisorAccepted = "SUPERVISOR_ACCEPTED" // Supervisor accepted the result
 	StateSupervisorRejected = "SUPERVISOR_REJECTED" // Supervisor rejected, needs revision
 	StateReviewRequired     = "REVIEW_REQUIRED"     // Needs human review before finalization
+	StateCheckpointed       = "CHECKPOINTED"        // Task paused at checkpoint for recovery
 	StateSucceeded          = string(state.TaskStateSucceeded)
 	StateFailed             = string(state.TaskStateFailed)
 	StateCancelled          = string(state.TaskStateCancelled)
@@ -133,8 +134,11 @@ var TaskStates = []string{
 	StateNeedsInfo,
 	StateBlocked,
 	StateWorkerCompleted,
+	StateOutputInvalid,
 	StateSupervisorAccepted,
 	StateSupervisorRejected,
+	StateReviewRequired,
+	StateCheckpointed,
 	StateSucceeded,
 	StateFailed,
 	StateCancelled,
@@ -202,6 +206,9 @@ type Task struct {
 	// ContractValidation tracks contract compliance (paths, tools, output size, schema)
 	ContractValidation *ContractValidation `json:"contract_validation,omitempty"`
 
+	// Checkpoint data for task recovery (issue #290)
+	CheckpointData *CheckpointData `json:"checkpoint_data,omitempty"`
+
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
 	Deduplicated bool `json:"deduplicated,omitempty"`
@@ -246,6 +253,22 @@ type ContractValidation struct {
 	ValidatedAt        float64           `json:"validated_at"`
 	ValidatedBy        string            `json:"validated_by"`
 	Details            map[string]string `json:"details,omitempty"`
+}
+
+// CheckpointData stores task state for recovery (issue #290)
+type CheckpointData struct {
+	// SourceHashes maps file paths to their content hashes at checkpoint time
+	SourceHashes map[string]string `json:"source_hashes,omitempty"`
+	// WorktreePath is the path to the worktree at checkpoint time
+	WorktreePath string `json:"worktree_path,omitempty"`
+	// CheckpointNumber increments on each checkpoint
+	CheckpointNumber int `json:"checkpoint_number"`
+	// Timestamp when checkpoint was created
+	Timestamp float64 `json:"timestamp"`
+	// WorkerState captures worker-specific state for recovery
+	WorkerState json.RawMessage `json:"worker_state,omitempty"`
+	// CompletedSteps tracks which steps have been completed
+	CompletedSteps []string `json:"completed_steps,omitempty"`
 }
 
 // SubmitTaskRequest is the payload accepted by SubmitTask.
@@ -320,6 +343,10 @@ type ControlPlane interface {
 	AddErrorCall(ctx context.Context, taskID string, record ErrorCallRecord) error
 	ValidateResult(ctx context.Context, taskID string, validation ResultValidation) error
 	ValidateContract(ctx context.Context, taskID string, validation ContractValidation) error
+
+	// Checkpoint/recovery for long-running tasks (issue #290)
+	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *CheckpointData) (*Task, error)
+	ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leaseToken string, newLeaseSeconds int) (*Task, error)
 }
 
 // canonicalJSON serializes value deterministically: map keys sorted

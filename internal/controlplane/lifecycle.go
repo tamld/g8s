@@ -487,12 +487,12 @@ func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
 	return tx.Commit()
 }
 
-// PauseTask moves a RUNNING lease into NEEDS_INFO or BLOCKED, always redacting
+// PauseTask moves a RUNNING lease into NEEDS_INFO, BLOCKED, or CHECKPOINTED, always redacting
 // the prompt and sealing a receipt even though paused states are not final
 // (baseline semantics: paused work is frozen evidence).
 func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, result json.RawMessage, reason string) (*Task, error) {
-	if pauseState != StateNeedsInfo && pauseState != StateBlocked {
-		return nil, errors.New("pause state must be NEEDS_INFO or BLOCKED")
+	if pauseState != StateNeedsInfo && pauseState != StateBlocked && pauseState != StateCheckpointed {
+		return nil, errors.New("pause state must be NEEDS_INFO, BLOCKED, or CHECKPOINTED")
 	}
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
@@ -563,6 +563,98 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 		return nil, err
 	}
 	return s.GetTask(context.Background(), taskID)
+}
+
+// CheckpointTask saves a checkpoint for a RUNNING task, storing source hashes,
+// worktree path, and worker state for recovery. Returns the updated task.
+func (s *Store) CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *CheckpointData) (*Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
+	task, err := scanTask(row)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+	}
+
+	if task.State != StateRunning {
+		return nil, fmt.Errorf("task %s in state %s cannot be checkpointed (must be RUNNING)", taskID, task.State)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	checkpointJSON, err := json.Marshal(checkpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = tx.Exec(
+		`UPDATE tasks SET checkpoint_data = ?, updated_at = ? WHERE task_id = ? AND lease_owner = ? AND lease_token = ?`,
+		string(checkpointJSON), now, taskID, workerID, leaseToken)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "task_checkpointed", workerID, map[string]any{
+		"checkpoint_number": checkpoint.CheckpointNumber,
+		"timestamp":         checkpoint.Timestamp,
+	}, now); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTask(ctx, taskID)
+}
+
+// ResumeFromCheckpoint restores a task from CHECKPOINTED state back to RUNNING.
+func (s *Store) ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leaseToken string, newLeaseSeconds int) (*Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
+	task, err := scanTask(row)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+	}
+
+	if task.State != StateCheckpointed {
+		return nil, fmt.Errorf("task %s in state %s cannot be resumed from checkpoint (must be CHECKPOINTED)", taskID, task.State)
+	}
+
+	now := float64(s.clock().UnixNano()) / 1e9
+	leaseExpiresAt := now + float64(newLeaseSeconds)
+
+	_, err = tx.Exec(
+		`UPDATE tasks SET state = ?, lease_owner = ?, lease_token = ?, lease_expires_at = ?, updated_at = ?
+		 WHERE task_id = ? AND state = ?`,
+		StateRunning, workerID, leaseToken, leaseExpiresAt, now, taskID, StateCheckpointed)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := insertTaskEvent(tx, taskID, "checkpoint_resumed", workerID, map[string]any{
+		"new_lease_seconds": newLeaseSeconds,
+	}, now); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTask(ctx, taskID)
 }
 
 // ResumeTask moves a task from NEEDS_INFO or BLOCKED back to QUEUED,
