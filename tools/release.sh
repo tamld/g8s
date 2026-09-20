@@ -50,22 +50,36 @@ EOF
 }
 
 DRY_RUN=0
-if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
-    usage
-    exit 0
-fi
+VERSION_ARG=""
 
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN=1
-    shift
-fi
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        *)
+            if [ -z "$VERSION_ARG" ]; then
+                VERSION_ARG="$1"
+            else
+                echo -e "${RED}Error: Unexpected argument: $1${NC}" >&2
+                usage
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
 
-if [[ $# -lt 1 ]]; then
+if [ -z "$VERSION_ARG" ]; then
     usage
     exit 1
 fi
-
-VERSION_ARG="$1"
 
 # Get current version from cmd/g8s/version.go
 CURRENT_VERSION=$(grep 'Version' cmd/g8s/version.go | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
