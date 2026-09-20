@@ -156,15 +156,22 @@ if ! bash tools/ci_doc_contract_check.sh; then
 fi
 pass "Doc-code contracts synchronized"
 
-# 7. Pure-Go Vet Gate
-step "7/11" "Running Pure-Go Vet Gate (CGO_ENABLED=0)..."
+# 7. Version Sync Gate
+step "7/11" "Running Version Sync Check..."
+if ! bash tools/ci_version_sync_check.sh; then
+    fail "Version sync check failed."
+fi
+pass "Version sync verified"
+
+# 8. Pure-Go Vet Gate
+step "8/12" "Running Pure-Go Vet Gate (CGO_ENABLED=0)..."
 if ! CGO_ENABLED=0 go vet ./...; then
     fail "go vet reported errors."
 fi
 pass "go vet clean"
 
-# 8. GolangCI-Lint Quality Gate
-step "8/11" "Running GolangCI-Lint Quality Gate..."
+# 9. GolangCI-Lint Quality Gate
+step "9/12" "Running GolangCI-Lint Quality Gate..."
 LINTER_BIN=""
 if command -v golangci-lint >/dev/null 2>&1; then
     LINTER_BIN="golangci-lint"
@@ -181,8 +188,8 @@ else
     echo -e "  ${YELLOW}⚠ golangci-lint not installed, skipping staticcheck/errcheck linter pass${NC}"
 fi
 
-# 9. Dual-Pass Test Suite
-step "9/11" "Running Dual-Pass Test Suite..."
+# 10. Dual-Pass Test Suite
+step "10/12" "Running Dual-Pass Test Suite..."
 echo "  -> Pass 1: Pure-Go (Zero-CGO)..."
 if ! CGO_ENABLED=0 go test -count=1 ./...; then
     fail "CGO_ENABLED=0 tests failed."
@@ -199,15 +206,15 @@ else
     echo "  -> Pass 2: Skipped (fast mode)"
 fi
 
-# 10. Dogfooding CI Roundtrip
-step "10/11" "Running Dogfooding Roundtrip Gate..."
+# 11. Dogfooding CI Roundtrip
+step "11/12" "Running Dogfooding Roundtrip Gate..."
 if ! make dogfood; then
     fail "Dogfooding roundtrip failed."
 fi
 pass "Dogfooding roundtrip verified"
 
-# 11. Cross-Platform Compilation Gate
-step "11/11" "Running Cross-Platform Build Gate..."
+# 12. Cross-Platform Compilation Gate
+step "12/12" "Running Cross-Platform Build Gate..."
 if [ "$FAST_MODE" -eq 0 ]; then
     if ! make verify-cross-platform; then
         fail "Cross-platform build failed."
