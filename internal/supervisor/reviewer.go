@@ -4,6 +4,12 @@
 package supervisor
 
 import (
+	"context"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/tamld/g8s/internal/orchestrator"
 )
 
@@ -110,4 +116,93 @@ func ReviewReceipt(receipt orchestrator.Receipt, envelope TaskEnvelope, r Review
 		Reason:    "receipt OK + clean scope + commit recorded",
 		Validated: validated,
 	}
+}
+
+// RealReviewer validates receipts by running tests on modified packages.
+// It replaces StubReviewer for production use.
+type RealReviewer struct {
+	Timeout       time.Duration
+	MaxOutputSize int64
+}
+
+// NewRealReviewer creates a reviewer with bounded execution limits.
+// Default: 30s timeout, 1MB output cap.
+func NewRealReviewer() *RealReviewer {
+	return &RealReviewer{
+		Timeout:       30 * time.Second,
+		MaxOutputSize: 1024 * 1024,
+	}
+}
+
+// Validate runs the scope gate and test gate.
+// Scope gate: already enforced by orchestrator via diffScope (receipt.ScopeViolations).
+// Test gate: runs `go test` on packages containing modified .go files.
+func (r *RealReviewer) Validate(env TaskEnvelope, receipt orchestrator.Receipt) (map[string]bool, error) {
+	out := make(map[string]bool, len(env.SelectedFields))
+	for _, f := range env.SelectedFields {
+		out[f] = false
+	}
+
+	// Test gate: run tests on modified Go packages
+	testPassed, err := r.runTestGate(receipt)
+	if err != nil {
+		return out, err
+	}
+
+	if !testPassed {
+		return out, nil
+	}
+
+	// All gates passed
+	for _, f := range env.SelectedFields {
+		out[f] = true
+	}
+	return out, nil
+}
+
+// runTestGate runs `go test` on packages containing modified .go files.
+// Returns true if all tests pass (or no Go files to test).
+func (r *RealReviewer) runTestGate(receipt orchestrator.Receipt) (bool, error) {
+	// Collect unique packages from modified .go files
+	packages := r.collectPackages(receipt.FilesModified)
+	if len(packages) == 0 {
+		return true, nil // No Go files to test
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
+	defer cancel()
+
+	for _, pkg := range packages {
+		cmd := exec.CommandContext(ctx, "go", "test", pkg)
+		cmd.Dir = filepath.Dir(pkg) // Run from package directory
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			// Test failed
+			return false, nil
+		}
+		// Check output size
+		if int64(len(output)) > r.MaxOutputSize {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// collectPackages extracts unique package paths from modified .go files.
+// A package path is the directory containing the .go file.
+func (r *RealReviewer) collectPackages(files []string) []string {
+	pkgSet := make(map[string]struct{})
+	for _, f := range files {
+		if strings.HasSuffix(f, ".go") {
+			dir := filepath.Dir(f)
+			if dir != "." {
+				pkgSet[dir] = struct{}{}
+			}
+		}
+	}
+	pkgs := make([]string, 0, len(pkgSet))
+	for p := range pkgSet {
+		pkgs = append(pkgs, p)
+	}
+	return pkgs
 }
