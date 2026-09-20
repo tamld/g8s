@@ -307,6 +307,23 @@ func OpenAPISpec() map[string]any {
 					},
 				},
 			},
+			"/api/v1/system/metrics": map[string]any{
+				"get": map[string]any{
+					"summary":     "Get system-wide effectiveness metrics",
+					"description": "Returns aggregated system-wide effectiveness metrics including task throughput, latency, success rates, worker utilization, and session metrics",
+					"operationId": "getSystemMetrics",
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "System-wide metrics",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{"$ref": "#/components/schemas/SystemMetrics"},
+								},
+							},
+						},
+					},
+				},
+			},
 			"/api/v1/briefs": map[string]any{
 				"get": map[string]any{
 					"summary":     "List briefs",
@@ -434,6 +451,32 @@ func OpenAPISpec() map[string]any {
 						"avg_approaches_to_success":  map[string]any{"type": "number"},
 						"escalation_rate":            map[string]any{"type": "number"},
 						"avg_cycle_duration_seconds": map[string]any{"type": "number"},
+					},
+				},
+				"SystemMetrics": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"tasks_completed_total":                 map[string]any{"type": "integer", "format": "int64"},
+						"tasks_failed_total":                    map[string]any{"type": "integer", "format": "int64"},
+						"tasks_cancelled_total":                 map[string]any{"type": "integer", "format": "int64"},
+						"tasks_queued_current":                  map[string]any{"type": "integer"},
+						"tasks_running_current":                 map[string]any{"type": "integer"},
+						"avg_queue_latency_seconds":             map[string]any{"type": "number"},
+						"avg_execution_seconds":                 map[string]any{"type": "number"},
+						"task_success_rate":                     map[string]any{"type": "number"},
+						"task_failure_rate":                     map[string]any{"type": "number"},
+						"task_cancellation_rate":                map[string]any{"type": "number"},
+						"active_workers":                        map[string]any{"type": "integer"},
+						"worker_utilization":                    map[string]any{"type": "number"},
+						"active_sessions":                       map[string]any{"type": "integer"},
+						"tasks_per_session":                     map[string]any{"type": "number"},
+						"supervisor_total_runs":                 map[string]any{"type": "integer"},
+						"supervisor_first_attempt_success_rate": map[string]any{"type": "number"},
+						"supervisor_avg_attempts_to_success":    map[string]any{"type": "number"},
+						"supervisor_avg_approaches_to_success":  map[string]any{"type": "number"},
+						"supervisor_escalation_rate":            map[string]any{"type": "number"},
+						"supervisor_avg_cycle_seconds":          map[string]any{"type": "number"},
+						"collected_at":                          map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 				"Brief": map[string]any{

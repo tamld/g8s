@@ -40,7 +40,9 @@ import (
 //	    structured dispatch contracts and audit trail.
 //	v7 (DEBT-31 pure FSM validator & event log): adds event_log table for
 //	    append-only state transition audit trail.
-const SchemaVersion = 9
+//	v8 (Issue #291): adds session_id to tasks and supervisor_tasks, adds
+//	    session_quotas table for per-session quota tracking.
+const SchemaVersion = 10
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
@@ -294,6 +296,8 @@ type SubmitTaskRequest struct {
 	WorktreeID      *string         `json:"worktree_id,omitempty"`
 	WorkerName      *string         `json:"worker_name,omitempty"`
 	Iter            int             `json:"iter,omitempty"`
+	// Session ownership and isolation (issue #291)
+	SessionID *string `json:"session_id,omitempty"`
 
 	// Contract fields for verifiable task execution (issue #289)
 	// AllowedPaths restricts file system access to whitelisted paths
@@ -314,8 +318,9 @@ type TaskResult struct {
 
 // TaskFilter narrows ListTasks results; zero value lists every state.
 type TaskFilter struct {
-	State *string
-	Limit int
+	State     *string
+	Limit     int
+	SessionID *string
 }
 
 // BriefFilter narrows ListBriefs results; zero value lists every status.

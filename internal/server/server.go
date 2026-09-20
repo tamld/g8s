@@ -79,6 +79,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/supervisor", s.handleSupervisor)
 	mux.HandleFunc("/api/v1/supervisor/", s.handleSupervisorByID)
 	mux.HandleFunc("/api/v1/supervisor/metrics", s.handleSupervisorMetrics)
+	mux.HandleFunc("/api/v1/system/metrics", s.handleSystemMetrics)
 	mux.HandleFunc("/api/v1/briefs", s.handleBriefs)
 	mux.HandleFunc("/api/v1/briefs/", s.handleBriefByID)
 }
@@ -224,13 +225,25 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Collect supervisor metrics
 	agg, err := supervisor.Aggregate(s.store, ctx, supervisor.AggregateOptions{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Collect system-wide metrics
+	collector := supervisor.NewSystemMetricsCollector(s.store, nil)
+	sysMetrics, err := collector.Collect(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+
+	// Supervisor metrics
 	fmt.Fprintf(w, "# HELP g8s_supervisor_total_runs Total number of supervisor runs\n")
 	fmt.Fprintf(w, "# TYPE g8s_supervisor_total_runs counter\n")
 	fmt.Fprintf(w, "g8s_supervisor_total_runs %d\n", agg.TotalRuns)
@@ -254,6 +267,51 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP g8s_supervisor_avg_cycle_seconds Average cycle duration in seconds\n")
 	fmt.Fprintf(w, "# TYPE g8s_supervisor_avg_cycle_seconds gauge\n")
 	fmt.Fprintf(w, "g8s_supervisor_avg_cycle_seconds %.4f\n", agg.AvgCycleSeconds)
+
+	// System-wide effectiveness metrics
+	fmt.Fprintf(w, "# HELP g8s_tasks_completed_total Total number of tasks completed\n")
+	fmt.Fprintf(w, "# TYPE g8s_tasks_completed_total counter\n")
+	fmt.Fprintf(w, "g8s_tasks_completed_total %d\n", sysMetrics.TasksCompletedTotal)
+
+	fmt.Fprintf(w, "# HELP g8s_tasks_failed_total Total number of tasks failed\n")
+	fmt.Fprintf(w, "# TYPE g8s_tasks_failed_total counter\n")
+	fmt.Fprintf(w, "g8s_tasks_failed_total %d\n", sysMetrics.TasksFailedTotal)
+
+	fmt.Fprintf(w, "# HELP g8s_tasks_cancelled_total Total number of tasks cancelled\n")
+	fmt.Fprintf(w, "# TYPE g8s_tasks_cancelled_total counter\n")
+	fmt.Fprintf(w, "g8s_tasks_cancelled_total %d\n", sysMetrics.TasksCancelledTotal)
+
+	fmt.Fprintf(w, "# HELP g8s_tasks_queued_current Current number of queued tasks\n")
+	fmt.Fprintf(w, "# TYPE g8s_tasks_queued_current gauge\n")
+	fmt.Fprintf(w, "g8s_tasks_queued_current %d\n", sysMetrics.TasksQueuedCurrent)
+
+	fmt.Fprintf(w, "# HELP g8s_tasks_running_current Current number of running tasks\n")
+	fmt.Fprintf(w, "# TYPE g8s_tasks_running_current gauge\n")
+	fmt.Fprintf(w, "g8s_tasks_running_current %d\n", sysMetrics.TasksRunningCurrent)
+
+	fmt.Fprintf(w, "# HELP g8s_task_success_rate Task success rate (0-1)\n")
+	fmt.Fprintf(w, "# TYPE g8s_task_success_rate gauge\n")
+	fmt.Fprintf(w, "g8s_task_success_rate %.4f\n", sysMetrics.TaskSuccessRate)
+
+	fmt.Fprintf(w, "# HELP g8s_task_failure_rate Task failure rate (0-1)\n")
+	fmt.Fprintf(w, "# TYPE g8s_task_failure_rate gauge\n")
+	fmt.Fprintf(w, "g8s_task_failure_rate %.4f\n", sysMetrics.TaskFailureRate)
+
+	fmt.Fprintf(w, "# HELP g8s_avg_queue_latency_seconds Average queue latency in seconds\n")
+	fmt.Fprintf(w, "# TYPE g8s_avg_queue_latency_seconds gauge\n")
+	fmt.Fprintf(w, "g8s_avg_queue_latency_seconds %.4f\n", sysMetrics.AvgQueueLatencySeconds)
+
+	fmt.Fprintf(w, "# HELP g8s_avg_execution_seconds Average execution time in seconds\n")
+	fmt.Fprintf(w, "# TYPE g8s_avg_execution_seconds gauge\n")
+	fmt.Fprintf(w, "g8s_avg_execution_seconds %.4f\n", sysMetrics.AvgExecutionSeconds)
+
+	fmt.Fprintf(w, "# HELP g8s_active_workers Number of active workers\n")
+	fmt.Fprintf(w, "# TYPE g8s_active_workers gauge\n")
+	fmt.Fprintf(w, "g8s_active_workers %d\n", sysMetrics.ActiveWorkers)
+
+	fmt.Fprintf(w, "# HELP g8s_active_sessions Number of active sessions\n")
+	fmt.Fprintf(w, "# TYPE g8s_active_sessions gauge\n")
+	fmt.Fprintf(w, "g8s_active_sessions %d\n", sysMetrics.ActiveSessions)
 }
 
 // handleTasks handles GET /api/v1/tasks and POST /api/v1/tasks.
@@ -522,4 +580,23 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(task)
+}
+
+// handleSystemMetrics handles GET /api/v1/system/metrics.
+func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+	collector := supervisor.NewSystemMetricsCollector(s.store, nil)
+	metrics, err := collector.Collect(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metrics)
 }

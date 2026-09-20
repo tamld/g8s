@@ -54,6 +54,22 @@ func (s *Store) GetSupervisorTask(ctx context.Context, id string) (SupervisorTas
 	return scanSupervisorTaskRow(row)
 }
 
+// GetSupervisorTaskInSession returns the row only if it belongs to the given session.
+func (s *Store) GetSupervisorTaskInSession(ctx context.Context, id, sessionID string) (SupervisorTaskRow, error) {
+	if strings.TrimSpace(id) == "" {
+		return SupervisorTaskRow{}, errors.New("controlplane: supervisor task id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return SupervisorTaskRow{}, errors.New("controlplane: session_id is required")
+	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, state, envelope_json, approach_idx, attempt_idx,
+		        parent_task_id, session_id, created_at, updated_at
+		 FROM supervisor_tasks WHERE id = ? AND session_id = ?`, id, sessionID,
+	)
+	return scanSupervisorTaskRow(row)
+}
+
 // UpdateSupervisorTask overwrites the mutable columns (state, envelope_json,
 // approach_idx, attempt_idx, updated_at). updated_at is reset to the clock.
 // Returns ErrUnknownSupervisorTask if no such id.
@@ -61,14 +77,19 @@ func (s *Store) UpdateSupervisorTask(ctx context.Context, st SupervisorTaskRow) 
 	if strings.TrimSpace(st.ID) == "" {
 		return errors.New("controlplane: supervisor task id is required")
 	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE supervisor_tasks
+	query := `UPDATE supervisor_tasks
 		 SET state = ?, envelope_json = ?, approach_idx = ?, attempt_idx = ?,
 		     updated_at = ?
-		 WHERE id = ?`,
+		 WHERE id = ?`
+	args := []any{
 		st.State, st.EnvelopeJSON, st.ApproachIdx, st.AttemptIdx,
 		floatUnix(s.clock()), st.ID,
-	)
+	}
+	if st.SessionID != nil && *st.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, *st.SessionID)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("controlplane: update supervisor task: %w", err)
 	}
@@ -88,6 +109,36 @@ func (s *Store) ListSupervisorTasks(ctx context.Context) ([]SupervisorTaskRow, e
 	)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: list supervisor tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SupervisorTaskRow
+	for rows.Next() {
+		row, err := scanSupervisorTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("controlplane: iterate supervisor tasks: %w", err)
+	}
+	return out, nil
+}
+
+// ListSupervisorTasksInSession returns supervisor tasks for a specific session.
+func (s *Store) ListSupervisorTasksInSession(ctx context.Context, sessionID string) ([]SupervisorTaskRow, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("controlplane: session_id is required")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, state, envelope_json, approach_idx, attempt_idx,
+		        parent_task_id, session_id, created_at, updated_at
+		 FROM supervisor_tasks WHERE session_id = ? ORDER BY created_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: list supervisor tasks in session: %w", err)
 	}
 	defer rows.Close()
 

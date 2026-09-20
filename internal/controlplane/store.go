@@ -142,7 +142,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 8 && version != SchemaVersion) {
+	if version < 0 || (version > SchemaVersion && version != SchemaVersion) {
 		return fmt.Errorf("unsupported control-plane schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -193,6 +193,13 @@ func applyBaseSchema(conn *sql.Conn) error {
 			singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
 			owner TEXT NOT NULL,
 			expires_at REAL NOT NULL,
+			updated_at REAL NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_quotas (
+			session_id TEXT PRIMARY KEY,
+			max_concurrent_tasks INTEGER NOT NULL DEFAULT 10,
+			max_tasks_per_hour INTEGER NOT NULL DEFAULT 100,
+			created_at REAL NOT NULL,
 			updated_at REAL NOT NULL
 		)`,
 	}
@@ -701,6 +708,14 @@ func (s *Store) GetTask(_ context.Context, taskID string) (*Task, error) {
 	return scanTask(row)
 }
 
+// GetTaskInSession returns a task only if it belongs to the given session.
+func (s *Store) GetTaskInSession(_ context.Context, taskID, sessionID string) (*Task, error) {
+	row := s.db.QueryRow(
+		"SELECT "+taskColumns+" FROM tasks WHERE task_id = ? AND session_id = ?", taskID, sessionID,
+	)
+	return scanTask(row)
+}
+
 // ListTasks returns up to filter.Limit newest tasks, optionally narrowed to
 // one state. limit must be between 1 and 200; unknown states are rejected.
 func (s *Store) ListTasks(_ context.Context, filter TaskFilter) ([]*Task, error) {
@@ -718,11 +733,21 @@ func (s *Store) ListTasks(_ context.Context, filter TaskFilter) ([]*Task, error)
 		}
 		stateSet = true
 	}
+	sessionSet := filter.SessionID != nil && *filter.SessionID != ""
+
 	query := "SELECT " + taskColumns + " FROM tasks"
 	args := []any{}
+	whereClauses := []string{}
 	if stateSet {
-		query += " WHERE state = ?"
+		whereClauses = append(whereClauses, "state = ?")
 		args = append(args, *filter.State)
+	}
+	if sessionSet {
+		whereClauses = append(whereClauses, "session_id = ?")
+		args = append(args, *filter.SessionID)
+	}
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 	query += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, limit)
@@ -758,6 +783,38 @@ func (s *Store) ListChildTasks(ctx context.Context, parentTaskID string) ([]*Tas
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list child tasks for %s: %w", parentTaskID, err)
+	}
+	defer rows.Close()
+
+	var out []*Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate child tasks: %w", err)
+	}
+	return out, nil
+}
+
+// ListChildTasksInSession returns all direct subtasks where parent_task_id = parentTaskID
+// and session_id matches, ordered chronologically by created_at.
+func (s *Store) ListChildTasksInSession(ctx context.Context, parentTaskID, sessionID string) ([]*Task, error) {
+	if strings.TrimSpace(parentTaskID) == "" {
+		return nil, errors.New("parent_task_id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session_id is required")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+taskColumns+" FROM tasks WHERE parent_task_id = ? AND session_id = ? ORDER BY created_at ASC",
+		parentTaskID, sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list child tasks for %s in session %s: %w", parentTaskID, sessionID, err)
 	}
 	defer rows.Close()
 
@@ -830,6 +887,50 @@ ORDER BY lt.depth DESC;`
 	return lineage, nil
 }
 
+// GetTaskLineageInSession returns the full ancestry chain of a task within a session.
+func (s *Store) GetTaskLineageInSession(ctx context.Context, taskID, sessionID string) ([]*Task, error) {
+	if taskID == "" || sessionID == "" {
+		return nil, nil
+	}
+
+	query := `
+WITH RECURSIVE lineage_tree(task_id, parent_task_id, depth) AS (
+    SELECT task_id, parent_task_id, 0
+    FROM tasks
+    WHERE task_id = ? AND session_id = ?
+    UNION ALL
+    SELECT t.task_id, t.parent_task_id, lt.depth + 1
+    FROM tasks t
+    JOIN lineage_tree lt ON t.task_id = lt.parent_task_id
+    WHERE lt.depth < 1000 AND t.session_id = ?
+)
+SELECT ` + taskColumnsPrefixed + `
+FROM tasks t
+JOIN lineage_tree lt ON t.task_id = lt.task_id
+ORDER BY lt.depth DESC;`
+
+	rows, err := s.db.QueryContext(ctx, query, taskID, sessionID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("query task lineage in session: %w", err)
+	}
+	defer rows.Close()
+
+	var lineage []*Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan lineage task: %w", err)
+		}
+		if t != nil {
+			lineage = append(lineage, t)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task lineage: %w", err)
+	}
+	return lineage, nil
+}
+
 // ActiveTaskCount reports how many tasks currently hold a LEASED or RUNNING
 // state. It deliberately ignores any page size used by ListTasks, matching
 // active_task_count in the Python baseline.
@@ -840,6 +941,23 @@ func (s *Store) ActiveTaskCount(ctx context.Context) (int, error) {
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count active tasks: %w", err)
+	}
+	return count, nil
+}
+
+// ActiveTaskCountInSession reports how many tasks in a session currently hold
+// a LEASED or RUNNING state.
+func (s *Store) ActiveTaskCountInSession(ctx context.Context, sessionID string) (int, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return 0, errors.New("session_id is required")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM tasks WHERE state IN ('LEASED', 'RUNNING') AND session_id = ?",
+		sessionID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count active tasks in session: %w", err)
 	}
 	return count, nil
 }
@@ -960,17 +1078,24 @@ func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, reque
 	}
 	outputSchemaJSON, _ := json.Marshal(requestMap["output_schema"])
 
+	sessionID := ""
+	if req.SessionID != nil {
+		sessionID = *req.SessionID
+	}
+
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO tasks(
 			task_id, parent_task_id, idempotency_key, schema_version, state, priority,
 			request_json, request_hash, max_attempts, created_at, updated_at,
 			orchestrator_id, worktree_id, worker_name, iter,
-			allowed_paths, allowed_tools, max_output_size, output_schema, contract_validation
-		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			allowed_paths, allowed_tools, max_output_size, output_schema, contract_validation,
+			session_id
+		) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, req.ParentTaskID, req.IdempotencyKey, TaskSchemaVersion,
 		req.Priority, requestJSON, requestHash, req.MaxAttempts, now, now,
 		req.OrchestratorID, req.WorktreeID, req.WorkerName, req.Iter,
-		string(allowedPathsJSON), string(allowedToolsJSON), maxOutputSize, string(outputSchemaJSON), "{}")
+		string(allowedPathsJSON), string(allowedToolsJSON), maxOutputSize, string(outputSchemaJSON), "{}",
+		sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
 	}
@@ -1096,6 +1221,83 @@ func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSec
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
 		ORDER BY priority DESC, created_at ASC
 		LIMIT 1`)
+	candidate, scanErr := scanTask(row)
+	if scanErr != nil {
+		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
+	}
+	if candidate == nil {
+		return nil, tx.Commit()
+	}
+
+	leaseToken := uuid.NewString()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE tasks
+		SET state = 'LEASED', lease_owner = ?, lease_token = ?,
+		    lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
+		WHERE task_id = ? AND state = 'QUEUED' AND cancel_requested = 0`,
+		workerID, leaseToken, now+leaseSeconds, now, candidate.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("claim task: %w", err)
+	}
+	if affected, _ := res.RowsAffected(); affected != 1 {
+		return nil, tx.Commit()
+	}
+	if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
+		"lease_token":   leaseToken,
+		"lease_seconds": leaseSeconds,
+	}, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetTask(ctx, candidate.TaskID)
+}
+
+// ClaimTaskInSession leases the highest-priority QUEUED task in a session to workerID.
+func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID string, leaseDurationSeconds int) (*Task, error) {
+	if strings.TrimSpace(workerID) == "" {
+		return nil, errors.New("worker_id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session_id is required")
+	}
+	if leaseDurationSeconds <= 0 {
+		return nil, errors.New("lease_seconds must be positive")
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+	leaseSeconds := float64(leaseDurationSeconds)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin claim: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := reconcileExpiredTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
+	var expiresAt float64
+	err = tx.QueryRowContext(ctx,
+		"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
+	switch {
+	case err == nil && expiresAt > now:
+		return nil, tx.Commit()
+	case err == nil:
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
+			return nil, fmt.Errorf("clear stale maintenance: %w", err)
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return nil, fmt.Errorf("read maintenance: %w", err)
+	}
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT `+taskColumns+` FROM tasks
+		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
+		  AND session_id = ?
+		ORDER BY priority DESC, created_at ASC
+		LIMIT 1`, sessionID)
 	candidate, scanErr := scanTask(row)
 	if scanErr != nil {
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
@@ -1326,4 +1528,89 @@ func deref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// SessionQuota represents the quota configuration for a session.
+type SessionQuota struct {
+	SessionID          string  `json:"session_id"`
+	MaxConcurrentTasks int     `json:"max_concurrent_tasks"`
+	MaxTasksPerHour    int     `json:"max_tasks_per_hour"`
+	CreatedAt          float64 `json:"created_at"`
+	UpdatedAt          float64 `json:"updated_at"`
+}
+
+// GetSessionQuota returns the quota configuration for a session.
+// Returns default quotas if no explicit configuration exists.
+func (s *Store) GetSessionQuota(ctx context.Context, sessionID string) (*SessionQuota, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session_id is required")
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+	var sq SessionQuota
+	err := s.db.QueryRowContext(ctx,
+		`SELECT session_id, max_concurrent_tasks, max_tasks_per_hour, created_at, updated_at
+		 FROM session_quotas WHERE session_id = ?`, sessionID,
+	).Scan(&sq.SessionID, &sq.MaxConcurrentTasks, &sq.MaxTasksPerHour, &sq.CreatedAt, &sq.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Return defaults
+		return &SessionQuota{
+			SessionID:          sessionID,
+			MaxConcurrentTasks: 10,
+			MaxTasksPerHour:    100,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get session quota: %w", err)
+	}
+	return &sq, nil
+}
+
+// SetSessionQuota sets or updates the quota configuration for a session.
+func (s *Store) SetSessionQuota(ctx context.Context, quota SessionQuota) error {
+	if strings.TrimSpace(quota.SessionID) == "" {
+		return errors.New("session_id is required")
+	}
+	if quota.MaxConcurrentTasks <= 0 {
+		quota.MaxConcurrentTasks = 10
+	}
+	if quota.MaxTasksPerHour <= 0 {
+		quota.MaxTasksPerHour = 100
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO session_quotas (session_id, max_concurrent_tasks, max_tasks_per_hour, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			max_concurrent_tasks = excluded.max_concurrent_tasks,
+			max_tasks_per_hour = excluded.max_tasks_per_hour,
+			updated_at = excluded.updated_at`,
+		quota.SessionID, quota.MaxConcurrentTasks, quota.MaxTasksPerHour, now, now)
+	if err != nil {
+		return fmt.Errorf("set session quota: %w", err)
+	}
+	return nil
+}
+
+// CheckSessionQuota checks if a session can accept a new task.
+// Returns true if within quota, false if quota exceeded.
+func (s *Store) CheckSessionQuota(ctx context.Context, sessionID string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return true, nil // No session = no quota enforcement
+	}
+	quota, err := s.GetSessionQuota(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	// Check concurrent tasks
+	active, err := s.ActiveTaskCountInSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if active >= quota.MaxConcurrentTasks {
+		return false, nil
+	}
+	// TODO(OWNER=tamld): Check hourly rate limit (requires task creation timestamps per session)
+	return true, nil
 }
