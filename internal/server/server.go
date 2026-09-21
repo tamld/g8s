@@ -43,11 +43,12 @@ func NewServer(config Config, store *controlplane.Store) *Server {
 	s.registerRoutes(mux)
 
 	s.httpSrv = &http.Server{
-		Addr:         config.Address,
-		Handler:      s.corsMiddleware(mux),
-		ReadTimeout:  config.ReadTimeout,
-		WriteTimeout: config.WriteTimeout,
-		IdleTimeout:  config.IdleTimeout,
+		Addr:              config.Address,
+		Handler:           s.corsMiddleware(mux),
+		ReadHeaderTimeout: config.ReadHeaderTimeout,
+		ReadTimeout:       config.ReadTimeout,
+		WriteTimeout:      config.WriteTimeout,
+		IdleTimeout:       config.IdleTimeout,
 	}
 
 	return s
