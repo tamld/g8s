@@ -2,28 +2,21 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 func main() {
-	tmpDir := os.TempDir()
-	exePath := filepath.Join(tmpDir, "verify-tool.cmd")
-
-	content := `@echo off
-echo verify-tool version 1.0
-`
-
-	err := os.WriteFile(exePath, []byte(content), 0o755)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
+	files := []string{
+		"internal/a/a.go",
+		"internal/a/b.go",
+		"internal/b/c.go",
+		"cmd/main.go",
 	}
-	defer os.Remove(exePath)
 
-	cmd := exec.Command("cmd", "/c", exePath)
-	out, err := cmd.CombinedOutput()
-	fmt.Println("Error:", err)
-	fmt.Println("Out:", string(out))
+	for _, f := range files {
+		dir := filepath.Dir(f)
+		fmt.Printf("File: %s -> Dir: %s\n", f, dir)
+	}
+	fmt.Println("OS:", runtime.GOOS)
 }

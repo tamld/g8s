@@ -1,7 +1,6 @@
 package supervisor
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
