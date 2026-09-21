@@ -1,0 +1,7 @@
+🛡️ Sentinel: [security improvement] Add ReadHeaderTimeout and fix cross-platform paths
+
+- 🚨 Severity: MEDIUM
+- 💡 Vulnerability: Go's `http.Server` does not configure `ReadHeaderTimeout` by default. When the application sets `ReadTimeout`, `WriteTimeout`, and `IdleTimeout` but misses `ReadHeaderTimeout`, the server is vulnerable to Slowloris resource-exhaustion DoS attacks. Additionally, a test relied on forward slashes which fails on Windows.
+- 🎯 Impact: A malicious client could open many connections and slowly send HTTP headers, exhausting server connection limits and causing a Denial of Service. CI was failing on Windows because of an OS-dependent hardcoded path.
+- 🔧 Fix: Explicitly configured `ReadHeaderTimeout: 10 * time.Second` in the default server configuration and applied it to the `http.Server` initialization. Replaced hardcoded forward slashes with `filepath.FromSlash()` / `filepath.Join()` in `internal/supervisor/reviewer_test.go` to fix Windows build errors. Added unit tests for new server component to improve coverage.
+- ✅ Verification: Ran the full test suite (`go test ./...`) to ensure server configuration changes didn't break tests, verified `gofmt` compliance, and confirmed server instantiation correctly sets the field. Fixed windows specific `filepath` issue in tests.

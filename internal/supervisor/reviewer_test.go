@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -120,20 +121,20 @@ func TestRealReviewerFailOnScopeViolation(t *testing.T) {
 func TestRealReviewerCollectPackages(t *testing.T) {
 	r := NewRealReviewer()
 	files := []string{
-		"internal/a/a.go",
-		"internal/a/b.go",
-		"internal/b/c.go",
+		filepath.Join("internal", "a", "a.go"),
+		filepath.Join("internal", "a", "b.go"),
+		filepath.Join("internal", "b", "c.go"),
 		"README.md",
-		"cmd/main.go",
+		filepath.Join("cmd", "main.go"),
 	}
 	pkgs := r.collectPackages(files)
 	if len(pkgs) != 3 {
 		t.Errorf("expected 3 packages, got %d: %v", len(pkgs), pkgs)
 	}
 	expected := map[string]bool{
-		"internal/a": true,
-		"internal/b": true,
-		"cmd":        true,
+		filepath.Join("internal", "a"): true,
+		filepath.Join("internal", "b"): true,
+		"cmd":                          true,
 	}
 	for _, p := range pkgs {
 		if !expected[p] {
