@@ -11,6 +11,9 @@ type Config struct {
 	// Address to listen on (e.g., ":8080" or "127.0.0.1:8080").
 	Address string `json:"address" yaml:"address"`
 
+	// ReadHeaderTimeout is the amount of time allowed to read request headers.
+	ReadHeaderTimeout time.Duration `json:"read_header_timeout" yaml:"read_header_timeout"`
+
 	// ReadTimeout is the maximum duration for reading the entire request.
 	ReadTimeout time.Duration `json:"read_timeout" yaml:"read_timeout"`
 
@@ -36,14 +39,15 @@ type Config struct {
 // DefaultConfig returns a sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		Address:        ":8080",
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
-		IdleTimeout:    120 * time.Second,
-		EnableCORS:     true,
-		AllowedOrigins: []string{"*"},
-		EnableMetrics:  true,
-		EnableHealthz:  true,
+		Address:           ":8080",
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		EnableCORS:        true,
+		AllowedOrigins:    []string{"*"},
+		EnableMetrics:     true,
+		EnableHealthz:     true,
 	}
 }
 
@@ -51,6 +55,9 @@ func DefaultConfig() Config {
 func (c *Config) Validate() error {
 	if c.Address == "" {
 		c.Address = ":8080"
+	}
+	if c.ReadHeaderTimeout <= 0 {
+		c.ReadHeaderTimeout = 10 * time.Second
 	}
 	if c.ReadTimeout <= 0 {
 		c.ReadTimeout = 30 * time.Second
