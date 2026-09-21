@@ -38,14 +38,14 @@ type TriageRequest struct {
 
 // TriageVerdict represents the sub-100ms structured decision.
 type TriageVerdict struct {
-	Action      TriageAction `json:"action"`
-	RiskScore   float64      `json:"risk_score"`
-	BreachProb  float64      `json:"breach_prob"`
-	Confidence  float64      `json:"confidence"`
-	LatencyMs   int64        `json:"latency_ms"`
-	Reason      string       `json:"reason"`
-	KeyUsed     string       `json:"key_used"`
-	IsFallback  bool         `json:"is_fallback"`
+	Action     TriageAction `json:"action"`
+	RiskScore  float64      `json:"risk_score"`
+	BreachProb float64      `json:"breach_prob"`
+	Confidence float64      `json:"confidence"`
+	LatencyMs  int64        `json:"latency_ms"`
+	Reason     string       `json:"reason"`
+	KeyUsed    string       `json:"key_used"`
+	IsFallback bool         `json:"is_fallback"`
 }
 
 // Answer represents a typed Jev question response.
@@ -301,41 +301,41 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 	// 1. Sandbox breach >= 0.70 -> INSTANT KILL
 	if breachProb >= 0.70 {
 		return TriageVerdict{
-			Action:      ActionInstantKill,
-			RiskScore:   riskScore,
-			BreachProb:  breachProb,
-			Confidence:  conf,
-			LatencyMs:   elapsed,
-			Reason:      fmt.Sprintf("Jev sandbox breach detected (prob=%.2f)", breachProb),
-			KeyUsed:     activeKey,
-			IsFallback:  false,
+			Action:     ActionInstantKill,
+			RiskScore:  riskScore,
+			BreachProb: breachProb,
+			Confidence: conf,
+			LatencyMs:  elapsed,
+			Reason:     fmt.Sprintf("Jev sandbox breach detected (prob=%.2f)", breachProb),
+			KeyUsed:    activeKey,
+			IsFallback: false,
 		}, nil
 	}
 
 	// 2. Risk <= 1.5 AND breach < 0.20 AND confidence >= 0.85 -> AUTO GRANT
 	if riskScore <= 1.5 && breachProb < 0.20 && conf >= 0.85 {
 		return TriageVerdict{
-			Action:      ActionGrantReceipt,
-			RiskScore:   riskScore,
-			BreachProb:  breachProb,
-			Confidence:  conf,
-			LatencyMs:   elapsed,
-			Reason:      "Jev certified low-risk mutation within sandbox boundaries",
-			KeyUsed:     activeKey,
-			IsFallback:  false,
+			Action:     ActionGrantReceipt,
+			RiskScore:  riskScore,
+			BreachProb: breachProb,
+			Confidence: conf,
+			LatencyMs:  elapsed,
+			Reason:     "Jev certified low-risk mutation within sandbox boundaries",
+			KeyUsed:    activeKey,
+			IsFallback: false,
 		}, nil
 	}
 
 	// 3. Otherwise -> ESCALATE TO TELEGRAM HITL
 	return TriageVerdict{
-		Action:      ActionEscalateHITL,
-		RiskScore:   riskScore,
-		BreachProb:  breachProb,
-		Confidence:  conf,
-		LatencyMs:   elapsed,
-		Reason:      fmt.Sprintf("Jev flagged for human review (risk=%.2f, breach=%.2f)", riskScore, breachProb),
-		KeyUsed:     activeKey,
-		IsFallback:  false,
+		Action:     ActionEscalateHITL,
+		RiskScore:  riskScore,
+		BreachProb: breachProb,
+		Confidence: conf,
+		LatencyMs:  elapsed,
+		Reason:     fmt.Sprintf("Jev flagged for human review (risk=%.2f, breach=%.2f)", riskScore, breachProb),
+		KeyUsed:    activeKey,
+		IsFallback: false,
 	}, nil
 }
 

@@ -40,15 +40,15 @@ func TestTriageWithMockJev(t *testing.T) {
 			Model: "jev-1.13.0",
 			Answers: map[string]Answer{
 				"action": {
-					Type:         "choice",
-					Choice:       "grant_receipt",
-					Confidence:   0.88,
+					Type:          "choice",
+					Choice:        "grant_receipt",
+					Confidence:    0.88,
 					Probabilities: map[string]float64{"grant_receipt": 0.88, "escalate_human": 0.12},
 				},
 				"risk_tier": {
-					Type:         "score",
-					Score:        1.1,
-					Confidence:   0.90,
+					Type:          "score",
+					Score:         1.1,
+					Confidence:    0.90,
 					Probabilities: map[string]float64{"low": 0.85, "medium": 0.15},
 				},
 				"sandbox_breach": {
@@ -102,15 +102,15 @@ func TestTriageCircuitBreakerInstantKill(t *testing.T) {
 			Model: "jev-1.13.0",
 			Answers: map[string]Answer{
 				"action": {
-					Type:         "choice",
-					Choice:       "escalate_human",
-					Confidence:   0.95,
+					Type:          "choice",
+					Choice:        "escalate_human",
+					Confidence:    0.95,
 					Probabilities: map[string]float64{"escalate_human": 0.95},
 				},
 				"risk_tier": {
-					Type:         "score",
-					Score:        4.0,
-					Confidence:   0.95,
+					Type:          "score",
+					Score:         4.0,
+					Confidence:    0.95,
 					Probabilities: map[string]float64{"critical": 0.95},
 				},
 				"sandbox_breach": {
@@ -195,7 +195,6 @@ func TestDLPNoHardcodedKeys(t *testing.T) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		t.Fatalf("walk failed: %v", err)
 	}
