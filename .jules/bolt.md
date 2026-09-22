@@ -13,3 +13,6 @@
 ## 2025-09-01 - Zero-allocation case-insensitive prefix checks
 **Learning:** Using `strings.HasPrefix(strings.ToLower(str), strings.ToLower(prefix))` allocates two completely new copies of strings to lowercase them. This causes massive memory allocation scaling with string length.
 **Action:** Use `len(str) >= len(prefix) && strings.EqualFold(str[:len(prefix)], prefix)` instead, which performs a zero-allocation, case-insensitive comparison using shared underlying memory.
+## 2025-03-09 - Avoid dynamic regexp recompilation inside function bodies
+**Learning:** In Go, calling `regexp.MustCompile` inside function bodies, especially those called frequently or in loops, causes expensive dynamic recompilation on every invocation, dramatically impacting performance and increasing memory allocation.
+**Action:** Always hoist `regexp.MustCompile` calls to package-level variables so they are compiled exactly once at startup.
