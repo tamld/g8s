@@ -25,7 +25,7 @@ jobs:
           VERSION_CODE=$(grep '^[[:space:]]*Version[[:space:]]*=' cmd/g8s/version.go | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
           
           # Extract latest version from CHANGELOG
-          VERSION_CHANGELOG=$(awk '/^## \[Unreleased\]/ {found=1; next} found && /^## \[/ {print $2; exit}' CHANGELOG.md | tr -d '[]')
+          VERSION_CHANGELOG=$(awk '/^## \[Unreleased\]/ {next} /^## \[/ {print $2; exit}' CHANGELOG.md | tr -d '[]')
           
           echo "Code version: $VERSION_CODE"
           echo "CHANGELOG version: $VERSION_CHANGELOG"
