@@ -233,3 +233,110 @@ func TestDLPNoHardcodedKeys(t *testing.T) {
 		t.Fatalf("walk failed: %v", err)
 	}
 }
+
+func TestScopeBoundarySiblingDirectoryDefense(t *testing.T) {
+	// Sibling directories should NOT match prefix
+	if isWithinScope([]string{"docs_secret/passwords.txt"}, []string{"docs/*"}) {
+		t.Errorf("SECURITY: docs_secret should not match docs/*")
+	}
+	if isWithinScope([]string{"internal_exploit/hack.go"}, []string{"internal"}) {
+		t.Errorf("SECURITY: internal_exploit should not match internal")
+	}
+	if isWithinScope([]string{"../../etc/passwd"}, []string{"*"}) {
+		t.Errorf("SECURITY: path traversal should never be within scope")
+	}
+
+	// Valid paths should match
+	if !isWithinScope([]string{"docs/guide.md"}, []string{"docs/*"}) {
+		t.Errorf("expected docs/guide.md to match docs/*")
+	}
+	if !isWithinScope([]string{"internal/reflex/jev.go"}, []string{"internal"}) {
+		t.Errorf("expected internal/reflex/jev.go to match internal")
+	}
+}
+
+func TestWeakestLinkConfidenceAggregation(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := JevResponse{
+			Model: "jev-1.13.0",
+			Answers: map[string]Answer{
+				"risk_tier": {
+					Type:       "score",
+					Score:      1.0,
+					Confidence: 0.20, // Low confidence on risk!
+				},
+				"sandbox_breach": {
+					Type:       "noul",
+					Noul:       0.05,
+					Confidence: 0.95, // High confidence on breach
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(
+		WithEndpoint(ts.URL),
+		WithKeys([]string{"test-key"}),
+		WithEnvFile(false),
+	)
+
+	req := TriageRequest{
+		TaskID:        "task-weakest-link",
+		FilesModified: []string{"README.md"},
+		AllowedPaths:  []string{"README.md"},
+	}
+
+	signal, err := gate.EmitSignal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if signal.Confidence != 0.20 {
+		t.Fatalf("expected confidence to be min(0.20, 0.95) = 0.20, got %.2f", signal.Confidence)
+	}
+
+	verdict := gate.EvaluatePolicy(signal, req)
+	if verdict.Action != ActionEscalateHITL {
+		t.Fatalf("expected ActionEscalateHITL due to low confidence (0.20 < 0.80), got %s", verdict.Action)
+	}
+}
+
+func TestMissingAnswerKeyFailClosed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Missing "sandbox_breach" key
+		resp := JevResponse{
+			Model: "jev-1.13.0",
+			Answers: map[string]Answer{
+				"risk_tier": {
+					Type:       "score",
+					Score:      1.0,
+					Confidence: 0.95,
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(
+		WithEndpoint(ts.URL),
+		WithKeys([]string{"test-key"}),
+		WithEnvFile(false),
+	)
+
+	req := TriageRequest{
+		TaskID:        "task-missing-key",
+		FilesModified: []string{"cmd/g8s/main.go"},
+	}
+
+	signal, err := gate.EmitSignal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if signal.Source != "deterministic" || !signal.IsFallback {
+		t.Errorf("expected deterministic fallback on missing key, got source=%s isFallback=%v", signal.Source, signal.IsFallback)
+	}
+}

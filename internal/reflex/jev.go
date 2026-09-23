@@ -302,11 +302,18 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 	}
 
 	elapsed := time.Since(start).Milliseconds()
-	breachProb := jevResp.Answers["sandbox_breach"].Noul
-	riskScore := jevResp.Answers["risk_tier"].Score
-	conf := jevResp.Answers["risk_tier"].Confidence
-	if breachConf := jevResp.Answers["sandbox_breach"].Confidence; breachConf > conf {
-		conf = breachConf
+	breachAns, hasBreach := jevResp.Answers["sandbox_breach"]
+	riskAns, hasRisk := jevResp.Answers["risk_tier"]
+	if !hasBreach || !hasRisk {
+		return g.deterministicFallbackSignal(req, "Jev response missing required answers"), nil
+	}
+
+	breachProb := breachAns.Noul
+	riskScore := riskAns.Score
+	// Weakest-Link Invariant: composite confidence is bounded by the least confident metric
+	conf := riskAns.Confidence
+	if breachAns.Confidence < conf {
+		conf = breachAns.Confidence
 	}
 
 	return ReflexSignal{
@@ -444,14 +451,37 @@ func isWithinScope(modified []string, allowed []string) bool {
 	}
 	for _, f := range modified {
 		cleanFile := filepath.ToSlash(filepath.Clean(f))
+		// Reject path traversal attempts
+		if cleanFile == ".." || strings.HasPrefix(cleanFile, "../") {
+			return false
+		}
 		matched := false
 		for _, pattern := range allowed {
 			cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
-			// Exact match or prefix match for directories
-			if cleanFile == cleanPattern || strings.HasPrefix(cleanFile, strings.TrimSuffix(cleanPattern, "*")) {
+			// 1. Exact path match
+			if cleanFile == cleanPattern {
 				matched = true
 				break
 			}
+			// 2. Directory boundary match: pattern ends in /* or /
+			if strings.HasSuffix(pattern, "/*") || strings.HasSuffix(pattern, "/") {
+				dirPrefix := strings.TrimSuffix(cleanPattern, "*")
+				if !strings.HasSuffix(dirPrefix, "/") {
+					dirPrefix += "/"
+				}
+				if strings.HasPrefix(cleanFile, dirPrefix) {
+					matched = true
+					break
+				}
+			} else if !strings.Contains(cleanPattern, "*") {
+				// Bare directory pattern without trailing slash e.g. "internal" or "docs"
+				dirPrefix := cleanPattern + "/"
+				if strings.HasPrefix(cleanFile, dirPrefix) {
+					matched = true
+					break
+				}
+			}
+			// 3. Glob matching (e.g. *.md, src/*.go)
 			if m, _ := filepath.Match(cleanPattern, cleanFile); m {
 				matched = true
 				break
