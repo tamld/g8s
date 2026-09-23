@@ -392,6 +392,9 @@ func setupTestServer(t *testing.T) (*Server, *controlplane.Store) {
 	if err != nil {
 		t.Fatalf("failed to init store: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
 	cfg := DefaultConfig()
 	cfg.EnableHealthz = true
 	cfg.EnableMetrics = true
