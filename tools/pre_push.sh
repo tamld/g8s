@@ -26,6 +26,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Unset git hook environment variables so sub-tests (e.g. TestCleanupWorktrees) don't bleed into git repo
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+
 # Ensure tools in GOPATH/bin are available
 GOPATH_BIN="$(go env GOPATH)/bin"
 export PATH="$GOPATH_BIN:$PATH"
