@@ -14,6 +14,14 @@ import (
 )
 
 func TestKeyPoolLoading(t *testing.T) {
+	origKeys := os.Getenv("TYPESAFE_API_KEYS")
+	os.Unsetenv("TYPESAFE_API_KEYS")
+	defer func() {
+		if origKeys != "" {
+			os.Setenv("TYPESAFE_API_KEYS", origKeys)
+		}
+	}()
+
 	os.Setenv("TYPESAFE_API_KEY", "primary_key")
 	os.Setenv("TYPESAFE_API_KEY_FALLBACK", "secondary_key")
 	defer os.Unsetenv("TYPESAFE_API_KEY")
@@ -29,7 +37,7 @@ func TestKeyPoolLoading(t *testing.T) {
 }
 
 func TestTriageWithMockJev(t *testing.T) {
-	// Mock Jev System 1 endpoint
+	// Mock Jev System 1 endpoint emitting pure telemetry (no action questions)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -39,12 +47,6 @@ func TestTriageWithMockJev(t *testing.T) {
 		resp := JevResponse{
 			Model: "jev-1.13.0",
 			Answers: map[string]Answer{
-				"action": {
-					Type:          "choice",
-					Choice:        "grant_receipt",
-					Confidence:    0.88,
-					Probabilities: map[string]float64{"grant_receipt": 0.88, "escalate_human": 0.12},
-				},
 				"risk_tier": {
 					Type:          "score",
 					Score:         1.1,
@@ -52,8 +54,9 @@ func TestTriageWithMockJev(t *testing.T) {
 					Probabilities: map[string]float64{"low": 0.85, "medium": 0.15},
 				},
 				"sandbox_breach": {
-					Type: "noul",
-					Noul: 0.05,
+					Type:       "noul",
+					Noul:       0.05,
+					Confidence: 0.95,
 				},
 			},
 			Usage: Usage{InputTokens: 250, OutputTokens: 30},
@@ -74,6 +77,7 @@ func TestTriageWithMockJev(t *testing.T) {
 		TaskID:        "task-101",
 		FilesModified: []string{"README.md"},
 		DiffSummary:   "update docs",
+		AllowedPaths:  []string{"*.md"},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -93,6 +97,9 @@ func TestTriageWithMockJev(t *testing.T) {
 	if verdict.RiskScore != 1.1 {
 		t.Fatalf("expected risk score 1.1, got %f", verdict.RiskScore)
 	}
+	if verdict.Signal.Source != "jev" {
+		t.Fatalf("expected source jev, got %s", verdict.Signal.Source)
+	}
 }
 
 func TestTriageCircuitBreakerInstantKill(t *testing.T) {
@@ -101,12 +108,6 @@ func TestTriageCircuitBreakerInstantKill(t *testing.T) {
 		resp := JevResponse{
 			Model: "jev-1.13.0",
 			Answers: map[string]Answer{
-				"action": {
-					Type:          "choice",
-					Choice:        "escalate_human",
-					Confidence:    0.95,
-					Probabilities: map[string]float64{"escalate_human": 0.95},
-				},
 				"risk_tier": {
 					Type:          "score",
 					Score:         4.0,
@@ -114,11 +115,13 @@ func TestTriageCircuitBreakerInstantKill(t *testing.T) {
 					Probabilities: map[string]float64{"critical": 0.95},
 				},
 				"sandbox_breach": {
-					Type: "noul",
-					Noul: 0.92, // Severe violation
+					Type:       "noul",
+					Noul:       0.92, // Severe violation
+					Confidence: 0.98,
 				},
 			},
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
@@ -145,8 +148,36 @@ func TestTriageCircuitBreakerInstantKill(t *testing.T) {
 	}
 }
 
+func TestScopeViolationRejection(t *testing.T) {
+	// Even if Jev reports low risk, Supervisor policy MUST reject scope violations
+	gate := NewReflexGate(
+		WithKeys([]string{}),
+		WithEnvFile(false),
+	)
+
+	signal := ReflexSignal{
+		RiskScore:  1.0,
+		BreachProb: 0.05,
+		Confidence: 0.95,
+		Source:     "jev",
+	}
+
+	req := TriageRequest{
+		TaskID:        "task-scope-test",
+		FilesModified: []string{"cmd/g8s/main.go"},
+		AllowedPaths:  []string{"internal/review/*"}, // main.go is NOT allowed
+	}
+
+	verdict := gate.EvaluatePolicy(signal, req)
+	if verdict.Action != ActionEscalateHITL {
+		t.Fatalf("expected ActionEscalateHITL on scope violation, got %s", verdict.Action)
+	}
+	if !strings.Contains(verdict.Reason, "scope violation") {
+		t.Errorf("expected scope violation reason, got: %s", verdict.Reason)
+	}
+}
+
 func TestOfflineGracefulFallback(t *testing.T) {
-	// Gate without keys should fall back deterministically without error
 	gate := NewReflexGate(
 		WithKeys([]string{}),
 		WithEnvFile(false),
@@ -163,6 +194,9 @@ func TestOfflineGracefulFallback(t *testing.T) {
 	}
 	if verdict.Action != ActionGrantReceipt {
 		t.Fatalf("expected ActionGrantReceipt for doc edit, got %s", verdict.Action)
+	}
+	if verdict.Signal.Source != "deterministic" {
+		t.Errorf("expected deterministic fallback source, got %s", verdict.Signal.Source)
 	}
 
 	// Unsafe secret access

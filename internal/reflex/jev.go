@@ -3,6 +3,8 @@
 // instant circuit-breaking on sandbox escapes.
 //
 // Complies with Zero-CGO Constitution Axiom and Zero-Leakage DLP Protocol.
+// Architecture: Strictly decouples Perception Telemetry (Sensors) from
+// Governance Decision-Making (Supervisor Policy Engine).
 package reflex
 
 import (
@@ -19,7 +21,7 @@ import (
 	"time"
 )
 
-// TriageAction defines the concrete operational decision emitted by the reflex gate.
+// TriageAction defines the concrete operational decision emitted by the g8s Supervisor policy engine.
 type TriageAction string
 
 const (
@@ -36,15 +38,29 @@ type TriageRequest struct {
 	AllowedPaths  []string `json:"allowed_paths"`
 }
 
-// TriageVerdict represents the sub-100ms structured decision.
+// ReflexSignal represents pure perception telemetry emitted by a System 1 reflex sensor.
+// It carries empirical measurements without dictating supervisor actions.
+type ReflexSignal struct {
+	RiskScore  float64 `json:"risk_score"`  // 0.0 (benign) -> 5.0 (critical)
+	BreachProb float64 `json:"breach_prob"` // 0.0 -> 1.0 (estimated probability of sandbox breach)
+	Confidence float64 `json:"confidence"`  // confidence score [0..1]
+	LatencyMs  int64   `json:"latency_ms"`
+	Source     string  `json:"source"` // "jev" | "deterministic"
+	Reason     string  `json:"reason,omitempty"`
+	KeyUsed    string  `json:"key_used,omitempty"`
+	IsFallback bool    `json:"is_fallback"`
+}
+
+// TriageVerdict represents the authoritative decision made by the g8s Supervisor policy engine.
 type TriageVerdict struct {
 	Action     TriageAction `json:"action"`
+	Signal     ReflexSignal `json:"signal"`
 	RiskScore  float64      `json:"risk_score"`
 	BreachProb float64      `json:"breach_prob"`
 	Confidence float64      `json:"confidence"`
 	LatencyMs  int64        `json:"latency_ms"`
 	Reason     string       `json:"reason"`
-	KeyUsed    string       `json:"key_used"`
+	KeyUsed    string       `json:"key_used,omitempty"`
 	IsFallback bool         `json:"is_fallback"`
 }
 
@@ -71,11 +87,12 @@ type JevResponse struct {
 	Usage   Usage             `json:"usage"`
 }
 
-// ReflexGate coordinates System 1 evaluations.
+// ReflexGate coordinates System 1 evaluations and policy gating.
 type ReflexGate struct {
 	endpoint   string
 	model      string
 	keys       []string
+	keysSet    bool
 	keyIdx     int
 	mu         sync.Mutex
 	client     *http.Client
@@ -96,6 +113,7 @@ func WithEndpoint(endpoint string) Option {
 func WithKeys(keys []string) Option {
 	return func(g *ReflexGate) {
 		g.keys = keys
+		g.keysSet = true
 	}
 }
 
@@ -124,7 +142,7 @@ func NewReflexGate(opts ...Option) *ReflexGate {
 		opt(gate)
 	}
 
-	if len(gate.keys) == 0 {
+	if !gate.keysSet && len(gate.keys) == 0 {
 		gate.keys = gate.loadKeys()
 	}
 
@@ -152,7 +170,6 @@ func (g *ReflexGate) loadKeys() []string {
 	}
 
 	if len(keys) == 0 && g.useEnvFile {
-		// Read from local gitignored .env (support walking up from package dirs)
 		for _, d := range []string{".", "..", "../.."} {
 			envPath := filepath.Join(d, ".env")
 			data, err := os.ReadFile(envPath)
@@ -216,14 +233,16 @@ func (g *ReflexGate) rotateKey() string {
 	return g.keys[g.keyIdx]
 }
 
-// TriageMutation evaluates a subagent write request.
-func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (TriageVerdict, error) {
+// EmitSignal queries the System 1 reflex sensor (Jev or deterministic fallback)
+// and returns pure empirical risk telemetry without taking operational actions.
+func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexSignal, error) {
 	activeKey := g.currentKey()
 	if activeKey == "" {
-		// Fallback to deterministic heuristic when keyless
-		return g.deterministicFallback(req, "keyless offline fallback"), nil
+		return g.deterministicFallbackSignal(req, "keyless offline fallback"), nil
 	}
 
+	// Payload strictly asks for empirical risk and breach probability,
+	// NEVER asking the sensor to decide supervisor actions.
 	payload := map[string]any{
 		"model": g.model,
 		"state": map[string]any{
@@ -233,15 +252,6 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 			"allowed_paths":  req.AllowedPaths,
 		},
 		"questions": map[string]any{
-			"action": map[string]any{
-				"type":         "choice",
-				"instructions": "What action should g8s supervisor take on this subagent workspace mutation?",
-				"criteria": map[string]string{
-					"grant_receipt":  "Safe, within declared scope and sandbox boundaries. Auto-grant Schema v3 Write Receipt.",
-					"escalate_human": "Requires human operator sign-off via Telegram HITL card with HMAC signature.",
-					"abort_process":  "Dangerous or malicious mutation violating security policy. Instant SIGKILL.",
-				},
-			},
 			"risk_tier": map[string]any{
 				"type":         "score",
 				"instructions": "Rate the operational risk level of this mutation.",
@@ -256,13 +266,13 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return g.deterministicFallback(req, err.Error()), nil
+		return g.deterministicFallbackSignal(req, err.Error()), nil
 	}
 
 	start := time.Now()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return g.deterministicFallback(req, err.Error()), nil
+		return g.deterministicFallbackSignal(req, err.Error()), nil
 	}
 
 	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
@@ -270,92 +280,133 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 
 	resp, err := g.client.Do(httpReq)
 	if err != nil {
-		// Try rotating key once if network or timeout
 		if len(g.keys) > 1 {
 			g.rotateKey()
 		}
-		return g.deterministicFallback(req, err.Error()), nil
+		return g.deterministicFallbackSignal(req, err.Error()), nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		g.rotateKey()
-		return g.deterministicFallback(req, "HTTP 429 rate limit rotated"), nil
+		return g.deterministicFallbackSignal(req, "HTTP 429 rate limit rotated"), nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return g.deterministicFallback(req, fmt.Sprintf("HTTP %d from Jev", resp.StatusCode)), nil
+		return g.deterministicFallbackSignal(req, fmt.Sprintf("HTTP %d from Jev", resp.StatusCode)), nil
 	}
 
 	var jevResp JevResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jevResp); err != nil {
-		return g.deterministicFallback(req, err.Error()), nil
+		return g.deterministicFallbackSignal(req, err.Error()), nil
 	}
 
 	elapsed := time.Since(start).Milliseconds()
 	breachProb := jevResp.Answers["sandbox_breach"].Noul
 	riskScore := jevResp.Answers["risk_tier"].Score
-	conf := jevResp.Answers["action"].Confidence
-
-	// Decision Matrix:
-	// 1. Sandbox breach >= 0.70 -> INSTANT KILL
-	if breachProb >= 0.70 {
-		return TriageVerdict{
-			Action:     ActionInstantKill,
-			RiskScore:  riskScore,
-			BreachProb: breachProb,
-			Confidence: conf,
-			LatencyMs:  elapsed,
-			Reason:     fmt.Sprintf("Jev sandbox breach detected (prob=%.2f)", breachProb),
-			KeyUsed:    activeKey,
-			IsFallback: false,
-		}, nil
+	conf := jevResp.Answers["risk_tier"].Confidence
+	if breachConf := jevResp.Answers["sandbox_breach"].Confidence; breachConf > conf {
+		conf = breachConf
 	}
 
-	// 2. Risk <= 1.5 AND breach < 0.20 AND confidence >= 0.85 -> AUTO GRANT
-	if riskScore <= 1.5 && breachProb < 0.20 && conf >= 0.85 {
-		return TriageVerdict{
-			Action:     ActionGrantReceipt,
-			RiskScore:  riskScore,
-			BreachProb: breachProb,
-			Confidence: conf,
-			LatencyMs:  elapsed,
-			Reason:     "Jev certified low-risk mutation within sandbox boundaries",
-			KeyUsed:    activeKey,
-			IsFallback: false,
-		}, nil
-	}
-
-	// 3. Otherwise -> ESCALATE TO TELEGRAM HITL
-	return TriageVerdict{
-		Action:     ActionEscalateHITL,
+	return ReflexSignal{
 		RiskScore:  riskScore,
 		BreachProb: breachProb,
 		Confidence: conf,
 		LatencyMs:  elapsed,
-		Reason:     fmt.Sprintf("Jev flagged for human review (risk=%.2f, breach=%.2f)", riskScore, breachProb),
+		Source:     "jev",
 		KeyUsed:    activeKey,
 		IsFallback: false,
 	}, nil
 }
 
-func (g *ReflexGate) deterministicFallback(req TriageRequest, reason string) TriageVerdict {
-	// Inspect files modified for high-risk targets
+// EvaluatePolicy implements the g8s Supervisor Policy Engine.
+// It consumes the empirical ReflexSignal, correlates it with the task contract,
+// and deterministically emits an authoritative TriageVerdict.
+func (g *ReflexGate) EvaluatePolicy(signal ReflexSignal, req TriageRequest) TriageVerdict {
+	// Rule 1: Instant Kill on high sandbox breach probability (Active Defense)
+	if signal.BreachProb >= 0.70 {
+		return TriageVerdict{
+			Action:     ActionInstantKill,
+			Signal:     signal,
+			RiskScore:  signal.RiskScore,
+			BreachProb: signal.BreachProb,
+			Confidence: signal.Confidence,
+			LatencyMs:  signal.LatencyMs,
+			Reason:     fmt.Sprintf("Supervisor policy: sandbox breach threshold exceeded (prob=%.2f >= 0.70)", signal.BreachProb),
+			KeyUsed:    signal.KeyUsed,
+			IsFallback: signal.IsFallback,
+		}
+	}
+
+	// Rule 2: Fast-path Write Receipt grant for certified low-risk mutations within scope
+	if signal.RiskScore <= 1.5 && signal.BreachProb < 0.20 && (signal.Confidence >= 0.80 || signal.IsFallback) {
+		// Verify allowed paths scope gate
+		if len(req.AllowedPaths) > 0 && !isWithinScope(req.FilesModified, req.AllowedPaths) {
+			return TriageVerdict{
+				Action:     ActionEscalateHITL,
+				Signal:     signal,
+				RiskScore:  signal.RiskScore,
+				BreachProb: signal.BreachProb,
+				Confidence: signal.Confidence,
+				LatencyMs:  signal.LatencyMs,
+				Reason:     "Supervisor policy: low risk mutation rejected due to allowed_paths scope violation",
+				KeyUsed:    signal.KeyUsed,
+				IsFallback: signal.IsFallback,
+			}
+		}
+
+		return TriageVerdict{
+			Action:     ActionGrantReceipt,
+			Signal:     signal,
+			RiskScore:  signal.RiskScore,
+			BreachProb: signal.BreachProb,
+			Confidence: signal.Confidence,
+			LatencyMs:  signal.LatencyMs,
+			Reason:     "Supervisor policy: certified low-risk mutation within declared scope boundaries",
+			KeyUsed:    signal.KeyUsed,
+			IsFallback: signal.IsFallback,
+		}
+	}
+
+	// Rule 3: Escalate non-trivial or ambiguous mutations to Human Operator (HITL)
+	return TriageVerdict{
+		Action:     ActionEscalateHITL,
+		Signal:     signal,
+		RiskScore:  signal.RiskScore,
+		BreachProb: signal.BreachProb,
+		Confidence: signal.Confidence,
+		LatencyMs:  signal.LatencyMs,
+		Reason:     fmt.Sprintf("Supervisor policy: mutation flagged for human operator review (risk=%.2f, breach=%.2f)", signal.RiskScore, signal.BreachProb),
+		KeyUsed:    signal.KeyUsed,
+		IsFallback: signal.IsFallback,
+	}
+}
+
+// TriageMutation executes the full two-step pipeline: Sensor EmitSignal + Supervisor EvaluatePolicy.
+func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (TriageVerdict, error) {
+	signal, err := g.EmitSignal(ctx, req)
+	if err != nil {
+		signal = g.deterministicFallbackSignal(req, err.Error())
+	}
+	return g.EvaluatePolicy(signal, req), nil
+}
+
+func (g *ReflexGate) deterministicFallbackSignal(req TriageRequest, reason string) ReflexSignal {
 	for _, f := range req.FilesModified {
 		base := strings.ToLower(filepath.Base(f))
 		if strings.Contains(base, ".env") || strings.Contains(base, "id_rsa") || strings.Contains(base, "shadow") {
-			return TriageVerdict{
-				Action:     ActionInstantKill,
+			return ReflexSignal{
 				RiskScore:  4.0,
 				BreachProb: 0.99,
 				Confidence: 1.0,
-				Reason:     fmt.Sprintf("Deterministic circuit-breaker: sensitive file match %s (%s)", f, reason),
+				Source:     "deterministic",
+				Reason:     fmt.Sprintf("Sensitive file match %s (%s)", f, reason),
 				IsFallback: true,
 			}
 		}
 	}
 
-	// If only documentation files (.md, .txt)
 	allDocs := true
 	for _, f := range req.FilesModified {
 		ext := strings.ToLower(filepath.Ext(f))
@@ -366,22 +417,49 @@ func (g *ReflexGate) deterministicFallback(req TriageRequest, reason string) Tri
 	}
 
 	if allDocs && len(req.FilesModified) > 0 {
-		return TriageVerdict{
-			Action:     ActionGrantReceipt,
+		return ReflexSignal{
 			RiskScore:  1.0,
 			BreachProb: 0.05,
 			Confidence: 0.95,
-			Reason:     fmt.Sprintf("Deterministic fallback: documentation edits only (%s)", reason),
+			Source:     "deterministic",
+			Reason:     fmt.Sprintf("Documentation edits only (%s)", reason),
 			IsFallback: true,
 		}
 	}
 
-	return TriageVerdict{
-		Action:     ActionEscalateHITL,
+	return ReflexSignal{
 		RiskScore:  2.5,
 		BreachProb: 0.30,
 		Confidence: 0.70,
-		Reason:     fmt.Sprintf("Deterministic fallback: non-trivial mutation (%s)", reason),
+		Source:     "deterministic",
+		Reason:     fmt.Sprintf("Non-trivial mutation (%s)", reason),
 		IsFallback: true,
 	}
+}
+
+// isWithinScope verifies whether all modified files conform to declared allowed path patterns.
+func isWithinScope(modified []string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, f := range modified {
+		cleanFile := filepath.ToSlash(filepath.Clean(f))
+		matched := false
+		for _, pattern := range allowed {
+			cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
+			// Exact match or prefix match for directories
+			if cleanFile == cleanPattern || strings.HasPrefix(cleanFile, strings.TrimSuffix(cleanPattern, "*")) {
+				matched = true
+				break
+			}
+			if m, _ := filepath.Match(cleanPattern, cleanFile); m {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
