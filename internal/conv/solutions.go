@@ -22,15 +22,19 @@ type Solution struct {
 	Tradeoffs     []string          `json:"tradeoffs"`      // Listed tradeoffs or decisions
 }
 
-var headingRegex = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
+var (
+	headingRegex       = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
+	headingPrefixRegex = regexp.MustCompile(`^(\d+[\.\)]\s*|step\s*\d+[:\.]?\s*)`)
+	headingPunctRegex  = regexp.MustCompile(`[^\w\s-]`)
+)
 
 // NormalizeHeading converts a markdown heading into a canonical lookup key.
 func NormalizeHeading(h string) string {
 	h = strings.ToLower(strings.TrimSpace(h))
 	// Strip leading numbers like "1. ", "1.1 ", "step 1:"
-	h = regexp.MustCompile(`^(\d+[\.\)]\s*|step\s*\d+[:\.]?\s*)`).ReplaceAllString(h, "")
+	h = headingPrefixRegex.ReplaceAllString(h, "")
 	// Remove punctuation and extra spaces
-	h = regexp.MustCompile(`[^\w\s-]`).ReplaceAllString(h, "")
+	h = headingPunctRegex.ReplaceAllString(h, "")
 	return strings.Join(strings.Fields(h), " ")
 }
 

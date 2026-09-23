@@ -181,10 +181,10 @@ func (s *Scanner) scanStaticAnalysis(ctx context.Context) error {
 	return nil
 }
 
+var todoRegex = regexp.MustCompile(`(?i)(TODO|FIXME|XXX):\s*@agy-fix-me\s*(.*)`)
+
 // scanStaleTodos scans for @agy-fix-me TODO comments in the codebase.
 func (s *Scanner) scanStaleTodos(ctx context.Context) error {
-	todoRegex := regexp.MustCompile(`(?i)(TODO|FIXME|XXX):\s*@agy-fix-me\s*(.*)`)
-
 	err := filepath.Walk(s.config.CodebasePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors, continue walking
