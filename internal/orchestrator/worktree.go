@@ -152,7 +152,7 @@ func (p *Pool) Active() []Worktree {
 }
 
 func (p *Pool) forceCleanup(path string) error {
-	cmd := exec.Command("git", "worktree", "remove", "--force", path)
+	cmd := exec.Command("git", "worktree", "remove", "--force", "--", path)
 	cmd.Dir = p.repo
 	return cmd.Run()
 }
@@ -187,7 +187,7 @@ func gitAddWorktree(repo, path, branch, base string) error {
 }
 
 func gitRemoveWorktree(repo, path string) error {
-	cmd := exec.Command("git", "worktree", "remove", "--force", path)
+	cmd := exec.Command("git", "worktree", "remove", "--force", "--", path)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -197,7 +197,7 @@ func gitRemoveWorktree(repo, path string) error {
 }
 
 func gitDeleteBranch(repo, branch string) error {
-	cmd := exec.Command("git", "branch", "-D", branch)
+	cmd := exec.Command("git", "branch", "-D", "--", branch)
 	cmd.Dir = repo
 	return cmd.Run()
 }

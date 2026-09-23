@@ -73,12 +73,12 @@ func (bw *BlindWorktree) Cleanup() error {
 	}
 
 	if bw.IsGit && bw.RepoRoot != "" {
-		cmd := exec.Command("git", "worktree", "remove", "--force", bw.Path)
+		cmd := exec.Command("git", "worktree", "remove", "--force", "--", bw.Path)
 		cmd.Dir = bw.RepoRoot
 		_ = cmd.Run()
 
 		if bw.Branch != "" {
-			delCmd := exec.Command("git", "branch", "-D", bw.Branch)
+			delCmd := exec.Command("git", "branch", "-D", "--", bw.Branch)
 			delCmd.Dir = bw.RepoRoot
 			_ = delCmd.Run()
 		}
