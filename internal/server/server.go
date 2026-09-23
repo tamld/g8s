@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -415,6 +416,10 @@ func (s *Server) handleSupervisorByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	task, err := s.store.GetSupervisorTask(ctx, taskID)
 	if err != nil {
+		if errors.Is(err, controlplane.ErrUnknownSupervisorTask) {
+			http.Error(w, "Supervisor task not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -521,6 +526,10 @@ func (s *Server) handleBriefByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	brief, err := s.store.GetBrief(ctx, briefID)
 	if err != nil {
+		if errors.Is(err, controlplane.ErrUnknownBrief) {
+			http.Error(w, "Brief not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

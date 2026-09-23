@@ -188,13 +188,48 @@ else
     echo -e "  ${YELLOW}⚠ golangci-lint not installed, skipping staticcheck/errcheck linter pass${NC}"
 fi
 
-# 10. Dual-Pass Test Suite
-step "10/12" "Running Dual-Pass Test Suite..."
-echo "  -> Pass 1: Pure-Go (Zero-CGO)..."
-if ! CGO_ENABLED=0 go test -count=1 ./...; then
+# 10. Dual-Pass Test Suite & Coverage Verification
+step "10/12" "Running Dual-Pass Test Suite & Coverage Verification..."
+echo "  -> Pass 1: Pure-Go (Zero-CGO) with coverage..."
+COV_FILE=$(mktemp)
+trap 'rm -f "$COV_FILE"' EXIT
+if ! CGO_ENABLED=0 go test -count=1 -v -cover ./... 2>&1 | tee "$COV_FILE" >/dev/null; then
     fail "CGO_ENABLED=0 tests failed."
 fi
 pass "Pure-Go tests passed"
+
+echo "  -> Checking aggregate coverage >= 80% (matching CI Quality Gate)..."
+COV_RESULT=$(awk '
+  /^ok[ \t]/ && !/cmd\/g8s/ {
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^coverage:/) {
+        pct = $(i+1)
+        gsub(/%/, "", pct)
+        total += pct
+        count++
+        break
+      }
+    }
+  }
+  END {
+    if (count == 0) exit 1
+    avg = total / count
+    printf "%.2f %d", avg, count
+  }
+' "$COV_FILE")
+
+if [ -z "$COV_RESULT" ]; then
+    fail "Coverage extraction failed."
+fi
+
+avg=$(echo "$COV_RESULT" | awk '{print $1}')
+count=$(echo "$COV_RESULT" | awk '{print $2}')
+echo "     Aggregate coverage: ${avg}% across ${count} packages (cmd/g8s excluded)"
+
+if awk -v a="$avg" 'BEGIN { exit !(a+0 < 80) }'; then
+    fail "Aggregate coverage ${avg}% is below 80% threshold."
+fi
+pass "Coverage threshold met (${avg}% >= 80%)"
 
 if [ "$FAST_MODE" -eq 0 ]; then
     echo "  -> Pass 2: Race Detector (CGO_ENABLED=1 -race)..."

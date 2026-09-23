@@ -75,7 +75,7 @@ func (c *SystemMetricsCollector) Collect(ctx context.Context) (SystemMetrics, er
 	metrics.CollectedAt = c.clock()
 
 	// Collect task metrics
-	allTasks, err := c.store.ListTasks(ctx, controlplane.TaskFilter{Limit: 10000})
+	allTasks, err := c.store.ListTasks(ctx, controlplane.TaskFilter{Limit: 200})
 	if err != nil {
 		return metrics, err
 	}
