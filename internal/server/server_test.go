@@ -110,3 +110,62 @@ func TestCorsMiddleware_Disabled(t *testing.T) {
 		t.Errorf("expected empty Access-Control-Allow-Origin, got %s", rec.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
+
+func TestHandleHealthz(t *testing.T) {
+	cfg := DefaultConfig()
+	srv := NewServer(cfg, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %s", rec.Header().Get("Content-Type"))
+	}
+}
+
+func TestHandleReadyz_MethodNotAllowed(t *testing.T) {
+	cfg := DefaultConfig()
+	srv := NewServer(cfg, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+}
+
+func TestHandleMetrics_MethodNotAllowed(t *testing.T) {
+	cfg := DefaultConfig()
+	srv := NewServer(cfg, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/metrics", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleMetrics(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+}
+
+func TestHandleHealthz_MethodNotAllowed(t *testing.T) {
+	cfg := DefaultConfig()
+	srv := NewServer(cfg, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleHealthz(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+}
