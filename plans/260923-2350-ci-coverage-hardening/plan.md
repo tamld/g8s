@@ -1,6 +1,6 @@
 ---
 title: "Plan: Repo-Wide Coverage Hardening to Exceed 80% CI Threshold"
-status: "in_progress"
+status: "completed"
 created: "2026-09-23"
 author: "Antigravity Assistant"
 priority: "P0"
@@ -102,4 +102,4 @@ To gain the **+0.29%** needed to cross 80.00% (and reach **82.5%+** for a health
 - [x] `go test -count=1 -cover ./internal/server` reaches $\ge 50\%$ (Achieved: **93.8%**).
 - [x] Total repository aggregate coverage exceeds $81.5\%$ across all 34 packages (Achieved: **82.71%**).
 - [x] `./tools/pre_push.sh` runs cleanly with new coverage verification gate (Passed all 12 gates).
-- [ ] Pushed to GitHub Actions and all 10 checks turn **GREEN** (including `Quality Gate` and `Verify Gate`).
+- [x] Pushed to GitHub Actions and all 14 checks turn **GREEN** (including `Quality Gate` and `Verify Gate`).
