@@ -340,3 +340,106 @@ func TestMissingAnswerKeyFailClosed(t *testing.T) {
 		t.Errorf("expected deterministic fallback on missing key, got source=%s isFallback=%v", signal.Source, signal.IsFallback)
 	}
 }
+
+func TestReflexGateOptions(t *testing.T) {
+	gate := NewReflexGate(WithTimeout(100 * time.Millisecond))
+	if gate.client.Timeout != 100*time.Millisecond {
+		t.Fatalf("expected timeout 100ms, got %v", gate.client.Timeout)
+	}
+}
+
+func TestKeyRotation(t *testing.T) {
+	gate := NewReflexGate(WithKeys([]string{"k1", "k2", "k3"}))
+	if gate.currentKey() != "k1" {
+		t.Fatalf("expected k1, got %s", gate.currentKey())
+	}
+	if k := gate.rotateKey(); k != "k2" {
+		t.Fatalf("expected k2, got %s", k)
+	}
+	if k := gate.rotateKey(); k != "k3" {
+		t.Fatalf("expected k3, got %s", k)
+	}
+	if k := gate.rotateKey(); k != "k1" {
+		t.Fatalf("expected k1 after wrap, got %s", k)
+	}
+
+	emptyGate := NewReflexGate(WithKeys([]string{}))
+	if emptyGate.currentKey() != "" {
+		t.Fatalf("expected empty key")
+	}
+	if emptyGate.rotateKey() != "" {
+		t.Fatalf("expected empty key")
+	}
+}
+
+func TestLoadKeysFromEnvFile(t *testing.T) {
+	origKeys := os.Getenv("TYPESAFE_API_KEYS")
+	os.Unsetenv("TYPESAFE_API_KEYS")
+	origKey := os.Getenv("TYPESAFE_API_KEY")
+	os.Unsetenv("TYPESAFE_API_KEY")
+	origFallback := os.Getenv("TYPESAFE_API_KEY_FALLBACK")
+	os.Unsetenv("TYPESAFE_API_KEY_FALLBACK")
+	defer func() {
+		if origKeys != "" {
+			os.Setenv("TYPESAFE_API_KEYS", origKeys)
+		}
+		if origKey != "" {
+			os.Setenv("TYPESAFE_API_KEY", origKey)
+		}
+		if origFallback != "" {
+			os.Setenv("TYPESAFE_API_KEY_FALLBACK", origFallback)
+		}
+	}()
+
+	tmp := t.TempDir()
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tmp)
+	defer func() { _ = os.Chdir(origWd) }()
+
+	content := "# comment line\nINVALID_LINE\nTYPESAFE_API_KEYS=\"env_key1, env_key2\"\nTYPESAFE_API_KEY=env_single\nTYPESAFE_API_KEY_FALLBACK='env_fallback'\n"
+	_ = os.WriteFile(".env", []byte(content), 0o600)
+
+	gate := NewReflexGate(WithEnvFile(true))
+	if len(gate.keys) < 4 {
+		t.Fatalf("expected at least 4 keys loaded from .env, got %d: %v", len(gate.keys), gate.keys)
+	}
+}
+
+func TestEmitSignalHTTPFailures(t *testing.T) {
+	reqCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		if reqCount == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(
+		WithEndpoint(ts.URL),
+		WithKeys([]string{"k1", "k2"}),
+		WithEnvFile(false),
+	)
+
+	req := TriageRequest{TaskID: "t-fail", FilesModified: []string{"test.go"}}
+
+	// First request triggers 429 and key rotation
+	sig1, err := gate.EmitSignal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sig1.IsFallback || !strings.Contains(sig1.Reason, "429") {
+		t.Fatalf("expected 429 fallback, got %v", sig1)
+	}
+
+	// Second request triggers 500
+	sig2, err := gate.EmitSignal(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sig2.IsFallback || !strings.Contains(sig2.Reason, "500") {
+		t.Fatalf("expected 500 fallback, got %v", sig2)
+	}
+}
