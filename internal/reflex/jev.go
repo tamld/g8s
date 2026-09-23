@@ -151,23 +151,20 @@ func NewReflexGate(opts ...Option) *ReflexGate {
 
 func (g *ReflexGate) loadKeys() []string {
 	var keys []string
-
-	if raw := os.Getenv("TYPESAFE_API_KEYS"); raw != "" {
-		for _, k := range strings.Split(raw, ",") {
-			k = strings.TrimSpace(k)
-			if k != "" && !contains(keys, k) {
-				keys = append(keys, k)
-			}
+	addKey := func(k string) {
+		k = strings.TrimSpace(k)
+		if k != "" && !contains(keys, k) {
+			keys = append(keys, k)
 		}
 	}
 
-	if primary := strings.TrimSpace(os.Getenv("TYPESAFE_API_KEY")); primary != "" && !contains(keys, primary) {
-		keys = append(keys, primary)
+	if raw := os.Getenv("TYPESAFE_API_KEYS"); raw != "" {
+		for _, k := range strings.Split(raw, ",") {
+			addKey(k)
+		}
 	}
-
-	if fallback := strings.TrimSpace(os.Getenv("TYPESAFE_API_KEY_FALLBACK")); fallback != "" && !contains(keys, fallback) {
-		keys = append(keys, fallback)
-	}
+	addKey(os.Getenv("TYPESAFE_API_KEY"))
+	addKey(os.Getenv("TYPESAFE_API_KEY_FALLBACK"))
 
 	if len(keys) == 0 && g.useEnvFile {
 		for _, d := range []string{".", "..", "../.."} {
@@ -185,15 +182,13 @@ func (g *ReflexGate) loadKeys() []string {
 				parts := strings.SplitN(line, "=", 2)
 				k := strings.TrimSpace(parts[0])
 				v := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
-				if k == "TYPESAFE_API_KEYS" {
+				switch k {
+				case "TYPESAFE_API_KEYS":
 					for _, subk := range strings.Split(v, ",") {
-						subk = strings.TrimSpace(subk)
-						if subk != "" && !contains(keys, subk) {
-							keys = append(keys, subk)
-						}
+						addKey(subk)
 					}
-				} else if (k == "TYPESAFE_API_KEY" || k == "TYPESAFE_API_KEY_FALLBACK") && v != "" && !contains(keys, v) {
-					keys = append(keys, v)
+				case "TYPESAFE_API_KEY", "TYPESAFE_API_KEY_FALLBACK":
+					addKey(v)
 				}
 			}
 			if len(keys) > 0 {
@@ -327,67 +322,45 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 	}, nil
 }
 
+func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageVerdict {
+	return TriageVerdict{
+		Action:     action,
+		Signal:     signal,
+		RiskScore:  signal.RiskScore,
+		BreachProb: signal.BreachProb,
+		Confidence: signal.Confidence,
+		LatencyMs:  signal.LatencyMs,
+		Reason:     reason,
+		KeyUsed:    signal.KeyUsed,
+		IsFallback: signal.IsFallback,
+	}
+}
+
 // EvaluatePolicy implements the g8s Supervisor Policy Engine.
 // It consumes the empirical ReflexSignal, correlates it with the task contract,
 // and deterministically emits an authoritative TriageVerdict.
 func (g *ReflexGate) EvaluatePolicy(signal ReflexSignal, req TriageRequest) TriageVerdict {
 	// Rule 1: Instant Kill on high sandbox breach probability (Active Defense)
 	if signal.BreachProb >= 0.70 {
-		return TriageVerdict{
-			Action:     ActionInstantKill,
-			Signal:     signal,
-			RiskScore:  signal.RiskScore,
-			BreachProb: signal.BreachProb,
-			Confidence: signal.Confidence,
-			LatencyMs:  signal.LatencyMs,
-			Reason:     fmt.Sprintf("Supervisor policy: sandbox breach threshold exceeded (prob=%.2f >= 0.70)", signal.BreachProb),
-			KeyUsed:    signal.KeyUsed,
-			IsFallback: signal.IsFallback,
-		}
+		return newVerdict(signal, ActionInstantKill,
+			fmt.Sprintf("Supervisor policy: sandbox breach threshold exceeded (prob=%.2f >= 0.70)", signal.BreachProb))
 	}
 
 	// Rule 2: Fast-path Write Receipt grant for certified low-risk mutations within scope
 	if signal.RiskScore <= 1.5 && signal.BreachProb < 0.20 && (signal.Confidence >= 0.80 || signal.IsFallback) {
 		// Verify allowed paths scope gate
 		if len(req.AllowedPaths) > 0 && !isWithinScope(req.FilesModified, req.AllowedPaths) {
-			return TriageVerdict{
-				Action:     ActionEscalateHITL,
-				Signal:     signal,
-				RiskScore:  signal.RiskScore,
-				BreachProb: signal.BreachProb,
-				Confidence: signal.Confidence,
-				LatencyMs:  signal.LatencyMs,
-				Reason:     "Supervisor policy: low risk mutation rejected due to allowed_paths scope violation",
-				KeyUsed:    signal.KeyUsed,
-				IsFallback: signal.IsFallback,
-			}
+			return newVerdict(signal, ActionEscalateHITL,
+				"Supervisor policy: low risk mutation rejected due to allowed_paths scope violation")
 		}
 
-		return TriageVerdict{
-			Action:     ActionGrantReceipt,
-			Signal:     signal,
-			RiskScore:  signal.RiskScore,
-			BreachProb: signal.BreachProb,
-			Confidence: signal.Confidence,
-			LatencyMs:  signal.LatencyMs,
-			Reason:     "Supervisor policy: certified low-risk mutation within declared scope boundaries",
-			KeyUsed:    signal.KeyUsed,
-			IsFallback: signal.IsFallback,
-		}
+		return newVerdict(signal, ActionGrantReceipt,
+			"Supervisor policy: certified low-risk mutation within declared scope boundaries")
 	}
 
 	// Rule 3: Escalate non-trivial or ambiguous mutations to Human Operator (HITL)
-	return TriageVerdict{
-		Action:     ActionEscalateHITL,
-		Signal:     signal,
-		RiskScore:  signal.RiskScore,
-		BreachProb: signal.BreachProb,
-		Confidence: signal.Confidence,
-		LatencyMs:  signal.LatencyMs,
-		Reason:     fmt.Sprintf("Supervisor policy: mutation flagged for human operator review (risk=%.2f, breach=%.2f)", signal.RiskScore, signal.BreachProb),
-		KeyUsed:    signal.KeyUsed,
-		IsFallback: signal.IsFallback,
-	}
+	return newVerdict(signal, ActionEscalateHITL,
+		fmt.Sprintf("Supervisor policy: mutation flagged for human operator review (risk=%.2f, breach=%.2f)", signal.RiskScore, signal.BreachProb))
 }
 
 // TriageMutation executes the full two-step pipeline: Sensor EmitSignal + Supervisor EvaluatePolicy.
@@ -399,22 +372,26 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 	return g.EvaluatePolicy(signal, req), nil
 }
 
+func fallbackSignal(risk, breach, conf float64, reason string) ReflexSignal {
+	return ReflexSignal{
+		RiskScore:  risk,
+		BreachProb: breach,
+		Confidence: conf,
+		Source:     "deterministic",
+		Reason:     reason,
+		IsFallback: true,
+	}
+}
+
 func (g *ReflexGate) deterministicFallbackSignal(req TriageRequest, reason string) ReflexSignal {
 	for _, f := range req.FilesModified {
 		base := strings.ToLower(filepath.Base(f))
 		if strings.Contains(base, ".env") || strings.Contains(base, "id_rsa") || strings.Contains(base, "shadow") {
-			return ReflexSignal{
-				RiskScore:  4.0,
-				BreachProb: 0.99,
-				Confidence: 1.0,
-				Source:     "deterministic",
-				Reason:     fmt.Sprintf("Sensitive file match %s (%s)", f, reason),
-				IsFallback: true,
-			}
+			return fallbackSignal(4.0, 0.99, 1.0, fmt.Sprintf("Sensitive file match %s (%s)", f, reason))
 		}
 	}
 
-	allDocs := true
+	allDocs := len(req.FilesModified) > 0
 	for _, f := range req.FilesModified {
 		ext := strings.ToLower(filepath.Ext(f))
 		if ext != ".md" && ext != ".txt" {
@@ -422,26 +399,11 @@ func (g *ReflexGate) deterministicFallbackSignal(req TriageRequest, reason strin
 			break
 		}
 	}
-
-	if allDocs && len(req.FilesModified) > 0 {
-		return ReflexSignal{
-			RiskScore:  1.0,
-			BreachProb: 0.05,
-			Confidence: 0.95,
-			Source:     "deterministic",
-			Reason:     fmt.Sprintf("Documentation edits only (%s)", reason),
-			IsFallback: true,
-		}
+	if allDocs {
+		return fallbackSignal(1.0, 0.05, 0.95, fmt.Sprintf("Documentation edits only (%s)", reason))
 	}
 
-	return ReflexSignal{
-		RiskScore:  2.5,
-		BreachProb: 0.30,
-		Confidence: 0.70,
-		Source:     "deterministic",
-		Reason:     fmt.Sprintf("Non-trivial mutation (%s)", reason),
-		IsFallback: true,
-	}
+	return fallbackSignal(2.5, 0.30, 0.70, fmt.Sprintf("Non-trivial mutation (%s)", reason))
 }
 
 // isWithinScope verifies whether all modified files conform to declared allowed path patterns.
@@ -451,38 +413,12 @@ func isWithinScope(modified []string, allowed []string) bool {
 	}
 	for _, f := range modified {
 		cleanFile := filepath.ToSlash(filepath.Clean(f))
-		// Reject path traversal attempts
 		if cleanFile == ".." || strings.HasPrefix(cleanFile, "../") {
 			return false
 		}
 		matched := false
 		for _, pattern := range allowed {
-			cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
-			// 1. Exact path match
-			if cleanFile == cleanPattern {
-				matched = true
-				break
-			}
-			// 2. Directory boundary match: pattern ends in /* or /
-			if strings.HasSuffix(pattern, "/*") || strings.HasSuffix(pattern, "/") {
-				dirPrefix := strings.TrimSuffix(cleanPattern, "*")
-				if !strings.HasSuffix(dirPrefix, "/") {
-					dirPrefix += "/"
-				}
-				if strings.HasPrefix(cleanFile, dirPrefix) {
-					matched = true
-					break
-				}
-			} else if !strings.Contains(cleanPattern, "*") {
-				// Bare directory pattern without trailing slash e.g. "internal" or "docs"
-				dirPrefix := cleanPattern + "/"
-				if strings.HasPrefix(cleanFile, dirPrefix) {
-					matched = true
-					break
-				}
-			}
-			// 3. Glob matching (e.g. *.md, src/*.go)
-			if m, _ := filepath.Match(cleanPattern, cleanFile); m {
+			if pathMatches(cleanFile, pattern) {
 				matched = true
 				break
 			}
@@ -492,4 +428,29 @@ func isWithinScope(modified []string, allowed []string) bool {
 		}
 	}
 	return true
+}
+
+func pathMatches(cleanFile, pattern string) bool {
+	cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
+	// 1. Exact path match
+	if cleanFile == cleanPattern {
+		return true
+	}
+	// 2. Directory boundary match: pattern ends in /* or / or is a bare directory name
+	if strings.HasSuffix(pattern, "/*") || strings.HasSuffix(pattern, "/") {
+		dirPrefix := strings.TrimSuffix(cleanPattern, "*")
+		if !strings.HasSuffix(dirPrefix, "/") {
+			dirPrefix += "/"
+		}
+		if strings.HasPrefix(cleanFile, dirPrefix) {
+			return true
+		}
+	} else if !strings.Contains(cleanPattern, "*") {
+		if strings.HasPrefix(cleanFile, cleanPattern+"/") {
+			return true
+		}
+	}
+	// 3. Glob matching (e.g. *.md, src/*.go)
+	m, _ := filepath.Match(cleanPattern, cleanFile)
+	return m
 }
