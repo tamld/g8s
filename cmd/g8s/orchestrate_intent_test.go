@@ -426,6 +426,29 @@ func TestOrchestrateAICDiffError(t *testing.T) {
 	}
 }
 
+func TestOrchestrateAICCleanDiffNoisePruned(t *testing.T) {
+	origFetcher := ghDiffFetcher
+	defer func() { ghDiffFetcher = origFetcher }()
+
+	ghDiffFetcher = func(pr int) (string, error) {
+		return "diff --git a/go.sum b/go.sum\n--- a/go.sum\n+++ b/go.sum\n@@ -1 +1,2 @@\n+foo v1.0.0\n", nil
+	}
+
+	// Noise-only diff should finish with APPROVED without needing orchestrator
+	runOrchestrateAIC([]string{"--pr", "101", "--intent", "Security audit"})
+}
+
+func TestOrchestrateAICJSONCleanDiff(t *testing.T) {
+	origFetcher := ghDiffFetcher
+	defer func() { ghDiffFetcher = origFetcher }()
+
+	ghDiffFetcher = func(pr int) (string, error) {
+		return "diff --git a/package-lock.json b/package-lock.json\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1 +1,2 @@\n+\"version\": \"1.0.1\"\n", nil
+	}
+
+	runOrchestrateAIC([]string{"--pr", "102", "--intent", "Security audit", "--json"})
+}
+
 func TestRunOrchestrateCLIIntentJSON(t *testing.T) {
 	origCtor := orchestratorWorkerCtor
 	defer func() { orchestratorWorkerCtor = origCtor }()

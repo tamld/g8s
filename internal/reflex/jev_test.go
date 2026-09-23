@@ -14,6 +14,14 @@ import (
 )
 
 func TestKeyPoolLoading(t *testing.T) {
+	origKeys := os.Getenv("TYPESAFE_API_KEYS")
+	os.Unsetenv("TYPESAFE_API_KEYS")
+	defer func() {
+		if origKeys != "" {
+			os.Setenv("TYPESAFE_API_KEYS", origKeys)
+		}
+	}()
+
 	os.Setenv("TYPESAFE_API_KEY", "primary_key")
 	os.Setenv("TYPESAFE_API_KEY_FALLBACK", "secondary_key")
 	defer os.Unsetenv("TYPESAFE_API_KEY")
