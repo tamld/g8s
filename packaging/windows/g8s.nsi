@@ -2,7 +2,7 @@
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-  !define VERSION "0.4.0"
+  !define VERSION "0.10.0"
 !endif
 
 !ifndef INPUT_DIR

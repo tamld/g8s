@@ -47,6 +47,36 @@ jobs:
           
           echo "✓ Version sync OK"
 
+      - name: Check packaging installer version drift
+        run: |
+          # Packaging templates must not pin a stale release version (#319).
+          # ci.yml derives the live version at build time; these literals are
+          # the offline fallback defaults and the chocolatey download URL.
+          VERSION_CODE=$(grep '^[[:space:]]*Version[[:space:]]*=' cmd/g8s/version.go | head -1 | sed 's/.*= *"\([^"]*\)".*/\1/')
+          fail=0
+
+          for f in packaging/windows/g8s.nsi packaging/windows/g8s.wxs; do
+            LITERAL=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$f" | head -1 | tr -d '"')
+            echo "$f: $LITERAL"
+            if [ "$LITERAL" != "$VERSION_CODE" ]; then
+              echo "::error::Installer template version drift in $f: template=$LITERAL, canonical=$VERSION_CODE"
+              fail=1
+            fi
+          done
+
+          CHOCO_VER=$(grep -oE 'download/v[0-9]+\.[0-9]+\.[0-9]+/' packaging/chocolatey/tools/chocolateyinstall.ps1 | head -1 | sed 's|download/v||; s|/$||')
+          echo "chocolateyinstall.ps1: v$CHOCO_VER"
+          if [ "$CHOCO_VER" != "$VERSION_CODE" ]; then
+            echo "::error::Chocolatey download URL drift: url=v$CHOCO_VER, canonical=$VERSION_CODE"
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+
+          echo "✓ Packaging version consistent"
+
       - name: Check Go version consistency
         run: |
           GO_MOD_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
