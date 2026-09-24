@@ -27,6 +27,9 @@ set -euo pipefail
 echo "==> Running pre-push CI/CD quality gate..."
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# Unset git hook environment variables so sub-tests don't bleed into git repo
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX
+
 if ! "${REPO_ROOT}/tools/pre_push.sh" --fast; then
     echo ""
     echo "::error::git push ABORTED: pre-push verification failed."
