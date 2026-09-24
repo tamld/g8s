@@ -180,6 +180,12 @@
       "title": "Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius",
       "path": "spec/openspec/20-code-intel-adapter-spec.md",
       "status": "PROPOSED"
+    },
+    {
+      "id": "DELTA-21",
+      "title": "Unified Decoupled Memory Layer & Hybrid Retrieval Adapter",
+      "path": "spec/openspec/21-unified-memory-adapter-spec.md",
+      "status": "ACCEPTED"
     }
   ],
   "milestones": {
@@ -187,7 +193,7 @@
     "M2": "Control Plane, Multi-Worker Governor & Pluggable Providers",
     "M3": "LSP Blast Radius, OS Service Daemon & Public Open-Source Release",
     "M4": "DX/AX Experience, Interactive Setup Wizard & Self-Healing Auto-Remediation",
-    "M5": "Robustness, Closed-Loop Telemetry & Adversarial Evaluations",
+    "M5": "Robustness, Decoupled Memory, Closed-Loop Telemetry & Adversarial Evaluations",
     "M6": "Jev AI Reflex Decoupling, Native DiffDistiller & Governance Hardening"
   }
 }
