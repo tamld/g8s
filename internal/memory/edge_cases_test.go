@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -450,12 +451,15 @@ func TestAdapter_NewAdapter_PreExistingFilePermissions(t *testing.T) {
 	}
 	defer adapter.Close()
 
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		t.Fatalf("stat failed: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("expected 0600 on preexisting file, got %04o", perm)
+	// POSIX 0600 enforcement is POSIX-only; Windows has no permission bits
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(dbPath)
+		if err != nil {
+			t.Fatalf("stat failed: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("expected 0600 on preexisting file, got %04o", perm)
+		}
 	}
 }
 

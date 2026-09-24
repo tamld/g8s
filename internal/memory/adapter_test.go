@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -60,14 +61,16 @@ func TestWorkingMemory_CRUD_And_Redaction(t *testing.T) {
 	adapter, dbPath := setupTestAdapter(t)
 	ctx := context.Background()
 
-	// Verify POSIX 0600 file permissions
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		t.Fatalf("failed to stat db file: %v", err)
-	}
-	perm := info.Mode().Perm()
-	if perm != 0o600 {
-		t.Errorf("expected 0600 file permissions, got %04o", perm)
+	// Verify POSIX 0600 file permissions (POSIX-only; Windows has no permission bits)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(dbPath)
+		if err != nil {
+			t.Fatalf("failed to stat db file: %v", err)
+		}
+		perm := info.Mode().Perm()
+		if perm != 0o600 {
+			t.Errorf("expected 0600 file permissions, got %04o", perm)
+		}
 	}
 
 	taskID := "task-wm-001"
