@@ -206,7 +206,11 @@ echo verify-tool version 1.0
 		runArgs = []string{"/c", exePath}
 	}
 
-	result, _, _, err := RunWithTimeoutAndVerify(5*time.Second, runCommand, runArgs, VerifyOptions{
+	// 30s deadline: this test exercises the success path, not timeout handling
+	// (TestRunWithTimeout_Timeout covers that). The old 5s deadline was
+	// load-sensitive — fork/exec plus interpreter startup on macOS can exceed
+	// it when the full suite or the race detector saturates the machine (#321).
+	result, _, _, err := RunWithTimeoutAndVerify(30*time.Second, runCommand, runArgs, VerifyOptions{
 		ExpectedNames: []string{"verify-tool", "cmd"},
 		CheckShebang:  true,
 	})
