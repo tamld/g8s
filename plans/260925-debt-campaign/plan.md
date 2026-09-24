@@ -109,3 +109,31 @@ was never approached (max breach 0.03).
 
 **DoD**: supervisor metrics queried; ledger finalized; residuals mapped to
 v0.3.0 milestone issues (#1–#8 in docs/REFACTORING_PLAN.md).
+
+## Phase 4 addendum — execution findings (recorded post-merge-prep)
+
+- D5: worker task marked `WORKER_COMPLETED` while the agent stream ends in
+  `error_message` with no deliverable (task a51cd2df, 155 steps ≈ 474K
+  tokens; task af2151a0, 188 steps — same pattern). Runner must parse the
+  terminal event and mark FAILED(retryable); the unused
+  `result_validation` column is the natural hook.
+- D6 (multi-session cowork): concurrent orchestrator sessions in one shared
+  checkout moved each other's branch refs / HEAD mid-campaign (campaign
+  commit 9e24ba5 orphaned by an external checkout; recovered via reflog and
+  pushed as fix/debt-319-321-campaign @ 9e24ba5 → PR #330). Enforce-code
+  fixes needed: `worker --once` must default to a dedicated worktree (the
+  orchestrate path already does this — bare dispatch against the shared
+  checkout should require an explicit flag); concurrent supervisors need a
+  repo-lock or session-scoped state dir.
+- Measured worker ceilings (gemini-3.8-flash-high via agy 1.2.10,
+  --print-timeout 30m): bounded-scope task ≈ 354K input / 17.5K output
+  tokens in 147 s → full deliverable; broad-scope task dies in
+  error_message around ≈ 474–500K total tokens / ~155 steps. Budget worker
+  prompts well below ~450K tokens.
+- PR closeout: #325 Windows guards pushed (1115019) + review note posted;
+  #324 reviewed, verdict approve-as-comment (lands the #254 probe suite and
+  a docs-contract CI gate); gh identity is the PR author, so formal GitHub
+  approval is impossible — verdicts recorded in comments.
+- Delivery: PR #330 (closes #321, #319) awaiting operator merge; findings
+  filed as #326 (D1), #327 (D2), #328 (D3), #329 (D4), D5 issue pending;
+  #320 closed by re-audit evidence (resolved by b503108).
