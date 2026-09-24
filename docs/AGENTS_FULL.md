@@ -101,12 +101,10 @@ Incoming Task:
 | **DELTA-09** | [`09-worker-supervisor-spec.md`](../spec/openspec/09-worker-supervisor-spec.md) | `internal/worker` | APPLIED |
 | **DELTA-10** | [`10-two-class-providers-spec.md`](../spec/openspec/10-two-class-providers-spec.md) | `internal/provider` | APPLIED |
 | **DELTA-11** | [`11-knowledge-vault-spec.md`](../spec/openspec/11-knowledge-vault-spec.md) | `internal/vault` | APPLIED |
-| **DELTA-12** | [`12-lineage-cte-and-stream-pipe-spec.md`](../spec/openspec/12-lineage-cte-and-stream-pipe-spec.md) | `internal/lineage` | APPLIED |
+| **DELTA-11-ROADMAP** | [`11-orchestration-roadmap-spec.md`](../spec/openspec/11-orchestration-roadmap-spec.md) | `internal/supervisor` | APPLIED |
+| **DELTA-12** | [`12-lineage-cte-and-stream-pipe-spec.md`](../spec/openspec/12-lineage-cte-and-stream-pipe-spec.md) | `internal/controlplane` | APPLIED |
 | **DELTA-13** | [`13-dx-ax-init-and-autorepair-spec.md`](../spec/openspec/13-dx-ax-init-and-autorepair-spec.md) | `internal/initwiz` | APPLIED |
-| **DELTA-15** | [`15-fsm-orchestrator-spec.md`](../spec/openspec/15-fsm-orchestrator-spec.md) | `internal/supervisor` | APPLIED |
-| **DELTA-17** | [`17-controlplane-orchestrator-spec.md`](../spec/openspec/17-controlplane-orchestrator-spec.md) | `internal/controlplane` | APPLIED |
-| **DELTA-18** | [`18-aic-integration-spec.md`](../spec/openspec/18-aic-integration-spec.md) | `cmd/g8s` | APPLIED |
-| **DELTA-19** | [`19-lego-mounts-spec.md`](../spec/openspec/19-lego-mounts-spec.md) | `internal/orchestrator` | APPLIED |
+| **DELTA-20** | [`20-code-intel-adapter-spec.md`](../spec/openspec/20-code-intel-adapter-spec.md) | `internal/codeintel` | PROPOSED |
 
 ---
 

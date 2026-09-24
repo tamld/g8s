@@ -87,7 +87,7 @@ jobs:
           mkdir -p dist/windows_amd64
           go build -o dist/windows_amd64/g8s.exe ./cmd/g8s
           cp README.md LICENSE dist/windows_amd64/
-          VERSION=$(go run ./cmd/g8s version --json | jq -r '.data.version')
+          VERSION=$(go run ./cmd/g8s version --json | jq -r '.data.version // .version')
           if command -v makensis &> /dev/null; then
             makensis -DVERSION="$VERSION" -DINPUT_DIR=dist/windows_amd64 packaging/windows/g8s.nsi
           elif [ -f "/c/Program Files (x86)/NSIS/makensis.exe" ]; then

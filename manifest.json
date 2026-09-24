@@ -4,11 +4,11 @@
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
   "version": "0.10.0",
-  "go_version": "1.25",
+  "go_version": "1.26.0",
   "latest_release": {
-    "tag": "v0.3.0",
-    "commit": "a35d205",
-    "date": "2026-08-29"
+    "tag": "v0.10.0",
+    "commit": "60905b4",
+    "date": "2026-09-20"
   },
   "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/tamld/g8s",
@@ -27,8 +27,8 @@
     "agent_protocol": "AGENTS.md"
   },
   "runtime": {
-    "language": "Go 1.25+",
-    "go_version": "1.25",
+    "language": "Go 1.26.0",
+    "go_version": "1.26.0",
     "cgo_enabled": 0,
     "module": "github.com/tamld/g8s",
     "entrypoint": "cmd/g8s/main.go",
@@ -158,6 +158,12 @@
       "status": "APPLIED"
     },
     {
+      "id": "DELTA-11-ROADMAP",
+      "title": "Supervisor Multi-Phase Fix Loop & Orchestration Roadmap",
+      "path": "spec/openspec/11-orchestration-roadmap-spec.md",
+      "status": "APPLIED"
+    },
+    {
       "id": "DELTA-12",
       "title": "Core Resilience, Recursive CTE Lineage & Unbuffered Streaming Pipe",
       "path": "spec/openspec/12-lineage-cte-and-stream-pipe-spec.md",
@@ -187,6 +193,7 @@
     "M2": "Control Plane, Multi-Worker Governor & Pluggable Providers",
     "M3": "LSP Blast Radius, OS Service Daemon & Public Open-Source Release",
     "M4": "DX/AX Experience, Interactive Setup Wizard & Self-Healing Auto-Remediation",
-    "M5": "Robustness, Decoupled Memory & Multi-Agent Evals"
+    "M5": "Robustness, Decoupled Memory, Closed-Loop Telemetry & Adversarial Evaluations",
+    "M6": "Jev AI Reflex Decoupling, Native DiffDistiller & Governance Hardening"
   }
 }
