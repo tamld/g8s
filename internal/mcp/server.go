@@ -1,7 +1,7 @@
 // Package mcp implements the g8s Model Context Protocol (MCP) server over
 // stdio using newline-delimited JSON-RPC 2.0 (DELTA-04).
 //
-// The server exposes six tools that let a Brain-tier client (Claude Desktop,
+// The server exposes eleven tools that let a Brain-tier client (Claude Desktop,
 // Cursor, Codex, Windsurf) drive the g8s runtime:
 //
 //	g8s_run             synchronous task execution (Phase 4 supervisor dependency)
@@ -9,7 +9,12 @@
 //	g8s_get             task status lookup via internal/controlplane
 //	g8s_receipt_issue   single-use write receipt via internal/receipt
 //	g8s_self_awareness  provider/model discovery via internal/provider
-//	g8s_blast_radius    LSP impact analysis (DELTA-07, not yet built)
+//	g8s_blast_radius    LSP impact analysis (DELTA-07)
+//	g8s_dispatch        bounded read-only dispatch through g8s wrapper
+//	g8s_list_tasks      list durable tasks with optional state filter
+//	g8s_cancel_task     request cooperative cancellation of a durable task
+//	g8s_list_roles      enumerate registered role profiles
+//	g8s_list_permissions enumerate permission profiles with MCP enablement metadata
 //
 // Dependencies are injected as narrow local interfaces so this package stays
 // decoupled from concrete store types and remains trivially testable. Per the
