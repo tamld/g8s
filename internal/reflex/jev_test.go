@@ -443,3 +443,50 @@ func TestEmitSignalHTTPFailures(t *testing.T) {
 		t.Fatalf("expected 500 fallback, got %v", sig2)
 	}
 }
+
+// #329 Red Test: a live Jev response that omits confidence must no longer
+// deadlock the grant fast-path. With the calibration fix, a docs-only
+// mutation scored low-risk by the sensor gets its confidence derived from
+// the deterministic classifier and EvaluatePolicy grants the receipt.
+func TestLiveJevMissingConfidenceCalibration(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model": "jev-latest",
+			"answers": {
+				"risk_tier": {"type": "score", "score": 0.5, "confidence": 0},
+				"sandbox_breach": {"type": "noul", "noul": 0.02, "confidence": 0}
+			},
+			"usage": {"input_tokens": 10, "output_tokens": 5}
+		}`))
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(WithEndpoint(ts.URL), WithKeys([]string{"test_key"}), WithEnvFile(false))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	signal, err := gate.EmitSignal(ctx, TriageRequest{
+		TaskID:        "calibration-test",
+		FilesModified: []string{"README.md"},
+		DiffSummary:   "typo fix in docs",
+	})
+	if err != nil {
+		t.Fatalf("EmitSignal: %v", err)
+	}
+	if signal.Source != "jev" {
+		t.Fatalf("expected live jev source, got %q (%s)", signal.Source, signal.Reason)
+	}
+	if signal.Confidence <= 0 {
+		t.Fatalf("confidence must be derived from the deterministic classifier when Jev omits it")
+	}
+
+	verdict := gate.EvaluatePolicy(signal, TriageRequest{
+		TaskID:        "calibration-test",
+		FilesModified: []string{"README.md"},
+		DiffSummary:   "typo fix in docs",
+	})
+	if verdict.Action != ActionGrantReceipt {
+		t.Fatalf("docs-only low-risk mutation should reach the grant fast-path, got %s (%s)", verdict.Action, verdict.Reason)
+	}
+}
