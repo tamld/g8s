@@ -85,7 +85,7 @@ reference/python/                                     g8s/ (Pure Go)
 
 ### Phase 5: Parity Verification & CI Pipeline
 * [x] Run side-by-side verification: Go `g8s` vs Python `reference/` on identical workloads. Executed 2026-08-25 against the v0.1.0 candidate — all five parity-matrix rows pass or are documented deviations (see docs/RELEASE_READINESS.md).
-* [x] Achieve $\ge 140$ passing Go tests: 187 test functions green under dual-pass verification (CGO_ENABLED=0 full suite and CGO_ENABLED=1 race detector with zero reports).
+* [x] Achieve $\ge 140$ passing Go tests: current state (2026-09-25) is 38 packages / 820+ test functions green under dual-pass verification (CGO_ENABLED=0 full suite and CGO_ENABLED=1 race detector with zero reports).
 * [x] Configure multi-OS automated build with GoReleaser. Config present since `eb5b14d`; snapshot smoke verified in T019 producing darwin/linux/windows amd64+arm64 archives (modernized v2 formats schema, commit `c73e0b1`).
 
 ---
@@ -140,15 +140,41 @@ reference/python/                                     g8s/ (Pure Go)
 
 ---
 
-### v0.4.0 — Observability & Hardening (Future)
-**Target**: 2026-11-15
+### Historical releases v0.4.0 → v0.9.2 (Completed)
+All shipped and published on GitHub Releases (verified 2026-09-25 by roadmap-truth audit, issue #332):
+
+| Version | Highlight |
+|---------|-----------|
+| v0.4.0 (2026-08-30) | Observability & hardening baseline |
+| v0.5.0 → v0.6.1 | Incremental hardening releases |
+| v0.7.0 | DELTA-20 Multi-Tier Code Intelligence Adapter (`internal/codeintel`) |
+| v0.8.0 | Windows service backend via sc.exe wrapper (DEBT-44, PR #174) |
+| v0.9.0 → v0.9.2 | Knowledge vault, DX/AX wizard, governance polish |
+
+---
+
+### v0.11.0 — Memory, Telemetry & Adversarial Evals (In Progress)
+**Target**: 2026-10-05
+
+| Workstream | Status | Notes |
+|-----------|--------|-------|
+| DELTA-21 Unified Decoupled Memory Facade | ✅ Merged | PR #325, ADR-0019 |
+| Docs-contract gate + adversarial probe suite | ✅ Merged | PR #324 (progress on #254) |
+| Reflex-gated debt campaign #319/#320/#321 | ✅ Merged | PR #330, ADR-0020 |
+| Closed-Loop Worker Trace Telemetry | 🔄 In Progress | Issue #253 |
+| Adversarial Safety Probes & Behavioral Evals | 🔄 In Progress | Issue #254 |
+| Dogfood enforcement debt (#326–#331) | 📋 Tracked | cleanup channel bugs, worker ceilings, Jev calibration |
+
+---
+
+### v0.12.0 — Code Intelligence & Service Unification (Planned)
+**Target**: 2026-11-01
 
 | Issue | Description | Priority |
 |-------|-------------|----------|
-| #9 | Structured logging (slog + trace_id correlation) | P1 |
-| #10 | Prometheus text endpoint (`/metrics`) — zero deps | P1 |
-| #11 | Receipt lake compaction / retention policies | P2 |
-| #12 | Windows service hardening (kardianos/service integration) | P2 |
+| DELTA-20 | Code Intelligence Tiers 0.5–2 (dynamic blast radius) | P1 |
+| #8/#12 | kardianos/service cross-platform unification | P2 |
+| #326–#329 | Cleanup channel + CLI envelope + reflex CLI enforcement | P1 |
 
 ---
 
