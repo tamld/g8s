@@ -6,7 +6,7 @@
 * **Milestone**: `M5` (Robustness & Evals)
 * **Target Package**: `internal/codeintel`
 * **Tracking Issue**: #256
-* **Architecture Decision**: [ADR-0018](decisions/0018-soc-code-intelligence.md)
+* **Architecture Decision**: [ADR-0018](../../docs/decisions/0018-soc-code-intelligence.md)
 
 ---
 

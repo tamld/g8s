@@ -10,6 +10,7 @@ The `g8s` binary is the self-describing, single entry point for task submission,
 | :--- | :--- | :--- |
 | `G8S_DB` | Path to shared SQLite control-plane & receipt database | `~/.local/state/g8s/g8s.db` |
 | `AGY_BIN` | Explicit worker binary path (overrides PATH lookup) | Resolved from `PATH` |
+| `G8S_PROVIDERS` | Path to custom provider configuration JSON file | `~/.config/g8s/providers.json` |
 
 ---
 
@@ -75,7 +76,48 @@ g8s tasks --state QUEUED --limit 20
 
 ---
 
-### 4. `g8s lineage <task-id>`
+### 4. `g8s cancel <task-id>`
+Cancels an active, leased, or queued task in the SQLite control plane.
+
+```sh
+# Cancel by positional ID
+g8s cancel 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31
+
+# Cancel with explicit reason
+g8s cancel --task-id 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31 --reason "User requested abort"
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task-id` | `string` | `""` | Task ID to cancel (can be provided as positional argument). |
+| `--reason` | `string` | `"cancelled via CLI"` | Reason recorded in the task event audit log. |
+
+---
+
+### 5. `g8s resume <task-id>`
+Resumes a task halted in `NEEDS_INFO` or `BLOCKED` state, optionally providing clarifying answers or refined instructions.
+
+```sh
+# Resume task
+g8s resume 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31
+
+# Resume with updated prompt and reason
+g8s resume 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31 \
+  --prompt "Proceed with approach B using standard flag.FlagSet" \
+  --reason "Clarification provided by operator"
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task-id` | `string` | `""` | Task ID to resume (can be provided as positional argument). |
+| `--prompt` | `string` | `""` | Updated prompt or clarifying instructions. |
+| `--reason` | `string` | `"resumed via CLI"` | Reason recorded in the task event audit log. |
+
+---
+
+### 6. `g8s lineage <task-id>`
 Prints the full ancestry chain of a task up to the root parent, ordered chronologically (`Root -> Child -> Grandchild`).
 
 ```sh
@@ -84,7 +126,7 @@ g8s lineage grandchild-task-id-123
 
 ---
 
-### 5. `g8s children <parent-task-id>`
+### 7. `g8s children <parent-task-id>`
 Lists all direct child subtasks submitted under a specified parent task ID.
 
 ```sh
@@ -93,7 +135,7 @@ g8s children root-task-id-123
 
 ---
 
-### 6. `g8s receipt` — Write Receipt Management
+### 8. `g8s receipt` — Write Receipt Management
 
 #### `g8s receipt issue`
 Issues a cryptographic, single-use, TTL-bounded, path-scoped Write Receipt on behalf of the Brain orchestrator.
@@ -120,66 +162,31 @@ Prints the receipt envelope with all metadata including supervisor columns (`app
 Validates a receipt against the control plane (expiry, revocation, single-use consumption).
 
 #### `g8s receipt revoke <receipt-id>`
-Revokes an active receipt, preventing further consumption.
+Revokes an unconsumed write receipt immediately.
+
+#### `g8s receipt list`
+Lists all active, consumed, or expired receipts with status filtering.
 
 ---
 
-## Subcommands — Supervisor Orchestration (DELTA-11 + DELTA-18)
+## Subcommands — Orchestration & Supervision
 
-### 7. `g8s orchestrate`
-Runs the supervisor-driven fix loop (Concern A) or intent-based FanOut orchestration (DELTA-18).
+### 9. `g8s orchestrate`
+Runs the supervisor self-test loop against the worker engine with automated Root Cause Analysis (RCA) and bounded fix cycles.
 
 ```sh
-# Self-test: deterministic escalation at 9 attempts
-g8s orchestrate "Refactor auth middleware to use pure-Go context tokens" \
-  --self-test \
-  --max-attempts 3 \
-  --max-approaches 3 \
-  --actor "brain-supervisor"
-
-# From free-text intent (comma/newline split into sub-tasks)
-g8s orchestrate --from-intent "Scan for security issues, generate tests, update docs" \
-  --model gemini-3.8-flash-high \
-  --role collector \
-  --permission read_only \
-  --add-dir ./src \
-  --json
-
-# From intent file
-g8s orchestrate --from-file ./INTENT.md --json
-
-# Brief-driven orchestration
-g8s orchestrate --brief-file ./BRIEF.md --json
+g8s orchestrate "Run security benchmark suite" \
+  --max-attempts 5 \
+  --model "gemini-3.8-flash-high"
 ```
 
-#### Key Flags:
-| Flag | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--self-test` | `bool` | `false` | Run self-contained supervisor loop against real agy worker. |
-| `--from-intent` | `string` | `""` | Free-text natural language intent (comma/newline split). |
-| `--from-file` | `string` | `""` | Path to file containing natural language intent. |
-| `--brief-file` | `string` | `""` | Path to brief markdown file to issue and dispatch. |
-| `--brief` | `string` | `""` | Stored brief ID for dual-blind orchestration. |
-| `--dispatch` | `string` | `""` | Stored brief ID to re-issue and dispatch. |
-| `--blind-converge` | `int` | `0` | Run N dual-blind workers with isolated worktrees. |
-| `--task` | `string` | `"scan ./src..."` | Task description handed to the supervisor. |
-| `--max-attempts` | `int` | `3` | Attempts per approach (iteration cap). |
-| `--max-approaches` | `int` | `3` | Approach budget before HITL escalation. |
-| `--timeout` | `duration` | `5m` | Per-attempt execution window. |
-| `--provider` | `string` | `"agy"` | Agent provider backend (`agy`, `codex`, `claude`, `ollama`). |
-| `--model` | `string` | *(auto)* | Target worker model. |
-| `--role` | `string` | `"collector"` | Worker role contract. |
-| `--permission` | `string` | `"read_only"` | Permission profile. |
-| `--add-dir` | `string` | `[cwd]` | Additional allowed directory (repeatable). |
-
 ---
 
-### 8. `g8s orchestrate-aic` (DELTA-18)
-Thin AIC integration wrapper for automated GitHub PR reviews. Extracts PR diff via `gh pr diff` and dispatches review intent to `g8s orchestrate --from-intent`.
+### 10. `g8s orchestrate-aic` (DELTA-18)
+Automated PR review and remediation orchestrator. Analyzes GitHub PR diffs, distills noise, generates reviewer contracts, and drives verifier subtasks.
 
 ```sh
-# Requires gh CLI authenticated
-g8s orchestrate-aic --pr 123 --intent "Review security changes for auth middleware" --json
+g8s orchestrate-aic --pr 42 --intent "Verify zero-alloc buffer pool changes"
 ```
 
 #### Flags:
@@ -192,11 +199,31 @@ g8s orchestrate-aic --pr 123 --intent "Review security changes for auth middlewa
 
 ---
 
-### 9. `g8s supervisor-metrics` (Concern C)
-Queries supervisor metrics persisted in the control plane. Read-only ingestion for meta-optimizer.
+### 11. `g8s worker`
+Runs the local background supervisor loop, claiming tasks from the SQLite queue, executing them with configured provider templates, and reporting status.
 
 ```sh
-# Aggregate metrics across all runs (8 metrics)
+# Claim and execute a single task, then exit (ideal for CI)
+g8s worker --once
+
+# Run continuous worker for a specific model with 120s lease
+g8s worker --once=false --model "gemini-3.8-flash-high" --lease 120
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--once` | `bool` | `true` | Claim and execute a single task, then exit. |
+| `--model` | `string` | `""` | Restrict claiming to tasks targeting this model. |
+| `--lease` | `int` | `60` | Lease duration in seconds. |
+
+---
+
+### 12. `g8s supervisor-metrics` & `g8s supervisor-metrics-update-false`
+Queries supervisor telemetry persisted in the control plane (`supervisor_metrics` table) and records operator feedback.
+
+```sh
+# Aggregate metrics across all runs (8 core metrics)
 g8s supervisor-metrics --aggregate --json
 
 # Streaming per-task metrics (one JSON object per task)
@@ -207,9 +234,12 @@ g8s supervisor-metrics --task-id sup-abc123 --json
 
 # Filtered aggregation
 g8s supervisor-metrics --aggregate --time-range 24h --worker-name agy --json
+
+# Feedback loop: mark escalation as false positive
+g8s supervisor-metrics-update-false --task-id sup-abc123 --false
 ```
 
-#### Flags:
+#### `g8s supervisor-metrics` Flags:
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--task-id` | `string` | `""` | Supervisor task ID (single-run mode). |
@@ -218,44 +248,116 @@ g8s supervisor-metrics --aggregate --time-range 24h --worker-name agy --json
 | `--time-range` | `duration` | `0` | Filter by time window (e.g. `1h`, `24h`). |
 | `--worker-name` | `string` | `""` | Filter by worker name (`agy`, `codex`, `claude`, etc.). |
 
-> **Flag collision guard**: `--task-id` cannot be combined with `--aggregate` or `--json-stream` (exits with usage error code 2).
+#### `g8s supervisor-metrics-update-false` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task-id` | `string` | *(Required)* | Supervisor task ID to update. |
+| `--false` | `bool` | `false` | Mark escalation as false positive (task should have succeeded). |
 
 ---
 
-### 10. `g8s brief` — Decoupled Brief Dispatch
-
-#### `g8s brief-issue`
-Issues a brief (contract-driven task specification) with DoD and optional title.
+### 13. `g8s brief-issue` & `g8s brief-consume`
+Decoupled contract-driven brief dispatch system with Definition of Done (DoD) and TTL expiry.
 
 ```sh
+# Issue a structured task brief
 g8s brief-issue \
   --file ./BRIEF.md \
   --title "Security audit" \
   --dod "All tests pass, no scope violations" \
-  --ttl 2h \
-  --issued-by "brain-supervisor"
-```
+  --ttl 2h
 
-#### `g8s brief-consume`
-Atomically consumes a brief, preventing double-execution.
-
-```sh
-g8s brief-consume --brief-id <brief-id> --actor "worker-001"
+# Consume an active brief
+g8s brief-consume --brief-id brief-abc123 --actor "worker-001"
 ```
 
 ---
 
-## Subcommands — Operations & Maintenance
+### 14. `g8s autopilot`
+Manages the background cron-based scheduler daemon for autonomous health sweeps, CI remediation, and issue processing.
 
-### 11. `g8s cleanup`
-Inspects and purges ghost worker processes, orphan worktrees, and stale artifacts.
+```sh
+# Start autopilot scheduler
+g8s autopilot start --cron "*/15 * * * *" --repo .
+
+# Trigger immediate scan cycle
+g8s autopilot trigger --type issues
+
+# Inspect status
+g8s autopilot status
+
+# Stop daemon
+g8s autopilot stop
+
+# Show configuration
+g8s autopilot config --show
+```
+
+---
+
+## Subcommands — Code Intelligence & Knowledge
+
+### 15. `g8s analyze`
+Quantifies code blast radius, symbol references, and downstream dependency impact using native Go AST parsing to recommend precise write scopes.
+
+```sh
+# Analyze file blast radius
+g8s analyze --file ./internal/receipt/receipt.go
+
+# Analyze impact of a specific symbol
+g8s analyze --file ./internal/receipt/receipt.go --symbol "IssueReceipt" --root .
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--file` | `string` | *(Required)* | Target file path to analyze (can be passed as positional argument). |
+| `--symbol` | `string` | `""` | Target symbol identifier (function, struct, method). |
+| `--root` | `string` | `[cwd]` | Codebase root directory for dependency analysis. |
+
+---
+
+### 16. `g8s vault`
+Pure-Go Decoupled Tri-Anchor Knowledge Vault with SQLite FTS5 full-text indexing and BM25 relevance ranking (DELTA-11).
+
+```sh
+# Store a distillation record
+g8s vault store \
+  --id "DELTA-02-A" \
+  --delta-id "DELTA-02" \
+  --spec-anchor "spec/openspec/02-receipt-delegation-spec.md" \
+  --plan-anchor "plans/receipt-sprint.md" \
+  --confidence 0.95 \
+  --summary "Receipt delegation engine implementation patterns"
+
+# Query vault using BM25 full-text search
+g8s vault query --q "write receipts CAS" --limit 10
+
+# List stored vault records
+g8s vault list --limit 25
+
+# Get record by ID
+g8s vault get DELTA-02-A
+
+# Delete record by ID
+g8s vault delete DELTA-02-A
+```
+
+---
+
+## Subcommands — Operations & Daemon
+
+### 17. `g8s cleanup`
+Inspects and purges ghost worker processes, orphan worktrees, branches, tags, and stale receipts.
 
 ```sh
 g8s cleanup --dry-run   # Inspect only
 g8s cleanup --force     # Execute cleanup
 ```
 
-### 12. `g8s cleanup-worktrees`
+---
+
+### 18. `g8s cleanup-worktrees`
 Cleans up orphaned git worktrees created during dual-blind or FanOut runs.
 
 ```sh
@@ -263,22 +365,28 @@ g8s cleanup-worktrees --dry-run
 g8s cleanup-worktrees --force
 ```
 
-### 13. `g8s status`
-Real-time worker heartbeat and process status introspection.
+---
+
+### 19. `g8s status`
+Real-time worker heartbeat, active leases, and process status introspection.
 
 ```sh
 g8s status --worker --json
 ```
 
-### 14. `g8s state`
-Control plane state inspection and maintenance commands.
+---
+
+### 20. `g8s state`
+Control plane state inspection and event log replay.
 
 ```sh
-g8s state active-count
-g8s state reconcile
+g8s state show <task-id>
+g8s state replay <task-id>
 ```
 
-### 15. `g8s migrate`
+---
+
+### 21. `g8s migrate`
 Database schema migrations and version management.
 
 ```sh
@@ -286,29 +394,59 @@ g8s migrate status
 g8s migrate up
 ```
 
-### 15. `g8s converge`
+---
+
+### 22. `g8s converge`
 Dual-blind convergence synthesis for multiple worker runs on the same brief.
 
 ```sh
 g8s converge --brief-id <brief-id> --threshold 0.7
 ```
 
-### 16. `g8s sleep` / `g8s wake`
-Pause and resume control plane task processing.
+---
+
+### 23. `g8s sleep` / `g8s wake`
+Marks operator away to defer non-critical notifications, or ends sleep cycle emitting voice/json summary.
 
 ```sh
-g8s sleep --reason "maintenance window"
-g8s wake
+g8s sleep --until "2h"
+g8s wake --format json
 ```
 
-### 17. `g8s providers`
-Lists registered worker providers and their available models.
+---
+
+### 24. `g8s serve`
+Runs long-lived daemon mode exposing RESTful HTTP API server for remote task submission, receipt validation, and Prometheus metrics.
+
+```sh
+# Start HTTP API server on default port
+g8s serve --address ":8080"
+
+# Run as background daemon blocking until SIGINT/SIGTERM
+g8s serve --address "127.0.0.1:8080" --daemon
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--address` | `string` | `":8080"` | Host and port to listen on. |
+| `--daemon` | `bool` | `false` | Run as long-lived daemon (blocks until signal received). |
+| `--config` | `string` | `""` | Path to server configuration YAML file. |
+
+---
+
+## Subcommands — Protocols & Security Introspection
+
+### 25. `g8s providers`
+Lists detected AI agent CLI providers and their availability status.
 
 ```sh
 g8s providers --json
 ```
 
-### 18. `g8s mcp`
+---
+
+### 26. `g8s mcp`
 Serves the standard Stdio JSON-RPC 2.0 Model Context Protocol (MCP) server on `stdin`/`stdout`.
 
 ```sh
@@ -319,35 +457,40 @@ g8s mcp
 
 ---
 
-## Subcommands — Security & Introspection
-
-### 19. `g8s roles` & `g8s permissions`
-Inspect built-in security profiles directly in your terminal:
+### 27. `g8s roles` & `g8s permissions`
+Inspects built-in security profiles and mutation permissions:
 
 ```sh
 g8s roles
 g8s permissions
 ```
 
-### 20. `g8s version`
+---
+
+### 28. `g8s version`
 Prints binary version banner, Go runtime, and Zero-CGO pure Go status.
 
 ```sh
 g8s version
 ```
 
-### 21. `g8s doctor`
-Runs health checks on the binary, control plane, and worker provider availability.
+---
+
+### 29. `g8s doctor`
+Runs health checks on binary integrity, SQLite database connectivity, and worker provider availability.
 
 ```sh
 g8s doctor --json
+g8s doctor --fix
 ```
 
-### 22. `g8s init` / `g8s config` / `g8s completion` / `g8s service`
-Runtime initialization, configuration management, shell completion, and service management (macOS LaunchAgent).
+---
+
+### 30. `g8s init` / `g8s config` / `g8s completion` / `g8s service`
+Runtime initialization, persistent key-value configuration, shell completion generation, and OS service management.
 
 ```sh
-g8s init --force
+g8s init
 g8s config get G8S_DB
 g8s completion zsh > ~/.zsh/completions/_g8s
 g8s service install --user

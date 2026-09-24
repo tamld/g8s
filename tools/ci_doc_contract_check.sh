@@ -20,7 +20,7 @@ FAILED=0
 echo "==> Running Documentation ↔ Code Contract Checks..."
 
 # 1. Orchestrator FSM States Contract
-echo "--> [1/5] Verifying Orchestrator FSM states contract..."
+echo "--> [1/6] Verifying Orchestrator FSM states contract..."
 EXPECTED_ORCH_STATES=("PLAN" "SPAWN" "MONITOR" "RECEIPT" "MERGE" "ESCALATE" "CANCEL" "CONFLICT")
 for state in "${EXPECTED_ORCH_STATES[@]}"; do
     if ! grep -qi "OrchestratorState$state" internal/state/state.go; then
@@ -34,7 +34,7 @@ for state in "${EXPECTED_ORCH_STATES[@]}"; do
 done
 
 # 2. Task FSM States Contract
-echo "--> [2/5] Verifying Task FSM states contract..."
+echo "--> [2/6] Verifying Task FSM states contract..."
 EXPECTED_TASK_STATES=("QUEUED" "LEASED" "RUNNING" "NEEDS_INFO" "BLOCKED" "SUCCEEDED" "FAILED" "CANCELLED")
 for state in "${EXPECTED_TASK_STATES[@]}"; do
     clean_state="${state//_/}"
@@ -45,7 +45,7 @@ for state in "${EXPECTED_TASK_STATES[@]}"; do
 done
 
 # 3. Go Version Contract
-echo "--> [3/5] Verifying Go version consistency..."
+echo "--> [3/6] Verifying Go version consistency across SSoT docs..."
 GO_MOD_VER=$(grep -E '^go ' go.mod | awk '{print $2}')
 if [ -z "$GO_MOD_VER" ]; then
     echo "::error::Unable to determine go version in go.mod"
@@ -55,10 +55,26 @@ else
         echo "::error::docs/ARCHITECTURE_ROADMAP.md does not reference current go version $GO_MOD_VER"
         FAILED=$((FAILED + 1))
     fi
+    if ! grep -q "$GO_MOD_VER" spec/constitution.md; then
+        echo "::error::spec/constitution.md does not reference current go version $GO_MOD_VER"
+        FAILED=$((FAILED + 1))
+    fi
+    if ! grep -q "\"go_version\": \"$GO_MOD_VER\"" manifest.json; then
+        echo "::error::manifest.json does not reference current go version $GO_MOD_VER"
+        FAILED=$((FAILED + 1))
+    fi
+    if ! grep -q "$GO_MOD_VER" README.md; then
+        echo "::error::README.md does not reference current go version $GO_MOD_VER"
+        FAILED=$((FAILED + 1))
+    fi
+    if ! grep -q "$GO_MOD_VER" README.vi.md; then
+        echo "::error::README.vi.md does not reference current go version $GO_MOD_VER"
+        FAILED=$((FAILED + 1))
+    fi
 fi
 
 # 4. Receipt Verification Contract
-echo "--> [4/5] Verifying Receipt Verifier layer contract..."
+echo "--> [4/6] Verifying Receipt Verifier layer contract..."
 if [ ! -f "internal/orchestrator/verify.go" ]; then
     echo "::error::internal/orchestrator/verify.go missing (ReceiptVerifier layer contract)"
     FAILED=$((FAILED + 1))
@@ -73,13 +89,22 @@ if ! grep -q "StdoutEnvelopeVerifier" internal/orchestrator/verify.go; then
 fi
 
 # 5. Doc Unowned TODO Check
-echo "--> [5/5] Checking for unowned TODO/FIXME in documentation..."
+echo "--> [5/6] Checking for unowned TODO/FIXME in documentation..."
 UNOWNED_DOC_TODOS=$(grep -rnE '(^|[[:space:]])//\s*(TODO|FIXME|XXX)' docs/ spec/ 2>/dev/null | grep -v 'OWNER=' | grep -v '`//' || true)
 if [ -n "$UNOWNED_DOC_TODOS" ]; then
     echo "::error::Found unowned TODO/FIXME in documentation:"
     echo "$UNOWNED_DOC_TODOS"
     FAILED=$((FAILED + 1))
 fi
+
+# 6. OpenSpec File Link Consistency
+echo "--> [6/6] Verifying OpenSpec registry file existence..."
+while IFS= read -r link; do
+    if [ ! -f "spec/openspec/$link" ]; then
+        echo "::error::spec/openspec/README.md references missing spec file: spec/openspec/$link"
+        FAILED=$((FAILED + 1))
+    fi
+done < <(grep -oE '\([0-9A-Za-z_-]+\.md\)' spec/openspec/README.md | tr -d '()')
 
 if [ "$FAILED" -gt 0 ]; then
     echo ""

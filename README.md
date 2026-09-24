@@ -8,7 +8,7 @@
 > *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26.0-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 `g8s` (pronounced **"Gates"** — short for **G**atekeeper**s**) is a standalone, single-binary runtime designed for **Two-Tier Multi-Agent Systems**. It enables high-tier "Brain" orchestrators (Claude 3.7 Sonnet / Opus, GPT-4o, DeepSeek R1) to safely delegate heavy mechanical tasks (code scanning, unit test synthesis, MCP mapping, artifact extraction) to fast, lightweight CLI workers (Antigravity `agy`, Claude Code CLI, Gemini CLI, Ollama) behind **strict role contracts, sandboxes, and cryptographic/time-limited write receipts**.
 
-**v0.9.2 (2026-09-18)** delivers the complete **DELTA-11 Orchestration Roadmap** plus **DEBT Tech Debt Cleanup** — four concerns landed:
+**v0.10.0 (2026-09-20)** delivers the complete **DELTA-11 Orchestration Roadmap**, Jev AI reflex sensor decoupling, native DiffDistiller & Verifier subagent pipeline, plus hardened governance gates:
 
 | Concern | Deliverable | Status |
 |---------|-------------|--------|
@@ -64,7 +64,7 @@
 
 ---
 
-## 🚀 Key Features (v0.2.0)
+## 🚀 Key Features (v0.10.0)
 
 * **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single ~15MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
 * **🛡️ Defense-in-Depth Safety Gates**:
@@ -72,7 +72,7 @@
   * **3 Permission Profiles**: `read_only`, `automation_read`, `workspace_write`.
   * **Blocked Command Patterns**: Chokes `rm -rf`, `drop database`, `mkfs`, `cat .env`.
   * **Sensitive Path Protections**: Rejects access to `.ssh`, `.aws`, `.env`, `id_rsa` (including symlinks and `..` traversal).
-* **🎟️ Receipt-Based Write Delegation (Schema v3)**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain. **New in v0.2.0**: Supervisor metadata columns (`approach_idx`, `attempt_idx`, `rca_confidence`, `adr_path`) + provenance/replay context (11 columns) — backward-compatible idempotent migration.
+* **🎟️ Receipt-Based Write Delegation (Schema v3)**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain. Supervisor metadata columns (`approach_idx`, `attempt_idx`, `rca_confidence`, `adr_path`) + provenance/replay context (11 columns) — backward-compatible idempotent migration.
 * **📦 Durable Control Plane**: SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases, idempotency keys, and parent-child task lineage.
 * **🧠 Supervisor-Driven Fix Loop (Concern A)**: Bounded iteration policy (3 attempts × 3 approaches = 9 max), planner (envelope selection: SRS/PRD/DoR/DoD/DnD/Validateds/FSM), enforcer (DoR/DoD gating), reviewer (receipt inspection — scope violation always fails), RCA (structured analysis with confidence scoring; <0.6 → NEEDS_INFO pause), escalator (HITL JSON digest on stdout). **ADR-0001** accepted.
 * **📊 Meta-Optimizer Read-Only Ingestion (Concern C)**: `g8s supervisor metrics --aggregate` computes 8 metrics across all runs (total_runs, first_attempt_success_rate, avg_attempts_to_success, avg_approaches_to_success, rca_confidence_avg, escalation_rate, avg_cycle_duration_seconds, false_escalation_rate). Streaming via `--json-stream`. Flag collision guard: `--task-id` + `--aggregate/--json-stream` → usage error. **ADR-0003** proposed.
@@ -264,28 +264,28 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ---
 
-## 📦 Release Artifacts (v0.2.0)
+## 📦 Release Artifacts (v0.10.0)
 
 Cross-platform GoReleaser v2 artifacts (darwin/linux/windows × amd64/arm64):
 
 | Artifact | Platform |
 |----------|----------|
-| `g8s_v0.2.0_darwin_amd64.tar.gz` | macOS Intel |
-| `g8s_v0.2.0_darwin_arm64.tar.gz` | macOS Apple Silicon |
-| `g8s_v0.2.0_linux_amd64.tar.gz` | Linux x86_64 |
-| `g8s_v0.2.0_linux_arm64.tar.gz` | Linux ARM64 |
-| `g8s_v0.2.0_windows_amd64.zip` | Windows x86_64 |
-| `g8s_v0.2.0_windows_arm64.zip` | Windows ARM64 |
+| `g8s_v0.10.0_darwin_amd64.tar.gz` | macOS Intel |
+| `g8s_v0.10.0_darwin_arm64.tar.gz` | macOS Apple Silicon |
+| `g8s_v0.10.0_linux_amd64.tar.gz` | Linux x86_64 |
+| `g8s_v0.10.0_linux_arm64.tar.gz` | Linux ARM64 |
+| `g8s_v0.10.0_windows_amd64.zip` | Windows x86_64 |
+| `g8s_v0.10.0_windows_arm64.zip` | Windows ARM64 |
 
 ### Verification
 ```bash
 # Checksums (SHA256)
-sha256sum g8s_v0.2.0_*.tar.gz g8s_v0.2.0_*.zip
+sha256sum g8s_v0.10.0_*.tar.gz g8s_v0.10.0_*.zip
 
 # Cosign signature verification (when published)
-cosign verify-blob --signature g8s_v0.2.0_darwin_amd64.tar.gz.sig \
-  --certificate g8s_v0.2.0_darwin_amd64.tar.gz.pem \
-  g8s_v0.2.0_darwin_amd64.tar.gz
+cosign verify-blob --signature g8s_v0.10.0_darwin_amd64.tar.gz.sig \
+  --certificate g8s_v0.10.0_darwin_amd64.tar.gz.pem \
+  g8s_v0.10.0_darwin_amd64.tar.gz
 ```
 
 ---
@@ -301,8 +301,8 @@ CGO_ENABLED=0 go vet ./... && go test -count=1 ./...
 CGO_ENABLED=1 go test -race -count=1 ./...
 ```
 
-- **31 packages** — all green under both gates
-- **187+ test functions** — table-driven, injectable clock, deterministic
+- **38 packages** — all green under both gates
+- **820+ test functions** — table-driven, injectable clock, deterministic
 - **Zero race detector warnings**
 - **Zero CGO dependencies** (`modernc.org/sqlite` only)
 
@@ -310,12 +310,13 @@ CGO_ENABLED=1 go test -race -count=1 ./...
 
 ## 🗺️ Release Roadmap
 
-| Target | Milestone | Key Deliverables |
-|--------|-----------|------------------|
-| **2026-09-15** | **v0.2.0** | **Concern A + B + C complete** — Supervisor fix loop, Receipt evolution (Schema v3), Meta-optimizer read-only. DELTA-18 AIC + From-Intent. |
-| **2026-10-15** | v0.3.0 | Autopilot scheduler (cron + priority queue), Meta-optimizer write tranche (`Optimizer.Propose()`), False escalation feedback, Configurable priority weights. |
-| **2026-11-15** | v0.4.0 | Observability: OpenTelemetry + structured logging, Prometheus `/metrics`, Receipt lake compaction/retention. |
-| **2026-12-15** | v1.0.0 | GA Release: 6-month ct122 stability, Security audit (OWASP+STRIDE), Documentation audit + migration guide, Windows service hardening, Plugin ecosystem docs. |
+| Target | Milestone | Key Deliverables | Status |
+|--------|-----------|------------------|:---:|
+| **2026-09-15** | **v0.2.0** | **Concern A + B + C complete** — Supervisor fix loop, Receipt evolution (Schema v3), Meta-optimizer read-only. DELTA-18 AIC + From-Intent. | **Done** |
+| **2026-09-18** | **v0.3.0** | Autopilot scheduler, HTTP API daemon (`g8s serve`), False escalation feedback loop, Configurable priority weights. | **Done** |
+| **2026-09-20** | **v0.10.0** | **Jev AI + DiffIntel + Governance** — Reflex sensor decoupling (`internal/reflex`), Native DiffDistiller & Verifier (`internal/diffintel`, `internal/review`), Supervisor coverage $\ge 93.6\%$, 11 MCP tools. | **Done** |
+| **2026-11-15** | v0.11.0 | Closed-Loop Telemetry & Adversarial Evaluations Harness (`g8s eval`, Provider Reliability Index). | In Progress |
+| **2026-12-15** | v1.0.0 | GA Release: 6-month homelab stability, Enterprise security signoff, Windows service hardening, Distributed fleet mTLS. | Planned |
 
 ---
 

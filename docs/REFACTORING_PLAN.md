@@ -92,8 +92,8 @@ reference/python/                                     g8s/ (Pure Go)
 
 ## 4. Release Roadmap
 
-### v0.2.0 — Orchestration MVP (Current Sprint)
-**Target**: 2026-09-15  
+### v0.2.0 — Orchestration MVP (Completed 2026-09-15)
+**Delivered**: 2026-09-15  
 **Scope**: DELTA-11 Concerns A, B, C (read-only) + DELTA-18 AIC/from-intent
 
 | Component | Status | Notes |
@@ -103,39 +103,40 @@ reference/python/                                     g8s/ (Pure Go)
 | Meta-optimizer read-only (Concern C) | ✅ Complete | T022: Aggregate/StreamMetrics API, flag collision guard |
 | AIC contract (`orchestrate-aic`) | ✅ Complete | DELTA-18 §18.1: `--pr` + `--intent` → JSON envelope |
 | From-intent orchestration | ✅ Complete | DELTA-18 §18.2: `--from-intent` / `--from-file` → FanOut |
-| Dual-pass gates (CGO=0 + CGO=1 -race) | ✅ Green | All 31 packages |
+| Dual-pass gates (CGO=0 + CGO=1 -race) | ✅ Green | All 38 packages |
 | GoReleaser cross-platform artifacts | ✅ Configured | darwin/linux/windows amd64+arm64 |
 
-**Release artifacts**:
-- `g8s_v0.2.0_darwin_amd64.tar.gz`
-- `g8s_v0.2.0_darwin_arm64.tar.gz`
-- `g8s_v0.2.0_linux_amd64.tar.gz`
-- `g8s_v0.2.0_linux_arm64.tar.gz`
-- `g8s_v0.2.0_windows_amd64.zip`
-- `g8s_v0.2.0_windows_arm64.zip`
-
 **Acceptance criteria**:
-- [ ] `./bin/g8s orchestrate "self-test"` escalates at 9 attempts deterministically
-- [ ] `./bin/g8s supervisor metrics --aggregate` returns 8 metrics on seeded data
-- [ ] `./bin/g8s orchestrate-aic --pr 1 --intent "test"` emits JSON envelope
-- [ ] No race detector warnings, no CGO dependencies
+- [x] `./bin/g8s orchestrate "self-test"` escalates at 9 attempts deterministically
+- [x] `./bin/g8s supervisor-metrics --aggregate` returns 8 metrics on seeded data
+- [x] `./bin/g8s orchestrate-aic --pr 1 --intent "test"` emits JSON envelope
+- [x] No race detector warnings, no CGO dependencies
 
 ---
 
-### v0.3.0 — Autopilot & Daemon (Next Sprint)
-**Target**: 2026-10-15  
+### v0.3.0 — Autopilot & Daemon (Completed 2026-09-18)
+**Delivered**: 2026-09-18  
 **Scope**: Autopilot scheduler + meta-optimizer write/tuning + daemon mode + HTTP API
 
-| Issue | Description | Priority |
-|-------|-------------|----------|
-| #1 | Autopilot scheduler: cron tick scanning GH issues, CI failures, lints | P0 |
-| #2 | Meta-optimizer write tranche: `Optimizer.Propose()` applies tuned configs | P0 |
-| #3 | Daemon mode (`g8s serve`): long-lived supervisor process + HTTP API | P0 |
-| #4 | HTTP API + OpenAPI spec: `/api/v1/tasks`, `/api/v1/receipts`, `/api/v1/supervisor`, `/metrics`, `/healthz` | P0 |
-| #5 | `false_escalation_rate` feedback loop: user marks escalations | P1 |
-| #6 | Priority queue weights tunable via config file | P1 |
-| #7 | Export Go API docs + semantic versioning policy | P1 |
-| #8 | Windows service hardening (kardianos/service integration) | P2 |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Autopilot scheduler daemon | ✅ Complete | Cron tick scanning, CLI commands (`g8s autopilot`) |
+| Meta-optimizer tuning & feedback | ✅ Complete | `g8s supervisor-metrics-update-false`, feedback loop |
+| Daemon mode (`g8s serve`) | ✅ Complete | Long-lived process + HTTP API REST endpoints |
+| HTTP API & metrics | ✅ Complete | `/api/v1/tasks`, `/api/v1/receipts`, `/metrics` |
+
+---
+
+### v0.10.0 — Jev AI Reflex, DiffDistiller & Governance (Completed 2026-09-20)
+**Delivered**: 2026-09-20  
+**Scope**: System 1 Reflex sensor decoupling, DiffDistiller pipeline, and governance hardening
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Jev AI Reflex Sensor Decoupling | ✅ Complete | `internal/reflex` System 1 sensor decoupled from System 2 |
+| Native DiffDistiller & Verifier | ✅ Complete | `internal/diffintel`, `internal/review` token pruning & reviewer |
+| Supervisor Coverage Hardening | ✅ Complete | Package coverage lifted to $\ge 93.6\%$, repo aggregate $\ge 84.1\%$ |
+| MCP Expanded Surface | ✅ Complete | 11 registered MCP tools |
 
 ---
 
