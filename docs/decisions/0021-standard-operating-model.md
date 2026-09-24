@@ -27,6 +27,24 @@ windows; ADRs, CI gates, and CLI flags do.
 | **Jev (System-1 sensor)** | Empirical risk/breach telemetry on every planned mutation | Measures, never decides; kill-rule authoritative |
 | **Worker fleet** (agy/flash) | Bounded recon, verification, docs synthesis, red-team probes | `read_only` default; worktree-isolated; ≤ ~450K tokens/task (measured ceiling) |
 
+### 1a. Three-Tier Responsibility Stack (vertical model)
+
+The horizontal FSM above operates inside a vertical stack of three knowledge
+tiers. Each tier answers a different question and fails differently when
+skipped (Descent Output, `wiki-deep-why` protocol, 2026-09-25):
+
+| Tier | Question it owns | Mirrors (product architecture) | Exists because | If skipped |
+|------|------------------|-------------------------------|----------------|------------|
+| **T1 — Main agent: project direction** | "Is the project going the right way?" | Brain tier (receipt issuance, commits, architecture authority) | Concurrent sessions need one accountable owner; D6 showed refs moving under an active session twice | Duplicated implementations, roadmap fiction, session thrash |
+| **T2 — Orchestrator/supervisor: dogfood** | "Is the work coordinated through the tool's own transport?" | Supervisor fix loop (Concern A: orchestrate → worker) | g8s *is* a supervisor harness; managing it any other way disproves its own claims | The tool rots its advertised promises silently (e.g. #334: delegated-write dead while documented) |
+| **T3 — Self-optimization: supervisor + workers** | "Are the coordinator and the workers getting cheaper and more accurate?" | Meta-optimizer (Concern C: measure → learn → tune) | Supervisor and workers are the scarce resource (token budget); ceilings and channel bugs compound into every future slice | Every session re-pays the same tuition; broken channels corrupt evidence silently (#328, #331, #329) |
+
+Escalation direction is bottom-up: T3 findings (calibration, ceilings,
+channel defects) become T2 protocol changes; T2 evidence gaps become T1
+roadmap decisions. No tier may be bypassed downward — T1 never does T3's
+work directly (measuring, classifying) when a worker or sensor can; T3 never
+changes protocol without T1 ratification through this ADR's amendment path.
+
 ### 2. Slice lifecycle (every unit of work follows this FSM)
 
 ## State Diagram
