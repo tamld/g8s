@@ -55,7 +55,12 @@ func NewLocalSQLiteMemoryAdapter(opts AdapterOptions) (*LocalSQLiteMemoryAdapter
 		if err != nil {
 			return nil, fmt.Errorf("memory: enforce 0600 permissions on %s: %w", dbPath, err)
 		}
-		defer f.Close()
+		if err := f.Close(); err != nil {
+			return nil, fmt.Errorf("memory: close file %s: %w", dbPath, err)
+		}
+		if err := os.Chmod(dbPath, 0o600); err != nil {
+			return nil, fmt.Errorf("memory: chmod 0600 on %s: %w", dbPath, err)
+		}
 	}
 
 	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", dbPath)
@@ -114,6 +119,8 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 		metadata TEXT,
 		created_at TIMESTAMP NOT NULL
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_vector_dimensions ON vector_embeddings(dimensions);
 	`
 	_, err := a.db.Exec(schema)
 	return err
@@ -527,14 +534,21 @@ func (a *LocalSQLiteMemoryAdapter) SearchVector(ctx context.Context, queryVector
 		limit = 10
 	}
 
-	query := `SELECT record_id, vector_blob, dimensions, metadata FROM vector_embeddings`
-	rows, err := a.db.QueryContext(ctx, query)
+	query := `SELECT record_id, vector_blob, dimensions, metadata FROM vector_embeddings WHERE dimensions = ?`
+	rows, err := a.db.QueryContext(ctx, query, len(queryVector))
 	if err != nil {
 		return nil, fmt.Errorf("memory: query vectors: %w", err)
 	}
 	defer rows.Close()
 
-	var matches []VectorMatch
+	type rawCandidate struct {
+		recordID   string
+		score      float64
+		dimensions int
+		metaJSON   string
+	}
+
+	var candidates []rawCandidate
 	for rows.Next() {
 		var (
 			recordID string
@@ -545,10 +559,6 @@ func (a *LocalSQLiteMemoryAdapter) SearchVector(ctx context.Context, queryVector
 
 		if err := rows.Scan(&recordID, &blob, &dims, &metaJSON); err != nil {
 			return nil, fmt.Errorf("memory: scan vector row: %w", err)
-		}
-
-		if dims != len(queryVector) {
-			continue // Skip mismatched dimensions gracefully in multi-model environments
 		}
 
 		storedVec, err := DecodeVectorBlob(blob)
@@ -562,15 +572,15 @@ func (a *LocalSQLiteMemoryAdapter) SearchVector(ctx context.Context, queryVector
 		}
 
 		if score >= minScore {
-			var meta map[string]any
-			if metaJSON.Valid && metaJSON.String != "" {
-				_ = json.Unmarshal([]byte(metaJSON.String), &meta)
+			rawMeta := ""
+			if metaJSON.Valid {
+				rawMeta = metaJSON.String
 			}
-			matches = append(matches, VectorMatch{
-				RecordID:   recordID,
-				Score:      score,
-				Dimensions: dims,
-				Metadata:   meta,
+			candidates = append(candidates, rawCandidate{
+				recordID:   recordID,
+				score:      score,
+				dimensions: dims,
+				metaJSON:   rawMeta,
 			})
 		}
 	}
@@ -579,12 +589,26 @@ func (a *LocalSQLiteMemoryAdapter) SearchVector(ctx context.Context, queryVector
 		return nil, fmt.Errorf("memory: iterate vector rows: %w", err)
 	}
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].Score > matches[j].Score
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
 	})
 
-	if len(matches) > limit {
-		matches = matches[:limit]
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	matches := make([]VectorMatch, 0, len(candidates))
+	for _, c := range candidates {
+		var meta map[string]any
+		if c.metaJSON != "" {
+			_ = json.Unmarshal([]byte(c.metaJSON), &meta)
+		}
+		matches = append(matches, VectorMatch{
+			RecordID:   c.recordID,
+			Score:      c.score,
+			Dimensions: c.dimensions,
+			Metadata:   meta,
+		})
 	}
 
 	return matches, nil

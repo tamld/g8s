@@ -30,6 +30,10 @@ func CosineSimilarity(a, b []float32) (float64, error) {
 
 	sim := dot / (math.Sqrt(normA) * math.Sqrt(normB))
 
+	if math.IsNaN(sim) {
+		return 0, nil
+	}
+
 	// Numerical clamp to [-1.0, 1.0] to handle float precision drift
 	if sim > 1.0 {
 		sim = 1.0
@@ -70,7 +74,7 @@ func NormalizeVector(v []float32) ([]float32, error) {
 	}
 
 	norm := math.Sqrt(normSq)
-	if norm == 0 {
+	if norm == 0 || norm < 1e-38 {
 		res := make([]float32, len(v))
 		copy(res, v)
 		return res, nil

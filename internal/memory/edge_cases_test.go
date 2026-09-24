@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"errors"
+	"math"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -375,5 +377,110 @@ func TestWorkingMemory_Upsert_Update(t *testing.T) {
 	}
 	if loaded.Prompt != "updated prompt" {
 		t.Errorf("got prompt %q, want updated prompt", loaded.Prompt)
+	}
+}
+
+func TestWorkingContext_RawPrompt(t *testing.T) {
+	// 1. Nil receiver
+	var nilCtx *WorkingContext
+	if _, err := nilCtx.RawPrompt(); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for nil receiver, got %v", err)
+	}
+
+	// 2. Active status
+	activeCtx := &WorkingContext{
+		Prompt: "active prompt",
+		Status: StatusActive,
+	}
+	prompt, err := activeCtx.RawPrompt()
+	if err != nil || prompt != "active prompt" {
+		t.Errorf("expected 'active prompt', got (%q, %v)", prompt, err)
+	}
+
+	// 3. Purged status
+	purgedCtx := &WorkingContext{
+		Prompt: "",
+		Status: StatusPurged,
+	}
+	_, err = purgedCtx.RawPrompt()
+	if !errors.Is(err, ErrContextPurged) {
+		t.Errorf("expected ErrContextPurged, got %v", err)
+	}
+}
+
+func TestVectorMath_Adversarial_NaN_And_Underflow(t *testing.T) {
+	// 1. Cosine similarity with NaN
+	nanVec := []float32{float32(math.NaN()), 1.0}
+	normalVec := []float32{1.0, 1.0}
+	sim, err := CosineSimilarity(nanVec, normalVec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sim != 0.0 {
+		t.Errorf("expected 0.0 for NaN vector, got %v", sim)
+	}
+
+	// 2. Underflow in NormalizeVector
+	tinyVec := []float32{1e-39, 1e-39}
+	normed, err := NormalizeVector(tinyVec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, v := range normed {
+		if math.IsInf(float64(v), 0) || math.IsNaN(float64(v)) {
+			t.Errorf("NormalizeVector produced non-finite value: %v", v)
+		}
+	}
+}
+
+func TestAdapter_NewAdapter_PreExistingFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "preexisting.db")
+
+	// Create file with 0644
+	if err := os.WriteFile(dbPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("failed to write preexisting file: %v", err)
+	}
+
+	adapter, err := NewLocalSQLiteMemoryAdapter(AdapterOptions{
+		DBPath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("failed to open adapter on preexisting file: %v", err)
+	}
+	defer adapter.Close()
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat failed: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected 0600 on preexisting file, got %04o", perm)
+	}
+}
+
+func TestSearchVector_DimensionFilterAndDeferredJSON(t *testing.T) {
+	adapter, _ := setupTestAdapter(t)
+	ctx := context.Background()
+
+	// Store vector with 2 dimensions
+	_ = adapter.StoreVector(ctx, "rec-2d", []float32{1.0, 0.0}, map[string]any{"label": "2d"})
+
+	// Store vector with 3 dimensions
+	_ = adapter.StoreVector(ctx, "rec-3d", []float32{1.0, 0.0, 0.0}, map[string]any{"label": "3d"})
+
+	// Query with 3 dimensions
+	matches, err := adapter.SearchVector(ctx, []float32{1.0, 0.0, 0.0}, 10, 0.5)
+	if err != nil {
+		t.Fatalf("SearchVector failed: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 match for 3D query, got %d", len(matches))
+	}
+	if matches[0].RecordID != "rec-3d" {
+		t.Errorf("expected 'rec-3d', got %q", matches[0].RecordID)
+	}
+	if matches[0].Metadata["label"] != "3d" {
+		t.Errorf("expected metadata label '3d', got %v", matches[0].Metadata)
 	}
 }

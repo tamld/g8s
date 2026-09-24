@@ -47,6 +47,17 @@ type WorkingContext struct {
 	UpdatedAt      time.Time            `json:"updated_at"`
 }
 
+// RawPrompt safely returns the working context prompt or ErrContextPurged if already redacted.
+func (w *WorkingContext) RawPrompt() (string, error) {
+	if w == nil {
+		return "", ErrInvalidInput
+	}
+	if w.Status == StatusPurged {
+		return "", ErrContextPurged
+	}
+	return w.Prompt, nil
+}
+
 // EpisodicEvent models an event occurrence during task execution.
 type EpisodicEvent struct {
 	TaskID    string         `json:"task_id"`
