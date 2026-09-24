@@ -177,7 +177,7 @@ func isGitRepo(dir string) bool {
 }
 
 func gitAddWorktree(repo, path, branch, base string) error {
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, path, base)
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, "--", path, base)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -203,7 +203,7 @@ func gitDeleteBranch(repo, branch string) error {
 }
 
 func gitRevParse(repo, ref string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", ref)
+	cmd := exec.Command("git", "rev-parse", "--verify", ref)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {

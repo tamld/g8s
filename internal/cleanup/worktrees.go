@@ -75,7 +75,7 @@ func (d *DefaultGitRunner) WorktreeListPorcelain(ctx context.Context, repoDir st
 
 // WorktreeRemove removes a linked worktree from git.
 func (d *DefaultGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", wtPath)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", "--", wtPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove: %w (%s)", err, strings.TrimSpace(string(out)))
