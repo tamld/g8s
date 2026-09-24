@@ -312,11 +312,14 @@ CGO_ENABLED=1 go test -race -count=1 ./...
 
 | Target | Milestone | Key Deliverables | Status |
 |--------|-----------|------------------|:---:|
-| **2026-09-15** | **v0.2.0** | **Concern A + B + C complete** — Supervisor fix loop, Receipt evolution (Schema v3), Meta-optimizer read-only. DELTA-18 AIC + From-Intent. | **Done** |
-| **2026-09-18** | **v0.3.0** | Autopilot scheduler, HTTP API daemon (`g8s serve`), False escalation feedback loop, Configurable priority weights. | **Done** |
-| **2026-09-20** | **v0.10.0** | **Jev AI + DiffIntel + Governance** — Reflex sensor decoupling (`internal/reflex`), Native DiffDistiller & Verifier (`internal/diffintel`, `internal/review`), Supervisor coverage $\ge 93.6\%$, 11 MCP tools. | **Done** |
-| **2026-11-15** | v0.11.0 | Closed-Loop Telemetry & Adversarial Evaluations Harness (`g8s eval`, Provider Reliability Index). | In Progress |
-| **2026-12-15** | v1.0.0 | GA Release: 6-month homelab stability, Enterprise security signoff, Windows service hardening, Distributed fleet mTLS. | Planned |
+| **2026-09-13** | **v0.2.0** | **Concern A + B + C complete** — Supervisor fix loop, Receipt evolution (Schema v3), Meta-optimizer read-only. DELTA-18 AIC + From-Intent. | **Done** |
+| **2026-09-15** | **v0.3.0** | Autopilot scheduler, HTTP API daemon (`g8s serve`), False escalation feedback loop, Configurable priority weights, Prometheus `/metrics`. | **Done** |
+| **2026-08-30** | **v0.4.0** | Observability & hardening. | **Done** |
+| **2026-09** | **v0.5.0 → v0.9.2** | Incremental releases: DELTA-20 code-intel adapter (v0.7.0), Windows service backend (DEBT-44), knowledge vault, DX/AX wizard. | **Done** |
+| **2026-09-24** | **v0.10.0** | **Jev AI + DiffIntel + Governance** — Reflex sensor decoupling (`internal/reflex`), Native DiffDistiller & Verifier (`internal/diffintel`, `internal/review`), Supervisor coverage $\ge 93.6\%$, 11 MCP tools. | **Done** |
+| **2026-10-05** | v0.11.0 | DELTA-21 Unified Memory Facade (merged #325), Closed-Loop Telemetry Engine (#253), Adversarial Evaluations Harness (#254). | In Progress |
+| **2026-11-01** | v0.12.0 | DELTA-20 Code Intelligence Tiers 0.5–2, kardianos/service unification, debt-squad fixes (#326–#331). | Planned |
+| **2026-12-15** | v1.0.0 | GA Release: 6-month homelab stability, Enterprise security signoff, Distributed fleet mTLS. | Planned |
 
 ---
 
