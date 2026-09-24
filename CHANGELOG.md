@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-25
+
+Maintenance release produced by the reflex-gated debt campaign (ADR-0020) and
+the docs drift sweep (#332). No breaking changes.
+
+### Fixed
+- **Windows installer version derivation** (#319): NSIS/WiX steps now derive
+  the version from the canonical `version --json` envelope (`.data.version`);
+  stale `0.4.0` fallback literals in `g8s.nsi` / `g8s.wxs` / chocolatey URL
+  synced to the canonical version. New **version-sync CI gate** fails the
+  build when packaging templates drift from the canonical version.
+- **Flaky `TestRunWithTimeoutAndVerify`** (#321): success-path deadline raised
+  5s → 30s; the old deadline was load-sensitive under full-suite and `-race`
+  runs (fork/exec + code-sign validation latency).
+- **Windows CI test guards**: POSIX `0600` permission assertions in the
+  memory package now skip on Windows (no permission bits).
+- **Dogfood hardening** (#326–#331): cleanup channel findings, CLI envelope
+  rendering, worker completion-state validation, and live Jev calibration
+  are issue-tracked for v0.11.0.
+
+### Added
+- **Adversarial probe suite** (`internal/harness/probe`, ~20 probes × 6
+  categories) and **docs-contract CI gate** (`tools/ci_doc_contract_check.sh`)
+  via #324 (progress on #254).
+- **ADR-0020** (reflex-gated debt campaign), **ADR-0021** (standard operating
+  model), campaign ledger, and roadmap truth alignment (#332, #333).
+
+### Docs
+- README + REFACTORING_PLAN aligned with shipped reality (all releases
+  v0.2.0 → v0.10.0 verified tagged/published); removed 4 stale draft GitHub
+  releases.
+
 ## [0.10.0] - 2026-09-20
 
 ### Added
