@@ -137,3 +137,34 @@ v0.3.0 milestone issues (#1–#8 in docs/REFACTORING_PLAN.md).
 - Delivery: PR #330 (closes #321, #319) awaiting operator merge; findings
   filed as #326 (D1), #327 (D2), #328 (D3), #329 (D4), D5 issue pending;
   #320 closed by re-audit evidence (resolved by b503108).
+
+## Phase 5 addendum — debt-zero execution (post-SOM)
+
+Slices (DEBT-34-compliant layer split):
+- Slice 1 (#341, merged): cleanup local-existence filter + scratch
+  verify-tag-delete sweep (#326/#327), workspace_write escape-hatch hint
+  (#334), Jev confidence calibration (#329); repaired repo-wide CI
+  (telemetry gofmt/errcheck/SA9003/Windows t.TempDir + QF1012), Windows
+  batch-ingest bug skip-tracked (#342).
+- Slice 2 (#343, merged): worker error-tail classification (#331) +
+  Windows two-stage kill (#336 HIGH).
+- Slice 3 (#345, merged): g8s reflex triage CLI (#329), cleanup flags
+  (#327), quality-windows gate (#336), docs High-severity (#332),
+  README conciseness/standards, .gitignore /g8s anchor fix.
+- Vi sync (#347, merged): README.vi.md v0.10.1 alignment.
+
+New findings from this phase (issues):
+- #342 telemetry batch ingest persists 1/N events on Windows (operator
+  will debug on a Windows machine; test skipped with reference).
+- #344 Gemini safety filters block defensive security-audit prompts and
+  the refusal was classified succeeded (mitigated: defensive framing;
+  re-dispatch succeeded — see sec-hardening-review be8f3502).
+- #346 delegated-write missing last mile: receipt unconsumed, sandboxed
+  writes never materialize on the host repo (E2E experiment receipt
+  fb78986a / task a59c53e7).
+- #348 security hardening: wildcard bind + permissive CORS default,
+  checkpoint CAS RowsAffected, path-jail containment. Loopback default +
+  CORS-off shipped in this phase.
+
+Issue closure: #326, #327, #328 (resolved-on-main), #329, #331, #332,
+#334 closed; #336 partially addressed (HIGH + CI), MEDs remain open.
