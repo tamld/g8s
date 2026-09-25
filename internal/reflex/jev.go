@@ -311,6 +311,18 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		conf = breachAns.Confidence
 	}
 
+	reason := ""
+	if conf <= 0 {
+		// #329: the live Jev endpoint omits per-answer confidence (decodes
+		// as 0), which made the Rule-2 grant fast-path unreachable — every
+		// live verdict escalated regardless of risk. Keep Jev's empirical
+		// risk/breach telemetry, but derive confidence from the
+		// deterministic classifier so the gate stays calibrated: only
+		// rule-certifiable low-risk mutations can fast-path.
+		conf = g.deterministicFallbackSignal(req, "deterministic confidence").Confidence
+		reason = "confidence derived from deterministic classifier (live Jev omitted it)"
+	}
+
 	return ReflexSignal{
 		RiskScore:  riskScore,
 		BreachProb: breachProb,
@@ -318,6 +330,7 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		LatencyMs:  elapsed,
 		Source:     "jev",
 		KeyUsed:    activeKey,
+		Reason:     reason,
 		IsFallback: false,
 	}, nil
 }

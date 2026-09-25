@@ -40,9 +40,10 @@ func (m *mockSupervisorProcessManager) IsProcessAlive(pid int) bool {
 }
 
 type mockSupervisorGitRunner struct {
-	mu          sync.Mutex
-	pruneCalled bool
-	pruneErr    error
+	mu            sync.Mutex
+	pruneCalled   bool
+	pruneErr      error
+	localBranches []string
 }
 
 func (m *mockSupervisorGitRunner) WorktreeListPorcelain(ctx context.Context, repoDir string) (string, error) {
@@ -90,6 +91,22 @@ func (m *mockSupervisorGitRunner) LocalTags(ctx context.Context, repoDir string)
 
 func (m *mockSupervisorGitRunner) RemoteTags(ctx context.Context, repoDir string) ([]string, error) {
 	return nil, nil
+}
+
+func (m *mockSupervisorGitRunner) LocalBranches(ctx context.Context, repoDir string) ([]string, error) {
+	return m.localBranches, nil
+}
+
+func (m *mockSupervisorGitRunner) BranchesContaining(ctx context.Context, repoDir, sha string) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockSupervisorGitRunner) BranchTipInfo(ctx context.Context, repoDir, branch string) (string, time.Time, error) {
+	return "", time.Time{}, nil
+}
+
+func (m *mockSupervisorGitRunner) CreateTag(ctx context.Context, repoDir, tag, commit string) error {
+	return nil
 }
 
 func (m *mockSupervisorGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {

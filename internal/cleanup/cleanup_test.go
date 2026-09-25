@@ -62,13 +62,18 @@ func (m *MockProcessManager) IsProcessAlive(pid int) bool {
 
 // MockCleanupGitRunner provides scripted responses for Git operations.
 type MockCleanupGitRunner struct {
-	PorcelainOutput   string
-	PrunedOutput      string
-	MergedBranchesRes []string
-	RemoteBranchesRes []string
-	ClosedPRRes       []string
-	LocalTagsRes      []TagInfo
-	RemoteTagsRes     []string
+	PorcelainOutput       string
+	PrunedOutput          string
+	MergedBranchesRes     []string
+	RemoteBranchesRes     []string
+	ClosedPRRes           []string
+	LocalTagsRes          []TagInfo
+	RemoteTagsRes         []string
+	LocalBranchesRes      []string
+	BranchesContainingRes []string
+	BranchTipSHARes       string
+	BranchTipTimeRes      time.Time
+	CreatedTags           []string
 
 	DeletedBranches []string
 	DeletedTags     []string
@@ -113,6 +118,23 @@ func (m *MockCleanupGitRunner) LocalTags(ctx context.Context, repoDir string) ([
 
 func (m *MockCleanupGitRunner) RemoteTags(ctx context.Context, repoDir string) ([]string, error) {
 	return m.RemoteTagsRes, nil
+}
+
+func (m *MockCleanupGitRunner) LocalBranches(ctx context.Context, repoDir string) ([]string, error) {
+	return m.LocalBranchesRes, nil
+}
+
+func (m *MockCleanupGitRunner) BranchesContaining(ctx context.Context, repoDir, sha string) ([]string, error) {
+	return m.BranchesContainingRes, nil
+}
+
+func (m *MockCleanupGitRunner) BranchTipInfo(ctx context.Context, repoDir, branch string) (string, time.Time, error) {
+	return m.BranchTipSHARes, m.BranchTipTimeRes, nil
+}
+
+func (m *MockCleanupGitRunner) CreateTag(ctx context.Context, repoDir, tag, commit string) error {
+	m.CreatedTags = append(m.CreatedTags, tag+"@"+commit)
+	return nil
 }
 
 func (m *MockCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
@@ -546,7 +568,7 @@ CREATE TABLE write_receipts (
 
 func TestClosedPRBranchCleanup(t *testing.T) {
 	closedPRs := []string{"feat/pr-1", "feat/pr-2"}
-	runner := &MockCleanupGitRunner{ClosedPRRes: closedPRs}
+	runner := &MockCleanupGitRunner{ClosedPRRes: closedPRs, LocalBranchesRes: closedPRs}
 
 	t.Run("dry-run detects closed PR branches", func(t *testing.T) {
 		cfg := CleanupConfig{
@@ -566,7 +588,7 @@ func TestClosedPRBranchCleanup(t *testing.T) {
 	})
 
 	t.Run("force mode deletes closed PR branches", func(t *testing.T) {
-		r := &MockCleanupGitRunner{ClosedPRRes: closedPRs}
+		r := &MockCleanupGitRunner{ClosedPRRes: closedPRs, LocalBranchesRes: closedPRs}
 		cfg := CleanupConfig{
 			Targets:   []string{TargetClosedPRBranch},
 			DryRun:    false,
@@ -655,7 +677,7 @@ func TestTargetFiltering(t *testing.T) {
 		{PID: 1001, Binary: "agy", CommandLine: "agy", Reason: "no live heartbeat file"},
 	})
 	gitRunner := &MockCleanupGitRunner{
-		ClosedPRRes: []string{"feat/pr-1"},
+		ClosedPRRes: []string{"feat/pr-1"}, LocalBranchesRes: []string{"feat/pr-1"},
 	}
 
 	t.Run("runs only targeted sweep", func(t *testing.T) {
@@ -963,5 +985,109 @@ func TestGhostProcessCleanup_AuditLogAppended(t *testing.T) {
 	}
 	if entry.OperatorPID != os.Getpid() {
 		t.Errorf("expected OperatorPID %d, got %d", os.Getpid(), entry.OperatorPID)
+	}
+}
+
+// #326: closed PR heads that exist only on the remote are reported as
+// skipped remote-only refs, never attempted as local deletions.
+func TestSweepClosedPRBranchesRemoteOnly(t *testing.T) {
+	mock := &MockCleanupGitRunner{
+		ClosedPRRes:      []string{"dependabot/go_modules/sqlite-1.59.0", "feat/local-merged"},
+		LocalBranchesRes: []string{"feat/local-merged"},
+	}
+	items, err := sweepClosedPRBranches(context.Background(), CleanupConfig{
+		RepoDir:   "/repo",
+		DryRun:    true,
+		GitRunner: mock,
+	})
+	if err != nil {
+		t.Fatalf("sweep error: %v", err)
+	}
+	byID := map[string]CleanupItem{}
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	remoteOnly, ok := byID["dependabot/go_modules/sqlite-1.59.0"]
+	if !ok {
+		t.Fatalf("missing remote-only item: %+v", items)
+	}
+	if remoteOnly.Action != "skipped" {
+		t.Errorf("remote-only branch should be skipped, got %q", remoteOnly.Action)
+	}
+	local, ok := byID["feat/local-merged"]
+	if !ok {
+		t.Fatalf("missing local item: %+v", items)
+	}
+	if local.Action != "would_delete" {
+		t.Errorf("local branch in default dry-run should be would_delete, got %q", local.Action)
+	}
+	for _, d := range mock.DeletedBranches {
+		if d == "dependabot/go_modules/sqlite-1.59.0" {
+			t.Errorf("remote-only branch must not be passed to DeleteBranch")
+		}
+	}
+}
+
+// #327: scratch sweep deletes aged pattern-matched branches and preserves
+// unique unmerged tips under keep/scratch-auto-* tags (verify-tag-delete).
+func TestSweepScratchBranchesVerifyTagDelete(t *testing.T) {
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	mock := &MockCleanupGitRunner{
+		LocalBranchesRes:      []string{"agy/sup-1-sub-1", "agy/sup-2-sub-2", "feat/keep"},
+		BranchTipSHARes:       "abc123def4567890",
+		BranchTipTimeRes:      old,
+		BranchesContainingRes: []string{"agy/sup-1-sub-1"},
+	}
+	items, err := sweepScratchBranches(context.Background(), CleanupConfig{
+		RepoDir:         "/repo",
+		GitRunner:       mock,
+		ScratchEnabled:  true,
+		ScratchPatterns: []string{"agy/*"},
+		Clock:           time.Now,
+	})
+	if err != nil {
+		t.Fatalf("sweep error: %v", err)
+	}
+	if len(mock.CreatedTags) == 0 {
+		t.Errorf("unique unmerged tip must be tagged before deletion; items=%+v", items)
+	}
+	if len(mock.CreatedTags) > 0 && len(mock.CreatedTags[0]) < 10 {
+		t.Errorf("tag name unexpectedly short: %q", mock.CreatedTags[0])
+	}
+	deleted := map[string]bool{}
+	for _, d := range mock.DeletedBranches {
+		deleted[d] = true
+	}
+	if !deleted["agy/sup-1-sub-1"] || !deleted["agy/sup-2-sub-2"] {
+		t.Errorf("aged scratch branches should be deleted; deleted=%v", mock.DeletedBranches)
+	}
+	if deleted["feat/keep"] {
+		t.Errorf("non-matching branch must not be touched")
+	}
+	// Same tip shared by both branches: exactly one preservation tag.
+	if len(mock.CreatedTags) != 1 {
+		t.Errorf("shared tip should be tagged exactly once, got %d tags", len(mock.CreatedTags))
+	}
+}
+
+// #327: young scratch branches (within threshold) are left alone.
+func TestSweepScratchBranchesYoungSkipped(t *testing.T) {
+	young := time.Now().Add(-1 * time.Hour)
+	mock := &MockCleanupGitRunner{
+		LocalBranchesRes: []string{"agy/sup-fresh-sub-1"},
+		BranchTipSHARes:  "abc123def4567890",
+		BranchTipTimeRes: young,
+	}
+	items, err := sweepScratchBranches(context.Background(), CleanupConfig{
+		RepoDir:         "/repo",
+		GitRunner:       mock,
+		ScratchEnabled:  true,
+		ScratchPatterns: []string{"agy/*"},
+	})
+	if err != nil {
+		t.Fatalf("sweep error: %v", err)
+	}
+	if len(items) != 0 || len(mock.DeletedBranches) != 0 {
+		t.Errorf("young scratch branch must not be touched; items=%+v deleted=%v", items, mock.DeletedBranches)
 	}
 }
