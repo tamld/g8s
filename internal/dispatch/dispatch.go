@@ -611,25 +611,38 @@ func execRunnerWithTimeout(command []string, timeout time.Duration) (ExecResult,
 // ErrCommandTimeout indicates a command execution timed out.
 var ErrCommandTimeout = errors.New("command execution timeout")
 
-// verifyExecutableIdentity checks if the executable is what it claims to be.
+// VerifyExecutableIdentity checks if the executable is what it claims to be.
 // It detects fake scripts (e.g., python3 that's actually a Node script).
-func verifyExecutableIdentity(path string) error {
-	cmd := exec.Command(path, "--version")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		cmd = exec.Command(path, "-version")
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			return nil
+func VerifyExecutableIdentity(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	base := strings.ToLower(filepath.Base(path))
+
+	// Trim .exe, .cmd, or .bat for Windows platform matching
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".cmd")
+	base = strings.TrimSuffix(base, ".bat")
+
+	var output []byte
+	// Try standard version flags: --version, -version, version (for go), -v
+	versionArgs := [][]string{{"--version"}, {"-version"}, {"version"}, {"-v"}}
+	for _, args := range versionArgs {
+		cmd := exec.CommandContext(ctx, path, args...)
+		out, err := cmd.CombinedOutput()
+		if len(out) > 0 {
+			output = out
+			if err == nil {
+				break
+			}
 		}
 	}
 
-	outputStr := strings.ToLower(string(output))
-	base := strings.ToLower(filepath.Base(path))
+	if len(output) == 0 {
+		return nil
+	}
 
-	// Trim .exe or .cmd for Windows platform matching
-	base = strings.TrimSuffix(base, ".exe")
-	base = strings.TrimSuffix(base, ".cmd")
+	outputStr := strings.ToLower(string(output))
 
 	switch base {
 	case "python3", "python", "python2":
@@ -658,4 +671,8 @@ func verifyExecutableIdentity(path string) error {
 	}
 
 	return nil
+}
+
+func verifyExecutableIdentity(path string) error {
+	return VerifyExecutableIdentity(path)
 }
