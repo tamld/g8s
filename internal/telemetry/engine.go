@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	ErrEventNotFound  = errors.New("telemetry event not found")
+	ErrEventNotFound   = errors.New("telemetry event not found")
 	ErrPatternNotFound = errors.New("negative pattern not found")
 )
 

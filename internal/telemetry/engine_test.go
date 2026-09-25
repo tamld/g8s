@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tamld/g8s/internal/controlplane"
 )
 
 func TestTelemetryEngine_IngestAndQuery(t *testing.T) {
@@ -125,18 +125,18 @@ func TestTelemetryEngine_PreflightInjection(t *testing.T) {
 
 	// Test injection with manually created pattern
 	pattern := NegativePattern{
-		ID:              "neg-test-pattern",
-		PatternType:     FailureModeBlockedCommand,
-		Title:           "Blocked rm -rf command",
-		RootCause:       "Harness blocked dangerous command",
-		Remediation:     "Use safer file operations",
-		OccurrenceCount: 5,
-		FirstSeen:       time.Now().Add(-24 * time.Hour),
-		LastSeen:        time.Now(),
+		ID:               "neg-test-pattern",
+		PatternType:      FailureModeBlockedCommand,
+		Title:            "Blocked rm -rf command",
+		RootCause:        "Harness blocked dangerous command",
+		Remediation:      "Use safer file operations",
+		OccurrenceCount:  5,
+		FirstSeen:        time.Now().Add(-24 * time.Hour),
+		LastSeen:         time.Now(),
 		AffectedPackages: []string{"internal/harness"},
-		ExampleContexts: []string{"task=task-123, type=task_failed, error=blocked command: rm -rf /"},
-		ConfidenceScore: 0.8,
-		Status:          PatternStatusValidated,
+		ExampleContexts:  []string{"task=task-123, type=task_failed, error=blocked command: rm -rf /"},
+		ConfidenceScore:  0.8,
+		Status:           PatternStatusValidated,
 	}
 
 	brief := &controlplane.BriefRow{
