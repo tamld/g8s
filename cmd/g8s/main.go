@@ -78,6 +78,8 @@ func main() {
 	switch command {
 	case "version", "-v", "--version":
 		runVersion(os.Args[2:])
+	case "watch":
+		runWatch(os.Args[2:])
 	case "reflex":
 		runReflex(os.Args[2:])
 	case "roles":
@@ -1432,6 +1434,8 @@ func printUsage() {
 	fmt.Println("  state        Show state and replay event logs (g8s state show|replay <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  reflex       Run the System-1 reflex gate on a planned mutation (g8s reflex triage --summary ...)")
+	fmt.Println("  watch        Block until a watched condition is terminal (g8s watch --pr N / --task ID)")
+	fmt.Println("  watch        Block until a watched condition is terminal (g8s watch --pr N / --task ID)")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  providers    List detected agent providers and availability status")
