@@ -17,6 +17,93 @@ import (
 // the DELTA-03 Go contract surfaces typed errors instead.
 var ErrUnknownTask = errors.New("unknown task")
 
+// ErrReceiptAlreadyConsumed reports a delegated-write receipt that has been
+// consumed by a different task — a replay/suspicion signal for the caller.
+var ErrReceiptAlreadyConsumed = errors.New("write receipt already consumed")
+
+// ErrReceiptUnknownOrExpired reports a delegated-write receipt that does not
+// exist or whose TTL has lapsed at consume time.
+var ErrReceiptUnknownOrExpired = errors.New("write receipt unknown or expired")
+
+// writeReceiptsEnsureDDL mirrors the write_receipts table from
+// internal/receipt/receipt.go `schema` so a worker-only control plane can
+// consume delegated-write receipts without booting a receipt.Manager.
+// Keep in sync with that schema (see #346 for the user_version conflict
+// that prevents reusing the receipt initializer here).
+const writeReceiptsEnsureDDL = `
+CREATE TABLE IF NOT EXISTS write_receipts (
+	receipt_id         TEXT PRIMARY KEY,
+	issuer             TEXT NOT NULL,
+	allowed_paths_json TEXT NOT NULL,
+	expires_at         REAL NOT NULL,
+	consumed           INTEGER NOT NULL DEFAULT 0,
+	consumer_task_id   TEXT,
+	created_at         REAL NOT NULL,
+	approach_idx       INTEGER,
+	attempt_idx        INTEGER,
+	rca_confidence     REAL,
+	adr_path           TEXT,
+	envelope_schema_uri           TEXT,
+	envelope_field_order_json     TEXT,
+	envelope_required_fields_json TEXT,
+	ruleset_version               TEXT,
+	pipeline_digest               TEXT,
+	adr_ref                       TEXT,
+	issued_by                     TEXT,
+	tool_version                  TEXT,
+	trace_id                      TEXT,
+	actor_chain_json              TEXT,
+	source_commit                 TEXT
+)`
+
+// ConsumeWriteReceipt atomically marks a delegated-write receipt as consumed
+// by the given task (#346). The UPDATE only matches rows that are still
+// unconsumed and unexpired, so exactly one caller ever succeeds; a re-consume
+// by the same task is idempotent, a different task trips
+// ErrReceiptAlreadyConsumed, and an unknown/expired receipt trips
+// ErrReceiptUnknownOrExpired.
+func (s *Store) ConsumeWriteReceipt(ctx context.Context, receiptID, consumerTaskID string) error {
+	// Ensure the write_receipts table exists even in worker-only processes
+	// (#346): the table belongs to the receipt package schema, which the
+	// receipt CLI creates but a bare `g8s worker` does not. The DDL mirrors
+	// internal/receipt/receipt.go `schema` — keep them in sync. (receipt
+	// NewReceiptManager cannot be reused here: it enforces its own
+	// user_version on a database file whose user_version is owned by the
+	// control-plane migrations — a known cross-package defect to resolve.)
+	if _, err := s.db.ExecContext(ctx, writeReceiptsEnsureDDL); err != nil {
+		return fmt.Errorf("ensure write_receipts schema: %w", err)
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE write_receipts
+		 SET consumed = 1, consumer_task_id = ?
+		 WHERE receipt_id = ? AND consumed = 0 AND expires_at > ?`,
+		consumerTaskID, receiptID, now)
+	if err != nil {
+		return fmt.Errorf("consume write receipt: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil
+	}
+	// No rows matched: distinguish already-consumed (by whom?) from
+	// unknown/expired so callers can react precisely.
+	var consumed int
+	var storedTask sql.NullString
+	err = s.db.QueryRowContext(ctx,
+		`SELECT consumed, consumer_task_id FROM write_receipts WHERE receipt_id = ?`,
+		receiptID).Scan(&consumed, &storedTask)
+	if err != nil {
+		return ErrReceiptUnknownOrExpired
+	}
+	if consumed == 1 && storedTask.Valid && storedTask.String == consumerTaskID {
+		return nil // idempotent re-consume by the owning task
+	}
+	if consumed == 1 {
+		return fmt.Errorf("%w (held by task %s)", ErrReceiptAlreadyConsumed, storedTask.String)
+	}
+	return ErrReceiptUnknownOrExpired
+}
+
 // FinishAttemptParams carries the worker verdict for FinishAttempt.
 type FinishAttemptParams struct {
 	Result    json.RawMessage
