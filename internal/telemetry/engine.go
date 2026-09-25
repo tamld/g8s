@@ -849,11 +849,11 @@ func (e *TelemetryEngine) InjectPreflightContext(ctx context.Context, brief *con
 	var sb strings.Builder
 	sb.WriteString("\n\n## Relevant Failure Patterns (Pre-flight Injection)\n\n")
 	for _, p := range patterns {
-		sb.WriteString(fmt.Sprintf("### %s\n", p.Title))
-		sb.WriteString(fmt.Sprintf("- **Type**: %s\n", p.PatternType))
-		sb.WriteString(fmt.Sprintf("- **Root Cause**: %s\n", p.RootCause))
-		sb.WriteString(fmt.Sprintf("- **Remediation**: %s\n", p.Remediation))
-		sb.WriteString(fmt.Sprintf("- **Confidence**: %.0f%% (%d occurrences)\n\n", p.ConfidenceScore*100, p.OccurrenceCount))
+		fmt.Fprintf(&sb, "### %s\n", p.Title)
+		fmt.Fprintf(&sb, "- **Type**: %s\n", p.PatternType)
+		fmt.Fprintf(&sb, "- **Root Cause**: %s\n", p.RootCause)
+		fmt.Fprintf(&sb, "- **Remediation**: %s\n", p.Remediation)
+		fmt.Fprintf(&sb, "- **Confidence**: %.0f%% (%d occurrences)\n\n", p.ConfidenceScore*100, p.OccurrenceCount)
 	}
 	return sb.String(), nil
 }

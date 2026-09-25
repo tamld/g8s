@@ -177,11 +177,18 @@ func TestTelemetryEngine_IngestEventsBatch(t *testing.T) {
 	err = engine.IngestEvents(ctx, events)
 	require.NoError(t, err)
 
-	time.Sleep(500 * time.Millisecond)
-
-	// Query all - at least verify some events persisted
-	allEvents, err := engine.QueryEvents(ctx, TraceFilter{Limit: 10})
-	require.NoError(t, err)
+	// Async flush + WAL visibility on slower runners: poll instead of a
+	// single fixed sleep so the assertion stays timing-robust.
+	deadline := time.Now().Add(5 * time.Second)
+	var allEvents []TraceEvent
+	for time.Now().Before(deadline) {
+		allEvents, err = engine.QueryEvents(ctx, TraceFilter{Limit: 10})
+		require.NoError(t, err)
+		if len(allEvents) >= 3 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	assert.GreaterOrEqual(t, len(allEvents), 3)
 }
 

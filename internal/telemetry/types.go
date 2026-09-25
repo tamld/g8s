@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
@@ -138,8 +140,10 @@ type TelemetryConfig struct {
 }
 
 func DefaultTelemetryConfig() *TelemetryConfig {
+	// os.TempDir() resolves per-platform (TMPDIR/TEMP), unlike a literal
+	// /tmp path that does not exist on Windows.
 	return &TelemetryConfig{
-		DBPath:                "/tmp/g8s_telemetry.db",
+		DBPath:                filepath.Join(os.TempDir(), "g8s_telemetry.db"),
 		BatchSize:             100,
 		FlushInterval:         30 * time.Second,
 		RetentionPeriod:       30 * 24 * time.Hour,
