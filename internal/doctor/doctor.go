@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -369,7 +368,7 @@ func checkDatabase(dbPath string) DiagnosticResult {
 	}
 
 	// Test SQLite connectivity
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(wal)", url.PathEscape(dbPath))
+	dsn := pathutil.SQLiteURI(dbPath, "_pragma=journal_mode(wal)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return DiagnosticResult{

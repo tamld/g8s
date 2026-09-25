@@ -4,6 +4,7 @@ package pathutil
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -269,4 +270,62 @@ type UserProfileInfo struct {
 // DetectUserProfiles scans the host system for user profiles and their g8s data directories.
 func DetectUserProfiles() []UserProfileInfo {
 	return detectUserProfiles()
+}
+
+// SQLiteURI constructs an RFC-8089 compliant SQLite file URI with query parameters.
+// It normalizes backslashes to forward slashes across all platforms, formats Windows
+// drive letters as file:///C:/..., and escapes query-delimiter characters ('?', '#')
+// in path segments to prevent connection string injection (.jules/sentinel.md).
+func SQLiteURI(dbPath string, queryParams string) string {
+	if dbPath == "" || dbPath == ":memory:" {
+		if queryParams != "" {
+			return "file::memory:?" + strings.TrimPrefix(queryParams, "?")
+		}
+		return ":memory:"
+	}
+
+	// Always normalize backslashes to forward slashes across all platforms
+	normalized := strings.ReplaceAll(dbPath, "\\", "/")
+
+	var uri string
+	if len(normalized) >= 2 && normalized[1] == ':' && ((normalized[0] >= 'a' && normalized[0] <= 'z') || (normalized[0] >= 'A' && normalized[0] <= 'Z')) {
+		drive := normalized[:2]
+		rest := normalized[2:]
+		if !strings.HasPrefix(rest, "/") {
+			rest = "/" + rest
+		}
+		rest = path.Clean(rest)
+		escaped := escapeURIPath(rest)
+		if !strings.HasPrefix(escaped, "/") {
+			escaped = "/" + escaped
+		}
+		uri = "file:///" + drive + escaped
+	} else if strings.HasPrefix(normalized, "//") {
+		uri = "file:" + escapeURIPath("//"+path.Clean(normalized[2:]))
+	} else if strings.HasPrefix(normalized, "/") {
+		uri = "file://" + escapeURIPath(path.Clean(normalized))
+	} else {
+		uri = "file:" + escapeURIPath(path.Clean(normalized))
+	}
+
+	if queryParams != "" {
+		uri += "?" + strings.TrimPrefix(queryParams, "?")
+	}
+	return uri
+}
+
+func escapeURIPath(p string) string {
+	var sb strings.Builder
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		switch c {
+		case '?':
+			sb.WriteString("%3F")
+		case '#':
+			sb.WriteString("%23")
+		default:
+			sb.WriteByte(c)
+		}
+	}
+	return sb.String()
 }

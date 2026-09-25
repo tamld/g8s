@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -20,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/process"
 	_ "modernc.org/sqlite"
 )
@@ -1140,7 +1140,7 @@ func sweepStaleReceipts(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, 
 		return nil, nil
 	}
 
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", url.PathEscape(cfg.DBPath))
+	dsn := pathutil.SQLiteURI(cfg.DBPath, "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db for receipt cleanup: %w", err)
