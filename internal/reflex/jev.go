@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -425,10 +426,10 @@ func isWithinScope(modified []string, allowed []string) bool {
 		return true
 	}
 	for _, f := range modified {
-		cleanFile := filepath.ToSlash(filepath.Clean(f))
-		if cleanFile == ".." || strings.HasPrefix(cleanFile, "../") {
+		if isPathAbsoluteOrEscaping(f) {
 			return false
 		}
+		cleanFile := filepath.ToSlash(filepath.Clean(f))
 		matched := false
 		for _, pattern := range allowed {
 			if pathMatches(cleanFile, pattern) {
@@ -443,8 +444,39 @@ func isWithinScope(modified []string, allowed []string) bool {
 	return true
 }
 
+// isPathAbsoluteOrEscaping rejects paths that escape the workspace or specify absolute targets.
+func isPathAbsoluteOrEscaping(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" || p == "." {
+		return true
+	}
+	if filepath.IsAbs(p) {
+		return true
+	}
+	// Reject POSIX root-relative or Windows backslash root-relative
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return true
+	}
+	// Reject Windows drive volume: e.g. "C:", "D:\"
+	if len(p) >= 2 && p[1] == ':' {
+		return true
+	}
+	// Reject UNC network paths: e.g. "//server/share" or "\\server\share"
+	if strings.HasPrefix(p, "//") || strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	// Reject relative traversal
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return true
+	}
+	return false
+}
+
 func pathMatches(cleanFile, pattern string) bool {
+	cleanFile = filepath.ToSlash(filepath.Clean(cleanFile))
 	cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
+
 	// 1. Exact path match
 	if cleanFile == cleanPattern {
 		return true
@@ -463,7 +495,71 @@ func pathMatches(cleanFile, pattern string) bool {
 			return true
 		}
 	}
-	// 3. Glob matching (e.g. *.md, src/*.go)
-	m, _ := filepath.Match(cleanPattern, cleanFile)
-	return m
+	// 3. Glob matching (supporting standard glob and recursive globstar **)
+	return matchGlob(cleanPattern, cleanFile)
+}
+
+func matchGlob(cleanPattern, cleanFile string) bool {
+	cleanPattern = strings.TrimPrefix(cleanPattern, "./")
+	cleanFile = strings.TrimPrefix(cleanFile, "./")
+
+	if !strings.Contains(cleanPattern, "**") {
+		m, _ := filepath.Match(cleanPattern, cleanFile)
+		return m
+	}
+
+	re, err := regexp.Compile(globToRegex(cleanPattern))
+	if err != nil {
+		return false
+	}
+	return re.MatchString(cleanFile)
+}
+
+func globToRegex(pattern string) string {
+	var sb strings.Builder
+	sb.WriteString("^")
+
+	i := 0
+	n := len(pattern)
+	for i < n {
+		if i+2 <= n && pattern[i:i+2] == "**" {
+			hasLeadingSlash := (i > 0 && pattern[i-1] == '/')
+			hasTrailingSlash := (i+2 < n && pattern[i+2] == '/')
+
+			if hasLeadingSlash && hasTrailingSlash {
+				sb.WriteString("(?:.+/)?")
+				i += 3 // consume "**/"
+				continue
+			} else if hasLeadingSlash && i+2 == n {
+				sb.WriteString(".*")
+				i += 2
+				continue
+			} else if !hasLeadingSlash && hasTrailingSlash && i == 0 {
+				sb.WriteString("(?:.+/)?")
+				i += 3 // consume "**/"
+				continue
+			} else {
+				sb.WriteString(".*")
+				i += 2
+				continue
+			}
+		}
+
+		c := pattern[i]
+		switch c {
+		case '*':
+			sb.WriteString("[^/]*")
+		case '?':
+			sb.WriteString("[^/]")
+		case '.', '+', '(', ')', '|', '^', '$', '[', ']', '{', '}':
+			sb.WriteString(`\`)
+			sb.WriteByte(c)
+		default:
+			sb.WriteByte(c)
+		}
+		i++
+	}
+
+	sb.WriteString("$")
+	return sb.String()
 }

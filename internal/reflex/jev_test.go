@@ -255,6 +255,80 @@ func TestScopeBoundarySiblingDirectoryDefense(t *testing.T) {
 	}
 }
 
+func TestScopeBoundaryAbsoluteAndTraversingPaths(t *testing.T) {
+	wildcard := []string{"**"}
+
+	maliciousPaths := []string{
+		"/etc/passwd",
+		"/var/log/syslog",
+		`\Windows\System32\cmd.exe`,
+		`C:/Windows/System32/drivers/etc/hosts`,
+		`D:\secrets\keys.txt`,
+		`c:/foo/bar`,
+		`//10.0.0.1/share/payload`,
+		`\\server\share\file.txt`,
+		`../outside.txt`,
+		`src/../../escape.txt`,
+		"",
+		".",
+	}
+
+	for _, badPath := range maliciousPaths {
+		if isWithinScope([]string{badPath}, wildcard) {
+			t.Errorf("SECURITY: absolute or traversing path %q was erroneously allowed within scope", badPath)
+		}
+	}
+}
+
+func TestGlobstarRecursiveMatching(t *testing.T) {
+	// 1. Recursive wildcard "**" matches everything inside repo
+	if !isWithinScope([]string{"a.go", "src/pkg/deep/nested.go"}, []string{"**"}) {
+		t.Errorf("expected ** to match all repo paths")
+	}
+
+	// 2. "src/**" matches files under src at arbitrary depth
+	srcAllowed := []string{"src/**"}
+	if !isWithinScope([]string{"src/main.go", "src/a/b/c/nested.go"}, srcAllowed) {
+		t.Errorf("expected src/** to match deep nested files under src")
+	}
+	if isWithinScope([]string{"other/main.go"}, srcAllowed) {
+		t.Errorf("src/** should not match other/main.go")
+	}
+	if isWithinScope([]string{"src_sibling/main.go"}, srcAllowed) {
+		t.Errorf("src/** should not match src_sibling/main.go")
+	}
+
+	// 3. "**/*.go" matches .go files at any depth
+	goAllowed := []string{"**/*.go"}
+	if !isWithinScope([]string{"main.go", "pkg/util.go", "pkg/deep/sub/file.go"}, goAllowed) {
+		t.Errorf("expected **/*.go to match Go files at root and subdirs")
+	}
+	if isWithinScope([]string{"main.js"}, goAllowed) {
+		t.Errorf("**/*.go should not match main.js")
+	}
+	if isWithinScope([]string{"pkg/deep/sub/file.rs"}, goAllowed) {
+		t.Errorf("**/*.go should not match file.rs")
+	}
+
+	// 4. "docs/**/guide.md" matches guide.md at varying intermediate depths
+	docAllowed := []string{"docs/**/guide.md"}
+	if !isWithinScope([]string{"docs/guide.md"}, docAllowed) {
+		t.Errorf("expected docs/**/guide.md to match docs/guide.md (zero intermediate dirs)")
+	}
+	if !isWithinScope([]string{"docs/intro/guide.md"}, docAllowed) {
+		t.Errorf("expected docs/**/guide.md to match docs/intro/guide.md (one intermediate dir)")
+	}
+	if !isWithinScope([]string{"docs/intro/advanced/guide.md"}, docAllowed) {
+		t.Errorf("expected docs/**/guide.md to match docs/intro/advanced/guide.md (multiple intermediate dirs)")
+	}
+	if isWithinScope([]string{"docs/guide.txt"}, docAllowed) {
+		t.Errorf("docs/**/guide.md should not match docs/guide.txt")
+	}
+	if isWithinScope([]string{"other/docs/guide.md"}, docAllowed) {
+		t.Errorf("docs/**/guide.md should not match other/docs/guide.md")
+	}
+}
+
 func TestWeakestLinkConfidenceAggregation(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := JevResponse{
