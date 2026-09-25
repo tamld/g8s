@@ -1081,3 +1081,45 @@ func TestSpawnGenericFailureIsRetryable(t *testing.T) {
 		t.Fatalf("last_error = %v, want generic error message", final.LastError)
 	}
 }
+
+// #331: a stream that ends in error_message without a result event must be
+// classified as failed even when the wrapper exits 0.
+func TestReadWorkerResultErrorTail(t *testing.T) {
+	stream := "{\"event\":\"init\"}\n" +
+		"{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\"}}\n" +
+		"{\"event\":\"step_update\",\"step_update\":{\"step_index\":155,\"state\":\"DONE\",\"step_type\":\"error_message\"}}\n"
+	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	if wr.OK {
+		t.Errorf("error-tail stream with exit 0 must not be OK: %+v", wr)
+	}
+	if wr.Status != "failed" {
+		t.Errorf("expected failed status, got %q", wr.Status)
+	}
+}
+
+// #331: a result event supersedes an earlier error_message step.
+func TestReadWorkerResultResultSupersedesError(t *testing.T) {
+	stream := "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"error_message\"}}\n" +
+		"{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\"}}\n"
+	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	if !wr.OK {
+		t.Errorf("SUCCESS result event must win over earlier error step: %+v", wr)
+	}
+}
+
+func TestAgyStreamErrorTailUnit(t *testing.T) {
+	cases := []struct {
+		name, stream string
+		want         bool
+	}{
+		{"empty", "", false},
+		{"clean steps", "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\"}}\n", false},
+		{"error tail", "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"error_message\"}}\n", true},
+		{"recovered", "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"error_message\"}}\n{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\"}}\n", false},
+	}
+	for _, tc := range cases {
+		if got := agyStreamErrorTail(tc.stream); got != tc.want {
+			t.Errorf("%s: agyStreamErrorTail=%v want %v", tc.name, got, tc.want)
+		}
+	}
+}
