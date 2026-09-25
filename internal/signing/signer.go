@@ -13,7 +13,7 @@ import (
 )
 
 // DefaultTimestamper is the default RFC 3161 timestamp authority URL.
-const DefaultTimestamper = "http://timestamp.digicert.com"
+const DefaultTimestamper = "https://timestamp.digicert.com"
 
 // Signer defines the contract for signing and verifying binaries.
 type Signer interface {
@@ -46,11 +46,12 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 // is used with a PFX, the secret is necessarily present in the signtool argv
 // (a signtool limitation) — keep the window minimal and never log arguments.
 type SigntoolSigner struct {
-	CertPath       string
-	CertPassword   string
-	CertThumbprint string // preferred: store-resident certificate, no secret in argv
-	Timestamper    string
-	Runner         Runner
+	CertPath        string
+	CertPassword    string
+	CertPasswordEnv string // optional env var name holding the PFX password (#367)
+	CertThumbprint  string // preferred: store-resident certificate, no secret in argv
+	Timestamper     string
+	Runner          Runner
 }
 
 var _ Signer = (*SigntoolSigner)(nil)
@@ -109,24 +110,45 @@ func (s *SigntoolSigner) Sign(ctx context.Context, path string) error {
 			return fmt.Errorf("certificate file stat: %w", err)
 		}
 		args = append(args, "/f", s.CertPath)
-		if s.CertPassword != "" {
+		password := s.CertPassword
+		if password == "" && s.CertPasswordEnv != "" {
+			// #367: the secret can live in the environment instead of the
+			// config file — nothing at rest beyond the variable name.
+			password = os.Getenv(s.CertPasswordEnv)
+		}
+		if password != "" {
 			// Residual risk (documented): signtool requires the PFX
 			// password on the command line; it is visible in the process
 			// table for the lifetime of the invocation. Prefer
-			// CertThumbprint for store-resident certificates.
-			args = append(args, "/p", s.CertPassword)
+			// CertThumbprint (store) or CertPasswordEnv over a literal.
+			args = append(args, "/p", password)
 		}
 	}
 
 	args = append(args, path)
 
-	// The error wraps only the signtool exit status — arguments (which may
-	// contain the PFX password) are never included in logs or errors.
 	_, err := s.runner().Run(ctx, "signtool", args...)
 	if err != nil {
-		return fmt.Errorf("signtool sign: %w", err)
+		// #367: redact the PFX password from any surfaced error text —
+		// runner errors must never echo arguments containing the secret.
+		errStr := err.Error()
+		if pw := s.signPassword(); pw != "" {
+			errStr = strings.ReplaceAll(errStr, pw, "[REDACTED]")
+		}
+		return fmt.Errorf("signtool sign: %s", errStr)
 	}
 	return nil
+}
+
+// signPassword resolves the effective PFX password (literal or env).
+func (s *SigntoolSigner) signPassword() string {
+	if s.CertPassword != "" {
+		return s.CertPassword
+	}
+	if s.CertPasswordEnv != "" {
+		return os.Getenv(s.CertPasswordEnv)
+	}
+	return ""
 }
 
 // Verify verifies the digital signature of the binary at the given path using signtool.
