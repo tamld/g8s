@@ -18,10 +18,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/telemetry"
 )
 
 // agyResult represents the AGY tool's JSONL result format.
@@ -230,6 +232,13 @@ type Supervisor struct {
 	// commandResolver optionally overrides the dispatch-contract argv with
 	// an operator-defined invocation template (DELTA-10 R6).
 	commandResolver func(prompt, model, timeout string) ([]string, bool)
+
+	// Closed-loop telemetry ingestion (#253): opt-in via G8S_TELEMETRY=1
+	// (default ledger path) or G8S_TELEMETRY_DB=<path>. Lazily opened per
+	// process, flushed and closed when the run loop ends.
+	telOnce   sync.Once
+	telEngine *telemetry.TelemetryEngine
+	telErr    error
 }
 
 // NewSupervisor builds a supervisor over the given control plane and run root.
@@ -375,11 +384,13 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return nil, err
 	}
 	token := derefString(task.LeaseToken)
+	defer s.closeTelemetry() // flush ingestion at run end (#253)
 
 	var req taskRequest
 	if uerr := json.Unmarshal(task.Request, &req); uerr != nil {
 		return nil, fmt.Errorf("decode task request: %w", uerr)
 	}
+	s.ingestTrace(telemetry.TraceEventWorkerStarted, task.TaskID, nil, "")
 	if req.Model == "" {
 		req.Model = "gemini-3.8-flash-high"
 	}
@@ -575,6 +586,7 @@ func (s *Supervisor) collect(
 	case "lease_lost":
 		return s.snapshot(ctx, taskID, runDir, promptPath)
 	case "cancelled":
+		s.ingestTrace(telemetry.TraceEventTaskCancelled, taskID, nil, "cancelled by orchestrator")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "cancelled", stdoutText, stderrText)),
 			Success:   false,
@@ -585,6 +597,7 @@ func (s *Supervisor) collect(
 			return nil, fmt.Errorf("finish cancelled attempt: %w", ferr)
 		}
 	case "timeout":
+		s.ingestTrace(telemetry.TraceEventTaskTimeout, taskID, nil, "execution deadline exceeded")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "timeout", stdoutText, stderrText)),
 			Success:   false,
@@ -609,6 +622,14 @@ func (s *Supervisor) collect(
 		success := code == 0 && wr.OK
 		if paused := s.maybePause(ctx, wr, stdoutText, taskID, workerID, token); paused {
 			break
+		}
+		// #253 closed-loop ingestion: the terminal outcome of every attempt
+		// becomes a trace event (exit code + failure signature).
+		exitCode := code
+		if success {
+			s.ingestTrace(telemetry.TraceEventTaskCompleted, taskID, &exitCode, "")
+		} else {
+			s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &exitCode, firstNonEmpty(wr.Reason, wr.Status, "failed"))
 		}
 		finishErr := ""
 		if !success {
@@ -697,6 +718,63 @@ func (s *Supervisor) collect(
 		}
 	}
 	return s.snapshot(ctx, taskID, runDir, promptPath)
+}
+
+// telemetry lazily opens the closed-loop ingestion engine (#253). Opt-in via
+// G8S_TELEMETRY=1 (default ledger) or G8S_TELEMETRY_DB=<path> (custom ledger).
+func (s *Supervisor) telemetry() *telemetry.TelemetryEngine {
+	s.telOnce.Do(func() {
+		if os.Getenv("G8S_TELEMETRY") != "1" {
+			return
+		}
+		cfg := telemetry.DefaultTelemetryConfig()
+		if p := os.Getenv("G8S_TELEMETRY_DB"); p != "" {
+			cfg.DBPath = p
+		}
+		// Short flush interval: worker processes are short-lived and the
+		// engine flushes on Close, but a crash must not lose everything.
+		cfg.FlushInterval = 2 * time.Second
+		s.telEngine, s.telErr = telemetry.NewTelemetryEngine(cfg)
+		if s.telErr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] telemetry engine disabled: %v\n", s.telErr)
+			s.telEngine = nil
+		}
+	})
+	return s.telEngine
+}
+
+// ingestTrace emits one best-effort trace event; telemetry failures must
+// never break task flow.
+func (s *Supervisor) ingestTrace(eventType telemetry.TraceEventType, taskID string, exitCode *int, errMsg string) {
+	eng := s.telemetry()
+	if eng == nil {
+		return
+	}
+	payload := map[string]any{}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+	ev := telemetry.TraceEvent{
+		TaskID:    taskID,
+		EventType: eventType,
+		Timestamp: time.Now(),
+		ExitCode:  exitCode,
+		Payload:   payload,
+	}
+	if err := eng.IngestEvent(context.Background(), ev); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] telemetry ingest: %v\n", err)
+	}
+}
+
+// closeTelemetry flushes and releases the ingestion engine at run end.
+func (s *Supervisor) closeTelemetry() {
+	if s.telEngine == nil {
+		return
+	}
+	if err := s.telEngine.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] telemetry flush: %v\n", err)
+	}
+	s.telEngine = nil
 }
 
 // maybePause transitions NEEDS_INFO/BLOCKED outcomes (declared in the result

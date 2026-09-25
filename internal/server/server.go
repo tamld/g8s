@@ -28,6 +28,11 @@ type Server struct {
 	running bool
 }
 
+// maxRequestBodyBytes bounds JSON request bodies on the unauthenticated API
+// surface (#358): 1 MiB is generous for task submissions and prevents a
+// single oversized request from exhausting memory.
+const maxRequestBodyBytes = 1 << 20
+
 // NewServer creates a new HTTP API server.
 func NewServer(config Config, store *controlplane.Store) *Server {
 	if err := config.Validate(); err != nil {
@@ -472,6 +477,8 @@ func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r 
 	var req struct {
 		IsFalse bool `json:"is_false"`
 	}
+	// #358: bound request bodies (unauthenticated endpoint).
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -574,6 +581,9 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 
 // createTask handles POST /api/v1/tasks.
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	// #358: bound request bodies — an unbounded Decode lets a single
+	// request exhaust memory (DoS) on the unauthenticated API surface.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	var req controlplane.SubmitTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)

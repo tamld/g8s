@@ -14,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"database/sql"
+
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/telemetry"
 )
 
 // --- fakes ---
@@ -1145,5 +1148,45 @@ func TestReadWorkerResultFilterDiscussionNoFalsePositive(t *testing.T) {
 	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
 	if !wr.OK {
 		t.Fatalf("legitimate evidence discussing filters must stay OK: %+v", wr)
+	}
+}
+
+// #253: the ingestion hook persists trace events to the telemetry ledger
+// when enabled, and no-ops when disabled.
+func TestTelemetryIngestionHook(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	t.Setenv("G8S_TELEMETRY", "1")
+	t.Setenv("G8S_TELEMETRY_DB", dbPath)
+
+	s := &Supervisor{clock: time.Now}
+	if eng := s.telemetry(); eng == nil {
+		t.Fatal("engine must open when G8S_TELEMETRY=1")
+	}
+	ec := 3
+	s.ingestTrace(telemetry.TraceEventTaskFailed, "task-tel-1", &ec, "read-only contract violation")
+	if s.telEngine == nil {
+		t.Fatal("engine should stay open until closeTelemetry")
+	}
+	s.closeTelemetry()
+
+	raw, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	defer raw.Close()
+	var n int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM telemetry_events WHERE task_id = 'task-tel-1'`).Scan(&n); err != nil {
+		t.Fatalf("query ledger: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 persisted trace event, got %d", n)
+	}
+
+	// Disabled: explicit off value → nil engine, no writes.
+	t.Setenv("G8S_TELEMETRY", "0")
+	s2 := &Supervisor{clock: time.Now}
+	s2.ingestTrace(telemetry.TraceEventTaskFailed, "task-tel-2", nil, "x")
+	if s2.telEngine != nil {
+		t.Fatal("engine must stay nil when telemetry is not enabled")
 	}
 }
