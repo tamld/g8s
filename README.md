@@ -64,7 +64,7 @@
 
 ---
 
-## 🚀 Key Features (v0.10.0)
+## 🚀 Key Features (v0.10.1)
 
 * **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single ~15MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
 * **🛡️ Defense-in-Depth Safety Gates**:
@@ -75,7 +75,8 @@
 * **🎟️ Receipt-Based Write Delegation (Schema v3)**: Workers cannot mutate files unless presented with a single-use, time-limited write receipt issued by the Brain. Supervisor metadata columns (`approach_idx`, `attempt_idx`, `rca_confidence`, `adr_path`) + provenance/replay context (11 columns) — backward-compatible idempotent migration.
 * **📦 Durable Control Plane**: SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases, idempotency keys, and parent-child task lineage.
 * **🧠 Supervisor-Driven Fix Loop (Concern A)**: Bounded iteration policy (3 attempts × 3 approaches = 9 max), planner (envelope selection: SRS/PRD/DoR/DoD/DnD/Validateds/FSM), enforcer (DoR/DoD gating), reviewer (receipt inspection — scope violation always fails), RCA (structured analysis with confidence scoring; <0.6 → NEEDS_INFO pause), escalator (HITL JSON digest on stdout). **ADR-0001** accepted.
-* **📊 Meta-Optimizer Read-Only Ingestion (Concern C)**: `g8s supervisor metrics --aggregate` computes 8 metrics across all runs (total_runs, first_attempt_success_rate, avg_attempts_to_success, avg_approaches_to_success, rca_confidence_avg, escalation_rate, avg_cycle_duration_seconds, false_escalation_rate). Streaming via `--json-stream`. Flag collision guard: `--task-id` + `--aggregate/--json-stream` → usage error. **ADR-0003** proposed.
+* **📊 Meta-Optimizer Read-Only Ingestion (Concern C)**: `g8s supervisor-metrics --aggregate` computes 8 metrics across all runs (total_runs, first_attempt_success_rate, avg_attempts_to_success, avg_approaches_to_success, rca_confidence_avg, escalation_rate, avg_cycle_duration_seconds, false_escalation_rate). Streaming via `--json-stream`. Flag collision guard: `--task-id` + `--aggregate/--json-stream` → usage error. **ADR-0003** proposed.
+* **⚡ System-1 Reflex Mutation Gate**: `g8s reflex triage --summary ... --files ...` runs the Jev sensor (TypeSafe AI) + deterministic supervisor policy over a *planned* mutation and returns `grant_receipt` / `escalate_hitl` / `instant_kill` — enforce-code pre-mutation gating for scripts and CI. **ADR-0020** accepted.
 * **🔌 DELTA-18 AIC & From-Intent Orchestration**: `g8s orchestrate-aic --pr <num> --intent <text>` fetches PR diff via `gh` and delegates to `--from-intent`. `g8s orchestrate --from-intent <text>` / `--from-file <path>` splits comma/newline intent into collector sub-tasks via FanOut. JSON envelope output with `supervisor_task_id`, `outcome`, `sub_tasks`, `receipt_summary`.
 * **💓 Worker Heartbeat & Real-Time Observability**: Live per-session heartbeat monitoring and process status introspection (`g8s status --worker`).
 * **🧹 Lifecycle Hygiene & Resource Pruning**: Built-in sweeper to reap ghost processes, prune orphan worktrees, and evict stale scratch artifacts (`g8s cleanup`), with auto-cleanup hooks on orchestrator completion.
@@ -120,23 +121,17 @@ g8s submit \
   --add-dir ./src \
   --model gemini-3.8-flash-high \
   --timeout 60s \
-  --payload '{"prompt": "Scan ./src for MCP server candidate implementations and return JSON."}'
+  --prompt "Scan ./src for MCP server candidate implementations and return JSON."
 ```
 Workers claim queued tasks automatically; poll with `g8s get <task-id>`.
 
-### 3. Issue a Write Receipt (Brain-Only)
+### 3. Delegated Write with a Single-Use Receipt
 ```bash
-g8s receipt issue \
-  --issuer "brain-orchestrator" \
-  --path "./tests/*.py" \
-  --ttl 600
-```
-The command prints a JSON receipt envelope (`receipt_id`, `allowed_paths`, `expires_at`). Pass the receipt fields to the worker payload so it can consume the receipt exactly once during its delegated-write run.
+# Brain issues a path-scoped, time-limited receipt.
+g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 600
 
-### 4. Run a Delegated-Write Worker Task
-Submit the task with `workspace_write` and embed the issued receipt in the worker payload; the worker validates and consumes it exactly once at runtime.
-
-```bash
+# Worker task consumes the receipt exactly once at runtime. Delegated writes
+# are opt-in: set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment.
 g8s submit \
   --idempotency-key testwriter-1 \
   --role test-runner \
@@ -144,69 +139,29 @@ g8s submit \
   --add-dir ./tests \
   --model gemini-3.8-flash-high \
   --timeout 120s \
-  --payload '{"prompt": "Generate pytest test cases for user authentication.", "receipt_id": "<receipt_id>", "receipt_issuer": "brain-orchestrator", "allowed_paths": ["./tests/*.py"]}'
+  --prompt "Generate pytest test cases for user authentication. receipt_id=<receipt_id> issuer=brain-orchestrator allowed_paths=./tests/*.py"
 ```
+> Receipts cannot be carried through the MCP surface — workers consume them directly against the control plane.
 
-> Note: receipts cannot be carried through the MCP surface — they are consumed by workers directly against the control plane.
-
-### 5. Run Supervisor Fix Loop (Concern A)
+### 4. Orchestrate
 ```bash
-# Self-test: deterministic escalation at 9 attempts
-g8s orchestrate "Refactor auth middleware to use pure-Go context tokens" \
-  --self-test \
-  --max-attempts 3 \
-  --max-approaches 3 \
-  --actor "brain-supervisor"
-```
+# Supervisor fix loop self-test (deterministic escalation at 9 attempts)
+g8s orchestrate "Refactor auth middleware to use pure-Go context tokens" --self-test --actor "brain-supervisor"
 
-### 6. From-Intent Orchestration (DELTA-18)
-```bash
-# Free-text intent split into sub-tasks via FanOut
-g8s orchestrate --from-intent "Scan for security issues, generate tests, update docs" \
-  --model gemini-3.8-flash-high \
-  --role collector \
-  --permission read_only \
-  --add-dir ./src \
-  --json
-```
+# From-intent: free text split into collector sub-tasks (DELTA-18)
+g8s orchestrate --from-intent "Scan for security issues, generate tests, update docs" --role collector --add-dir ./src --json
 
-```bash
-# Intent from file
-g8s orchestrate --from-file ./INTENT.md --json
-```
-
-### 7. AIC Automated PR Review (DELTA-18)
-```bash
-# Requires gh CLI authenticated
+# AIC automated PR review (requires authenticated gh CLI)
 g8s orchestrate-aic --pr 123 --intent "Review security changes for auth middleware" --json
 ```
 
-### 8. Meta-Optimizer Metrics (Concern C)
+### 5. Operate
 ```bash
-# Aggregate metrics across all supervisor runs
-g8s supervisor metrics --aggregate --json
-
-# Streaming per-task metrics
-g8s supervisor metrics --json-stream
-
-# Single run metrics
-g8s supervisor metrics --task-id sup-abc123 --json
-
-# Filter by time window / worker
-g8s supervisor metrics --aggregate --time-range 24h --worker-name agy --json
-```
-
-### 9. Monitor Worker Heartbeat & Process Status
-```bash
-# Check real-time heartbeat and worker liveness across active sessions
-g8s status --worker --json
-```
-
-### 10. Run Lifecycle & Orphan Resource Cleanup
-```bash
-# Inspect and purge ghost worker processes, orphan worktrees, and stale artifacts
-g8s cleanup --dry-run
-g8s cleanup --force
+g8s supervisor-metrics --aggregate --json   # meta-optimizer metrics (Concern C)
+g8s status --worker --json                  # heartbeat + process introspection
+g8s cleanup --dry-run                       # lifecycle sweep: ghosts, orphans, scratch branches
+g8s cleanup --force --scratch               # apply, including worker scratch branches (#327)
+g8s reflex triage --summary "raise test deadline" --files "internal/runtime/verify_test.go"   # System-1 mutation gate (ADR-0020)
 ```
 
 ---
@@ -264,28 +219,28 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ---
 
-## 📦 Release Artifacts (v0.10.0)
+## 📦 Release Artifacts (v0.10.1)
 
 Cross-platform GoReleaser v2 artifacts (darwin/linux/windows × amd64/arm64):
 
 | Artifact | Platform |
 |----------|----------|
-| `g8s_v0.10.0_darwin_amd64.tar.gz` | macOS Intel |
-| `g8s_v0.10.0_darwin_arm64.tar.gz` | macOS Apple Silicon |
-| `g8s_v0.10.0_linux_amd64.tar.gz` | Linux x86_64 |
-| `g8s_v0.10.0_linux_arm64.tar.gz` | Linux ARM64 |
-| `g8s_v0.10.0_windows_amd64.zip` | Windows x86_64 |
-| `g8s_v0.10.0_windows_arm64.zip` | Windows ARM64 |
+| `g8s_v0.10.1_darwin_amd64.tar.gz` | macOS Intel |
+| `g8s_v0.10.1_darwin_arm64.tar.gz` | macOS Apple Silicon |
+| `g8s_v0.10.1_linux_amd64.tar.gz` | Linux x86_64 |
+| `g8s_v0.10.1_linux_arm64.tar.gz` | Linux ARM64 |
+| `g8s_v0.10.1_windows_amd64.zip` | Windows x86_64 |
+| `g8s_v0.10.1_windows_arm64.zip` | Windows ARM64 |
 
 ### Verification
 ```bash
 # Checksums (SHA256)
-sha256sum g8s_v0.10.0_*.tar.gz g8s_v0.10.0_*.zip
+sha256sum g8s_v0.10.1_*.tar.gz g8s_v0.10.1_*.zip
 
 # Cosign signature verification (when published)
-cosign verify-blob --signature g8s_v0.10.0_darwin_amd64.tar.gz.sig \
-  --certificate g8s_v0.10.0_darwin_amd64.tar.gz.pem \
-  g8s_v0.10.0_darwin_amd64.tar.gz
+cosign verify-blob --signature g8s_v0.10.1_darwin_amd64.tar.gz.sig \
+  --certificate g8s_v0.10.1_darwin_amd64.tar.gz.pem \
+  g8s_v0.10.1_darwin_amd64.tar.gz
 ```
 
 ---

@@ -28,10 +28,10 @@
 
 * **FR-5 (Stdio MCP Server)**:
   * Implement JSON-RPC 2.0 stdio protocol for MCP compatibility.
-  * Expose tools: `g8s_list_roles`, `g8s_list_permissions`, `g8s_self_awareness`, `g8s_run`, `g8s_dispatch`, `g8s_get_task`, `g8s_list_tasks`, `g8s_cancel_task`.
+  * Expose 11 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`.
 
 * **FR-6 (Cross-Platform Daemon Service)**:
-  * Support `g8s service install|start|stop|restart|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`service`).
+  * Support `g8s service install|start|stop|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`sc.exe`); unsupported platforms fail closed with a clear error.
 
 * **FR-7 (Decoupled Pure-Go Knowledge Vault)**:
   * Provide persistent storage and SQLite FTS5 + BM25 ranked full-text search indexing over Tri-Anchor distillation records (`internal/vault`).

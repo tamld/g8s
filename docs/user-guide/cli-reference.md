@@ -268,7 +268,7 @@ g8s brief-issue \
   --ttl 2h
 
 # Consume an active brief
-g8s brief-consume --brief-id brief-abc123 --actor "worker-001"
+g8s brief-consume --id brief-abc123 --actor "worker-001"
 ```
 
 ---
@@ -362,7 +362,7 @@ Cleans up orphaned git worktrees created during dual-blind or FanOut runs.
 
 ```sh
 g8s cleanup-worktrees --dry-run
-g8s cleanup-worktrees --force
+g8s cleanup-worktrees --older-than 1h
 ```
 
 ---
@@ -387,20 +387,20 @@ g8s state replay <task-id>
 ---
 
 ### 21. `g8s migrate`
-Database schema migrations and version management.
+Migrate legacy cwd-relative g8s data (state DB, receipts, heartbeats) to canonical paths.
 
 ```sh
-g8s migrate status
-g8s migrate up
+g8s migrate --from ./ --to ~/.local/state/g8s --dry-run
+g8s migrate --from ./ --to ~/.local/state/g8s --force
 ```
 
 ---
 
 ### 22. `g8s converge`
-Dual-blind convergence synthesis for multiple worker runs on the same brief.
+Dual-blind convergence synthesis for multiple worker proposal files on the same brief.
 
 ```sh
-g8s converge --brief-id <brief-id> --threshold 0.7
+g8s converge ./proposal-a.md ./proposal-b.md --out ./converged.md
 ```
 
 ---
@@ -435,6 +435,30 @@ g8s serve --address "127.0.0.1:8080" --daemon
 
 ---
 
+### 24a. `g8s reflex triage`
+Runs the System-1 reflex gate (Jev / TypeSafe AI sensor + deterministic supervisor policy, ADR-0020) on a *planned* mutation and prints the verdict: `grant_receipt`, `escalate_hitl`, or `instant_kill`. Use it as an enforce-code pre-mutation gate in scripts and CI.
+
+```sh
+g8s reflex triage \
+  --task "slice-42" \
+  --summary "raise success-path test deadline 5s to 30s" \
+  --files "internal/runtime/verify_test.go" \
+  --allowed "internal/runtime/*"
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task` | `string` | `cli-reflex-triage` | Mutation task id for the audit trail. |
+| `--summary` | `string` | *(required)* | One-line diff summary of the planned mutation. |
+| `--files` | `string` | `""` | Comma-separated files the mutation will touch. |
+| `--allowed` | `string` | `""` | Comma-separated allowed path globs. |
+| `--json` / `--jsonl` | `bool` | `true`/`false` | Emit machine-readable envelope (`kind: reflex_verdict`). |
+
+> Requires `TYPESAFE_API_KEY` (or a `.env` with it). Without a key the gate degrades to the deterministic classifier and reports `fallback: true`.
+
+---
+
 ## Subcommands — Protocols & Security Introspection
 
 ### 25. `g8s providers`
@@ -453,7 +477,7 @@ Serves the standard Stdio JSON-RPC 2.0 Model Context Protocol (MCP) server on `s
 g8s mcp
 ```
 
-**11 tools exposed**: `g8s_dispatch`, `g8s_get_task`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`.
+**11 tools exposed**: `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`.
 
 ---
 

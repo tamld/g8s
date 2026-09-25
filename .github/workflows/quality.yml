@@ -93,7 +93,6 @@ jobs:
         with:
           version: latest
           args: --timeout=10m
-
       - name: Cache modules
         uses: actions/cache@v6
         with:
@@ -289,6 +288,40 @@ jobs:
           name: coverage-report
           path: coverage.out
 
+  quality-windows:
+    # #336: the quality suite previously ran ubuntu-only; this job gives
+    # Windows a first-class vet+test pass (coverage parsing and golangci-lint
+    # remain Linux-only by design).
+    name: Quality Gate (windows-latest)
+    needs: [path-scope]
+    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      - name: Cache modules
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: go vet (Windows)
+        run: go vet ./...
+
+      - name: go test (Windows, CGO=0)
+        run: go test -count=1 ./...
+
   cross-platform:
     name: Cross-Platform Build
     needs: [path-scope]
@@ -311,7 +344,7 @@ jobs:
 
   verify:
     name: Verify Gate
-    needs: [path-scope, quality, cross-platform]
+    needs: [path-scope, quality, quality-windows, cross-platform]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -320,10 +353,12 @@ jobs:
         run: |
           SCOPE_RESULT="${{ needs.path-scope.result }}"
           QUALITY_RESULT="${{ needs.quality.result }}"
+          QUALITY_WIN_RESULT="${{ needs.quality-windows.result }}"
           CROSS_RESULT="${{ needs.cross-platform.result }}"
 
           echo "path-scope: $SCOPE_RESULT"
           echo "quality: $QUALITY_RESULT"
+          echo "quality-windows: $QUALITY_WIN_RESULT"
           echo "cross-platform: $CROSS_RESULT"
 
           if [ "$SCOPE_RESULT" != "success" ]; then
@@ -333,6 +368,11 @@ jobs:
 
           if [ "$QUALITY_RESULT" != "success" ] && [ "$QUALITY_RESULT" != "skipped" ]; then
             echo "::error::Quality Gate failed with state: $QUALITY_RESULT"
+            exit 1
+          fi
+
+          if [ "$QUALITY_WIN_RESULT" != "success" ] && [ "$QUALITY_WIN_RESULT" != "skipped" ]; then
+            echo "::error::Windows Quality Gate failed with state: $QUALITY_WIN_RESULT"
             exit 1
           fi
 
