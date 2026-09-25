@@ -406,8 +406,8 @@ func (g *ReflexGate) deterministicFallbackSignal(req TriageRequest, reason strin
 
 	allDocs := len(req.FilesModified) > 0
 	for _, f := range req.FilesModified {
-		ext := strings.ToLower(filepath.Ext(f))
-		if ext != ".md" && ext != ".txt" {
+		ext := filepath.Ext(f)
+		if !strings.EqualFold(ext, ".md") && !strings.EqualFold(ext, ".txt") {
 			allDocs = false
 			break
 		}

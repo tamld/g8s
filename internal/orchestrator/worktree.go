@@ -178,7 +178,7 @@ func isGitRepo(dir string) bool {
 }
 
 func gitAddWorktree(repo, path, branch, base string) error {
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, path, base)
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, "--", path, base)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
