@@ -34,6 +34,38 @@ type agyResult struct {
 	} `json:"result"`
 }
 
+// agyStreamErrorTail reports whether the captured stdout stream ends with an
+// error_message step_update event without a result event after it (#331):
+// the agent hit its ceiling or crashed mid-task, so "exit code 0" from the
+// wrapper must not be promoted to a successful result.
+func agyStreamErrorTail(stdoutText string) bool {
+	lastWasError := false
+	for _, line := range strings.Split(stdoutText, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var probe struct {
+			Event string `json:"event"`
+			Step  *struct {
+				StepType string `json:"step_type"`
+			} `json:"step_update"`
+		}
+		if json.Unmarshal([]byte(line), &probe) != nil {
+			continue
+		}
+		switch probe.Event {
+		case "result":
+			lastWasError = false // a result event supersedes any earlier error
+		case "step_update":
+			if probe.Step != nil && probe.Step.StepType != "" {
+				lastWasError = probe.Step.StepType == "error_message"
+			}
+		}
+	}
+	return lastWasError
+}
+
 // parseAGYResult scans the captured stdout for AGY JSONL result format.
 // Returns the last AGY result found, or nil if none.
 func parseAGYResult(stdoutText string) *agyResult {
@@ -704,12 +736,33 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 			return fenced
 		}
 	}
-	// Fallback 2: Exit code based synthesis for CLI worker compatibility
+	// Fallback 2: Exit code based synthesis for CLI worker compatibility.
+	// Guard (#331): an agent stream that terminates in error_message without
+	// a result event must be classified as a (retryable) failure even when
+	// the wrapper process exited 0 — otherwise ceiling-death runs are
+	// silently reported as WORKER_COMPLETED with no deliverable.
 	if code == 0 {
+		if agyStreamErrorTail(stdoutText) {
+			return workerResult{
+				OK:      false,
+				Status:  "failed",
+				Reason:  "agent stream ended in error_message without a result event",
+				Summary: "worker stream terminated mid-task before producing a result (likely context/step ceiling)",
+			}
+		}
 		return workerResult{
 			OK:      true,
 			Status:  "succeeded",
 			Summary: "worker completed execution successfully",
+		}
+	}
+	// Non-zero exit with an error tail: classify precisely for retry policy.
+	if agyStreamErrorTail(stdoutText) {
+		return workerResult{
+			OK:      false,
+			Status:  "failed",
+			Reason:  fmt.Sprintf("worker stream ended in error_message (exit code %d)", code),
+			Summary: "worker terminated mid-task before producing a result",
 		}
 	}
 	return workerResult{

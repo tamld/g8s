@@ -23,14 +23,34 @@ func configureSysProcAttr(cmd *exec.Cmd) {
 	}
 }
 
-// killProcessGroup terminates the entire process tree on Windows.
-// It executes taskkill /T /F /PID <pid> to forcefully terminate the process
-// and all child processes spawned by it, preventing orphaned background workers.
-// If the process has already exited (taskkill exit code 128 or 1), nil is returned.
-func killProcessGroup(pid int, _ syscall.Signal) error {
+// killProcessGroup terminates the entire process tree on Windows,
+// mirroring the POSIX two-stage contract (#336):
+//
+//   - SIGTERM stage: taskkill /T without /F requests graceful termination —
+//     GUI/windowed children receive WM_CLOSE and console children attached
+//     to a control handler get a cleanup window before being terminated.
+//   - SIGKILL stage (or any explicit force path): taskkill /T /F hard-terminates.
+//
+// If the process has already exited, taskkill exit codes 128 (not found)
+// and 1 (already terminated) are treated as benign.
+func killProcessGroup(pid int, sig syscall.Signal) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid pid %d", pid)
 	}
+	if sig == syscallSIGKILL {
+		return forceKillProcessTree(pid)
+	}
+	// Graceful stage: taskkill without /F posts WM_CLOSE to top-level
+	// windows of the tree and signals console process groups. Processes
+	// that ignore the request are cleaned up by the SIGKILL stage after
+	// the supervisor's grace period (processChild.Terminate).
+	graceful := exec.Command("taskkill", "/T", "/PID", strconv.Itoa(pid))
+	_ = graceful.Run() // best effort; survivors are force-killed later
+	return nil
+}
+
+// forceKillProcessTree hard-terminates the process tree (taskkill /T /F).
+func forceKillProcessTree(pid int) error {
 	cmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid))
 	err := cmd.Run()
 	if err == nil {
