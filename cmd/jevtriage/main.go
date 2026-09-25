@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-	out, _ := json.Marshal(verdict)
+	out, _ := json.Marshal(map[string]any{"action": verdict.Action, "risk": verdict.RiskScore, "breach": verdict.BreachProb, "confidence": verdict.Confidence, "source": verdict.Signal.Source})
 	fmt.Println(string(out))
 }
 
