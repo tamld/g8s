@@ -41,6 +41,11 @@ func runSubmit(args []string) {
 
 	var prompt string
 	if *promptFile != "" {
+		// #348: the prompt file is task input and must pass the same
+		// denied-path gate as the task itself before it is read.
+		if err := harness.ValidateScopePath(*promptFile); err != nil {
+			exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("prompt file rejected: %w", err), "Choose a prompt file outside denied/sensitive paths", *jsonl)
+		}
 		content, err := os.ReadFile(*promptFile)
 		failRuntime(err)
 		prompt = string(content)
