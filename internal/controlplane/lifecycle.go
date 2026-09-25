@@ -76,7 +76,11 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 		return errors.New("custom agy_bin is disabled in control-plane v0.1")
 	}
 	if permission == "workspace_write" && os.Getenv("AGY_MCP_ALLOW_WORKSPACE_WRITE") != "1" {
-		return errors.New("workspace_write is disabled in control-plane v0.1")
+		// #334: the delegated-write path is opt-in; the rejection must name
+		// the escape hatch so supervisors do not have to read source to
+		// discover it. Receipts remain mandatory for workspace_write
+		// regardless of this flag (harness gate).
+		return errors.New("workspace_write is disabled by default; set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
 	}
 
 	return harness.ValidateRequest(payload.Prompt, role, permission, req.AddDirs, req.SkipPermissions, "")

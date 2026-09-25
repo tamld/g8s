@@ -63,13 +63,18 @@ func (m *MockProcessManager) IsProcessAlive(pid int) bool {
 
 // MockCleanupGitRunner provides scripted responses for Git operations.
 type MockCleanupGitRunner struct {
-	PorcelainOutput   string
-	PrunedOutput      string
-	MergedBranchesRes []string
-	RemoteBranchesRes []string
-	ClosedPRRes       []string
-	LocalTagsRes      []TagInfo
-	RemoteTagsRes     []string
+	PorcelainOutput       string
+	PrunedOutput          string
+	MergedBranchesRes     []string
+	RemoteBranchesRes     []string
+	ClosedPRRes           []string
+	LocalTagsRes          []TagInfo
+	RemoteTagsRes         []string
+	LocalBranchesRes      []string
+	BranchesContainingRes []string
+	BranchTipSHARes       string
+	BranchTipTimeRes      time.Time
+	CreatedTags           []string
 
 	DeletedBranches []string
 	DeletedTags     []string
@@ -114,6 +119,23 @@ func (m *MockCleanupGitRunner) LocalTags(ctx context.Context, repoDir string) ([
 
 func (m *MockCleanupGitRunner) RemoteTags(ctx context.Context, repoDir string) ([]string, error) {
 	return m.RemoteTagsRes, nil
+}
+
+func (m *MockCleanupGitRunner) LocalBranches(ctx context.Context, repoDir string) ([]string, error) {
+	return m.LocalBranchesRes, nil
+}
+
+func (m *MockCleanupGitRunner) BranchesContaining(ctx context.Context, repoDir, sha string) ([]string, error) {
+	return m.BranchesContainingRes, nil
+}
+
+func (m *MockCleanupGitRunner) BranchTipInfo(ctx context.Context, repoDir, branch string) (string, time.Time, error) {
+	return m.BranchTipSHARes, m.BranchTipTimeRes, nil
+}
+
+func (m *MockCleanupGitRunner) CreateTag(ctx context.Context, repoDir, tag, commit string) error {
+	m.CreatedTags = append(m.CreatedTags, tag+"@"+commit)
+	return nil
 }
 
 func (m *MockCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
@@ -572,7 +594,7 @@ CREATE TABLE write_receipts (
 
 func TestClosedPRBranchCleanup(t *testing.T) {
 	closedPRs := []string{"feat/pr-1", "feat/pr-2"}
-	runner := &MockCleanupGitRunner{ClosedPRRes: closedPRs}
+	runner := &MockCleanupGitRunner{ClosedPRRes: closedPRs, LocalBranchesRes: closedPRs}
 
 	t.Run("dry-run detects closed PR branches", func(t *testing.T) {
 		cfg := CleanupConfig{
@@ -592,7 +614,7 @@ func TestClosedPRBranchCleanup(t *testing.T) {
 	})
 
 	t.Run("force mode deletes closed PR branches", func(t *testing.T) {
-		r := &MockCleanupGitRunner{ClosedPRRes: closedPRs}
+		r := &MockCleanupGitRunner{ClosedPRRes: closedPRs, LocalBranchesRes: closedPRs}
 		cfg := CleanupConfig{
 			Targets:   []string{TargetClosedPRBranch},
 			DryRun:    false,

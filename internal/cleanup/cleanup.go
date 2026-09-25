@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -32,6 +33,7 @@ const (
 	TargetStaleReceipt   = "stale-receipt"
 	TargetClosedPRBranch = "closed-pr-branch"
 	TargetOldTag         = "old-tag"
+	TargetScratchBranch  = "scratch-branch"
 )
 
 // AllCleanupTargets lists all available cleanup target flags.
@@ -43,6 +45,7 @@ var AllCleanupTargets = []string{
 	TargetStaleReceipt,
 	TargetClosedPRBranch,
 	TargetOldTag,
+	TargetScratchBranch,
 }
 
 // CleanupItem describes an individual resource identified for or subjected to cleanup.
@@ -112,6 +115,16 @@ type CleanupGitRunner interface {
 	LocalTags(ctx context.Context, repoDir string) ([]TagInfo, error)
 	RemoteTags(ctx context.Context, repoDir string) ([]string, error)
 	DeleteTag(ctx context.Context, repoDir, tag string) error
+	// LocalBranches lists local branch names (short format, no HEAD marker).
+	LocalBranches(ctx context.Context, repoDir string) ([]string, error)
+	// BranchesContaining lists every ref (local and remote, short names) that
+	// contains the given commit — used to prove a tip is preserved elsewhere.
+	BranchesContaining(ctx context.Context, repoDir, sha string) ([]string, error)
+	// BranchTipInfo returns the commit SHA and commit date of a branch tip.
+	BranchTipInfo(ctx context.Context, repoDir, branch string) (string, time.Time, error)
+	// CreateTag creates a lightweight tag at commit (used by the scratch
+	// sweep to preserve unique unmerged tips before branch deletion).
+	CreateTag(ctx context.Context, repoDir, tag, commit string) error
 }
 
 // DefaultProcessManager is the production implementation of ProcessManager using OS primitives and ProcessLister.
@@ -517,6 +530,68 @@ func (g *DefaultCleanupGitRunner) ClosedPRBranches(ctx context.Context, repoDir 
 	return branches, nil
 }
 
+// LocalBranches lists local branch names in short format.
+func (g *DefaultCleanupGitRunner) LocalBranches(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", "--format=%(refname:short)")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git branch --format: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	var branches []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
+}
+
+// BranchesContaining lists refs that contain the given commit (local + remote).
+func (g *DefaultCleanupGitRunner) BranchesContaining(ctx context.Context, repoDir, sha string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", "-a", "--contains", sha, "--format=%(refname:short)")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git branch -a --contains: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	var refs []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			refs = append(refs, line)
+		}
+	}
+	return refs, nil
+}
+
+// BranchTipInfo returns the commit SHA and commit date of a branch tip.
+func (g *DefaultCleanupGitRunner) BranchTipInfo(ctx context.Context, repoDir, branch string) (string, time.Time, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "log", "-1", "--format=%H|%cI", branch)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("git log -1 %s: %w (%s)", branch, err, strings.TrimSpace(string(out)))
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+	if len(parts) != 2 {
+		return "", time.Time{}, fmt.Errorf("git log -1 %s: unexpected output %q", branch, strings.TrimSpace(string(out)))
+	}
+	t, perr := time.Parse(time.RFC3339, parts[1])
+	if perr != nil {
+		return "", time.Time{}, fmt.Errorf("parse tip date for %s: %w", branch, perr)
+	}
+	return parts[0], t, nil
+}
+
+// CreateTag creates a lightweight tag at commit.
+func (g *DefaultCleanupGitRunner) CreateTag(ctx context.Context, repoDir, tag, commit string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", tag, commit)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git tag %s %s: %w (%s)", tag, commit, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func (g *DefaultCleanupGitRunner) LocalTags(ctx context.Context, repoDir string) ([]TagInfo, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "-l", "--format=%(refname:short)|%(creatordate:iso8601)|%(authordate:iso8601)")
 	out, err := cmd.CombinedOutput()
@@ -638,6 +713,13 @@ type CleanupConfig struct {
 	GitRunner       CleanupGitRunner
 	ProcessManager  ProcessManager
 	Writer          io.Writer
+	// Scratch branch sweep (#327): when ScratchEnabled, local branches whose
+	// name matches any ScratchPattern and whose tip is older than
+	// ScratchOlderThan are deleted after their unique unmerged tip commits
+	// are preserved under keep/scratch-auto-* tags.
+	ScratchEnabled   bool
+	ScratchPatterns  []string
+	ScratchOlderThan time.Duration
 }
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
@@ -752,6 +834,20 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetOldTag] = len(items)
+		}
+	}
+
+	// 8. Scratch branches (#327) — pattern-matched worker litter with
+	// verify-tag-delete preservation of unique unmerged tips.
+	// Opt-in only: never runs unless --scratch (ScratchEnabled) was passed,
+	// because it deletes unmerged branches.
+	if targetSet[TargetScratchBranch] && cfg.ScratchEnabled {
+		items, err := sweepScratchBranches(ctx, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] scratch-branch sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetScratchBranch] = len(items)
 		}
 	}
 
@@ -1098,9 +1194,31 @@ func sweepClosedPRBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupIte
 		return nil, nil
 	}
 
+	// #326: PR head refs include branches that only exist on the remote
+	// (dependabot/*, merged-and-deleted feat/*). Attempting a local
+	// `git branch -D` on those always fails with "not found" — report them
+	// honestly as skipped remote-only refs instead of error noise.
+	localBranches, lerr := cfg.GitRunner.LocalBranches(ctx, cfg.RepoDir)
+	localSet := make(map[string]bool)
+	if lerr == nil {
+		for _, b := range localBranches {
+			localSet[b] = true
+		}
+	}
+
 	var items []CleanupItem
 	for _, branch := range closedBranches {
 		if branch == "main" || branch == "master" {
+			continue
+		}
+
+		if !localSet[branch] {
+			items = append(items, CleanupItem{
+				Target: TargetClosedPRBranch,
+				ID:     branch,
+				Detail: "remote-only PR head (not a local branch; delete on the remote with git push origin --delete if wanted)",
+				Action: "skipped",
+			})
 			continue
 		}
 
@@ -1123,6 +1241,113 @@ func sweepClosedPRBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupIte
 				Target: TargetClosedPRBranch,
 				ID:     branch,
 				Detail: "branch from closed GitHub pull request",
+				Action: action,
+				Error:  errStr,
+			})
+		}
+	}
+
+	return items, nil
+}
+
+// sweepScratchBranches implements the scratch-class sweep (#327). Local
+// worker scratch branches (pattern-matched, tip older than the threshold)
+// are deleted only after every unique unmerged tip commit is preserved
+// under a keep/scratch-auto-N tag — the verify-tag-delete protocol from
+// the 2026-09-25 campaign sweep, promoted to enforce-code.
+func sweepScratchBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	if len(cfg.ScratchPatterns) == 0 {
+		cfg.ScratchPatterns = []string{"agy/*", "blind/*"}
+	}
+	threshold := cfg.ScratchOlderThan
+	if threshold <= 0 {
+		threshold = 72 * time.Hour
+	}
+
+	branches, err := cfg.GitRunner.LocalBranches(ctx, cfg.RepoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	if cfg.Clock != nil {
+		now = cfg.Clock()
+	}
+
+	var items []CleanupItem
+	taggedTips := make(map[string]bool)
+	tagSeq := 0
+	for _, branch := range branches {
+		matched := false
+		for _, p := range cfg.ScratchPatterns {
+			if ok, _ := path.Match(strings.TrimSpace(p), branch); ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		sha, tipTime, terr := cfg.GitRunner.BranchTipInfo(ctx, cfg.RepoDir, branch)
+		if terr != nil {
+			items = append(items, CleanupItem{
+				Target: TargetScratchBranch,
+				ID:     branch,
+				Detail: "cannot read tip commit",
+				Action: "skipped",
+				Error:  terr.Error(),
+			})
+			continue
+		}
+
+		age := now.Sub(tipTime)
+		if age <= threshold {
+			continue // young scratch branch — still in active use
+		}
+
+		// Verify-tag-delete: if this tip commit is not already preserved
+		// (tagged in a previous branch iteration of this sweep) and no
+		// other ref contains it, tag it before deleting the branch.
+		if !taggedTips[sha] {
+			refs, cerr := cfg.GitRunner.BranchesContaining(ctx, cfg.RepoDir, sha)
+			preserved := cerr == nil && len(refs) > 1 // the scratch branch itself is one ref
+			if cerr == nil && !preserved {
+				tag := fmt.Sprintf("keep/scratch-auto-%04d", tagSeq)
+				tagSeq++
+				if terr := cfg.GitRunner.CreateTag(ctx, cfg.RepoDir, tag, sha); terr == nil {
+					taggedTips[sha] = true
+					items = append(items, CleanupItem{
+						Target: TargetScratchBranch,
+						ID:     tag,
+						Detail: fmt.Sprintf("preserved unique unmerged tip %s (from %s)", sha[:10], branch),
+						Action: "created",
+					})
+				}
+			} else if cerr == nil {
+				taggedTips[sha] = true // preserved by other refs; no tag needed
+			}
+		}
+
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetScratchBranch,
+				ID:     branch,
+				Detail: fmt.Sprintf("scratch branch, tip %s old (threshold %s)", age.Round(24*time.Hour), threshold),
+				Action: "would_delete",
+			})
+		} else {
+			delErr := cfg.GitRunner.DeleteBranch(ctx, cfg.RepoDir, branch, true)
+			action := "deleted"
+			var errStr string
+			if delErr != nil {
+				action = "skipped"
+				errStr = delErr.Error()
+			}
+			items = append(items, CleanupItem{
+				Target: TargetScratchBranch,
+				ID:     branch,
+				Detail: fmt.Sprintf("scratch branch, tip %s old", age.Round(24*time.Hour)),
 				Action: action,
 				Error:  errStr,
 			})
