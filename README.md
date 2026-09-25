@@ -221,26 +221,26 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ## 📦 Release Artifacts (v0.10.1)
 
-Cross-platform GoReleaser v2 artifacts (darwin/linux/windows × amd64/arm64):
+Archives (GoReleaser v2 — macOS ships a single universal binary):
 
 | Artifact | Platform |
 |----------|----------|
-| `g8s_v0.10.1_darwin_amd64.tar.gz` | macOS Intel |
-| `g8s_v0.10.1_darwin_arm64.tar.gz` | macOS Apple Silicon |
+| `g8s_v0.10.1_darwin_all.tar.gz` | macOS universal (Intel + Apple Silicon) |
 | `g8s_v0.10.1_linux_amd64.tar.gz` | Linux x86_64 |
 | `g8s_v0.10.1_linux_arm64.tar.gz` | Linux ARM64 |
 | `g8s_v0.10.1_windows_amd64.zip` | Windows x86_64 |
-| `g8s_v0.10.1_windows_arm64.zip` | Windows ARM64 |
+
+Packages (Linux, additionally published): `g8s_0.10.1_amd64.deb`, `g8s_0.10.1_arm64.deb`, `g8s-0.10.1-1.x86_64.rpm`, `g8s-0.10.1-1.aarch64.rpm`, `g8s_0.10.1_amd64.apk`, `g8s_0.10.1_aarch64.apk`. Always derive the exact asset names from the release page (`gh release view v0.10.1 --json assets`) — #338.
 
 ### Verification
 ```bash
 # Checksums (SHA256)
-sha256sum g8s_v0.10.1_*.tar.gz g8s_v0.10.1_*.zip
+sha256sum g8s_v0.10.1_*.tar.gz g8s_v0.10.1_*.zip checksums.txt
 
 # Cosign signature verification (when published)
-cosign verify-blob --signature g8s_v0.10.1_darwin_amd64.tar.gz.sig \
-  --certificate g8s_v0.10.1_darwin_amd64.tar.gz.pem \
-  g8s_v0.10.1_darwin_amd64.tar.gz
+cosign verify-blob --signature g8s_v0.10.1_darwin_all.tar.gz.sig \
+  --certificate g8s_v0.10.1_darwin_all.tar.gz.pem \
+  g8s_v0.10.1_darwin_all.tar.gz
 ```
 
 ---
