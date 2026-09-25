@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -219,7 +220,11 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	providersPath := filepath.Join(configDir, "providers.json")
 	mockArgs := `["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]`
 	if runtime.GOOS == "windows" {
-		mockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"status\":\"succeeded\"}'"]`
+		mockCmd := filepath.Join(tempDir, "mock_success.cmd")
+		if err := os.WriteFile(mockCmd, []byte("@echo off\r\necho {\"status\":\"succeeded\"}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock success: %v", err)
+		}
+		mockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(mockCmd)))
 	}
 	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
@@ -236,18 +241,10 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("write mock providers: %v", err)
 	}
 
-	envVars := []string{
-		"G8S_STATE_DIR=" + stateDir,
-		"G8S_PROVIDERS=" + providersPath,
-		"PATH=" + os.Getenv("PATH"),
-	}
-	if runtime.GOOS == "windows" {
-		for _, key := range []string{"SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "SystemDrive", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "COMSPEC"} {
-			if v := os.Getenv(key); v != "" {
-				envVars = append(envVars, key+"="+v)
-			}
-		}
-	}
+	envVars := append(os.Environ(),
+		"G8S_STATE_DIR="+stateDir,
+		"G8S_PROVIDERS="+providersPath,
+	)
 
 	// 1. Submit a task
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--model", "gemini-3.8-flash-high", "--json")
@@ -342,10 +339,13 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("task state = %q, want SUPERVISOR_ACCEPTED\nGet output: %s", getEnv2.Data.State, string(getOut2))
 	}
 
-	// 6. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
 	errMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]`
 	if runtime.GOOS == "windows" {
-		errMockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]`
+		errMockCmd := filepath.Join(tempDir, "mock_err.cmd")
+		if err := os.WriteFile(errMockCmd, []byte("@echo off\r\necho {\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock err cmd: %v", err)
+		}
+		errMockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(errMockCmd)))
 	}
 	errProviderJSON := fmt.Sprintf(`{
   "version": "1.0",
@@ -499,7 +499,11 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 	providersPath := filepath.Join(configDir, "providers.json")
 	failMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]`
 	if runtime.GOOS == "windows" {
-		failMockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]`
+		failMockCmd := filepath.Join(tempDir, "mock_fail.cmd")
+		if err := os.WriteFile(failMockCmd, []byte("@echo off\r\necho {\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock fail cmd: %v", err)
+		}
+		failMockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(failMockCmd)))
 	}
 	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
@@ -516,18 +520,10 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 		t.Fatalf("write err mock providers: %v", err)
 	}
 
-	envVars := []string{
-		"G8S_STATE_DIR=" + stateDir,
-		"G8S_PROVIDERS=" + providersPath,
-		"PATH=" + os.Getenv("PATH"),
-	}
-	if runtime.GOOS == "windows" {
-		for _, key := range []string{"SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "SystemDrive", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "COMSPEC"} {
-			if v := os.Getenv(key); v != "" {
-				envVars = append(envVars, key+"="+v)
-			}
-		}
-	}
+	envVars := append(os.Environ(),
+		"G8S_STATE_DIR="+stateDir,
+		"G8S_PROVIDERS="+providersPath,
+	)
 
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--model", "gemini-3.8-flash-high", "--json")
 	submitCmd.Env = envVars
