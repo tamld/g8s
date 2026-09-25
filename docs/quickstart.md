@@ -22,14 +22,13 @@ Grab the matching archive from the [releases page](https://github.com/tamld/g8s/
 
 | OS | Archive |
 | --- | --- |
-| macOS Apple Silicon | `g8s_<ver>_darwin_arm64.tar.gz` |
-| macOS Intel | `g8s_<ver>_darwin_amd64.tar.gz` |
+| macOS (Intel + Apple Silicon) | `g8s_<ver>_darwin_all.tar.gz` — universal binary |
 | Linux arm64 | `g8s_<ver>_linux_arm64.tar.gz` |
 | Linux amd64 | `g8s_<ver>_linux_amd64.tar.gz` |
 | Windows amd64 | `g8s_<ver>_windows_amd64.zip` |
 
 ```sh
-tar -xzf g8s_0.10.1_darwin_arm64.tar.gz
+tar -xzf g8s_0.10.1_darwin_all.tar.gz
 ./g8s version
 ```
 
