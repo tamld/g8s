@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/receipt"
 )
 
 // ErrUnknownTask reports operations addressing a task id that does not exist.
@@ -57,19 +58,37 @@ CREATE TABLE IF NOT EXISTS write_receipts (
 )`
 
 // ConsumeWriteReceipt atomically marks a delegated-write receipt as consumed
-// by the given task (#346). The UPDATE only matches rows that are still
-// unconsumed and unexpired, so exactly one caller ever succeeds; a re-consume
-// by the same task is idempotent, a different task trips
-// ErrReceiptAlreadyConsumed, and an unknown/expired receipt trips
-// ErrReceiptUnknownOrExpired.
+// by the given task (#346).
+//
+// The receipt CLI issues receipts into receipts.db (a sibling of g8s.db),
+// while the worker's control plane opens g8s.db — the split-brain paths made
+// every worker-side consume miss. This implementation therefore consumes in
+// the receipts.db store first (the canonical receipt ledger), then falls back
+// to legacy rows that live in g8s.db from earlier path conventions.
+//
+// Exactly one caller ever succeeds; a re-consume by the same task is
+// idempotent, a different task trips ErrReceiptAlreadyConsumed, and an
+// unknown/expired receipt trips ErrReceiptUnknownOrExpired.
 func (s *Store) ConsumeWriteReceipt(ctx context.Context, receiptID, consumerTaskID string) error {
-	// Ensure the write_receipts table exists even in worker-only processes
-	// (#346): the table belongs to the receipt package schema, which the
-	// receipt CLI creates but a bare `g8s worker` does not. The DDL mirrors
-	// internal/receipt/receipt.go `schema` — keep them in sync. (receipt
-	// NewReceiptManager cannot be reused here: it enforces its own
-	// user_version on a database file whose user_version is owned by the
-	// control-plane migrations — a known cross-package defect to resolve.)
+	// 1. Canonical ledger: receipts.db (fresh file owned by the receipt
+	// schema — no user_version conflict with control-plane migrations).
+	mgr, merr := s.receiptsManager()
+	if merr == nil {
+		_, cerr := mgr.ValidateAndConsume(receiptID, consumerTaskID)
+		switch {
+		case cerr == nil:
+			return nil
+		case isReceiptConsumedErr(cerr):
+			return fmt.Errorf("%w (receipts ledger)", ErrReceiptAlreadyConsumed)
+		case !isReceiptUnknownErr(cerr):
+			return fmt.Errorf("consume write receipt: %w", cerr)
+		}
+		// unknown in receipts ledger → try the legacy g8s.db rows below
+	}
+
+	// 2. Legacy fallback: rows written into g8s.db by older path
+	// conventions. Ensure the table exists (worker-only processes never
+	// created it), then consume conditionally.
 	if _, err := s.db.ExecContext(ctx, writeReceiptsEnsureDDL); err != nil {
 		return fmt.Errorf("ensure write_receipts schema: %w", err)
 	}
@@ -102,6 +121,20 @@ func (s *Store) ConsumeWriteReceipt(ctx context.Context, receiptID, consumerTask
 		return fmt.Errorf("%w (held by task %s)", ErrReceiptAlreadyConsumed, storedTask.String)
 	}
 	return ErrReceiptUnknownOrExpired
+}
+
+// isReceiptConsumedErr reports whether err is the receipt package's
+// AlreadyConsumedError.
+func isReceiptConsumedErr(err error) bool {
+	var target *receipt.AlreadyConsumedError
+	return errors.As(err, &target)
+}
+
+// isReceiptUnknownErr reports whether err means the receipt does not exist
+// (as opposed to being expired or otherwise rejected).
+func isReceiptUnknownErr(err error) bool {
+	var target *receipt.NotFoundError
+	return errors.As(err, &target)
 }
 
 // FinishAttemptParams carries the worker verdict for FinishAttempt.
@@ -155,6 +188,17 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	}
 	if len(req.AddDirs) == 0 {
 		return errors.New("request.add_dirs requires at least one explicit scope root")
+	}
+	// #348 second-line defense: the CLI is not the only submit surface
+	// (MCP/HTTP) — reject traversal segments and empty scope dirs here,
+	// independent of any client-side jail.
+	for _, dir := range req.AddDirs {
+		if strings.TrimSpace(dir) == "" {
+			return errors.New("request.add_dirs contains an empty scope root")
+		}
+		if dir == ".." || strings.HasPrefix(dir, ".."+string(os.PathSeparator)) || strings.HasPrefix(dir, "../") {
+			return errors.New("request.add_dirs must not escape the workspace via .. traversal")
+		}
 	}
 	if req.NoSandbox {
 		return errors.New("no_sandbox is disabled in control-plane v0.1")

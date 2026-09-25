@@ -125,6 +125,65 @@ func ValidateScopePath(rawPath string) error {
 	return nil
 }
 
+// ValidateScopeJail enforces workspace-jail containment for add-dirs
+// (#348, operator-approved design): every scope dir must resolve inside at
+// least one of the provided jail roots (symlinks resolved before the
+// containment check), and each dir passes the denied-fragment gate. Cross-root
+// workflows remain supported by adding explicit --scope-root entries at
+// submit time.
+func ValidateScopeJail(addDirs []string, roots []string) error {
+	if len(roots) == 0 {
+		return fmt.Errorf("scope jail requires at least one root")
+	}
+	resolvedRoots := make([]string, 0, len(roots))
+	for _, rawRoot := range roots {
+		cleanRoot := filepath.Clean(rawRoot)
+		homeDir, _ := os.UserHomeDir()
+		if strings.HasPrefix(cleanRoot, "~") && homeDir != "" {
+			cleanRoot = filepath.Join(homeDir, cleanRoot[1:])
+		}
+		absRoot, err := filepath.Abs(cleanRoot)
+		if err != nil {
+			absRoot = cleanRoot
+		}
+		absRoot = resolveExistingSymlinks(absRoot)
+		resolvedRoots = append(resolvedRoots, absRoot)
+	}
+
+	for _, rawDir := range addDirs {
+		cleanDir := filepath.Clean(rawDir)
+		if cleanDir == ".." || strings.HasPrefix(cleanDir, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("add-dir escapes scope: %s", rawDir)
+		}
+		homeDir, _ := os.UserHomeDir()
+		if strings.HasPrefix(cleanDir, "~") && homeDir != "" {
+			cleanDir = filepath.Join(homeDir, cleanDir[1:])
+		}
+		absDir, err := filepath.Abs(cleanDir)
+		if err != nil {
+			absDir = cleanDir
+		}
+		absDir = resolveExistingSymlinks(absDir)
+
+		inside := false
+		for _, root := range resolvedRoots {
+			rel, rerr := filepath.Rel(root, absDir)
+			if rerr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			return fmt.Errorf("add-dir %q is outside scope roots %v; extend with --scope-root", rawDir, roots)
+		}
+
+		if serr := ValidateScopePath(rawDir); serr != nil {
+			return serr
+		}
+	}
+	return nil
+}
+
 // ReceiptRef carries the minimal receipt identity injected into delegated-write
 // prompts (spec 01: BuildContractPrompt injects exact allowed paths when a
 // receipt is present).

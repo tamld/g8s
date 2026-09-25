@@ -160,10 +160,21 @@ All shipped and published on GitHub Releases (verified 2026-09-25 by roadmap-tru
 |-----------|--------|-------|
 | DELTA-21 Unified Decoupled Memory Facade | ✅ Merged | PR #325, ADR-0019 |
 | Docs-contract gate + adversarial probe suite | ✅ Merged | PR #324 (progress on #254) |
-| Reflex-gated debt campaign #319/#320/#321 | ✅ Merged | PR #330, ADR-0020 |
-| Closed-Loop Worker Trace Telemetry | 🔄 In Progress | Issue #253 |
+| Reflex-gated debt campaign #319/#321 | ✅ Merged | PR #330, ADR-0020 |
+| Delegated-write E2E: receipt consume + host materialization + workspace jail | ✅ Merged | PRs #352/#353, plan 260925-0930 (closes #346/#348) |
+| Closed-Loop Worker Trace Telemetry | 🔄 In Progress | Issue #253; Windows batch-ingest bug #342 |
 | Adversarial Safety Probes & Behavioral Evals | 🔄 In Progress | Issue #254 |
-| Dogfood enforcement debt (#326–#331) | 📋 Tracked | cleanup channel bugs, worker ceilings, Jev calibration |
+| **Throughput & Multi-Session Capability** | 📋 Planned | see rows below (operator directive 2026-09-25) |
+
+**Throughput & Multi-Session rows (v0.11.0)** — raise speed and safe parallelism:
+
+| Item | Design notes | Priority |
+|------|--------------|----------|
+| Session-scoped state isolation | per-session g8s.db namespace or repo-lock so concurrent supervisors never move each other's refs/HEAD (D6 contention class, 2026-09-25 campaign) | P0 |
+| Worktree-isolated `worker --once` default | every bare worker dispatch runs in a dedicated worktree; shared-checkout requires explicit `--in-place` | P0 |
+| FanOut concurrency + session quotas exposed in config | per-submitter quota enforcement (schema v10 `session_id` already lands the data) | P1 |
+| Result streaming: `g8s get --tail` + bounded streaming reads | supervisors observe long worker sessions without polling full transcripts | P1 |
+| CLI envelope conformance suite | every `--json` command emits `{v,kind,data}`; guards the D3 class permanently | P1 |
 
 ---
 
@@ -174,7 +185,9 @@ All shipped and published on GitHub Releases (verified 2026-09-25 by roadmap-tru
 |-------|-------------|----------|
 | DELTA-20 | Code Intelligence Tiers 0.5–2 (dynamic blast radius) | P1 |
 | #8/#12 | kardianos/service cross-platform unification | P2 |
+| #342/#336 | Windows-native fixes: telemetry batch ingest, CPU sampling, file-lock containment (needs Windows host) | P1 |
 | #326–#329 | Cleanup channel + CLI envelope + reflex CLI enforcement | P1 |
+| Reflex-gated dispatch | `g8s reflex triage` wired into the dispatch path as a pre-spawn gate (ADR-0020) | P1 |
 
 ---
 
