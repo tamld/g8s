@@ -1123,3 +1123,27 @@ func TestAgyStreamErrorTailUnit(t *testing.T) {
 		}
 	}
 }
+
+// #344: a provider content-filter refusal is not task evidence — even when
+// the provider stream wraps it in SUCCESS, the result classifies as blocked.
+func TestReadWorkerResultProviderRefusal(t *testing.T) {
+	stream := "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"This request was blocked by Gemini's filters.\"}}\n" +
+		"{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"This request was blocked by Gemini's filters.\"}}\n"
+	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	if wr.OK {
+		t.Fatalf("provider refusal must not classify as OK: %+v", wr)
+	}
+	if wr.Status != "blocked" {
+		t.Errorf("expected blocked status, got %q", wr.Status)
+	}
+}
+
+// #344: a task legitimately discussing content filtering must not
+// false-positive the refusal detector.
+func TestReadWorkerResultFilterDiscussionNoFalsePositive(t *testing.T) {
+	stream := "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"The harness documents how blocked task patterns are matched before dispatch.\"}}\n"
+	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	if !wr.OK {
+		t.Fatalf("legitimate evidence discussing filters must stay OK: %+v", wr)
+	}
+}

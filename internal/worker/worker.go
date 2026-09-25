@@ -96,6 +96,10 @@ type WorkerControlPlane interface {
 	AddErrorCall(ctx context.Context, taskID string, record controlplane.ErrorCallRecord) error
 	ValidateResult(ctx context.Context, taskID string, validation controlplane.ResultValidation) error
 	ValidateContract(ctx context.Context, taskID string, validation controlplane.ContractValidation) error
+	// ConsumeWriteReceipt marks a delegated-write receipt consumed by the
+	// task (#346): exactly one caller succeeds; replay by a different task
+	// trips controlplane.ErrReceiptAlreadyConsumed.
+	ConsumeWriteReceipt(ctx context.Context, receiptID, consumerTaskID string) error
 
 	// Checkpoint/recovery for long-running tasks (issue #290)
 	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *controlplane.CheckpointData) (*controlplane.Task, error)
@@ -120,6 +124,10 @@ type taskRequest struct {
 	// the envelope; "stdout" synthesizes {ok:true} from bounded stdout when
 	// the child exits 0 without writing a result file.
 	ResultMode string `json:"result_mode"`
+
+	// ReceiptID carries the delegated-write receipt for workspace_write
+	// tasks; consumed exactly once on a successful attempt (#346).
+	ReceiptID string `json:"receipt_id,omitempty"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -491,7 +499,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID)
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -547,6 +555,7 @@ func (s *Supervisor) collect(
 	child Child,
 	reason, taskID, workerID, token, runDir, promptPath, resultPath, stdoutPath, stderrPath string,
 	resultMode string,
+	permission, receiptID string,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -604,6 +613,31 @@ func (s *Supervisor) collect(
 		finishErr := ""
 		if !success {
 			finishErr = firstNonEmpty(wr.Reason, wr.Status, "failed")
+		}
+
+		// #346: consume the delegated-write receipt exactly once when the
+		// scoped write attempt succeeded — before the attempt is finished.
+		// A replay by a different task is a hard, non-retryable failure.
+		if success && permission == "workspace_write" && receiptID != "" {
+			if cerr := s.cp.ConsumeWriteReceipt(ctx, receiptID, taskID); cerr != nil {
+				if errors.Is(cerr, controlplane.ErrReceiptAlreadyConsumed) {
+					wr = workerResult{
+						OK:      false,
+						Status:  "failed",
+						Reason:  "write receipt already consumed by another task (replay suspected)",
+						Summary: "delegated-write receipt replay detected",
+					}
+				} else {
+					wr = workerResult{
+						OK:      false,
+						Status:  "failed",
+						Reason:  "receipt consume failed: " + cerr.Error(),
+						Summary: "delegated-write receipt could not be consumed",
+					}
+				}
+				success = false
+				finishErr = firstNonEmpty(finishErr, wr.Reason)
+			}
 		}
 
 		// Perform result validation before finishing attempt
@@ -689,7 +723,42 @@ func (s *Supervisor) maybePause(ctx context.Context, wr workerResult, stdoutText
 	return false
 }
 
+// providerRefusalPhrases are the canned refusal sentence fragments emitted
+// by provider content filters (#344). Narrow by design — a task legitimately
+// discussing content filtering must not false-positive, so we match the
+// full refusal sentence stems, not individual words.
+var providerRefusalPhrases = []string{
+	"this request was blocked by",
+	"blocked by gemini's filters",
+	"occasionally trigger by mistake on safe coding",
+	"read more about [our policies here]",
+}
+
+// providerRefusalDetected reports whether the captured output is a provider
+// content-filter refusal rather than task evidence. A refusal is not a
+// result: classifying it as succeeded poisons the control plane with
+// non-evidence (#344).
+func providerRefusalDetected(stdoutText string) bool {
+	lower := strings.ToLower(stdoutText)
+	for _, phrase := range providerRefusalPhrases {
+		if strings.Contains(lower, strings.ToLower(phrase)) {
+			return true
+		}
+	}
+	return false
+}
+
 func readWorkerResult(resultPath string, stdoutText string, code int) workerResult {
+	// #344: a content-filter refusal is never task evidence, even when the
+	// provider stream reports SUCCESS around it.
+	if providerRefusalDetected(stdoutText) {
+		return workerResult{
+			OK:      false,
+			Status:  "blocked",
+			Reason:  "provider content filter refused the prompt (no task evidence produced)",
+			Summary: "worker response is a provider refusal, not a result",
+		}
+	}
 	if envErr := dispatch.ParseWorkerEnvelope([]byte(stdoutText)); envErr != nil {
 		var envE *dispatch.WorkerEnvelopeError
 		reason := envErr.Error()
