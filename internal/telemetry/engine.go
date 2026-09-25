@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,7 @@ type TelemetryEngine struct {
 	eventChan chan TraceEvent
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
-	seq       uint64
+	seq       atomic.Uint64
 }
 
 func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
@@ -153,7 +154,7 @@ func (e *TelemetryEngine) Close() error {
 
 func (e *TelemetryEngine) IngestEvent(ctx context.Context, event TraceEvent) error {
 	if event.ID == "" {
-		seq := atomic.AddUint64(&e.seq, 1)
+		seq := e.seq.Add(1)
 		event.ID = fmt.Sprintf("evt-%d-%06d-%s", e.getClock().UnixNano(), seq%1000000, randomString(8))
 	}
 	if event.Timestamp.IsZero() {
@@ -866,9 +867,10 @@ func randomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, n)
 	if _, err := cryptorand.Read(b); err != nil {
-		ts := uint64(time.Now().UnixNano())
+		h := uint64(time.Now().UnixNano()) ^ (uint64(os.Getpid()) << 32)
 		for i := range b {
-			b[i] = byte(ts >> (i * 8))
+			h = h*6364136223846793005 + 1442695040888963407
+			b[i] = byte(h >> 32)
 		}
 	}
 	for i := range b {
