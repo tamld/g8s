@@ -83,7 +83,16 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 		return errors.New("workspace_write is disabled by default; set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
 	}
 
-	return harness.ValidateRequest(payload.Prompt, role, permission, req.AddDirs, req.SkipPermissions, "")
+	// The harness re-validates with the receipt ID carried in the payload
+	// (#334): submit.go embeds receipt_id into the payload JSON, so the
+	// control-plane re-check must pass it through — an empty receipt here
+	// would double-reject every delegated-write submission.
+	var receiptEnvelope struct {
+		ReceiptID string `json:"receipt_id"`
+	}
+	_ = json.Unmarshal(req.Payload, &receiptEnvelope)
+
+	return harness.ValidateRequest(payload.Prompt, role, permission, req.AddDirs, req.SkipPermissions, receiptEnvelope.ReceiptID)
 }
 
 // redactPayload removes the raw prompt from a request JSON document and

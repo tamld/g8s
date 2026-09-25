@@ -37,15 +37,21 @@ type Config struct {
 }
 
 // DefaultConfig returns a sensible default configuration.
+//
+// Security defaults (#348): the daemon binds loopback only and CORS is
+// disabled unless explicitly enabled — the HTTP API is unauthenticated, so
+// a wildcard bind plus permissive CORS exposed the control plane to the
+// local network by default. External binds require explicit opt-in via
+// config/flag.
 func DefaultConfig() Config {
 	return Config{
-		Address:           ":8080",
+		Address:           "127.0.0.1:8080",
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
-		EnableCORS:        true,
-		AllowedOrigins:    []string{"*"},
+		EnableCORS:        false,
+		AllowedOrigins:    nil,
 		EnableMetrics:     true,
 		EnableHealthz:     true,
 	}
@@ -54,7 +60,7 @@ func DefaultConfig() Config {
 // Validate validates the configuration.
 func (c *Config) Validate() error {
 	if c.Address == "" {
-		c.Address = ":8080"
+		c.Address = "127.0.0.1:8080"
 	}
 	if c.ReadHeaderTimeout <= 0 {
 		c.ReadHeaderTimeout = 10 * time.Second

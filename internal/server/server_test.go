@@ -42,8 +42,8 @@ func TestServerConfigValidation(t *testing.T) {
 		t.Fatalf("expected nil, got %v", err)
 	}
 
-	if cfg.Address != ":8080" {
-		t.Errorf("expected Address to be :8080, got %s", cfg.Address)
+	if cfg.Address != "127.0.0.1:8080" {
+		t.Errorf("expected Address to be 127.0.0.1:8080 (loopback default, #348), got %s", cfg.Address)
 	}
 	if cfg.ReadHeaderTimeout != 10*time.Second {
 		t.Errorf("expected ReadHeaderTimeout to be 10s, got %v", cfg.ReadHeaderTimeout)
