@@ -3,6 +3,7 @@ package signing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestSigntoolSigner_SignSuccess(t *testing.T) {
 	signer := &SigntoolSigner{
 		CertPath:     certPath,
 		CertPassword: "secret-password",
-		Timestamper:  "http://timestamp.digicert.com",
+		Timestamper:  "https://timestamp.digicert.com",
 		Runner:       runner,
 	}
 
@@ -59,7 +60,7 @@ func TestSigntoolSigner_SignSuccess(t *testing.T) {
 	}
 
 	cmdStr := strings.Join(call, " ")
-	if !strings.Contains(cmdStr, "/tr http://timestamp.digicert.com") {
+	if !strings.Contains(cmdStr, "/tr https://timestamp.digicert.com") {
 		t.Errorf("expected timestamper arg in %q", cmdStr)
 	}
 	if !strings.Contains(cmdStr, "/td sha256 /fd sha256 /a /f "+certPath) {
@@ -95,7 +96,7 @@ func TestSigntoolSigner_DefaultTimestamperAndConstructor(t *testing.T) {
 
 	call := runner.calls[0]
 	cmdStr := strings.Join(call, " ")
-	if !strings.Contains(cmdStr, "/tr http://timestamp.digicert.com") {
+	if !strings.Contains(cmdStr, "/tr https://timestamp.digicert.com") {
 		t.Errorf("expected default timestamper in %q", cmdStr)
 	}
 }
@@ -245,4 +246,46 @@ func TestExecRunner_Timeout(t *testing.T) {
 	if err == nil {
 		t.Log("sleep 1 returned without error (unexpected in short timeout)")
 	}
+}
+
+// #367: the PFX password is redacted from any surfaced error text.
+func TestSigntoolSigner_PasswordRedactedInError(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pfx")
+	targetPath := filepath.Join(dir, "g8s.exe")
+	for _, p := range []string{certPath, targetPath} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var capturedCmd string
+	s := &SigntoolSigner{
+		CertPath:     certPath,
+		CertPassword: "super-secret-pfx-pass",
+		Timestamper:  "https://timestamp.digicert.com",
+		Runner: &fakeSignRunner{run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			capturedCmd = name + " " + strings.Join(args, " ")
+			return nil, fmt.Errorf("signtool error: SIGNTOOL-FAIL with /p super-secret-pfx-pass")
+		}},
+	}
+	err := s.Sign(context.Background(), targetPath)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "super-secret-pfx-pass") {
+		t.Errorf("password leaked in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Errorf("expected redacted marker: %v", err)
+	}
+	_ = capturedCmd
+}
+
+// fakeSignRunner adapts a function to the Runner interface.
+type fakeSignRunner struct {
+	run func(ctx context.Context, name string, args ...string) ([]byte, error)
+}
+
+func (f *fakeSignRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return f.run(ctx, name, args...)
 }
