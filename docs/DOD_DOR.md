@@ -38,3 +38,37 @@ A dispatched agent run is **Done** when:
 3. **Resource Cleanup**: Ephemeral worktrees + child process groups pruned, zero zombies.
 4. **Lineage Edge**: DAG edge recorded in `task_events`.
 5. **Telemetry Emit**: Completion event emitted with exit code + root-cause signature (see #253).
+
+## 3. Campaign-Proven Governance Standards (ADR-0020/0021, 2026-09-25)
+
+Standards validated across the reflex-gated debt campaign (10+ worker tasks,
+20+ PRs, live Jev triages) — they extend the tracks above with the operating
+model the project now runs on:
+
+### 3.1 Campaign DoR additions (before any mutation)
+1. **Reflex Triage Verdict**: every planned mutation passes `g8s reflex triage`
+   (Jev sensor + deterministic policy). `instant_kill` abandons; `escalate_hitl`
+   with risk ≥ 1.0 routes to operator review via PR — never silent.
+2. **Worker Packet Ceiling**: recon/audit packets bounded well below the
+   measured worker ceiling (~450K tokens for gemini-3.8-flash-high); explicit
+   paths, no blind filesystem searches.
+3. **Scope Roots Declared**: delegated-write submissions declare jail roots
+   (`--scope-root`); cross-root access is explicit opt-in (#348).
+4. **Defensive Framing**: security/audit prompts use verification vocabulary —
+   attacker vocabulary trips provider content filters and yields non-evidence.
+
+### 3.2 Campaign DoD additions (before merge)
+1. **Layer Ownership**: PR never mixes `internal/worker` with `cmd/g8s` or
+   `internal/orchestrator` (DEBT-34 gate); test-fake ripples split accordingly.
+2. **Gates as Code**: dual-pass CI + pre-push suite + version-sync +
+   docs-contract + layer-ownership all green; no gate bypassed — spurious
+   failures are fixed at the tool level (isolate, never `--no-verify`).
+3. **Evidence over Assertion**: every finding carries file:line evidence
+   reproducible by a different agent (ADLC WA-8); worker transcripts ending in
+   `error_message` classify as failures, never as results.
+4. **Ledger Trail**: verdicts, adjudications, and ceilings recorded in the
+   campaign ledger; ADRs carry the decisions; issues track the residue.
+5. **Zero Garbage**: no orphan worktrees, no untagged scratch branches, no
+   draft releases, no unpushed local state without a safety tag.
+6. **Delegated-Write Proof**: workspace_write runs show `consumed=1` owned by
+   the task and host-materialized outputs (verified E2E, 2026-09-25).
