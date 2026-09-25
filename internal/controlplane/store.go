@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +62,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	}
 	dsn := fmt.Sprintf(
 		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
-		url.PathEscape(dbPath),
+		sqlitePathEscape(dbPath),
 	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -1647,4 +1648,26 @@ func (s *Store) CheckSessionQuota(ctx context.Context, sessionID string) (bool, 
 	}
 	// TODO(OWNER=tamld): Check hourly rate limit (requires task creation timestamps per session)
 	return true, nil
+}
+
+// sqlitePathEscapeFor escapes a database file path for a SQLite file: URI on
+// the given GOOS (#336). On Windows url.PathEscape percent-encodes drive
+// colons (%3A) and separators (%5C) — the modernc driver does not decode
+// them back, producing an unusable URI. Windows keeps the path literal and
+// escapes only the URI-significant characters, preserving the v0.9.2
+// connection-string injection guarantee (?, # and % cannot smuggle query
+// parameters). Non-Windows keeps the proven url.PathEscape behavior.
+func sqlitePathEscapeFor(goos, path string) string {
+	if goos != "windows" {
+		return url.PathEscape(path)
+	}
+	p := strings.ReplaceAll(path, "%", "%25")
+	p = strings.ReplaceAll(p, "?", "%3F")
+	p = strings.ReplaceAll(p, "#", "%23")
+	return p
+}
+
+// sqlitePathEscape escapes the database path for the running platform.
+func sqlitePathEscape(path string) string {
+	return sqlitePathEscapeFor(runtime.GOOS, path)
 }
