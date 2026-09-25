@@ -40,11 +40,17 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 // SigntoolSigner signs and verifies Windows binaries using Microsoft signtool.exe.
+//
+// Credential handling (#358): prefer CertThumbprint (certificate already in
+// the machine/user store — no secret on the command line). When CertPassword
+// is used with a PFX, the secret is necessarily present in the signtool argv
+// (a signtool limitation) — keep the window minimal and never log arguments.
 type SigntoolSigner struct {
-	CertPath     string
-	CertPassword string
-	Timestamper  string
-	Runner       Runner
+	CertPath       string
+	CertPassword   string
+	CertThumbprint string // preferred: store-resident certificate, no secret in argv
+	Timestamper    string
+	Runner         Runner
 }
 
 var _ Signer = (*SigntoolSigner)(nil)
@@ -83,12 +89,6 @@ func (s *SigntoolSigner) Sign(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("target file stat: %w", err)
 	}
-	if strings.TrimSpace(s.CertPath) == "" {
-		return errors.New("certificate path is required for signing")
-	}
-	if _, err := os.Stat(s.CertPath); err != nil {
-		return fmt.Errorf("certificate file stat: %w", err)
-	}
 
 	args := []string{
 		"sign",
@@ -96,15 +96,32 @@ func (s *SigntoolSigner) Sign(ctx context.Context, path string) error {
 		"/td", "sha256",
 		"/fd", "sha256",
 		"/a",
-		"/f", s.CertPath,
 	}
 
-	if s.CertPassword != "" {
-		args = append(args, "/p", s.CertPassword)
+	if s.CertThumbprint != "" {
+		// #358: store-resident certificate — no secret material in argv.
+		args = append(args, "/sha1", s.CertThumbprint)
+	} else {
+		if strings.TrimSpace(s.CertPath) == "" {
+			return errors.New("certificate path is required for signing")
+		}
+		if _, err := os.Stat(s.CertPath); err != nil {
+			return fmt.Errorf("certificate file stat: %w", err)
+		}
+		args = append(args, "/f", s.CertPath)
+		if s.CertPassword != "" {
+			// Residual risk (documented): signtool requires the PFX
+			// password on the command line; it is visible in the process
+			// table for the lifetime of the invocation. Prefer
+			// CertThumbprint for store-resident certificates.
+			args = append(args, "/p", s.CertPassword)
+		}
 	}
 
 	args = append(args, path)
 
+	// The error wraps only the signtool exit status — arguments (which may
+	// contain the PFX password) are never included in logs or errors.
 	_, err := s.runner().Run(ctx, "signtool", args...)
 	if err != nil {
 		return fmt.Errorf("signtool sign: %w", err)
