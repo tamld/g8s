@@ -420,6 +420,12 @@ func (g *ReflexGate) deterministicFallbackSignal(req TriageRequest, reason strin
 }
 
 // isWithinScope verifies whether all modified files conform to declared allowed path patterns.
+//
+// Confinement semantics (#359): allowed patterns are workspace-relative.
+// A modified file given as an absolute path (leading "/" or Windows drive)
+// is ALWAYS outside the declared scope — filepath.Clean does not remove a
+// leading root, so the previous traversal-only check let an absolute path
+// bypass confinement entirely.
 func isWithinScope(modified []string, allowed []string) bool {
 	if len(allowed) == 0 {
 		return true
@@ -427,6 +433,9 @@ func isWithinScope(modified []string, allowed []string) bool {
 	for _, f := range modified {
 		cleanFile := filepath.ToSlash(filepath.Clean(f))
 		if cleanFile == ".." || strings.HasPrefix(cleanFile, "../") {
+			return false
+		}
+		if strings.HasPrefix(cleanFile, "/") || isWindowsDrivePath(cleanFile) {
 			return false
 		}
 		matched := false
@@ -443,11 +452,30 @@ func isWithinScope(modified []string, allowed []string) bool {
 	return true
 }
 
+// isWindowsDrivePath reports whether a slashed path begins with a Windows
+// drive prefix (e.g. "C:/...").
+func isWindowsDrivePath(cleanFile string) bool {
+	if len(cleanFile) < 2 || cleanFile[1] != ':' {
+		return false
+	}
+	drive := cleanFile[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
+}
+
 func pathMatches(cleanFile, pattern string) bool {
 	cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
 	// 1. Exact path match
 	if cleanFile == cleanPattern {
 		return true
+	}
+	// 1a. Globstar: a "/**" segment matches any number of path segments,
+	// including none (e.g. "src/**/*.go" matches "src/main.go" and
+	// "src/a/b/main.go").
+	if strings.Contains(cleanPattern, "**") {
+		return globstarMatch(
+			strings.Split(cleanFile, "/"),
+			strings.Split(cleanPattern, "/"),
+		)
 	}
 	// 2. Directory boundary match: pattern ends in /* or / or is a bare directory name
 	if strings.HasSuffix(pattern, "/*") || strings.HasSuffix(pattern, "/") {
@@ -466,4 +494,28 @@ func pathMatches(cleanFile, pattern string) bool {
 	// 3. Glob matching (e.g. *.md, src/*.go)
 	m, _ := filepath.Match(cleanPattern, cleanFile)
 	return m
+}
+
+// globstarMatch matches slashed path segments against pattern segments where
+// a "**" segment consumes zero or more segments (#359).
+func globstarMatch(fileSegs, patSegs []string) bool {
+	if len(patSegs) == 0 {
+		return len(fileSegs) == 0
+	}
+	if patSegs[0] == "**" {
+		for i := 0; i <= len(fileSegs); i++ {
+			if globstarMatch(fileSegs[i:], patSegs[1:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(fileSegs) == 0 {
+		return false
+	}
+	m, _ := filepath.Match(patSegs[0], fileSegs[0])
+	if !m {
+		return false
+	}
+	return globstarMatch(fileSegs[1:], patSegs[1:])
 }

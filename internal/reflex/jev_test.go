@@ -490,3 +490,41 @@ func TestLiveJevMissingConfidenceCalibration(t *testing.T) {
 		t.Fatalf("docs-only low-risk mutation should reach the grant fast-path, got %s (%s)", verdict.Action, verdict.Reason)
 	}
 }
+
+// #359: absolute paths bypass the workspace scope — they must always be
+// rejected, and globstar patterns must match nested paths.
+func TestIsWithinScopeConfinementBypass(t *testing.T) {
+	allowed := []string{"internal/memory/*"}
+	if isWithinScope([]string{"/etc/passwd"}, allowed) {
+		t.Error("absolute path must be rejected (scope bypass)")
+	}
+	if isWithinScope([]string{"C:/Windows/system32/config"}, allowed) {
+		t.Error("Windows absolute path must be rejected (scope bypass)")
+	}
+	if isWithinScope([]string{"../../etc/shadow"}, allowed) {
+		t.Error("traversal must be rejected")
+	}
+	if !isWithinScope([]string{"internal/memory/adapter.go"}, allowed) {
+		t.Error("in-scope file must pass")
+	}
+}
+
+// #359: globstar (**) matches any number of segments including none.
+func TestPathMatchesGlobstar(t *testing.T) {
+	cases := []struct {
+		file, pattern string
+		want          bool
+	}{
+		{"src/main.go", "src/**/*.go", true},
+		{"src/a/b/main.go", "src/**/*.go", true},
+		{"src/a/b/c.txt", "src/**/*.go", false},
+		{"other/main.go", "src/**/*.go", false},
+		{"docs/readme.md", "docs/**", true},
+		{"docs/deep/nested/readme.md", "docs/**", true},
+	}
+	for _, tc := range cases {
+		if got := pathMatches(tc.file, tc.pattern); got != tc.want {
+			t.Errorf("pathMatches(%q, %q) = %v, want %v", tc.file, tc.pattern, got, tc.want)
+		}
+	}
+}
