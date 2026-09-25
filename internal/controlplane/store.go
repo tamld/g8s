@@ -81,6 +81,12 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 
 // Close releases the underlying connection pool.
 func (s *Store) Close() error {
+	// Close the lazily-opened receipt ledger too (#346): an open receipts.db
+	// handle blocks TempDir cleanup on Windows.
+	if s.receiptsMgr != nil {
+		_ = s.receiptsMgr.Close()
+		s.receiptsMgr = nil
+	}
 	return s.db.Close()
 }
 
