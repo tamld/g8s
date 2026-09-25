@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/state"
 	_ "modernc.org/sqlite"
 )
@@ -26,8 +29,26 @@ var (
 // safe for concurrent use: database/sql serializes access through its pool
 // and all mutations run inside BEGIN IMMEDIATE transactions.
 type Store struct {
-	db    *sql.DB
-	clock func() time.Time
+	db     *sql.DB
+	clock  func() time.Time
+	dbPath string
+
+	// receiptsMgr is the canonical receipt ledger (receipts.db, a sibling of
+	// g8s.db) — lazily opened on first delegated-write consume (#346). It is
+	// a separate file owned by the receipt schema, so there is no
+	// user_version conflict with control-plane migrations.
+	receiptsOnce sync.Once
+	receiptsMgr  *receipt.Manager
+	receiptsErr  error
+}
+
+// receiptsManager opens the receipt ledger lazily.
+func (s *Store) receiptsManager() (*receipt.Manager, error) {
+	s.receiptsOnce.Do(func() {
+		receiptsPath := filepath.Join(filepath.Dir(s.dbPath), "receipts.db")
+		s.receiptsMgr, s.receiptsErr = receipt.NewReceiptManager(receiptsPath, s.clock)
+	})
+	return s.receiptsMgr, s.receiptsErr
 }
 
 // NewControlPlane opens (creating if needed) the control-plane database at
@@ -46,7 +67,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open control-plane database: %w", err)
 	}
-	s := &Store{db: db, clock: clock}
+	s := &Store{db: db, clock: clock, dbPath: dbPath}
 	if err := s.initialize(); err != nil {
 		db.Close()
 		return nil, err

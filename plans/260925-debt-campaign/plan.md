@@ -168,3 +168,20 @@ New findings from this phase (issues):
 
 Issue closure: #326, #327, #328 (resolved-on-main), #329, #331, #332,
 #334 closed; #336 partially addressed (HIGH + CI), MEDs remain open.
+
+## Phase 6 addendum — delegated-write E2E closure + jail (ck:plan/ck:cook)
+
+Plan: plans/260925-0930-delegated-write-jail/plan.md (operator-approved).
+
+- T1-T3: workspace jail (`harness.ValidateScopeJail`, submit `--scope-root`,
+  controlplane traversal defense) — jail tests green.
+- T4 materialization: **verified live** — bounded packet (explicit relative
+  path) → host file written with exact marker → receipt consumed=1 by the
+  task (receipts ledger). Root cause of the earlier failure: split-brain
+  receipt DB paths — receipt CLI writes receipts.db, worker control plane
+  opened g8s.db; ConsumeWriteReceipt now consumes the receipts ledger first
+  with a legacy g8s.db fallback.
+- T5 roadmap: Throughput & Multi-Session rows added to v0.11.0/v0.12.0
+  (session-scoped state isolation, worktree-isolated worker default, FanOut
+  quotas, result streaming, envelope conformance suite).
+- Jev triage M11: escalate_hitl — operator pre-approved this exact scope.

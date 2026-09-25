@@ -283,3 +283,34 @@ func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
 		t.Fatalf("expected nested path under symlink pointing to .ssh to be rejected, got %v", errNested)
 	}
 }
+
+// #348 jail: scope dirs must resolve inside at least one declared root;
+// traversal and denied fragments stay rejected.
+func TestValidateScopeJail(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+
+	if err := ValidateScopeJail([]string{inside}, []string{root}); err != nil {
+		t.Errorf("dir inside root must pass: %v", err)
+	}
+	if err := ValidateScopeJail([]string{inside}, []string{root, outside}); err != nil {
+		t.Errorf("multi-root containment must pass: %v", err)
+	}
+	err := ValidateScopeJail([]string{outside}, []string{root})
+	if err == nil || !strings.Contains(err.Error(), "outside scope roots") {
+		t.Errorf("dir outside root must be rejected, got %v", err)
+	}
+	if err := ValidateScopeJail([]string{filepath.Join(root, "..", "escape")}, []string{root}); err == nil {
+		t.Errorf(".. traversal must be rejected")
+	}
+	if err := ValidateScopeJail([]string{inside}, nil); err == nil {
+		t.Errorf("empty roots must be rejected")
+	}
+	if err := ValidateScopeJail([]string{filepath.Join(root, ".ssh")}, []string{root}); err == nil {
+		t.Errorf("denied fragment inside jail must still be rejected")
+	}
+}

@@ -34,7 +34,8 @@ func runSubmit(args []string) {
 	parentTaskID := fs.String("parent-task-id", "", "parent task ID for subtask lineage tracking")
 	skipPermissions := fs.Bool("skip-permissions", false, "bypass permission checks if permitted by profile")
 	var addDirs pathFlags
-	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd)")
+	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd; must stay inside scope roots)")
+	scopeRootFlag := fs.String("scope-root", "", "comma-separated scope roots extending the jail beyond the working directory (#348)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
@@ -68,6 +69,17 @@ func runSubmit(args []string) {
 	dirs := []string(addDirs)
 	if len(dirs) == 0 {
 		dirs = []string{cwd}
+	}
+
+	// #348 workspace jail (operator-approved design): scope dirs must resolve
+	// inside the declared roots — cwd by default, extended with repeatable
+	// --scope-root. Cross-root workflows stay supported by explicit opt-in.
+	scopeRoots := []string{cwd}
+	if *scopeRootFlag != "" {
+		scopeRoots = append(scopeRoots, splitComma(*scopeRootFlag)...)
+	}
+	if err := harness.ValidateScopeJail(dirs, scopeRoots); err != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("scope jail: %w", err), "Add --scope-root for legitimate directories outside the working directory", *jsonl)
 	}
 
 	// Validate request against security harness gatekeeper
