@@ -59,11 +59,14 @@ func runCleanup(args []string) {
 	forceMissingFlag := fs.Bool("force-missing", false, "alias for --force-foreign")
 	auditLogFlag := fs.String("audit-log", ".cleanup-audit.jsonl", "path to audit log file for process terminations")
 	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-foreign")
-	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag)")
+	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag,scratch-branch)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	worktreeBaseDir := fs.String("worktree-base-dir", "", "base directory for orphan worktree scan (defaults to OS temp/g8s-worktrees)")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
 	userProfileFlag := fs.String("user-profile", "", "scope cleanup to a specific user profile (e.g. alice)")
+	scratchFlag := fs.Bool("scratch", false, "enable scratch-branch sweep (#327): delete pattern-matched worker scratch branches older than the threshold, preserving unique unmerged tips under keep/scratch-auto-* tags")
+	scratchOlderThan := fs.Duration("scratch-older-than", 72*time.Hour, "minimum age of scratch branch tips before deletion (requires --scratch)")
+	scratchPatternsFlag := fs.String("scratch-pattern", "", "comma-separated scratch branch glob patterns (defaults to agy/*,blind/*)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("cleanup", "", *traceID, err.Error(), "", *jsonl)
 	}
@@ -90,6 +93,9 @@ func runCleanup(args []string) {
 			}
 		}
 	}
+	if *scratchFlag {
+		targets = append(targets, cleanup.TargetScratchBranch)
+	}
 
 	dbPath, _ := databasePath()
 	hbDir := filepath.Join(*repoDir, ".heartbeat")
@@ -105,20 +111,23 @@ func runCleanup(args []string) {
 	}
 
 	cfg := CleanupConfig{
-		RepoDir:         *repoDir,
-		HeartbeatDir:    hbDir,
-		DBPath:          dbPath,
-		WorktreeBaseDir: *worktreeBaseDir,
-		Targets:         targets,
-		DryRun:          dryRun,
-		ForceForeign:    forceForeign,
-		ForceMissing:    forceForeign,
-		AuditLogPath:    *auditLogFlag,
-		GracePeriod:     *gracePeriod,
-		Clock:           time.Now,
-		GitRunner:       &DefaultCleanupGitRunner{},
-		ProcessManager:  &DefaultProcessManager{RepoDir: *repoDir},
-		Writer:          os.Stdout,
+		RepoDir:          *repoDir,
+		HeartbeatDir:     hbDir,
+		DBPath:           dbPath,
+		WorktreeBaseDir:  *worktreeBaseDir,
+		Targets:          targets,
+		DryRun:           dryRun,
+		ForceForeign:     forceForeign,
+		ForceMissing:     forceForeign,
+		AuditLogPath:     *auditLogFlag,
+		GracePeriod:      *gracePeriod,
+		Clock:            time.Now,
+		ScratchEnabled:   *scratchFlag,
+		ScratchPatterns:  splitComma(*scratchPatternsFlag),
+		ScratchOlderThan: *scratchOlderThan,
+		GitRunner:        &DefaultCleanupGitRunner{},
+		ProcessManager:   &DefaultProcessManager{RepoDir: *repoDir},
+		Writer:           os.Stdout,
 	}
 
 	report, err := RunCleanupSweep(context.Background(), cfg)
@@ -194,4 +203,18 @@ func confirmForceForeign(r io.Reader, w io.Writer) bool {
 
 func confirmForceMissing(r io.Reader, w io.Writer) bool {
 	return confirmForceForeign(r, w)
+}
+
+// splitComma splits a comma-separated flag value, dropping empties.
+func splitComma(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

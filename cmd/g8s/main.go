@@ -78,6 +78,8 @@ func main() {
 	switch command {
 	case "version", "-v", "--version":
 		runVersion(os.Args[2:])
+	case "reflex":
+		runReflex(os.Args[2:])
 	case "roles":
 		runRoles(os.Args[2:])
 	case "permissions":
@@ -1429,6 +1431,7 @@ func printUsage() {
 	fmt.Println("  status       Display worker heartbeat and lifecycle observability status (--worker)")
 	fmt.Println("  state        Show state and replay event logs (g8s state show|replay <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
+	fmt.Println("  reflex       Run the System-1 reflex gate on a planned mutation (g8s reflex triage --summary ...)")
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  providers    List detected agent providers and availability status")

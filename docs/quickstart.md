@@ -29,7 +29,7 @@ Grab the matching archive from the [releases page](https://github.com/tamld/g8s/
 | Windows amd64 | `g8s_<ver>_windows_amd64.zip` |
 
 ```sh
-tar -xzf g8s_0.3.0_darwin_arm64.tar.gz
+tar -xzf g8s_0.10.1_darwin_arm64.tar.gz
 ./g8s version
 ```
 
@@ -52,7 +52,7 @@ go install github.com/tamld/g8s/cmd/g8s@latest
 # Submit a task for a worker to claim.
 ./g8s submit \
   --idempotency-key demo-1 \
-  --payload '{"prompt": "inventory the module", "timeout": "30s"}' \
+  --prompt "inventory the module" \
   --model gemini-3.8-flash-high \
   --role collector \
   --permission read_only \
@@ -63,7 +63,7 @@ go install github.com/tamld/g8s/cmd/g8s@latest
 ./g8s get <task-id>
 
 # Issue a single-use delegated write receipt (5 minute TTL).
-./g8s receipt-issue -issuer me -path './src/*' -ttl 300
+./g8s receipt issue --issuer me --path './src/*' --ttl 300
 ```
 
 ## Next steps
