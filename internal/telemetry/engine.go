@@ -2,12 +2,16 @@ package telemetry
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
@@ -28,6 +32,7 @@ type TelemetryEngine struct {
 	eventChan chan TraceEvent
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
+	seq       atomic.Uint64
 }
 
 func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
@@ -39,7 +44,7 @@ func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
 		return nil, err
 	}
 
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", config.DBPath)
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", url.PathEscape(config.DBPath))
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open telemetry db: %w", err)
@@ -150,7 +155,8 @@ func (e *TelemetryEngine) Close() error {
 
 func (e *TelemetryEngine) IngestEvent(ctx context.Context, event TraceEvent) error {
 	if event.ID == "" {
-		event.ID = fmt.Sprintf("evt-%d-%s", e.getClock().UnixNano(), randomString(8))
+		seq := e.seq.Add(1)
+		event.ID = fmt.Sprintf("evt-%d-%06d-%s", e.getClock().UnixNano(), seq%1000000, randomString(8))
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = e.getClock()
@@ -860,9 +866,22 @@ func (e *TelemetryEngine) InjectPreflightContext(ctx context.Context, brief *con
 
 func randomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
+	var buf [32]byte
+	var b []byte
+	if n <= len(buf) {
+		b = buf[:n]
+	} else {
+		b = make([]byte, n)
+	}
+	if _, err := cryptorand.Read(b); err != nil {
+		h := uint64(time.Now().UnixNano()) ^ (uint64(os.Getpid()) << 32)
+		for i := range b {
+			h = h*6364136223846793005 + 1442695040888963407
+			b[i] = byte(h >> 32)
+		}
+	}
 	for i := range b {
-		b[i] = letters[i%len(letters)]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }

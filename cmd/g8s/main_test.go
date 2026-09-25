@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -217,26 +218,33 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 
 	// Mock provider configuration that outputs valid success JSON
 	providersPath := filepath.Join(configDir, "providers.json")
-	providerJSON := `{
+	mockArgs := `["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]`
+	if runtime.GOOS == "windows" {
+		mockCmd := filepath.Join(tempDir, "mock_success.cmd")
+		if err := os.WriteFile(mockCmd, []byte("@echo off\r\necho {\"status\":\"succeeded\"}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock success: %v", err)
+		}
+		mockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(mockCmd)))
+	}
+	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-success",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]
+      "args": %s
     }
   ]
-}`
+}`, mockArgs)
 	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write mock providers: %v", err)
 	}
 
-	envVars := []string{
-		"G8S_STATE_DIR=" + stateDir,
-		"G8S_PROVIDERS=" + providersPath,
-		"PATH=" + os.Getenv("PATH"),
-	}
+	envVars := append(os.Environ(),
+		"G8S_STATE_DIR="+stateDir,
+		"G8S_PROVIDERS="+providersPath,
+	)
 
 	// 1. Submit a task
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--model", "gemini-3.8-flash-high", "--json")
@@ -331,18 +339,25 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("task state = %q, want SUPERVISOR_ACCEPTED\nGet output: %s", getEnv2.Data.State, string(getOut2))
 	}
 
-	// 6. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
-	errProviderJSON := `{
+	errMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]`
+	if runtime.GOOS == "windows" {
+		errMockCmd := filepath.Join(tempDir, "mock_err.cmd")
+		if err := os.WriteFile(errMockCmd, []byte("@echo off\r\necho {\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock err cmd: %v", err)
+		}
+		errMockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(errMockCmd)))
+	}
+	errProviderJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]
+      "args": %s
     }
   ]
-}`
+}`, errMockArgs)
 	if err := os.WriteFile(providersPath, []byte(errProviderJSON), 0o600); err != nil {
 		t.Fatalf("write err mock providers: %v", err)
 	}
@@ -421,7 +436,11 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("task state = %q, want SUPERVISOR_REJECTED", getEnv4.Data.State)
 	}
 	if getEnv4.Data.LastError == nil || !strings.Contains(*getEnv4.Data.LastError, "unknown command") {
-		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv4.Data.LastError)
+		msg := "<nil>"
+		if getEnv4.Data.LastError != nil {
+			msg = *getEnv4.Data.LastError
+		}
+		t.Fatalf("expected last_error to mention 'unknown command', got %q", msg)
 	}
 }
 
@@ -478,26 +497,33 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 	_ = os.MkdirAll(configDir, 0o700)
 
 	providersPath := filepath.Join(configDir, "providers.json")
-	providerJSON := `{
+	failMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]`
+	if runtime.GOOS == "windows" {
+		failMockCmd := filepath.Join(tempDir, "mock_fail.cmd")
+		if err := os.WriteFile(failMockCmd, []byte("@echo off\r\necho {\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}\r\n"), 0o755); err != nil {
+			t.Fatalf("write mock fail cmd: %v", err)
+		}
+		failMockArgs = fmt.Sprintf(`[%s]`, strconv.Quote(filepath.ToSlash(failMockCmd)))
+	}
+	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]
+      "args": %s
     }
   ]
-}`
+}`, failMockArgs)
 	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write err mock providers: %v", err)
 	}
 
-	envVars := []string{
-		"G8S_STATE_DIR=" + stateDir,
-		"G8S_PROVIDERS=" + providersPath,
-		"PATH=" + os.Getenv("PATH"),
-	}
+	envVars := append(os.Environ(),
+		"G8S_STATE_DIR="+stateDir,
+		"G8S_PROVIDERS="+providersPath,
+	)
 
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--model", "gemini-3.8-flash-high", "--json")
 	submitCmd.Env = envVars

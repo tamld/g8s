@@ -16,8 +16,9 @@ import (
 
 // Pool allocates per-worker git worktrees so N workers can edit the same
 // repo without stepping on each other. Acquire is race-safe across
-// goroutines via an exclusive flock on <root>/.lock (POSIX) or LockFileEx
-// (Windows). One worktree = one task = one worker.
+// goroutines within the process via an in-memory sync.Mutex (cross-process
+// file-level locking is handled by the SQLite control-plane task leases).
+// One worktree = one task = one worker.
 type Pool struct {
 	root   string
 	repo   string // absolute path of the git working tree

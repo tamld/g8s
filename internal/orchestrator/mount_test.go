@@ -462,6 +462,7 @@ func TestAgyWorkerWithMounts_SkillInjection(t *testing.T) {
 }
 
 func TestAgyWorkerWithMounts_PreSpawnAndPostWaitHooks(t *testing.T) {
+	requireCommand(t, "true")
 	reg := NewMountRegistry()
 	reg.RegisterHook(rewriteTaskHook{prefix: "INJECTED:"})
 	recorder := &recordingReceiptHook{}
@@ -532,6 +533,7 @@ func TestAgyWorkerWithMounts_PreSpawnErrorOnSpawn(t *testing.T) {
 }
 
 func TestAgyWorkerWithMounts_PostWaitErrorOnWait(t *testing.T) {
+	requireCommand(t, "true")
 	reg := NewMountRegistry()
 	reg.RegisterHook(errorPostWaitHook{err: errors.New("postwait validation failed")})
 
