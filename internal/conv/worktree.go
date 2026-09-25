@@ -45,7 +45,7 @@ func CreateBlindWorktree(repo, baseDir, prefix, id string) (*BlindWorktree, erro
 
 	if repo != "" && isGitDir(repo) {
 		branch := fmt.Sprintf("%s/%s", prefix, id)
-		cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath, "HEAD")
+		cmd := exec.Command("git", "worktree", "add", "-b", branch, "--", wtPath, "HEAD")
 		cmd.Dir = repo
 		if out, err := cmd.CombinedOutput(); err != nil {
 			// If worktree add fails (e.g. detached HEAD or existing dir), fallback to directory creation
