@@ -82,12 +82,19 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 // Close releases the underlying connection pool.
 func (s *Store) Close() error {
 	// Close the lazily-opened receipt ledger too (#346): an open receipts.db
-	// handle blocks TempDir cleanup on Windows.
+	// handle blocks TempDir cleanup on Windows. A ledger close error is
+	// surfaced after the control-plane DB closes so both handles are
+	// released either way.
+	var ledgerErr error
 	if s.receiptsMgr != nil {
-		_ = s.receiptsMgr.Close()
+		ledgerErr = s.receiptsMgr.Close()
 		s.receiptsMgr = nil
 	}
-	return s.db.Close()
+	dbErr := s.db.Close()
+	if ledgerErr != nil {
+		return fmt.Errorf("close receipt ledger: %w (db close: %v)", ledgerErr, dbErr)
+	}
+	return dbErr
 }
 
 // initialize runs the schema gate inside one EXCLUSIVE transaction on a single
