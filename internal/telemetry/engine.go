@@ -208,8 +208,21 @@ func (e *TelemetryEngine) batchProcessor() {
 		case <-ticker.C:
 			_ = flush()
 		case <-e.stopChan:
-			_ = flush()
-			return
+			// Drain buffered events before the final flush: a bare flush()
+			// here races the event channel and silently loses everything
+			// still buffered (the #342 Windows batch-loss symptom).
+			for {
+				select {
+				case event := <-e.eventChan:
+					batch = append(batch, event)
+					if len(batch) >= e.config.BatchSize {
+						_ = flush()
+					}
+				default:
+					_ = flush()
+					return
+				}
+			}
 		}
 	}
 }
