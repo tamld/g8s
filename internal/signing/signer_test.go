@@ -3,6 +3,7 @@ package signing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,8 +96,73 @@ func TestSigntoolSigner_DefaultTimestamperAndConstructor(t *testing.T) {
 
 	call := runner.calls[0]
 	cmdStr := strings.Join(call, " ")
-	if !strings.Contains(cmdStr, "/tr http://timestamp.digicert.com") {
+	if !strings.Contains(cmdStr, "/tr https://timestamp.digicert.com") {
 		t.Errorf("expected default timestamper in %q", cmdStr)
+	}
+}
+
+func TestSigntoolSigner_PasswordRedactedInError(t *testing.T) {
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "g8s.exe")
+	_ = os.WriteFile(binaryPath, []byte("dummy binary"), 0o600)
+	certPath := filepath.Join(tmpDir, "cert.pfx")
+	_ = os.WriteFile(certPath, []byte("dummy cert"), 0o600)
+
+	secretPassword := "SuperSecretPassword123"
+	runner := &mockRunner{
+		runFunc: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return nil, fmt.Errorf("signtool returned error: invalid password %s specified", secretPassword)
+		},
+	}
+
+	signer := &SigntoolSigner{
+		CertPath:     certPath,
+		CertPassword: secretPassword,
+		Runner:       runner,
+	}
+
+	err := signer.Sign(context.Background(), binaryPath)
+	if err == nil {
+		t.Fatalf("expected error from mock runner")
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, secretPassword) {
+		t.Errorf("SECURITY LEAK: error contains unredacted password: %s", errStr)
+	}
+	if !strings.Contains(errStr, "[REDACTED]") {
+		t.Errorf("expected error to contain [REDACTED], got: %s", errStr)
+	}
+}
+
+func TestSigntoolSigner_CertPasswordEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "g8s.exe")
+	_ = os.WriteFile(binaryPath, []byte("dummy binary"), 0o600)
+	certPath := filepath.Join(tmpDir, "cert.pfx")
+	_ = os.WriteFile(certPath, []byte("dummy cert"), 0o600)
+
+	envKey := "TEST_G8S_CERT_PW"
+	t.Setenv(envKey, "env-secret-password")
+
+	runner := &mockRunner{}
+	signer := &SigntoolSigner{
+		CertPath:        certPath,
+		CertPasswordEnv: envKey,
+		Runner:          runner,
+	}
+
+	if err := signer.Sign(context.Background(), binaryPath); err != nil {
+		t.Fatalf("expected Sign to succeed, got: %v", err)
+	}
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.calls))
+	}
+
+	cmdStr := strings.Join(runner.calls[0], " ")
+	if !strings.Contains(cmdStr, "/p env-secret-password") {
+		t.Errorf("expected env password to be passed to signtool, got %q", cmdStr)
 	}
 }
 

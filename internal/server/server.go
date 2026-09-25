@@ -19,6 +19,9 @@ import (
 	"github.com/tamld/g8s/internal/supervisor"
 )
 
+// maxRequestBodyBytes limits the maximum size of incoming JSON request bodies (10 MB).
+const maxRequestBodyBytes = 10 << 20
+
 // Server is the HTTP API server for g8s daemon mode.
 type Server struct {
 	config  Config
@@ -472,6 +475,7 @@ func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r 
 	var req struct {
 		IsFalse bool `json:"is_false"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -575,6 +579,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 // createTask handles POST /api/v1/tasks.
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req controlplane.SubmitTaskRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return

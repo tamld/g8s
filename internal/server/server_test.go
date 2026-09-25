@@ -655,3 +655,26 @@ func TestSupervisorEndpoints(t *testing.T) {
 		t.Errorf("expected 405, got %d", recFEGet.Code)
 	}
 }
+
+func TestRequestBodyLimit_OversizedPayload(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create an oversized payload > 10MB
+	oversizedData := bytes.Repeat([]byte("a"), (10<<20)+1024)
+
+	// 1. Test createTask with oversized payload
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", bytes.NewReader(oversizedData))
+	recCreate := httptest.NewRecorder()
+	srv.createTask(recCreate, reqCreate)
+	if recCreate.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for oversized createTask payload, got %d", recCreate.Code)
+	}
+
+	// 2. Test handleSupervisorUpdateFalseEscalation with oversized payload
+	reqFE := httptest.NewRequest(http.MethodPost, "/api/v1/supervisor/false-escalation/sup-1", bytes.NewReader(oversizedData))
+	recFE := httptest.NewRecorder()
+	srv.handleSupervisorUpdateFalseEscalation(recFE, reqFE)
+	if recFE.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for oversized supervisor false-escalation payload, got %d", recFE.Code)
+	}
+}

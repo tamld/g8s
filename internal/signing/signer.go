@@ -13,7 +13,7 @@ import (
 )
 
 // DefaultTimestamper is the default RFC 3161 timestamp authority URL.
-const DefaultTimestamper = "http://timestamp.digicert.com"
+const DefaultTimestamper = "https://timestamp.digicert.com"
 
 // Signer defines the contract for signing and verifying binaries.
 type Signer interface {
@@ -41,10 +41,11 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 
 // SigntoolSigner signs and verifies Windows binaries using Microsoft signtool.exe.
 type SigntoolSigner struct {
-	CertPath     string
-	CertPassword string
-	Timestamper  string
-	Runner       Runner
+	CertPath        string
+	CertPassword    string
+	CertPasswordEnv string
+	Timestamper     string
+	Runner          Runner
 }
 
 var _ Signer = (*SigntoolSigner)(nil)
@@ -90,6 +91,11 @@ func (s *SigntoolSigner) Sign(ctx context.Context, path string) error {
 		return fmt.Errorf("certificate file stat: %w", err)
 	}
 
+	password := s.CertPassword
+	if password == "" && s.CertPasswordEnv != "" {
+		password = os.Getenv(s.CertPasswordEnv)
+	}
+
 	args := []string{
 		"sign",
 		"/tr", s.timestamper(),
@@ -99,15 +105,19 @@ func (s *SigntoolSigner) Sign(ctx context.Context, path string) error {
 		"/f", s.CertPath,
 	}
 
-	if s.CertPassword != "" {
-		args = append(args, "/p", s.CertPassword)
+	if password != "" {
+		args = append(args, "/p", password)
 	}
 
 	args = append(args, path)
 
 	_, err := s.runner().Run(ctx, "signtool", args...)
 	if err != nil {
-		return fmt.Errorf("signtool sign: %w", err)
+		errStr := err.Error()
+		if password != "" {
+			errStr = strings.ReplaceAll(errStr, password, "[REDACTED]")
+		}
+		return fmt.Errorf("signtool sign: %s", errStr)
 	}
 	return nil
 }
