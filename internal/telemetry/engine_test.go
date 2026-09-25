@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 func TestTelemetryEngine_IngestAndQuery(t *testing.T) {
 	config := DefaultTelemetryConfig()
-	config.DBPath = "/tmp/test_telemetry_" + time.Now().Format("20060102150405") + ".db"
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry_"+time.Now().Format("20060102150405")+".db")
 	config.EnableDistillation = true
 	config.FlushInterval = 10 * time.Millisecond
 	config.BatchSize = 1
@@ -63,7 +64,7 @@ func TestTelemetryEngine_IngestAndQuery(t *testing.T) {
 
 func TestTelemetryEngine_DistillFailure(t *testing.T) {
 	config := DefaultTelemetryConfig()
-	config.DBPath = "/tmp/test_telemetry_distill_" + time.Now().Format("20060102150405") + ".db"
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db") + time.Now().Format("20060102150405") + ".db"
 	config.EnableDistillation = true
 	config.DistillationThreshold = 1
 	config.FlushInterval = 10 * time.Millisecond
@@ -111,7 +112,7 @@ func TestTelemetryEngine_DistillFailure(t *testing.T) {
 
 func TestTelemetryEngine_PreflightInjection(t *testing.T) {
 	config := DefaultTelemetryConfig()
-	config.DBPath = "/tmp/test_telemetry_preflight_" + time.Now().Format("20060102150405") + ".db"
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db") + time.Now().Format("20060102150405") + ".db"
 	config.EnableDistillation = true
 	config.DistillationThreshold = 1
 	config.FlushInterval = 10 * time.Millisecond
@@ -155,7 +156,7 @@ func TestTelemetryEngine_PreflightInjection(t *testing.T) {
 
 func TestTelemetryEngine_IngestEventsBatch(t *testing.T) {
 	config := DefaultTelemetryConfig()
-	config.DBPath = "/tmp/test_telemetry_batch_" + time.Now().Format("20060102150405") + ".db"
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db") + time.Now().Format("20060102150405") + ".db"
 	config.BatchSize = 5
 	config.FlushInterval = 100 * time.Millisecond
 

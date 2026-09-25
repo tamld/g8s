@@ -195,14 +195,12 @@ func (e *TelemetryEngine) batchProcessor() {
 		case event := <-e.eventChan:
 			batch = append(batch, event)
 			if len(batch) >= e.config.BatchSize {
-				if err := flush(); err != nil {
-					// Log error but continue
-				}
+				// Best-effort flush; failures surface via engine metrics
+				// rather than killing the ingest loop.
+				_ = flush()
 			}
 		case <-ticker.C:
-			if err := flush(); err != nil {
-				// Log error but continue
-			}
+			_ = flush()
 		case <-e.stopChan:
 			_ = flush()
 			return
@@ -263,9 +261,8 @@ func (e *TelemetryEngine) persistBatch(ctx context.Context, events []TraceEvent)
 	}
 
 	if e.config.EnableDistillation {
-		if err := e.distillFromBatch(ctx, tx, events); err != nil {
-			// Log but don't fail
-		}
+		// Best-effort distillation; a failure must not abort the ingest tx.
+		_ = e.distillFromBatch(ctx, tx, events)
 	}
 
 	return tx.Commit()
@@ -546,8 +543,10 @@ func (e *TelemetryEngine) getPatternInTx(ctx context.Context, tx *sql.Tx, id str
 
 	p.FirstSeen = time.Unix(0, firstSeen)
 	p.LastSeen = time.Unix(0, lastSeen)
-	json.Unmarshal([]byte(packages), &p.AffectedPackages)
-	json.Unmarshal([]byte(contexts), &p.ExampleContexts)
+	// Legacy columns may hold pre-validation JSON; malformed payloads
+	// degrade to empty package/context lists instead of failing the scan.
+	_ = json.Unmarshal([]byte(packages), &p.AffectedPackages)
+	_ = json.Unmarshal([]byte(contexts), &p.ExampleContexts)
 	return p, nil
 }
 
@@ -667,7 +666,8 @@ func (e *TelemetryEngine) QueryEvents(ctx context.Context, filter TraceFilter) (
 		if tags.Valid && tags.String != "" {
 			e.Tags = strings.Split(tags.String, ",")
 		}
-		json.Unmarshal([]byte(payload.String), &e.Payload)
+		// Legacy payload column may hold malformed JSON; degrade to nil map.
+		_ = json.Unmarshal([]byte(payload.String), &e.Payload)
 
 		events = append(events, e)
 	}
@@ -777,8 +777,8 @@ func (e *TelemetryEngine) GetPatterns(ctx context.Context, filter PatternFilter)
 
 		p.FirstSeen = time.Unix(0, firstSeen)
 		p.LastSeen = time.Unix(0, lastSeen)
-		json.Unmarshal([]byte(packages), &p.AffectedPackages)
-		json.Unmarshal([]byte(contexts), &p.ExampleContexts)
+		_ = json.Unmarshal([]byte(packages), &p.AffectedPackages)
+		_ = json.Unmarshal([]byte(contexts), &p.ExampleContexts)
 		patterns = append(patterns, p)
 	}
 	return patterns, rows.Err()
