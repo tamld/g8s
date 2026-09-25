@@ -262,3 +262,35 @@ func TestTelemetryEngine_RapidEventIDUniqueness(t *testing.T) {
 	}
 	assert.Equal(t, count, len(seen))
 }
+
+func BenchmarkRandomString(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = randomString(8)
+	}
+}
+
+func BenchmarkIngestEvent(b *testing.B) {
+	config := DefaultTelemetryConfig()
+	config.DBPath = filepath.Join(b.TempDir(), "bench.db")
+	config.BatchSize = 10000
+	config.FlushInterval = 1 * time.Hour // avoid flush during bench
+
+	engine, err := NewTelemetryEngine(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer engine.Close()
+
+	ctx := context.Background()
+	ev := TraceEvent{
+		TaskID:    "bench-task",
+		EventType: TraceEventTaskStarted,
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = engine.IngestEvent(ctx, ev)
+	}
+}

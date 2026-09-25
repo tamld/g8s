@@ -241,6 +241,13 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		"G8S_PROVIDERS=" + providersPath,
 		"PATH=" + os.Getenv("PATH"),
 	}
+	if runtime.GOOS == "windows" {
+		for _, key := range []string{"SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "SystemDrive", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "COMSPEC"} {
+			if v := os.Getenv(key); v != "" {
+				envVars = append(envVars, key+"="+v)
+			}
+		}
+	}
 
 	// 1. Submit a task
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "e2e-task-1", "--prompt", "inspect repo", "--model", "gemini-3.8-flash-high", "--json")
@@ -490,17 +497,21 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 	_ = os.MkdirAll(configDir, 0o700)
 
 	providersPath := filepath.Join(configDir, "providers.json")
-	providerJSON := `{
+	failMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]`
+	if runtime.GOOS == "windows" {
+		failMockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]`
+	}
+	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"task failed deliberate\"}}'"]
+      "args": %s
     }
   ]
-}`
+}`, failMockArgs)
 	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write err mock providers: %v", err)
 	}
@@ -509,6 +520,13 @@ func TestExitCodeWorkerOnceFailed(t *testing.T) {
 		"G8S_STATE_DIR=" + stateDir,
 		"G8S_PROVIDERS=" + providersPath,
 		"PATH=" + os.Getenv("PATH"),
+	}
+	if runtime.GOOS == "windows" {
+		for _, key := range []string{"SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "SystemDrive", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "COMSPEC"} {
+			if v := os.Getenv(key); v != "" {
+				envVars = append(envVars, key+"="+v)
+			}
+		}
 	}
 
 	submitCmd := exec.Command(binPath, "submit", "--idempotency-key", "worker-fail-task", "--prompt", "test fail", "--model", "gemini-3.8-flash-high", "--json")
