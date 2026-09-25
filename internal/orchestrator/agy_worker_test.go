@@ -15,6 +15,13 @@ import (
 
 var fixedClock = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 
+func requireCommand(t *testing.T, name string) {
+	t.Helper()
+	if _, err := exec.LookPath(name); err != nil {
+		t.Skipf("%s executable not found in PATH", name)
+	}
+}
+
 func TestAgyWorkerName(t *testing.T) {
 	w := &AgyWorker{}
 	if got := w.Name(); got != "agy" {
@@ -117,6 +124,7 @@ func TestAgyHandleSynthesizeTimeout(t *testing.T) {
 }
 
 func TestAgyHandleSynthesizeExitError(t *testing.T) {
+	requireCommand(t, "false")
 	h := &agyHandle{
 		stdout:    bytes.NewBufferString(""),
 		stderr:    bytes.NewBufferString(""),
@@ -173,6 +181,7 @@ func TestAgyHandleWaitAlreadyDone(t *testing.T) {
 }
 
 func TestAgyHandleWaitRealProcess(t *testing.T) {
+	requireCommand(t, "true")
 	cmd := exec.Command("true")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -197,6 +206,7 @@ func TestAgyHandleWaitRealProcess(t *testing.T) {
 }
 
 func TestAgyHandleWaitContextCancel(t *testing.T) {
+	requireCommand(t, "sleep")
 	cmd := exec.Command("sleep", "10")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("cmd.Start() failed: %v", err)
@@ -220,6 +230,7 @@ func TestAgyHandleWaitContextCancel(t *testing.T) {
 }
 
 func TestAgyWorkerSpawnDefaultsFilledIn(t *testing.T) {
+	requireCommand(t, "true")
 	w := &AgyWorker{
 		binary: "true",
 		clock:  fixedClock,
@@ -262,6 +273,7 @@ func TestAgyHandleSynthesizeRejectsErrorEnvelope(t *testing.T) {
 }
 
 func TestAgyHandleWaitRejectsErrorEnvelopeExitZero(t *testing.T) {
+	requireCommand(t, "sh")
 	cmd := exec.Command("sh", "-c", `echo '{"v":1,"kind":"error","cmd":"g8s","error":{"code":"E_USAGE","message":"unknown flag --prompt-file"}}'; exit 0`)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -296,6 +308,7 @@ func TestAgyHandleWaitRejectsErrorEnvelopeExitZero(t *testing.T) {
 }
 
 func TestAgyHandleWritesReceiptToOutPath(t *testing.T) {
+	requireCommand(t, "true")
 	tempDir := t.TempDir()
 	outPath := filepath.Join(tempDir, "custom", "receipt.json")
 
@@ -339,6 +352,7 @@ func TestAgyHandleWritesReceiptToOutPath(t *testing.T) {
 }
 
 func TestAgyHandleWaitTimeout(t *testing.T) {
+	requireCommand(t, "sleep")
 	cmd := exec.Command("sleep", "10")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -371,6 +385,7 @@ func TestAgyHandleWaitTimeout(t *testing.T) {
 }
 
 func TestAgyWorkerReadOnlyArgvContainsSandbox(t *testing.T) {
+	requireCommand(t, "true")
 	w := &AgyWorker{
 		binary: "true",
 		clock:  fixedClock,
@@ -405,6 +420,7 @@ func TestAgyWorkerReadOnlyArgvContainsSandbox(t *testing.T) {
 }
 
 func TestAgyWorkerWorkspaceWriteArgvOmitsSandbox(t *testing.T) {
+	requireCommand(t, "true")
 	w := &AgyWorker{
 		binary: "true",
 		clock:  fixedClock,
@@ -436,6 +452,7 @@ func TestAgyWorkerWorkspaceWriteArgvOmitsSandbox(t *testing.T) {
 }
 
 func TestAgyWorkerReadOnlyFileMutationAttempt(t *testing.T) {
+	requireCommand(t, "sh")
 	tempDir := t.TempDir()
 	targetFile := filepath.Join(tempDir, "should_not_exist.txt")
 

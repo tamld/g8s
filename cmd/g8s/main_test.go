@@ -217,17 +217,21 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 
 	// Mock provider configuration that outputs valid success JSON
 	providersPath := filepath.Join(configDir, "providers.json")
-	providerJSON := `{
+	mockArgs := `["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]`
+	if runtime.GOOS == "windows" {
+		mockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"status\":\"succeeded\"}'"]`
+	}
+	providerJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-success",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"status\":\"succeeded\"}'"]
+      "args": %s
     }
   ]
-}`
+}`, mockArgs)
 	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write mock providers: %v", err)
 	}
@@ -332,17 +336,21 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 	}
 
 	// 6. Test Anti-Success-Theater: Mock worker that exits 0 but returns an error envelope on stdout
-	errProviderJSON := `{
+	errMockArgs := `["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]`
+	if runtime.GOOS == "windows" {
+		errMockArgs = `["powershell", "-NoProfile", "-Command", "Write-Output '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]`
+	}
+	errProviderJSON := fmt.Sprintf(`{
   "version": "1.0",
   "providers": [
     {
       "name": "mock-error-envelope",
       "class": "platform_dispatch",
       "models": [{"id": "gemini-3.8-flash-high"}],
-      "args": ["sh", "-c", "echo '{\"v\":1,\"kind\":\"error\",\"cmd\":\"g8s\",\"error\":{\"code\":\"E_USAGE\",\"message\":\"unknown command \\\"--prompt-file\\\"\"}}'"]
+      "args": %s
     }
   ]
-}`
+}`, errMockArgs)
 	if err := os.WriteFile(providersPath, []byte(errProviderJSON), 0o600); err != nil {
 		t.Fatalf("write err mock providers: %v", err)
 	}
@@ -421,7 +429,11 @@ func TestSubmitAndWorkerE2E(t *testing.T) {
 		t.Fatalf("task state = %q, want SUPERVISOR_REJECTED", getEnv4.Data.State)
 	}
 	if getEnv4.Data.LastError == nil || !strings.Contains(*getEnv4.Data.LastError, "unknown command") {
-		t.Fatalf("expected last_error to mention 'unknown command', got %v", getEnv4.Data.LastError)
+		msg := "<nil>"
+		if getEnv4.Data.LastError != nil {
+			msg = *getEnv4.Data.LastError
+		}
+		t.Fatalf("expected last_error to mention 'unknown command', got %q", msg)
 	}
 }
 

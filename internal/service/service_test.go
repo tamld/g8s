@@ -396,7 +396,11 @@ func TestRestartWithoutLoadedInstallFails(t *testing.T) {
 }
 
 func TestExecRunnerTimeoutFailsClosed(t *testing.T) {
-	_, err := execRunner{}.Run([]string{"sleep", "5"}, 150*time.Millisecond)
+	cmd := []string{"sleep", "5"}
+	if runtime.GOOS == "windows" {
+		cmd = []string{"powershell", "-NoProfile", "-Command", "Start-Sleep -Seconds 5"}
+	}
+	_, err := execRunner{}.Run(cmd, 150*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("want timed-out failure, got %v", err)
 	}

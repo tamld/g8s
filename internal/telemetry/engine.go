@@ -2,12 +2,14 @@ package telemetry
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
@@ -28,6 +30,7 @@ type TelemetryEngine struct {
 	eventChan chan TraceEvent
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
+	seq       uint64
 }
 
 func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
@@ -150,7 +153,8 @@ func (e *TelemetryEngine) Close() error {
 
 func (e *TelemetryEngine) IngestEvent(ctx context.Context, event TraceEvent) error {
 	if event.ID == "" {
-		event.ID = fmt.Sprintf("evt-%d-%s", e.getClock().UnixNano(), randomString(8))
+		seq := atomic.AddUint64(&e.seq, 1)
+		event.ID = fmt.Sprintf("evt-%d-%06d-%s", e.getClock().UnixNano(), seq%1000000, randomString(8))
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = e.getClock()
@@ -861,8 +865,14 @@ func (e *TelemetryEngine) InjectPreflightContext(ctx context.Context, brief *con
 func randomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, n)
+	if _, err := cryptorand.Read(b); err != nil {
+		ts := uint64(time.Now().UnixNano())
+		for i := range b {
+			b[i] = byte(ts >> (i * 8))
+		}
+	}
 	for i := range b {
-		b[i] = letters[i%len(letters)]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }

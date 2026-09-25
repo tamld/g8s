@@ -2,8 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -156,12 +156,6 @@ func TestTelemetryEngine_PreflightInjection(t *testing.T) {
 }
 
 func TestTelemetryEngine_IngestEventsBatch(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// #342: on Windows only 1 of N batched events persists — a real
-		// engine bug needing Windows-native debugging, not a test-timing
-		// issue (polling for 5s still yields exactly 1). Skip until fixed.
-		t.Skip("telemetry batch ingest is broken on Windows (#342); needs Windows-native debugging")
-	}
 	config := DefaultTelemetryConfig()
 	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db") + time.Now().Format("20060102150405") + ".db"
 	config.BatchSize = 5
@@ -224,4 +218,47 @@ func TestTelemetryEngine_ConfigValidation(t *testing.T) {
 
 func intPtr(i int) *int {
 	return &i
+}
+
+func TestTelemetryEngine_RapidEventIDUniqueness(t *testing.T) {
+	config := DefaultTelemetryConfig()
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry_rapid.db")
+	config.BatchSize = 100
+	config.FlushInterval = 50 * time.Millisecond
+
+	engine, err := NewTelemetryEngine(config)
+	require.NoError(t, err)
+	defer engine.Close()
+
+	ctx := context.Background()
+	const count = 100
+
+	for i := 0; i < count; i++ {
+		ev := TraceEvent{
+			TaskID:    fmt.Sprintf("task-%d", i),
+			EventType: TraceEventTaskStarted,
+		}
+		err := engine.IngestEvent(ctx, ev)
+		require.NoError(t, err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	var allEvents []TraceEvent
+	for time.Now().Before(deadline) {
+		allEvents, err = engine.QueryEvents(ctx, TraceFilter{Limit: count})
+		require.NoError(t, err)
+		if len(allEvents) == count {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.Equal(t, count, len(allEvents), "all events should be persisted")
+
+	seen := make(map[string]bool)
+	for _, ev := range allEvents {
+		assert.NotEmpty(t, ev.ID)
+		assert.False(t, seen[ev.ID], "duplicate event ID detected: %s", ev.ID)
+		seen[ev.ID] = true
+	}
+	assert.Equal(t, count, len(seen))
 }
