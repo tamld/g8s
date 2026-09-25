@@ -6,21 +6,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/state"
 	_ "modernc.org/sqlite"
 )
 
 func newTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
-	path := t.TempDir() + "/control-plane.sqlite3"
+	path := filepath.Join(t.TempDir(), "control-plane.sqlite3")
 	store, err := NewControlPlane(path, nil)
 	if err != nil {
 		t.Fatalf("NewControlPlane: %v", err)
@@ -31,7 +32,7 @@ func newTestStore(t *testing.T) (*Store, string) {
 
 func openRawDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(ON)")
+	db, err := sql.Open("sqlite", pathutil.SQLiteURI(path, "_pragma=foreign_keys(ON)"))
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
@@ -318,7 +319,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 
 func newTestStoreWithClock(t *testing.T, clock *fakeClock) (*Store, string) {
 	t.Helper()
-	path := t.TempDir() + "/control-plane.sqlite3"
+	path := filepath.Join(t.TempDir(), "control-plane.sqlite3")
 	store, err := NewControlPlane(path, clock.Now)
 	if err != nil {
 		t.Fatalf("NewControlPlane: %v", err)

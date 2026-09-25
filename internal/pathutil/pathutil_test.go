@@ -247,3 +247,70 @@ func TestPathutil_JoinPathForOS(t *testing.T) {
 		t.Errorf("joinPathForOS(linux) = %s, want /home/test/.local/share", linuxPath)
 	}
 }
+
+func TestSQLiteURI(t *testing.T) {
+	tests := []struct {
+		name        string
+		dbPath      string
+		queryParams string
+		want        string
+	}{
+		{
+			name:        "in-memory with query",
+			dbPath:      ":memory:",
+			queryParams: "_pragma=foreign_keys(ON)",
+			want:        "file::memory:?_pragma=foreign_keys(ON)",
+		},
+		{
+			name:        "empty path",
+			dbPath:      "",
+			queryParams: "",
+			want:        ":memory:",
+		},
+		{
+			name:        "windows drive path with backslashes",
+			dbPath:      `C:\Users\Alice\AppData\Local\g8s\g8s.db`,
+			queryParams: "_txlock=immediate&_pragma=journal_mode(WAL)",
+			want:        "file:///C:/Users/Alice/AppData/Local/g8s/g8s.db?_txlock=immediate&_pragma=journal_mode(WAL)",
+		},
+		{
+			name:        "windows drive path with leading query mark",
+			dbPath:      `C:\data\test.db`,
+			queryParams: "?mode=ro",
+			want:        "file:///C:/data/test.db?mode=ro",
+		},
+		{
+			name:        "unix absolute path",
+			dbPath:      "/var/lib/g8s/g8s.db",
+			queryParams: "_pragma=busy_timeout(5000)",
+			want:        "file:///var/lib/g8s/g8s.db?_pragma=busy_timeout(5000)",
+		},
+		{
+			name:        "relative path",
+			dbPath:      "test.db",
+			queryParams: "_pragma=foreign_keys(ON)",
+			want:        "file:test.db?_pragma=foreign_keys(ON)",
+		},
+		{
+			name:        "injection attempt with question mark in filename",
+			dbPath:      `C:\data\malicious?_pragma=journal_mode(OFF).db`,
+			queryParams: "_pragma=busy_timeout(5000)",
+			want:        "file:///C:/data/malicious%3F_pragma=journal_mode(OFF).db?_pragma=busy_timeout(5000)",
+		},
+		{
+			name:        "injection attempt with hash in filename",
+			dbPath:      `/var/db#frag.sqlite`,
+			queryParams: "_txlock=immediate",
+			want:        "file:///var/db%23frag.sqlite?_txlock=immediate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SQLiteURI(tt.dbPath, tt.queryParams)
+			if got != tt.want {
+				t.Errorf("SQLiteURI(%q, %q) = %q, want %q", tt.dbPath, tt.queryParams, got, tt.want)
+			}
+		})
+	}
+}
