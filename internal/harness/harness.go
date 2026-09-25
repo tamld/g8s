@@ -100,6 +100,31 @@ func ValidateRequest(
 	return nil
 }
 
+// ValidateScopePath validates a single path a supervisor-side flow is about
+// to read (e.g. a submit --prompt-file, #348): it must not contain or resolve
+// (through symlinks) to a denied/sensitive path. This is the same gate
+// applied to add-dirs, extended to individually-read paths.
+func ValidateScopePath(rawPath string) error {
+	cleanDir := filepath.Clean(rawPath)
+	homeDir, _ := os.UserHomeDir()
+	if strings.HasPrefix(cleanDir, "~") && homeDir != "" {
+		cleanDir = filepath.Join(homeDir, cleanDir[1:])
+	}
+	absDir, err := filepath.Abs(cleanDir)
+	if err != nil {
+		absDir = cleanDir
+	}
+	absDir = resolveExistingSymlinks(absDir)
+	normalized := strings.ToLower(filepath.ToSlash(absDir))
+
+	for _, fragment := range DeniedPathFragments {
+		if strings.Contains(normalized, strings.ToLower(fragment)) {
+			return fmt.Errorf("denied path fragment detected in path: %s", rawPath)
+		}
+	}
+	return nil
+}
+
 // ReceiptRef carries the minimal receipt identity injected into delegated-write
 // prompts (spec 01: BuildContractPrompt injects exact allowed paths when a
 // receipt is present).

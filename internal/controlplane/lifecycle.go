@@ -606,11 +606,17 @@ func (s *Store) CheckpointTask(ctx context.Context, taskID, workerID, leaseToken
 		return nil, err
 	}
 
-	_, err = tx.Exec(
+	res, err := tx.Exec(
 		`UPDATE tasks SET checkpoint_data = ?, updated_at = ? WHERE task_id = ? AND lease_owner = ? AND lease_token = ?`,
 		string(checkpointJSON), now, taskID, workerID, leaseToken)
 	if err != nil {
 		return nil, err
+	}
+	// #348: a checkpoint is a lease-guarded CAS — zero affected rows means
+	// the lease was lost between the read and the write and must not be
+	// reported as a successful checkpoint.
+	if affected, rerr := res.RowsAffected(); rerr != nil || affected != 1 {
+		return nil, fmt.Errorf("%w: task %s checkpoint lease lost (worker %s)", ErrLeaseLost, taskID, workerID)
 	}
 
 	if err := insertTaskEvent(tx, taskID, "task_checkpointed", workerID, map[string]any{
@@ -650,12 +656,17 @@ func (s *Store) ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leas
 	now := float64(s.clock().UnixNano()) / 1e9
 	leaseExpiresAt := now + float64(newLeaseSeconds)
 
-	_, err = tx.Exec(
+	res, err := tx.Exec(
 		`UPDATE tasks SET state = ?, lease_owner = ?, lease_token = ?, lease_expires_at = ?, updated_at = ?
 		 WHERE task_id = ? AND state = ?`,
 		StateRunning, workerID, leaseToken, leaseExpiresAt, now, taskID, StateCheckpointed)
 	if err != nil {
 		return nil, err
+	}
+	// #348: resuming an already-resumed or concurrently-mutated task would
+	// otherwise silently "succeed" with zero rows touched.
+	if affected, rerr := res.RowsAffected(); rerr != nil || affected != 1 {
+		return nil, fmt.Errorf("%w: task %s resume raced a concurrent state change", ErrLeaseLost, taskID)
 	}
 
 	if err := insertTaskEvent(tx, taskID, "checkpoint_resumed", workerID, map[string]any{
