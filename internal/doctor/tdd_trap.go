@@ -397,10 +397,14 @@ func isImplementationDetailField(name string) bool {
 	if unicode.IsUpper(rune(name[0])) {
 		return false
 	}
+	if len(name) >= 8 && strings.EqualFold(name[:8], "internal") {
+		return true
+	}
+	if len(name) >= 12 && strings.EqualFold(name[:12], "privatestate") {
+		return true
+	}
 	lower := strings.ToLower(name)
-	return strings.HasPrefix(lower, "internal") ||
-		strings.HasPrefix(lower, "privatestate") ||
-		strings.Contains(lower, "connstatus") ||
+	return strings.Contains(lower, "connstatus") ||
 		strings.Contains(lower, "lockstatus")
 }
 
