@@ -237,10 +237,14 @@ type Supervisor struct {
 
 	// Closed-loop telemetry ingestion (#253): opt-in via G8S_TELEMETRY=1
 	// (default ledger path) or G8S_TELEMETRY_DB=<path>. Lazily opened per
-	// process, flushed and closed when the run loop ends.
-	telOnce   sync.Once
+	// process; refcounted per in-flight run so concurrent runs (#394) close
+	// the engine only after the last one exits, and closing resets the
+	// lazy-init so later runs in the same process re-open a fresh engine
+	// instead of silently dropping events.
+	telMu     sync.Mutex
+	telInited bool
 	telEngine *telemetry.TelemetryEngine
-	telErr    error
+	telRuns   int
 
 	// L3 post-run quality gate reflex (#253/#371): cached to avoid per-attempt
 	// .env scanning and http.Client allocation.
@@ -281,6 +285,10 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 type RunOptions struct {
 	WorkerID     string
 	LeaseSeconds int
+	// Dir optionally overrides the child process working directory — the
+	// concurrent loop's per-worker worktree (#394). Empty keeps the
+	// request-driven default (first AddDir, else the run root).
+	Dir string
 }
 
 // processChild wraps an exec.Cmd whose process group the supervisor owns.
@@ -391,7 +399,8 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return nil, err
 	}
 	token := derefString(task.LeaseToken)
-	defer s.closeTelemetry() // flush ingestion at run end (#253)
+	s.telEnter()      // engine outlives every in-flight run (#394)
+	defer s.telExit() // flush ingestion at run end (#253)
 
 	var req taskRequest
 	if uerr := json.Unmarshal(task.Request, &req); uerr != nil {
@@ -465,7 +474,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
-		Dir:        firstNonEmpty(firstOf(req.AddDirs), s.runRoot),
+		Dir:        firstNonEmpty(opts.Dir, firstOf(req.AddDirs), s.runRoot),
 		Stdout:     outWriter,
 		Stderr:     errWriter,
 		ResultPath: resultPath,
@@ -781,24 +790,71 @@ func (s *Supervisor) reflexGate() *reflex.ReflexGate {
 // telemetry lazily opens the closed-loop ingestion engine (#253). Opt-in via
 // G8S_TELEMETRY=1 (default ledger) or G8S_TELEMETRY_DB=<path> (custom ledger).
 func (s *Supervisor) telemetry() *telemetry.TelemetryEngine {
-	s.telOnce.Do(func() {
-		if os.Getenv("G8S_TELEMETRY") != "1" {
-			return
+	s.telMu.Lock()
+	defer s.telMu.Unlock()
+	return s.telemetryLocked()
+}
+
+func (s *Supervisor) telemetryLocked() *telemetry.TelemetryEngine {
+	if !s.telInited {
+		s.telInited = true
+		if os.Getenv("G8S_TELEMETRY") == "1" {
+			cfg := telemetry.DefaultTelemetryConfig()
+			if p := os.Getenv("G8S_TELEMETRY_DB"); p != "" {
+				cfg.DBPath = p
+			}
+			// Short flush interval: worker processes are short-lived and the
+			// engine flushes on Close, but a crash must not lose everything.
+			cfg.FlushInterval = 2 * time.Second
+			eng, err := telemetry.NewTelemetryEngine(cfg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] telemetry engine disabled: %v\n", err)
+			} else {
+				s.telEngine = eng
+			}
 		}
-		cfg := telemetry.DefaultTelemetryConfig()
-		if p := os.Getenv("G8S_TELEMETRY_DB"); p != "" {
-			cfg.DBPath = p
-		}
-		// Short flush interval: worker processes are short-lived and the
-		// engine flushes on Close, but a crash must not lose everything.
-		cfg.FlushInterval = 2 * time.Second
-		s.telEngine, s.telErr = telemetry.NewTelemetryEngine(cfg)
-		if s.telErr != nil {
-			fmt.Fprintf(os.Stderr, "[warn] telemetry engine disabled: %v\n", s.telErr)
-			s.telEngine = nil
-		}
-	})
+	}
 	return s.telEngine
+}
+
+// telEnter registers one in-flight run so the engine outlives every run that
+// may still ingest (#394).
+func (s *Supervisor) telEnter() {
+	s.telMu.Lock()
+	s.telRuns++
+	s.telMu.Unlock()
+}
+
+// telExit drops one in-flight run; the last one out flushes and closes the
+// engine and resets the lazy-init so a later run re-opens a fresh engine.
+func (s *Supervisor) telExit() {
+	s.telMu.Lock()
+	defer s.telMu.Unlock()
+	if s.telRuns > 0 {
+		s.telRuns--
+	}
+	if s.telRuns == 0 {
+		s.closeTelemetryLocked()
+	}
+}
+
+// closeTelemetry flushes and releases the ingestion engine, resetting the
+// lazy-init state so a subsequent run re-opens it instead of silently
+// dropping events.
+func (s *Supervisor) closeTelemetry() {
+	s.telMu.Lock()
+	defer s.telMu.Unlock()
+	s.closeTelemetryLocked()
+}
+
+func (s *Supervisor) closeTelemetryLocked() {
+	if s.telEngine != nil {
+		if err := s.telEngine.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] telemetry flush: %v\n", err)
+		}
+		s.telEngine = nil
+	}
+	s.telInited = false
 }
 
 // ingestTrace emits one best-effort trace event; telemetry failures must
@@ -822,17 +878,6 @@ func (s *Supervisor) ingestTrace(eventType telemetry.TraceEventType, taskID stri
 	if err := eng.IngestEvent(context.Background(), ev); err != nil {
 		fmt.Fprintf(os.Stderr, "[warn] telemetry ingest: %v\n", err)
 	}
-}
-
-// closeTelemetry flushes and releases the ingestion engine at run end.
-func (s *Supervisor) closeTelemetry() {
-	if s.telEngine == nil {
-		return
-	}
-	if err := s.telEngine.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "[warn] telemetry flush: %v\n", err)
-	}
-	s.telEngine = nil
 }
 
 // maybePause transitions NEEDS_INFO/BLOCKED outcomes (declared in the result
@@ -1213,17 +1258,55 @@ func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
 	}
 }
 
+// LoopIsolation hands each concurrent loop worker a private working directory
+// (e.g. a pool worktree, #394). Acquire is called once per worker before its
+// first attempt; release runs when that worker exits. An acquire error fails
+// the whole loop with exit 1 — concurrency must never silently degrade into a
+// shared checkout.
+type LoopIsolation interface {
+	Acquire(ctx context.Context, workerID string) (dir string, release func(), err error)
+}
+
 // LoopOptions parameterize RunLoop.
 type LoopOptions struct {
 	WorkerID     string
 	LeaseSeconds int
 	Once         bool
+	// Concurrency bounds the drain pool: <=1 (and any Once request) keeps
+	// the serial drain byte-identical; N>1 claims and runs up to N attempts
+	// simultaneously.
+	Concurrency int
+	// Isolation, when set, engages once per concurrent worker.
+	Isolation LoopIsolation
+	// OnTask observes each completed attempt. It is invoked from worker
+	// goroutines — callbacks must synchronize themselves.
+	OnTask func(*controlplane.Task)
 }
+
+// maxLoopConcurrency caps the drain pool so an internal caller passing an
+// absurd Concurrency cannot fork itself before the isolation gate applies.
+const maxLoopConcurrency = 64
 
 // RunLoop drains claimable tasks until none remain, the context ends, or
 // once-mode completes a single attempt. It returns a process-style exit code.
 func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
 	s.reapOrphans()
+	n := opts.Concurrency
+	if n < 1 {
+		n = 1
+	}
+	if n > maxLoopConcurrency {
+		fmt.Fprintf(os.Stderr, "[warn] concurrent loop: clamping concurrency %d to %d\n", n, maxLoopConcurrency)
+		n = maxLoopConcurrency
+	}
+	if n == 1 || opts.Once {
+		return s.runSerialLoop(ctx, opts)
+	}
+	return s.runConcurrentLoop(ctx, opts, n)
+}
+
+// runSerialLoop is the historical drain: claim, run, repeat until empty.
+func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
 	for {
 		if ctx.Err() != nil {
 			return ExitCodeForSignal(15)
@@ -1231,6 +1314,9 @@ func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
 		task, err := s.RunOnce(ctx, RunOptions{WorkerID: opts.WorkerID, LeaseSeconds: opts.LeaseSeconds})
 		if err != nil || task == nil {
 			return 0
+		}
+		if opts.OnTask != nil {
+			opts.OnTask(task)
 		}
 		if opts.Once {
 			switch task.State {
@@ -1241,6 +1327,101 @@ func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
 			}
 		}
 	}
+}
+
+// runConcurrentLoop drains through up to n simultaneous RunOnce cycles. A
+// worker whose claim returns empty parks; the loop is drained only when every
+// worker parks at the same moment, so retryable re-queues surfaced by a
+// finishing worker are re-claimed by that worker itself. Cancellation unwinds
+// in-flight attempts and reports the SIGTERM exit convention (143).
+func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n int) int {
+	var (
+		mu     sync.Mutex
+		cond   = sync.NewCond(&mu)
+		active int
+		parked int
+		stop   bool
+		isoErr error
+	)
+	setStop := func() {
+		mu.Lock()
+		if !stop {
+			stop = true
+			cond.Broadcast()
+		}
+		mu.Unlock()
+	}
+	loopDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			setStop()
+		case <-loopDone:
+		}
+	}()
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var dir string
+			var release func()
+			if opts.Isolation != nil {
+				d, rel, aerr := opts.Isolation.Acquire(ctx, opts.WorkerID)
+				if aerr != nil {
+					mu.Lock()
+					if isoErr == nil {
+						isoErr = aerr
+					}
+					mu.Unlock()
+					setStop()
+					return
+				}
+				dir, release = d, rel
+				defer release()
+			}
+			for {
+				mu.Lock()
+				if stop {
+					mu.Unlock()
+					return
+				}
+				active++
+				mu.Unlock()
+
+				task, err := s.RunOnce(ctx, RunOptions{WorkerID: opts.WorkerID, LeaseSeconds: opts.LeaseSeconds, Dir: dir})
+
+				mu.Lock()
+				active--
+				if err != nil || task == nil {
+					parked++
+					if parked == n && active == 0 {
+						stop = true
+						cond.Broadcast()
+					}
+					for !stop {
+						cond.Wait()
+					}
+					mu.Unlock()
+					return
+				}
+				mu.Unlock()
+				if opts.OnTask != nil {
+					opts.OnTask(task)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(loopDone)
+	if ctx.Err() != nil {
+		return ExitCodeForSignal(15)
+	}
+	if isoErr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] concurrent loop: isolation acquire: %v\n", isoErr)
+		return 1
+	}
+	return 0
 }
 
 // reapOrphans kills process groups recorded by stale child.pid files left by

@@ -112,3 +112,50 @@ process groups; tests use fakes that complete, hang, or fail on demand.
 #### Scenario: once-mode exit codes
 - Once-mode with no claimable task exits 0; a finished task exits 0 for
   `SUCCEEDED`/`CANCELLED`/`QUEUED` outcomes and 1 otherwise.
+
+### Requirement: RunLoop drains through a bounded concurrent pool (#394)
+
+`LoopOptions.Concurrency` selects the drain shape. Values `<= 1` (and any
+`Once` request) take the existing serial `for{}` path unchanged — default
+behavior is byte-identical. `Concurrency N > 1` claims and executes through at
+most N simultaneous `RunOnce` cycles. A worker whose claim returns empty parks;
+the loop is drained only when every worker is parked at the same moment, so a
+retryable re-queue surfaced by a finishing worker is re-claimed by that worker.
+Context cancellation unwinds in-flight attempts and exits `128+SIGTERM`. Each
+concurrent worker may obtain a private working directory through the
+`Isolation` hook (acquire → dir feeds every attempt of that worker → release
+at worker exit); an isolation acquire failure stops the loop with exit 1 —
+concurrency without isolation must fail loudly, never degrade to sharing.
+
+#### Scenario: N=4 drains the queue under the race detector
+- Four tasks submitted; `RunLoop` with `Concurrency: 4` runs all four to a
+  terminal state and returns 0; `go test -race` reports zero warnings.
+
+#### Scenario: concurrency is bounded
+- With blocking children and more tasks than workers, the number of
+  simultaneously spawned children never exceeds N.
+
+#### Scenario: cancellation exits 143
+- Cancelling the context while attempts are in flight terminates the children
+  and `RunLoop` returns 143.
+
+#### Scenario: isolation acquire failure fails the loop
+- `Isolation.Acquire` returning an error stops the loop with exit 1 and the
+  hook's `release` is never invoked for the failed acquire.
+
+### Requirement: Telemetry engine lifecycle is refcounted per run
+
+The closed-loop ingestion engine (#253) is opened lazily once and closed when
+the last in-flight run exits — not at the end of every `RunOnce`. Closing
+resets the lazy-init state so a later run in the same process re-opens a fresh
+engine instead of silently dropping events. All engine access is
+mutex-guarded, so concurrent runs may ingest simultaneously without data races.
+
+#### Scenario: repeated serial runs all emit telemetry
+- Two consecutive `RunOnce` calls in one process with `G8S_TELEMETRY=1` both
+  persist trace events; the second run is not silenced by the first run's
+  close.
+
+#### Scenario: concurrent runs close the engine exactly once
+- With N runs in flight, the engine closes only after the last run exits, and
+  every run's events reach the ledger.
