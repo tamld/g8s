@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,8 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"database/sql"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/telemetry"
