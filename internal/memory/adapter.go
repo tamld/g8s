@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/vault"
 	_ "modernc.org/sqlite"
@@ -63,13 +64,18 @@ func NewLocalSQLiteMemoryAdapter(opts AdapterOptions) (*LocalSQLiteMemoryAdapter
 		}
 	}
 
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", dbPath)
+	// #380: use pathutil.SQLiteURI for cross-platform path escaping (was raw
+	// fmt.Sprintf — Windows paths failed, same bug as #336 finding 3).
+	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open sqlite: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
+	// #380: WAL mode supports concurrent readers — raise from 1 to 4.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	adapter := &LocalSQLiteMemoryAdapter{
 		db:             db,
