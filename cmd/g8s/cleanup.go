@@ -24,6 +24,7 @@ const (
 	TargetOrphanDir      = cleanup.TargetOrphanDir
 	TargetOrphanBranch   = cleanup.TargetOrphanBranch
 	TargetStaleReceipt   = cleanup.TargetStaleReceipt
+	TargetOrphanSession  = cleanup.TargetOrphanSession
 	TargetClosedPRBranch = cleanup.TargetClosedPRBranch
 	TargetOldTag         = cleanup.TargetOldTag
 )
@@ -59,7 +60,7 @@ func runCleanup(args []string) {
 	forceMissingFlag := fs.Bool("force-missing", false, "alias for --force-foreign")
 	auditLogFlag := fs.String("audit-log", ".cleanup-audit.jsonl", "path to audit log file for process terminations")
 	yesFlag := fs.Bool("yes", false, "skip interactive confirmation prompt for --force-foreign")
-	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,closed-pr-branch,old-tag,scratch-branch)")
+	targetFlag := fs.String("target", "", "comma-separated targets (ghost-process,orphan-wt,orphan-dir,orphan-branch,stale-receipt,orphan-session,closed-pr-branch,old-tag,scratch-branch)")
 	repoDir := fs.String("repo", ".", "target git repository directory")
 	worktreeBaseDir := fs.String("worktree-base-dir", "", "base directory for orphan worktree scan (defaults to OS temp/g8s-worktrees)")
 	gracePeriod := fs.Duration("grace-period", 10*time.Second, "grace period before SIGKILL for ghost processes")
@@ -67,6 +68,7 @@ func runCleanup(args []string) {
 	scratchFlag := fs.Bool("scratch", false, "enable scratch-branch sweep (#327): delete pattern-matched worker scratch branches older than the threshold, preserving unique unmerged tips under keep/scratch-auto-* tags")
 	scratchOlderThan := fs.Duration("scratch-older-than", 72*time.Hour, "minimum age of scratch branch tips before deletion (requires --scratch)")
 	scratchPatternsFlag := fs.String("scratch-pattern", "", "comma-separated scratch branch glob patterns (defaults to agy/*,blind/*)")
+	sessionGrace := fs.Duration("session-grace", cleanup.DefaultSessionGrace, "zombie threshold for supervisor sessions: active sessions with a heartbeat older than this are reaped with their worktrees (orphan-session target)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("cleanup", "", *traceID, err.Error(), "", *jsonl)
 	}
@@ -111,23 +113,24 @@ func runCleanup(args []string) {
 	}
 
 	cfg := CleanupConfig{
-		RepoDir:          *repoDir,
-		HeartbeatDir:     hbDir,
-		DBPath:           dbPath,
-		WorktreeBaseDir:  *worktreeBaseDir,
-		Targets:          targets,
-		DryRun:           dryRun,
-		ForceForeign:     forceForeign,
-		ForceMissing:     forceForeign,
-		AuditLogPath:     *auditLogFlag,
-		GracePeriod:      *gracePeriod,
-		Clock:            time.Now,
-		ScratchEnabled:   *scratchFlag,
-		ScratchPatterns:  splitComma(*scratchPatternsFlag),
-		ScratchOlderThan: *scratchOlderThan,
-		GitRunner:        &DefaultCleanupGitRunner{},
-		ProcessManager:   &DefaultProcessManager{RepoDir: *repoDir},
-		Writer:           os.Stdout,
+		RepoDir:            *repoDir,
+		HeartbeatDir:       hbDir,
+		DBPath:             dbPath,
+		WorktreeBaseDir:    *worktreeBaseDir,
+		Targets:            targets,
+		DryRun:             dryRun,
+		ForceForeign:       forceForeign,
+		ForceMissing:       forceForeign,
+		AuditLogPath:       *auditLogFlag,
+		GracePeriod:        *gracePeriod,
+		Clock:              time.Now,
+		ScratchEnabled:     *scratchFlag,
+		ScratchPatterns:    splitComma(*scratchPatternsFlag),
+		ScratchOlderThan:   *scratchOlderThan,
+		SessionGracePeriod: *sessionGrace,
+		GitRunner:          &DefaultCleanupGitRunner{},
+		ProcessManager:     &DefaultProcessManager{RepoDir: *repoDir},
+		Writer:             os.Stdout,
 	}
 
 	report, err := RunCleanupSweep(context.Background(), cfg)

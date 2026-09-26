@@ -31,6 +31,7 @@ const (
 	TargetOrphanDir      = "orphan-dir"
 	TargetOrphanBranch   = "orphan-branch"
 	TargetStaleReceipt   = "stale-receipt"
+	TargetOrphanSession  = "orphan-session"
 	TargetClosedPRBranch = "closed-pr-branch"
 	TargetOldTag         = "old-tag"
 	TargetScratchBranch  = "scratch-branch"
@@ -43,6 +44,7 @@ var AllCleanupTargets = []string{
 	TargetOrphanDir,
 	TargetOrphanBranch,
 	TargetStaleReceipt,
+	TargetOrphanSession,
 	TargetClosedPRBranch,
 	TargetOldTag,
 	TargetScratchBranch,
@@ -720,6 +722,13 @@ type CleanupConfig struct {
 	ScratchEnabled   bool
 	ScratchPatterns  []string
 	ScratchOlderThan time.Duration
+	// Orphan-session sweep (#393): active sessions whose heartbeat is older
+	// than SessionGracePeriod are zombies — marked dead, then reaped along
+	// with every dead session (worktree, sess/* branch with tip preserved
+	// under keep/session-* tags, registry row). Zero means the 10-minute
+	// default (DefaultSessionGrace) — minutes-scale so a machine that
+	// sleeps does not come back to a reaped worktree.
+	SessionGracePeriod time.Duration
 }
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
@@ -812,6 +821,17 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetStaleReceipt] = len(items)
+		}
+	}
+
+	// 5b. Orphan sessions (#393): dead + zombie supervisor sessions.
+	if targetSet[TargetOrphanSession] {
+		items, err := sweepOrphanSessions(ctx, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] orphan-session sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetOrphanSession] = len(items)
 		}
 	}
 
