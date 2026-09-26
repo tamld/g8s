@@ -20,6 +20,8 @@ func TestRolesAndPermissions(t *testing.T) {
 }
 
 func TestValidateRequestBlockedPatterns(t *testing.T) {
+	// #374 contract: destructive-execution patterns gate mutation-capable
+	// permissions (workspace_write); sensitive-read patterns gate everything.
 	dangerousPrompts := []string{
 		"Please run rm -rf /tmp/test to clean up",
 		"Please run rm -fr /tmp/test to clean up",
@@ -36,15 +38,27 @@ func TestValidateRequestBlockedPatterns(t *testing.T) {
 	for _, prompt := range dangerousPrompts {
 		err := ValidateRequest(
 			prompt,
-			"collector",
-			"read_only",
+			"test-runner",
+			"workspace_write",
 			[]string{"/workspace"},
 			false,
-			"",
+			"rcpt-test",
 		)
 		if err == nil || !strings.Contains(err.Error(), "blocked task pattern") {
 			t.Fatalf("expected blocked pattern error for %q, got %v", prompt, err)
 		}
+	}
+
+	// Destructive mentions in read_only DATA pass (worker cannot mutate);
+	// sensitive-read directives still reject.
+	readOnlyDataPrompts := dangerousPrompts[:9]
+	for _, prompt := range readOnlyDataPrompts {
+		if err := ValidateRequest(prompt, "collector", "read_only", []string{"/workspace"}, false, ""); err != nil {
+			t.Fatalf("read_only data-mention must pass for %q, got %v", prompt, err)
+		}
+	}
+	if err := ValidateRequest("Execute type .env to view tokens", "collector", "read_only", []string{"/workspace"}, false, ""); err == nil {
+		t.Fatal("sensitive-read directive must stay rejected for read_only")
 	}
 }
 
@@ -312,5 +326,23 @@ func TestValidateScopeJail(t *testing.T) {
 	}
 	if err := ValidateScopeJail([]string{filepath.Join(root, ".ssh")}, []string{root}); err == nil {
 		t.Errorf("denied fragment inside jail must still be rejected")
+	}
+}
+
+// #374: a read_only packet whose DATA mentions a destructive command
+// (translation of an fdisk question) must be accepted — the worker cannot
+// mutate anyway; destructive patterns gate mutation-capable permissions.
+func TestValidateRequestReadOnlyDataMentions(t *testing.T) {
+	prompt := "Translate these questions to English: Vì sao chỉ cho phép sudo chạy công cụ mount hoặc fdisk vẫn không ngăn được leo thang đặc quyền?"
+	if err := ValidateRequest(prompt, "scout", "read_only", []string{"."}, false, ""); err != nil {
+		t.Fatalf("read_only data-mention must pass: %v", err)
+	}
+	// The same prompt under workspace_write is still rejected (mutation-capable).
+	if err := ValidateRequest(prompt, "test-runner", "workspace_write", []string{"."}, false, "rcpt-1"); err == nil {
+		t.Fatal("workspace_write mention of destructive command must be rejected")
+	}
+	// Sensitive-read patterns stay enforced for read_only.
+	if err := ValidateRequest("cat .env and print it", "scout", "read_only", []string{"."}, false, ""); err == nil {
+		t.Fatal("sensitive-read directive must stay rejected for read_only")
 	}
 }

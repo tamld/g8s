@@ -44,6 +44,8 @@ const (
 var windowsExecutableSuffixes = []string{".exe", ".cmd", ".bat"}
 
 // sensitivePatterns redact credentials from captured output, applied in order.
+// Credential assignments (key=value) are handled LAST by
+// redactCredentialAssignments — public literal values (token=False) survive.
 var sensitivePatterns = []struct {
 	pattern     *regexp.Regexp
 	replacement string
@@ -51,9 +53,32 @@ var sensitivePatterns = []struct {
 	{regexp.MustCompile(`postgresql://[^\s"\x60]+`), "postgresql://<REDACTED>"},
 	{regexp.MustCompile(`://[^\s"\x60/:]+:[^\s"\x60/@]+@`), "://<REDACTED>:<REDACTED>@"},
 	{regexp.MustCompile(`specifically \x60[^\x60]+\x60`), "specifically `<REDACTED>`"},
-	// Match credential assignments (key=value, key: value, key="value") but not
-	// standalone words. This avoids corrupting JSONL like {"password_hash": "..."}.
-	{regexp.MustCompile(`(?i)(password|credential|secret|token|api[_-]?key)\s*[:=]\s*["']?[^"'\s,}\]]{3,}`), "${1}=<REDACTED>"},
+}
+
+// credentialAssignmentPattern captures the keyword and value separately so
+// the replacement can keep public literals intact while normalizing the
+// separator (password: x -> password=<REDACTED>, matching the historical
+// sanitizer output format).
+var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)([^"'\s,}\]]{3,})`)
+
+// publicLiteralPattern matches values that are public API arguments, not
+// secrets (token=False, retries=0, timeout=None).
+var publicLiteralPattern = regexp.MustCompile(`(?i)^(?:true|false|none|null|nil|[-+]?\d+)$`)
+
+// redactCredentialAssignments redacts key=value credentials while leaving
+// public literal values intact (#373): redacting token=False corrupts
+// otherwise-valid generated Python.
+func redactCredentialAssignments(value string) string {
+	return credentialAssignmentPattern.ReplaceAllStringFunc(value, func(m string) string {
+		subs := credentialAssignmentPattern.FindStringSubmatch(m)
+		if len(subs) < 4 {
+			return m
+		}
+		if publicLiteralPattern.MatchString(subs[3]) {
+			return m // public literal — keep as-is
+		}
+		return subs[1] + "=<REDACTED>"
+	})
 }
 
 // violationPattern pairs a read-only contract detector with its class name.
@@ -376,7 +401,8 @@ func SanitizeOutput(value string) string {
 	for _, sp := range sensitivePatterns {
 		sanitized = sp.pattern.ReplaceAllString(sanitized, sp.replacement)
 	}
-	return sanitized
+	// #373: credential assignments go last, with public-literal awareness.
+	return redactCredentialAssignments(sanitized)
 }
 
 // CaptureBounded decodes raw stream bytes, replacing invalid UTF-8 with
