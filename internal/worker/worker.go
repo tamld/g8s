@@ -20,9 +20,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -239,6 +241,11 @@ type Supervisor struct {
 	telOnce   sync.Once
 	telEngine *telemetry.TelemetryEngine
 	telErr    error
+
+	// L3 post-run quality gate reflex (#253/#371): cached to avoid per-attempt
+	// .env scanning and http.Client allocation.
+	reflexOnce    sync.Once
+	reflexGateIns *reflex.ReflexGate
 }
 
 // NewSupervisor builds a supervisor over the given control plane and run root.
@@ -510,7 +517,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock())
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -567,6 +574,7 @@ func (s *Supervisor) collect(
 	reason, taskID, workerID, token, runDir, promptPath, resultPath, stdoutPath, stderrPath string,
 	resultMode string,
 	permission, receiptID string,
+	startTime time.Time,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -620,6 +628,47 @@ func (s *Supervisor) collect(
 	default:
 		wr := readWorkerResult(resultPath, stdoutText, code)
 		success := code == 0 && wr.OK
+
+		// L3 post-run Jev quality gate (#253/#371): assess output quality
+		// before structural validation — catches hallucination that passes
+		// schema checks but fails semantic review. DurationSec computed via
+		// the injectable clock (worker review finding: fix 1).
+		if success && os.Getenv("G8S_TELEMETRY") == "1" {
+			gate := s.reflexGate()
+			excerpt := stdoutText
+			if len(excerpt) > 2000 {
+				// Rune-aware truncation (worker review finding: fix 3).
+				for len(excerpt) > 2000 && !utf8.RuneStart(excerpt[2000]) {
+					excerpt = excerpt[:2000-1]
+				}
+				excerpt = excerpt[:2000]
+			}
+			elapsed := int(s.clock().Sub(startTime).Seconds())
+			if elapsed < 0 {
+				elapsed = 0
+			}
+			oqReq := reflex.OutputQualityRequest{
+				TaskID:        taskID,
+				OutputExcerpt: excerpt,
+				ExpectedShape: "analysis",
+				ExitCode:      code,
+				DurationSec:   elapsed,
+			}
+			signal, qerr := gate.EmitOutputQualitySignal(ctx, oqReq)
+			if qerr == nil {
+				verdict := reflex.EvaluateOutputQuality(signal)
+				if verdict.Action == "reject" {
+					wr = workerResult{
+						OK:      false,
+						Status:  "blocked",
+						Reason:  verdict.Reason,
+						Summary: "L3 post-run quality gate: output failed Jev assessment",
+					}
+					success = false
+				}
+			}
+		}
+
 		if paused := s.maybePause(ctx, wr, stdoutText, taskID, workerID, token); paused {
 			break
 		}
@@ -718,6 +767,15 @@ func (s *Supervisor) collect(
 		}
 	}
 	return s.snapshot(ctx, taskID, runDir, promptPath)
+}
+
+// reflexGate lazily creates the Jev gate for the L3 post-run quality check
+// (#253/#371). Cached per Supervisor to reuse the HTTP client and key pool.
+func (s *Supervisor) reflexGate() *reflex.ReflexGate {
+	s.reflexOnce.Do(func() {
+		s.reflexGateIns = reflex.NewReflexGate()
+	})
+	return s.reflexGateIns
 }
 
 // telemetry lazily opens the closed-loop ingestion engine (#253). Opt-in via

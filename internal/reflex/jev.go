@@ -38,6 +38,27 @@ type TriageRequest struct {
 	AllowedPaths  []string `json:"allowed_paths"`
 }
 
+// OutputQualityRequest carries the L3 post-run context (#253): after a
+// worker completes, Jev assesses whether the output is genuine evidence or
+// hallucination. This is the L3 deployment point in the distributed reflex
+// architecture — it closes the gap where a worker returns garbage that
+// passes structural validation but poisons downstream consumers.
+type OutputQualityRequest struct {
+	TaskID        string `json:"task_id"`
+	OutputExcerpt string `json:"output_excerpt"` // first N chars of stdout (sanitized)
+	ExpectedShape string `json:"expected_shape"` // "code" | "docs" | "json" | "analysis"
+	ExitCode      int    `json:"exit_code"`
+	DurationSec   int    `json:"duration_sec"`
+}
+
+// OutputQualityVerdict is the L3 policy decision.
+type OutputQualityVerdict struct {
+	Action     string  `json:"action"`  // "accept" | "reject" | "skip"
+	Quality    float64 `json:"quality"` // 0=garbage/hallucination, 5=high-quality evidence
+	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}
+
 // ReflexSignal represents pure perception telemetry emitted by a System 1 reflex sensor.
 // It carries empirical measurements without dictating supervisor actions.
 type ReflexSignal struct {
@@ -347,6 +368,115 @@ func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageV
 		KeyUsed:    signal.KeyUsed,
 		IsFallback: signal.IsFallback,
 	}
+}
+
+// EmitOutputQualitySignal queries Jev (L3 post-run deployment point) to
+// assess whether the worker's output is genuine evidence or hallucination.
+// Returns a ReflexSignal where RiskScore maps to quality-inverted
+// (0=high-quality, 5=garbage) and BreachProb maps to fabrication likelihood.
+func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQualityRequest) (ReflexSignal, error) {
+	activeKey := g.currentKey()
+	if activeKey == "" {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, "keyless offline fallback"), nil
+	}
+
+	payload := map[string]any{
+		"model": g.model,
+		"state": map[string]any{
+			"task_id":       req.TaskID,
+			"output":        req.OutputExcerpt,
+			"expected_type": req.ExpectedShape,
+			"exit_code":     req.ExitCode,
+			"duration_sec":  req.DurationSec,
+		},
+		"questions": map[string]any{
+			"output_quality": map[string]any{
+				"type":         "score",
+				"instructions": "Rate the quality of this worker output (0=garbage/hallucination/incoherent, 5=high-quality genuine evidence with actionable content).",
+				"criteria":     []string{"garbage", "low", "mediocre", "good", "high-quality"},
+			},
+			"output_authenticity": map[string]any{
+				"type":         "noul",
+				"instructions": "Does this output look like fabricated or hallucinated content rather than genuine task completion?",
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
+	}
+
+	start := time.Now()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		if len(g.keys) > 1 {
+			g.rotateKey()
+		}
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		g.rotateKey()
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, "HTTP 429"), nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, fmt.Sprintf("HTTP %d from Jev", resp.StatusCode)), nil
+	}
+
+	var jevResp JevResponse
+	if err := json.NewDecoder(resp.Body).Decode(&jevResp); err != nil {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
+	}
+
+	qualityAns, hasQ := jevResp.Answers["output_quality"]
+	authAns, hasA := jevResp.Answers["output_authenticity"]
+	if !hasQ || !hasA {
+		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, "Jev response missing output quality answers"), nil
+	}
+
+	// Quality-inverted: quality score 0=garbage → risk 5=critical.
+	riskScore := 5.0 - qualityAns.Score
+	conf := qualityAns.Confidence
+	if authAns.Confidence < conf {
+		conf = authAns.Confidence
+	}
+	if conf <= 0 {
+		conf = 0.7 // #329 calibration: deterministic classifier default
+	}
+
+	return ReflexSignal{
+		RiskScore:  riskScore,
+		BreachProb: authAns.Noul,
+		Confidence: conf,
+		LatencyMs:  time.Since(start).Milliseconds(),
+		Source:     "jev",
+		KeyUsed:    activeKey,
+		IsFallback: false,
+	}, nil
+}
+
+// EvaluateOutputQuality applies the L3 policy to an output quality signal.
+// Policy: quality ≤ 1.5 (inverted risk ≥ 3.5) with confidence ≥ 0.6 →
+// reject. Otherwise accept (deterministic validation already passed —
+// uncertain quality defaults to accept, not reject).
+func EvaluateOutputQuality(signal ReflexSignal) OutputQualityVerdict {
+	quality := 5.0 - signal.RiskScore // invert back
+	if signal.IsFallback {
+		return OutputQualityVerdict{Action: "skip", Quality: quality, Confidence: signal.Confidence, Reason: "deterministic fallback — no live assessment"}
+	}
+	if quality <= 1.5 && signal.Confidence >= 0.6 {
+		return OutputQualityVerdict{Action: "reject", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f below threshold (hallucination suspected)", quality)}
+	}
+	return OutputQualityVerdict{Action: "accept", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f acceptable", quality)}
 }
 
 // EvaluatePolicy implements the g8s Supervisor Policy Engine.
