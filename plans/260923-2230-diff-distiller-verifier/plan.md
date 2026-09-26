@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Native Pure-Go Diff Distiller & Verifier Subagent Pipeline"
 status: "in-progress"
 created: "2026-09-23"

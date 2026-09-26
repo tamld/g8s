@@ -20,7 +20,7 @@ FAILED=0
 echo "==> Running Documentation ↔ Code Contract Checks..."
 
 # 1. Orchestrator FSM States Contract
-echo "--> [1/6] Verifying Orchestrator FSM states contract..."
+echo "--> [1/7] Verifying Orchestrator FSM states contract..."
 EXPECTED_ORCH_STATES=("PLAN" "SPAWN" "MONITOR" "RECEIPT" "MERGE" "ESCALATE" "CANCEL" "CONFLICT")
 for state in "${EXPECTED_ORCH_STATES[@]}"; do
     if ! grep -qi "OrchestratorState$state" internal/state/state.go; then
@@ -34,7 +34,7 @@ for state in "${EXPECTED_ORCH_STATES[@]}"; do
 done
 
 # 2. Task FSM States Contract
-echo "--> [2/6] Verifying Task FSM states contract..."
+echo "--> [2/7] Verifying Task FSM states contract..."
 EXPECTED_TASK_STATES=("QUEUED" "LEASED" "RUNNING" "NEEDS_INFO" "BLOCKED" "SUCCEEDED" "FAILED" "CANCELLED")
 for state in "${EXPECTED_TASK_STATES[@]}"; do
     clean_state="${state//_/}"
@@ -45,7 +45,7 @@ for state in "${EXPECTED_TASK_STATES[@]}"; do
 done
 
 # 3. Go Version Contract
-echo "--> [3/6] Verifying Go version consistency across SSoT docs..."
+echo "--> [3/7] Verifying Go version consistency across SSoT docs..."
 GO_MOD_VER=$(grep -E '^go ' go.mod | awk '{print $2}')
 if [ -z "$GO_MOD_VER" ]; then
     echo "::error::Unable to determine go version in go.mod"
@@ -74,7 +74,7 @@ else
 fi
 
 # 4. Receipt Verification Contract
-echo "--> [4/6] Verifying Receipt Verifier layer contract..."
+echo "--> [4/7] Verifying Receipt Verifier layer contract..."
 if [ ! -f "internal/orchestrator/verify.go" ]; then
     echo "::error::internal/orchestrator/verify.go missing (ReceiptVerifier layer contract)"
     FAILED=$((FAILED + 1))
@@ -89,7 +89,7 @@ if ! grep -q "StdoutEnvelopeVerifier" internal/orchestrator/verify.go; then
 fi
 
 # 5. Doc Unowned TODO Check
-echo "--> [5/6] Checking for unowned TODO/FIXME in documentation..."
+echo "--> [5/7] Checking for unowned TODO/FIXME in documentation..."
 UNOWNED_DOC_TODOS=$(grep -rnE '(^|[[:space:]])//\s*(TODO|FIXME|XXX)' docs/ spec/ 2>/dev/null | grep -v 'OWNER=' | grep -v '`//' || true)
 if [ -n "$UNOWNED_DOC_TODOS" ]; then
     echo "::error::Found unowned TODO/FIXME in documentation:"
@@ -98,13 +98,25 @@ if [ -n "$UNOWNED_DOC_TODOS" ]; then
 fi
 
 # 6. OpenSpec File Link Consistency
-echo "--> [6/6] Verifying OpenSpec registry file existence..."
+echo "--> [6/7] Verifying OpenSpec registry file existence..."
 while IFS= read -r link; do
     if [ ! -f "spec/openspec/$link" ]; then
         echo "::error::spec/openspec/README.md references missing spec file: spec/openspec/$link"
         FAILED=$((FAILED + 1))
     fi
 done < <(grep -oE '\([0-9A-Za-z_-]+\.md\)' spec/openspec/README.md | tr -d '()')
+
+# 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger
+#    declares which session type produced it — T1 (strategy) or T2 (execution).
+echo "--> [7/7] Verifying session-type markers (ADR-0022)..."
+for ledger in plans/*/plan.md; do
+    [ -e "$ledger" ] || continue
+    if ! grep -qE '\*\*Session type\*\*: *T[12]' "$ledger"; then
+        echo "::error::$ledger missing session-type marker (ADR-0022 §6)"
+        echo "        add '**Session type**: T1 (strategy)' or '**Session type**: T2 (execution)' to the ledger header"
+        FAILED=$((FAILED + 1))
+    fi
+done
 
 if [ "$FAILED" -gt 0 ]; then
     echo ""

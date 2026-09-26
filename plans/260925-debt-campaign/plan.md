@@ -1,5 +1,7 @@
 # Plan: Reflex-Gated Debt Campaign (2026-09-25)
 
+**Session type**: T2 (execution)
+
 tags: [debt, dogfood, reflex, jev, governance]
 adr: [docs/decisions/0020-reflex-gated-debt-campaign.md]
 

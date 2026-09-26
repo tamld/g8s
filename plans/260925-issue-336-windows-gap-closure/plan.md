@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Complete Issue #336 — Windows Runtime Gaps Closure"
 status: completed
 date: "2026-09-25"

@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: L3 Post-run Jev Output Quality Gate"
 tags: [reflex, jev, post-run, hallucination, distributed-reflex]
 status: planned
