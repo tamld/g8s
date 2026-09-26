@@ -2,8 +2,10 @@ package telemetry
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -292,5 +294,50 @@ func BenchmarkIngestEvent(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = engine.IngestEvent(ctx, ev)
+	}
+}
+
+// #253 closed loop: distilled negative patterns surface as pre-flight
+// context — QueryTopPatterns orders by occurrences/confidence.
+func TestQueryTopPatterns(t *testing.T) {
+	config := DefaultTelemetryConfig()
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db")
+	engine, err := NewTelemetryEngine(config)
+	require.NoError(t, err)
+	defer engine.Close()
+
+	ctx := context.Background()
+	now := time.Now().UnixNano()
+	seed := []struct {
+		id    string
+		title string
+		occ   int
+		conf  float64
+	}{
+		{"pat-low", "Low confidence pattern", 1, 0.3},
+		{"pat-top", "High frequency pattern", 9, 0.95},
+		{"pat-mid", "Mid frequency pattern", 4, 0.6},
+	}
+	for _, s := range seed {
+		pkg, _ := json.Marshal([]string{"internal/x"})
+		_, err := engine.db.Exec(`INSERT INTO negative_patterns
+			(id, pattern_type, title, description, root_cause, remediation, occurrence_count, first_seen, last_seen, affected_packages, example_contexts, confidence_score, status)
+			VALUES (?, 'timeout', ?, 'desc', 'root cause', 'remediate', ?, ?, ?, ?, ?, ?, 'VALIDATED')`,
+			s.id, s.title, s.occ, now, now, pkg, pkg, s.conf)
+		require.NoError(t, err)
+	}
+
+	patterns, err := engine.QueryTopPatterns(ctx, 2)
+	require.NoError(t, err)
+	require.Len(t, patterns, 2)
+	if patterns[0].ID != "pat-top" || patterns[1].ID != "pat-mid" {
+		t.Errorf("expected top-2 ordered by occurrences, got %s, %s", patterns[0].ID, patterns[1].ID)
+	}
+
+	// The injected pre-flight section carries the pattern knowledge.
+	section, err := engine.InjectPreflightContext(ctx, &controlplane.BriefRow{}, patterns)
+	require.NoError(t, err)
+	if !strings.Contains(section, "High frequency pattern") {
+		t.Errorf("pre-flight section missing top pattern title")
 	}
 }

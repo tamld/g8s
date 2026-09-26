@@ -13,23 +13,20 @@ import (
 )
 
 func main() {
-	taskID := flag.String("task", "supervisor-mutation", "mutation task id")
-	files := flag.String("files", "", "comma-separated files")
-	summary := flag.String("summary", "", "one-line diff summary")
-	allowed := flag.String("allowed", "", "comma-separated allowed globs")
+	taskID := flag.String("task", "m", "")
+	files := flag.String("files", "", "")
+	summary := flag.String("summary", "", "")
+	allowed := flag.String("allowed", "", "")
 	flag.Parse()
-	if *summary == "" {
-		os.Exit(2)
-	}
 	gate := reflex.NewReflexGate()
 	req := reflex.TriageRequest{TaskID: *taskID, FilesModified: split(*files), DiffSummary: *summary, AllowedPaths: split(*allowed)}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	verdict, err := gate.TriageMutation(ctx, req)
+	v, err := gate.TriageMutation(ctx, req)
 	if err != nil {
 		os.Exit(1)
 	}
-	out, _ := json.Marshal(map[string]any{"action": verdict.Action, "risk": verdict.RiskScore, "breach": verdict.BreachProb, "confidence": verdict.Confidence, "source": verdict.Signal.Source})
+	out, _ := json.Marshal(map[string]any{"action": v.Action, "risk": v.RiskScore, "breach": v.BreachProb, "confidence": v.Confidence})
 	fmt.Println(string(out))
 }
 

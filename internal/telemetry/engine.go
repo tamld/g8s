@@ -711,6 +711,47 @@ func (e *TelemetryEngine) DistillFailure(ctx context.Context, event TraceEvent) 
 	return e.extractPattern(ctx, nil, event)
 }
 
+// QueryTopPatterns returns the most frequent distilled negative patterns
+// (#253): ordered by occurrence count then confidence, capped at limit.
+// Brief issuance surfaces these as pre-flight context so workers inherit the
+// failure knowledge before dispatch.
+func (e *TelemetryEngine) QueryTopPatterns(ctx context.Context, limit int) ([]NegativePattern, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	rows, err := e.db.QueryContext(ctx, `
+		SELECT id, pattern_type, title, description, root_cause, remediation,
+		       occurrence_count, first_seen, last_seen, affected_packages,
+		       example_contexts, confidence_score, status
+		FROM negative_patterns
+		ORDER BY occurrence_count DESC, confidence_score DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query top patterns: %w", err)
+	}
+	defer rows.Close()
+
+	var patterns []NegativePattern
+	for rows.Next() {
+		var p NegativePattern
+		var firstSeen, lastSeen int64
+		var packages, contexts string
+		if err := rows.Scan(
+			&p.ID, &p.PatternType, &p.Title, &p.Description, &p.RootCause, &p.Remediation,
+			&p.OccurrenceCount, &firstSeen, &lastSeen, &packages, &contexts,
+			&p.ConfidenceScore, &p.Status,
+		); err != nil {
+			return nil, err
+		}
+		p.FirstSeen = time.Unix(0, firstSeen)
+		p.LastSeen = time.Unix(0, lastSeen)
+		_ = json.Unmarshal([]byte(packages), &p.AffectedPackages)
+		_ = json.Unmarshal([]byte(contexts), &p.ExampleContexts)
+		patterns = append(patterns, p)
+	}
+	return patterns, rows.Err()
+}
+
 func (e *TelemetryEngine) DistillBatch(ctx context.Context, events []TraceEvent) ([]NegativePattern, error) {
 	var patterns []NegativePattern
 	for _, event := range events {
