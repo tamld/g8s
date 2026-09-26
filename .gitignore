@@ -109,3 +109,13 @@ coverage.out
 .omo/
 .g8s/
 /g8s
+
+# Agent session metadata (per agent, never committed)
+.jules/
+.notes/
+
+# Release artifacts (managed by GoReleaser, not committed)
+*.deb
+*.rpm
+*.apk
+checksums.txt
