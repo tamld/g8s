@@ -27,6 +27,9 @@ func runServe(args []string) {
 	}
 
 	cfg := server.DefaultConfig()
+	if tok := os.Getenv("G8S_API_TOKEN"); tok != "" {
+		cfg.ApiToken = tok
+	}
 	if *configFile != "" {
 		// For now, just use defaults - YAML config loading can be added later
 		_ = configFile

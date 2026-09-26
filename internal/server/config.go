@@ -34,6 +34,12 @@ type Config struct {
 
 	// EnableHealthz enables the /healthz endpoint.
 	EnableHealthz bool `json:"enable_healthz" yaml:"enable_healthz"`
+
+	// ApiToken enables bearer-token auth on /api/v1/* and /openapi* when
+	// non-empty (#371-class controlled access): clients must send
+	// `Authorization: Bearer <token>`. healthz/readyz/metrics stay open for
+	// liveness probes. Empty = auth disabled (loopback-only deployments).
+	ApiToken string `json:"api_token" yaml:"api_token"`
 }
 
 // DefaultConfig returns a sensible default configuration.
