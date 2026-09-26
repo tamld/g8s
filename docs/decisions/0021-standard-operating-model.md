@@ -149,3 +149,69 @@ State-machine sanity check: `go test ./internal/cleanup/ -run TestCleanup -count
   rather than hiding them behind convention.
 - Risk: gate theater if checks drift from reality — mitigated by the
   anti-theater rule (substance over form) and the periodic audit workers.
+
+## 8. Distributed Reflex Architecture (v0.11.0, operator-directed)
+
+Jev is not a checkpoint — it is a distributed nervous system deployed at
+every decision point. Each deployment has its own Context Broker (assembles
+the enriched TriageRequest), its own Sensor query, and its own deterministic
+Policy rules.
+
+### 8.1 Deployment points
+
+| Layer | Decision | Package | Status |
+|-------|----------|---------|--------|
+| L1 | Pre-dispatch mutation risk | `internal/reflex` → `cmd/g8s/submit.go` | ✅ Shipped |
+| L2 | Brief quality (DoR check) | `cmd/g8s/brief_issue.go` (preflight) | 🔧 Preflight done, Jev gate pending |
+| L3 | Post-run output quality | `internal/worker/worker.go` → `collect()` | ✅ Shipped (#387) |
+| L4 | Skill routing | *(new)* `internal/routing` | ❌ Needs design |
+| L5 | F1→F2 spawn gate | *(new)* — requires OpenSpec delta | ❌ |
+| L6 | PR triage | `g8s reflex triage` → CI | ✅ Shipped (#372) |
+| L7 | Escalation context | `internal/worker` → escalator | 🔧 Framework exists |
+| L8 | Session lifecycle | `internal/autopilot` | 🔧 Engine exists |
+
+### 8.2 Context Broker (planned: `internal/context`)
+
+Assembles a `ContextPacket` per deployment point by querying:
+- Knowledge Vault (DELTA-11): historical patterns, operator preferences
+- Telemetry ledger (#253/#363): recent outcomes, failure signatures
+- SOM state (ADR-0021): current phase, DoR status
+
+The enriched `TriageRequest` gives Jev enough context to make situationally
+aware decisions — not just "is this dangerous?" but "is this the right action
+for this situation?"
+
+### 8.3 Skills mapping (L4 skill routing design sketch)
+
+The skills bank (supervisor, autoreview, debug, code-simplification, etc.)
+maps to deployment points:
+
+| Skill | Deployment | Jev question |
+|-------|-----------|--------------|
+| `autoreview` | L6 PR triage | "Does this diff pass the quality bar?" |
+| `debug` | L3 post-run | "Is this output genuine or hallucinated?" |
+| `code-simplification` | Stage 7 | "Is this diff minimal and clean?" |
+| `g8s-supervisor` | L1 pre-dispatch | "Is this brief ready for dispatch?" |
+
+Jev scores the match; the Brain approves or overrides — enforce-code
+routing, not prompt-level.
+
+### 8.4 Contribution prompting template
+
+When a user reports a bug/feature via g8s, the Brain routes it into a
+well-formed issue using this template:
+
+```
+Title: [<TYPE>] <one-line summary>
+Labels: <bug|enhancement|debt>, <severity>, <area>
+
+Body:
+- Evidence (repro command or file:line)
+- Expected vs actual behavior
+- Impact assessment
+- Proposed fix (if known)
+- DoD checklist
+```
+
+This ensures every user report becomes an actionable issue without manual
+cleanup by the Brain.
