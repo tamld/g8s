@@ -244,7 +244,6 @@ type Supervisor struct {
 	telMu     sync.Mutex
 	telInited bool
 	telEngine *telemetry.TelemetryEngine
-	telErr    error
 	telRuns   int
 
 	// L3 post-run quality gate reflex (#253/#371): cached to avoid per-attempt
@@ -807,10 +806,11 @@ func (s *Supervisor) telemetryLocked() *telemetry.TelemetryEngine {
 			// Short flush interval: worker processes are short-lived and the
 			// engine flushes on Close, but a crash must not lose everything.
 			cfg.FlushInterval = 2 * time.Second
-			s.telEngine, s.telErr = telemetry.NewTelemetryEngine(cfg)
-			if s.telErr != nil {
-				fmt.Fprintf(os.Stderr, "[warn] telemetry engine disabled: %v\n", s.telErr)
-				s.telEngine = nil
+			eng, err := telemetry.NewTelemetryEngine(cfg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] telemetry engine disabled: %v\n", err)
+			} else {
+				s.telEngine = eng
 			}
 		}
 	}
@@ -1283,6 +1283,10 @@ type LoopOptions struct {
 	OnTask func(*controlplane.Task)
 }
 
+// maxLoopConcurrency caps the drain pool so an internal caller passing an
+// absurd Concurrency cannot fork itself before the isolation gate applies.
+const maxLoopConcurrency = 64
+
 // RunLoop drains claimable tasks until none remain, the context ends, or
 // once-mode completes a single attempt. It returns a process-style exit code.
 func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
@@ -1290,6 +1294,10 @@ func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
 	n := opts.Concurrency
 	if n < 1 {
 		n = 1
+	}
+	if n > maxLoopConcurrency {
+		fmt.Fprintf(os.Stderr, "[warn] concurrent loop: clamping concurrency %d to %d\n", n, maxLoopConcurrency)
+		n = maxLoopConcurrency
 	}
 	if n == 1 || opts.Once {
 		return s.runSerialLoop(ctx, opts)
@@ -1362,7 +1370,9 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 				d, rel, aerr := opts.Isolation.Acquire(ctx, opts.WorkerID)
 				if aerr != nil {
 					mu.Lock()
-					isoErr = aerr
+					if isoErr == nil {
+						isoErr = aerr
+					}
 					mu.Unlock()
 					setStop()
 					return
@@ -1404,12 +1414,12 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 	}
 	wg.Wait()
 	close(loopDone)
+	if ctx.Err() != nil {
+		return ExitCodeForSignal(15)
+	}
 	if isoErr != nil {
 		fmt.Fprintf(os.Stderr, "[warn] concurrent loop: isolation acquire: %v\n", isoErr)
 		return 1
-	}
-	if ctx.Err() != nil {
-		return ExitCodeForSignal(15)
 	}
 	return 0
 }

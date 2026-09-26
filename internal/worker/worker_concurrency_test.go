@@ -74,12 +74,20 @@ func TestRunLoopConcurrentBoundedInFlight(t *testing.T) {
 	}
 	// Release hanging children in waves; each wave waits for a stall so the
 	// snapshot records the true simultaneous-in-flight high-water mark.
+	releaseDone := make(chan struct{})
+	earlyExit := false
 	var releaser sync.WaitGroup
 	releaser.Add(1)
 	go func() {
 		defer releaser.Done()
 		for done := 0; done < total; {
 			for {
+				select {
+				case <-releaseDone:
+					earlyExit = true
+					return
+				case <-time.After(time.Millisecond):
+				}
 				mu.Lock()
 				inflight := len(pending) - done
 				spawned := len(pending)
@@ -87,7 +95,6 @@ func TestRunLoopConcurrentBoundedInFlight(t *testing.T) {
 				if inflight >= n || spawned == total {
 					break
 				}
-				time.Sleep(time.Millisecond)
 			}
 			time.Sleep(20 * time.Millisecond) // stall window
 			mu.Lock()
@@ -102,7 +109,13 @@ func TestRunLoopConcurrentBoundedInFlight(t *testing.T) {
 		}
 	}()
 	code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-bounded", LeaseSeconds: 60, Concurrency: n})
+	close(releaseDone)
 	releaser.Wait()
+	if earlyExit {
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("RunLoop returned before draining: %d/%d spawns", len(pending), total)
+	}
 	if code != 0 {
 		t.Fatalf("expected drain exit 0, got %d", code)
 	}
@@ -133,6 +146,98 @@ func TestRunLoopConcurrentCancelReturns143(t *testing.T) {
 	code := env.sup.RunLoop(ctx, LoopOptions{WorkerID: "w-cancel", LeaseSeconds: 60, Concurrency: 4})
 	if code != 143 {
 		t.Fatalf("expected cancel exit 143, got %d", code)
+	}
+}
+
+// The drain invariant: a worker that parks while a sibling is still mid-run
+// must not end the loop — the sibling's completion may surface follow-up
+// claimable work that the loop must still claim and finish.
+func TestRunLoopConcurrentDrainsWorkSurfacedAfterSiblingParks(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	first := submitTask(t, env, "surfaced-1", 1, nil)
+	var (
+		mu         sync.Mutex
+		secondID   string
+		firstChild *fakeChild
+		firstOpts  SpawnOptions
+	)
+	const okPayload = `{"ok":true,"status":"succeeded"}`
+	env.runner.factory = func(opts SpawnOptions) Child {
+		c := newFakeChild(0)
+		if filepath.Base(filepath.Dir(opts.RunDir)) == first.TaskID {
+			mu.Lock()
+			firstChild, firstOpts = c, opts
+			mu.Unlock()
+			return c // hangs until the follow-up task is queued
+		}
+		c.finishLater(opts.ResultPath, okPayload, 5*time.Millisecond)
+		return c
+	}
+	var submitOnce sync.Once
+	env.runner.onSpawn = func(taskID string) {
+		if taskID != first.TaskID {
+			return
+		}
+		// Surface a follow-up task while the sibling worker is still parked
+		// on an empty claim and the first run is still in flight.
+		submitOnce.Do(func() {
+			go func() {
+				time.Sleep(30 * time.Millisecond)
+				task := submitTask(t, env, "surfaced-2", 1, nil)
+				mu.Lock()
+				secondID = task.TaskID
+				mu.Unlock()
+			}()
+		})
+	}
+	// Release the hanging first child only after the follow-up task exists,
+	// so its worker re-claims it instead of parking into the drain.
+	go func() {
+		for {
+			mu.Lock()
+			queued := secondID != ""
+			mu.Unlock()
+			if queued {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		mu.Lock()
+		child, opts := firstChild, firstOpts
+		mu.Unlock()
+		_ = os.WriteFile(opts.ResultPath, []byte(okPayload), 0o600)
+		child.closeOnce.Do(func() { close(child.done) })
+	}()
+	code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-surfaced", LeaseSeconds: 60, Concurrency: 2})
+	if code != 0 {
+		t.Fatalf("expected drain exit 0, got %d", code)
+	}
+	mu.Lock()
+	second := secondID
+	mu.Unlock()
+	if second == "" {
+		t.Fatal("follow-up task was never submitted")
+	}
+	ctx := context.Background()
+	for _, id := range []string{first.TaskID, second} {
+		task, err := env.store.GetTask(ctx, id)
+		if err != nil || task == nil || task.State != controlplane.StateWorkerCompleted {
+			t.Fatalf("task %s not terminal: %v", id, err)
+		}
+	}
+}
+
+func TestRunLoopNonPositiveConcurrencyTakesSerialPath(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	if code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-zero", LeaseSeconds: 60, Concurrency: 0}); code != 0 {
+		t.Fatalf("Concurrency 0 with empty queue must exit 0, got %d", code)
+	}
+	if code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-neg", LeaseSeconds: 60, Concurrency: -3}); code != 0 {
+		t.Fatalf("negative Concurrency with empty queue must exit 0, got %d", code)
+	}
+	submitTask(t, env, "serial-neg", 1, nil)
+	if code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-neg", LeaseSeconds: 60, Concurrency: -3}); code != 0 {
+		t.Fatalf("negative Concurrency must drain serially, got %d", code)
 	}
 }
 
