@@ -983,3 +983,19 @@ echo node v20.0.0
 		}
 	}
 }
+
+// #373: public literal keyword arguments (token=False) must survive
+// sanitization — redacting them corrupts otherwise-valid generated code.
+func TestSanitizePreservesPublicLiterals(t *testing.T) {
+	in := "loader = pipeline(model, token=False, trust_remote_code=None, retries=0)\napi_key=hunter2secret\n"
+	out := SanitizeOutput(in)
+	if !strings.Contains(out, "token=False") {
+		t.Errorf("public literal token=False must survive: %q", out)
+	}
+	if !strings.Contains(out, "trust_remote_code=None") || !strings.Contains(out, "retries=0") {
+		t.Errorf("other public literals must survive: %q", out)
+	}
+	if !strings.Contains(out, "api_key=<REDACTED>") {
+		t.Errorf("secret assignments must still be redacted: %q", out)
+	}
+}

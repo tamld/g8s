@@ -8,7 +8,13 @@ import (
 	"strings"
 )
 
-var BlockedTaskPatterns = []*regexp.Regexp{
+// DestructiveExecutionPatterns reject prompts that direct destructive
+// execution. They apply to mutation-capable permissions only (#374): a
+// read_only/automation_read worker cannot execute them (OS cage + post-run
+// mutation scan enforce the boundary), and rejecting the *mention* of e.g.
+// fdisk breaks legitimate data-processing tasks (translation of question
+// corpora that discuss system administration).
+var DestructiveExecutionPatterns = []*regexp.Regexp{
 	// rm with recursive and force in any flag combination: -rf, -fr, -r -f, -f -r, --recursive --force, etc.
 	regexp.MustCompile(`(?i)\brm\s+(?:-[a-z0-9]*[rf][a-z0-9]*\s+)+|(?i)\brm\s+-(?:[a-z0-9]*r[a-z0-9]*f|[a-z0-9]*f[a-z0-9]*r)[a-z0-9]*\b|(?i)\brm\s+.*(?:--recursive\s+--force|--force\s+--recursive)\b`),
 	regexp.MustCompile(`(?i)\bdel\s+(?:/[a-z0-9]+\s+)*[/\-][sS]\b`),
@@ -20,10 +26,20 @@ var BlockedTaskPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\btruncate\s+table\b`),
 	regexp.MustCompile(`(?i)\b(?:shutdown|reboot|halt)\b`),
 	regexp.MustCompile(`(?i)\binit\s+0\b`),
+}
+
+// SensitiveReadPatterns reject prompts directing the worker toward secrets
+// and credential material. They apply to EVERY permission — reading secrets
+// is an exfiltration risk even for read-only workers.
+var SensitiveReadPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:copy|exfiltrate)\s+private\s+key\b`),
 	regexp.MustCompile(`(?i)\b(?:cat|open|type)\s+\.env\b`),
 	regexp.MustCompile(`(?i)\bcopy\s+token\s+store\b`),
 }
+
+// BlockedTaskPatterns is the full list (union of both classes) — kept for
+// backward compatibility with callers that do not know the permission.
+var BlockedTaskPatterns = append(append([]*regexp.Regexp{}, DestructiveExecutionPatterns...), SensitiveReadPatterns...)
 
 var DeniedPathFragments = []string{
 	"/.env",
@@ -69,8 +85,16 @@ func ValidateRequest(
 		return fmt.Errorf("permission=%s requires --receipt-id from Brain orchestrator", permission.Name)
 	}
 
-	// Check blocked patterns in prompt
-	for _, pattern := range BlockedTaskPatterns {
+	// Check blocked patterns in prompt (#374): permission-aware. Destructive
+	// execution patterns apply only to mutation-capable workers (they cannot
+	// harm a read_only sandbox and rejecting the *mention* of e.g. fdisk
+	// breaks benign data-processing tasks); sensitive-read patterns apply to
+	// every permission.
+	patterns := SensitiveReadPatterns
+	if permission.MutationAllowed {
+		patterns = BlockedTaskPatterns
+	}
+	for _, pattern := range patterns {
 		if pattern.MatchString(prompt) {
 			return fmt.Errorf("blocked task pattern detected: %s", pattern.String())
 		}
