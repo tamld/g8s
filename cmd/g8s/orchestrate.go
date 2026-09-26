@@ -613,6 +613,48 @@ func runOrchestrate(args []string) {
 	if err != nil {
 		exitRuntime("orchestrate", "", *traceID, cli.CodeIO, err, "", *jsonl)
 	}
+
+	// Session gate (#393): arbitrate concurrent supervisor sessions over
+	// this checkout. The first session runs in-place holding the kernel
+	// lock; a contended one is auto-promoted into an isolated worktree and
+	// never touches the holder's refs. Carve-outs: --self-test is hermetic;
+	// blind-converge / brief-file / dispatch flows are self-isolating or
+	// pure control-plane ops — hoisting the gate over them is evaluated in
+	// the cleanup slice (PR-3). exitRuntime calls os.Exit, which skips
+	// defers — every post-gate exit routes through fatalAfterGate so the
+	// worktree and registry row are cleaned up on graceful exits too.
+	var gate *sessionGate
+	finishGate := func() {
+		if gate == nil {
+			return
+		}
+		if ferr := gate.Finish(context.Background(), false); ferr != nil {
+			fmt.Fprintln(os.Stderr, "orchestrate: session gate finish:", ferr)
+		}
+	}
+	fatalAfterGate := func(sub string, code string, err error) {
+		finishGate()
+		exitRuntime("orchestrate", sub, *traceID, code, err, "", *jsonl)
+	}
+	if !*selfTest {
+		gate, err = acquireSessionGate(context.Background(), store, cwd)
+		if err != nil {
+			fatalAfterGate("session-gate", cli.CodeRuntime, err)
+		}
+		defer finishGate()
+		if gate.Mode == controlplane.SessionModeWorktree {
+			if chdirErr := os.Chdir(gate.WorktreePath); chdirErr != nil {
+				fatalAfterGate("session-gate", cli.CodeIO, chdirErr)
+			}
+			if cwd, err = os.Getwd(); err != nil {
+				fatalAfterGate("session-gate", cli.CodeIO, err)
+			}
+		}
+		heartbeatCtx, heartbeatStop := context.WithCancel(context.Background())
+		defer heartbeatStop()
+		go sessionHeartbeatLoop(heartbeatCtx, gate, 5*time.Second)
+	}
+
 	dirs := []string(addDirs)
 	if len(dirs) == 0 {
 		dirs = []string{cwd}
@@ -656,7 +698,7 @@ func runOrchestrate(args []string) {
 		}
 		res, err := executeOrchestration(context.Background(), intentText, opts)
 		if err != nil {
-			exitRuntime("orchestrate", "intent", *traceID, cli.CodeRuntime, err, "", *jsonl)
+			fatalAfterGate("intent", cli.CodeRuntime, err)
 		}
 		out = res
 	} else {
@@ -725,6 +767,9 @@ func runOrchestrate(args []string) {
 				fmt.Fprintf(os.Stdout, "supervisor task: %s\noutcome: %s\napproaches_tried: %d\ntotal_attempts: %d\nescalated: %t\n",
 					out.SupervisorTaskID, out.Outcome, out.ApproachesTried, out.TotalAttempts, out.Escalated)
 			}
+			// Escalation is a graceful outcome, not a crash — release the
+			// gate's worktree and registry row before the non-zero exit.
+			finishGate()
 			os.Exit(2)
 		}
 	}
@@ -733,7 +778,7 @@ func runOrchestrate(args []string) {
 		env := cli.NewEnvelope("orchestrate_result", "orchestrate", "", out)
 		env.TraceID = *traceID
 		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
-			exitRuntime("orchestrate", "", *traceID, cli.CodeIO, err, "", *jsonl)
+			fatalAfterGate("", cli.CodeIO, err)
 		}
 		return
 	}
