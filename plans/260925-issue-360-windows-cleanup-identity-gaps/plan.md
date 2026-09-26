@@ -1,5 +1,7 @@
 # Implementation Plan - Issue #360: Windows Cleanup CWD and Worker Executable Identity
 
+**Session type**: T2 (execution)
+
 ## Context
 Forensic analysis on Windows revealed three cross-platform gaps in process cleanup and worker verification:
 1. `internal/cleanup/cwd_windows.go`: `resolveProcessCWD` called `QueryFullProcessImageName` and returned `filepath.Dir(imgPath)`, confusing the binary installation path with process CWD. This caused false positives/negatives in ghost process detection.

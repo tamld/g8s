@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Unified Decoupled Memory Layer & Hybrid Retrieval Adapter (Issue #257)"
 status: "completed"
 created: "2026-09-24"

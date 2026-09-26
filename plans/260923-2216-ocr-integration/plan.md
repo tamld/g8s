@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Integration Plan: Alibaba Open Code Review (ocr) Engine for g8s"
 status: "superseded"
 created: "2026-09-23"

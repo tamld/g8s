@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Decouple Jev Reflex Sensor from Supervisor Policy Engine"
 status: "completed"
 created: "2026-09-23"

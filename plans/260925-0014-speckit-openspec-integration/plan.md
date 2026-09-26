@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Spec Kit Integration & SDD Registry Optimization"
 description: "Hybrid SDD convergence: adopt GitHub Spec Kit as the feature-delivery workflow engine, keep OpenSpec as the capability SSoT; repair registry drift; add machine-verifiable sync guard (cmd/speccheck); wire CI and ship PR"
 status: pending

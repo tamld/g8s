@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Supervisor Targeted Coverage & Invariant Hardening"
 status: "completed"
 created: "2026-09-24"

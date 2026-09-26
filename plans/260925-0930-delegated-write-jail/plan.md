@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Delegated-Write Materialization Verification + Workspace Jail"
 tags: [receipt, sandbox, jail, security, e2e, dogfood]
 status: planned

@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Repo-Wide Coverage Hardening to Exceed 80% CI Threshold"
 status: "completed"
 created: "2026-09-23"

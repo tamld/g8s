@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: Documentation Stale References, Specification Gaps & Constitution Remediation"
 status: "completed"
 created: "2026-09-24"

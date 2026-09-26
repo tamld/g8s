@@ -1,4 +1,6 @@
 ---
+
+**Session type**: T2 (execution)
 title: "Plan: g8s watch — push-channel primitive"
 tags: [cli, watch, notification, ops]
 status: planned
