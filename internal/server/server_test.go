@@ -655,3 +655,71 @@ func TestSupervisorEndpoints(t *testing.T) {
 		t.Errorf("expected 405, got %d", recFEGet.Code)
 	}
 }
+
+// #controlled-access: bearer-token auth on /api/v1/* when ApiToken is set;
+// healthz/readyz/metrics stay open; errors use the JSON envelope.
+func TestAuthMiddleware(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.ApiToken = "secret-token-1"
+	srv := NewServer(cfg, nil)
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := srv.authMiddleware(ok)
+
+	// Open probe endpoints need no token.
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s must stay open, got 401", path)
+		}
+	}
+
+	// API without token → 401 JSON envelope.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "E_UNAUTHORIZED") {
+		t.Errorf("expected JSON error envelope, got %q", rec.Body.String())
+	}
+
+	// Wrong token → 401.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for wrong token, got %d", rec.Code)
+	}
+
+	// Correct token → passes through to the wrapped handler.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil)
+	req.Header.Set("Authorization", "Bearer secret-token-1")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("valid token must pass")
+	}
+}
+
+// JSON error contract: apiError emits the CLI-consistent envelope.
+func TestApiErrorEnvelope(t *testing.T) {
+	rec := httptest.NewRecorder()
+	apiError(rec, http.StatusNotFound, "task not found")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status: got %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body must be JSON: %v", err)
+	}
+	if body["kind"] != "error" {
+		t.Errorf("kind=error expected, got %v", body["kind"])
+	}
+	if e, ok := body["error"].(map[string]any); !ok || e["code"] != "E_NOT_FOUND" {
+		t.Errorf("error.code=E_NOT_FOUND expected, got %v", body["error"])
+	}
+}

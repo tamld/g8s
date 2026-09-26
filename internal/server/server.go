@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,7 +51,7 @@ func NewServer(config Config, store *controlplane.Store) *Server {
 
 	s.httpSrv = &http.Server{
 		Addr:              config.Address,
-		Handler:           s.corsMiddleware(mux),
+		Handler:           s.authMiddleware(s.corsMiddleware(mux)),
 		ReadHeaderTimeout: config.ReadHeaderTimeout,
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
@@ -89,6 +90,44 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/system/metrics", s.handleSystemMetrics)
 	mux.HandleFunc("/api/v1/briefs", s.handleBriefs)
 	mux.HandleFunc("/api/v1/briefs/", s.handleBriefByID)
+}
+
+// authMiddleware enforces bearer-token auth on the API and OpenAPI surfaces
+// when a token is configured (#controlled-access). healthz/readyz/metrics
+// stay open for liveness probes. Requests without a valid token receive a
+// consistent JSON error envelope.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	if s.config.ApiToken == "" {
+		return next
+	}
+	token := s.config.ApiToken
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		open := path == "/healthz" || path == "/readyz" || path == "/metrics"
+		if open {
+			next.ServeHTTP(w, r)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(auth, prefix) || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, prefix)), []byte(token)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="g8s"`)
+			writeJSONError(w, http.StatusUnauthorized, "E_UNAUTHORIZED", "missing or invalid bearer token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeJSONError emits the CLI-consistent error envelope.
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"v":     1,
+		"kind":  "error",
+		"error": map[string]any{"code": code, "message": message},
+	})
 }
 
 // corsMiddleware adds CORS headers if enabled.
@@ -185,7 +224,7 @@ func (s *Server) IsRunning() bool {
 // handleHealthz handles the /healthz endpoint.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -199,7 +238,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // handleReadyz handles the /readyz endpoint.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -227,7 +266,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 // handleMetrics handles the /metrics endpoint (Prometheus text format).
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -236,7 +275,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Collect supervisor metrics
 	agg, err := supervisor.Aggregate(s.store, ctx, supervisor.AggregateOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -244,7 +283,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	collector := supervisor.NewSystemMetricsCollector(s.store, nil)
 	sysMetrics, err := collector.Collect(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -329,21 +368,21 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.createTask(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
 // handleTaskByID handles GET /api/v1/tasks/{id}.
 func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	// Extract task ID from path
 	path := r.URL.Path
 	if len(path) <= len("/api/v1/tasks/") {
-		http.Error(w, "Task ID required", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Task ID required")
 		return
 	}
 	taskID := path[len("/api/v1/tasks/"):]
@@ -351,11 +390,11 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	task, err := s.store.GetTask(ctx, taskID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if task == nil {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		apiError(w, http.StatusNotFound, "Task not found")
 		return
 	}
 
@@ -366,7 +405,7 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 // handleReceipts handles GET /api/v1/receipts.
 func (s *Server) handleReceipts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -378,7 +417,7 @@ func (s *Server) handleReceipts(w http.ResponseWriter, r *http.Request) {
 // handleReceiptByID handles GET /api/v1/receipts/{id}.
 func (s *Server) handleReceiptByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -389,14 +428,14 @@ func (s *Server) handleReceiptByID(w http.ResponseWriter, r *http.Request) {
 // handleSupervisor handles GET /api/v1/supervisor.
 func (s *Server) handleSupervisor(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	ctx := r.Context()
 	tasks, err := s.store.ListSupervisorTasks(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -407,13 +446,13 @@ func (s *Server) handleSupervisor(w http.ResponseWriter, r *http.Request) {
 // handleSupervisorByID handles GET /api/v1/supervisor/{id}.
 func (s *Server) handleSupervisorByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	path := r.URL.Path
 	if len(path) <= len("/api/v1/supervisor/") {
-		http.Error(w, "Supervisor task ID required", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Supervisor task ID required")
 		return
 	}
 	taskID := path[len("/api/v1/supervisor/"):]
@@ -422,14 +461,14 @@ func (s *Server) handleSupervisorByID(w http.ResponseWriter, r *http.Request) {
 	task, err := s.store.GetSupervisorTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, controlplane.ErrUnknownSupervisorTask) {
-			http.Error(w, "Supervisor task not found", http.StatusNotFound)
+			apiError(w, http.StatusNotFound, "Supervisor task not found")
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if task.ID == "" {
-		http.Error(w, "Supervisor task not found", http.StatusNotFound)
+		apiError(w, http.StatusNotFound, "Supervisor task not found")
 		return
 	}
 
@@ -440,14 +479,14 @@ func (s *Server) handleSupervisorByID(w http.ResponseWriter, r *http.Request) {
 // handleSupervisorMetrics handles GET /api/v1/supervisor/metrics.
 func (s *Server) handleSupervisorMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	ctx := r.Context()
 	agg, err := supervisor.Aggregate(s.store, ctx, supervisor.AggregateOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -458,18 +497,18 @@ func (s *Server) handleSupervisorMetrics(w http.ResponseWriter, r *http.Request)
 // handleSupervisorUpdateFalseEscalation handles POST /api/v1/supervisor/false-escalation/{id}.
 func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	path := r.URL.Path
 	prefix := "/api/v1/supervisor/false-escalation/"
 	if len(path) <= len(prefix) {
-		http.Error(w, "Supervisor task ID required", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Supervisor task ID required")
 		return
 	}
 	if !strings.HasPrefix(path, prefix) {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Invalid path")
 		return
 	}
 	taskID := path[len(prefix):]
@@ -480,13 +519,13 @@ func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r 
 	// #358: bound request bodies (unauthenticated endpoint).
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	ctx := r.Context()
 	if err := s.store.UpdateFalseEscalationRate(ctx, taskID, req.IsFalse); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -501,14 +540,14 @@ func (s *Server) handleSupervisorUpdateFalseEscalation(w http.ResponseWriter, r 
 // handleBriefs handles GET /api/v1/briefs.
 func (s *Server) handleBriefs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	ctx := r.Context()
 	briefs, err := s.store.ListBriefs(ctx, controlplane.BriefFilter{Limit: 100})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -519,13 +558,13 @@ func (s *Server) handleBriefs(w http.ResponseWriter, r *http.Request) {
 // handleBriefByID handles GET /api/v1/briefs/{id}.
 func (s *Server) handleBriefByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	path := r.URL.Path
 	if len(path) <= len("/api/v1/briefs/") {
-		http.Error(w, "Brief ID required", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Brief ID required")
 		return
 	}
 	briefID := path[len("/api/v1/briefs/"):]
@@ -534,14 +573,14 @@ func (s *Server) handleBriefByID(w http.ResponseWriter, r *http.Request) {
 	brief, err := s.store.GetBrief(ctx, briefID)
 	if err != nil {
 		if errors.Is(err, controlplane.ErrUnknownBrief) {
-			http.Error(w, "Brief not found", http.StatusNotFound)
+			apiError(w, http.StatusNotFound, "Brief not found")
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if brief.ID == "" {
-		http.Error(w, "Brief not found", http.StatusNotFound)
+		apiError(w, http.StatusNotFound, "Brief not found")
 		return
 	}
 
@@ -568,7 +607,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 
 	tasks, err := s.store.ListTasks(ctx, filter)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -586,14 +625,14 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	var req controlplane.SubmitTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		apiError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	ctx := r.Context()
 	task, err := s.store.SubmitTask(ctx, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -605,7 +644,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 // handleSystemMetrics handles GET /api/v1/system/metrics.
 func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -613,10 +652,30 @@ func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	collector := supervisor.NewSystemMetricsCollector(s.store, nil)
 	metrics, err := collector.Collect(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		apiError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(metrics)
+}
+
+// apiError writes the CLI-consistent JSON error envelope with a code derived
+// from the HTTP status. All handlers route errors through this for a uniform
+// machine-readable contract (#controlled-access upgrade).
+func apiError(w http.ResponseWriter, status int, msg string) {
+	code := "E_ERROR"
+	switch status {
+	case http.StatusBadRequest:
+		code = "E_BAD_REQUEST"
+	case http.StatusUnauthorized:
+		code = "E_UNAUTHORIZED"
+	case http.StatusNotFound:
+		code = "E_NOT_FOUND"
+	case http.StatusMethodNotAllowed:
+		code = "E_METHOD_NOT_ALLOWED"
+	case http.StatusInternalServerError:
+		code = "E_INTERNAL"
+	}
+	writeJSONError(w, status, code, msg)
 }
