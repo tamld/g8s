@@ -1356,8 +1356,8 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			dir := ""
-			release := func() {}
+			var dir string
+			var release func()
 			if opts.Isolation != nil {
 				d, rel, aerr := opts.Isolation.Acquire(ctx, opts.WorkerID)
 				if aerr != nil {
