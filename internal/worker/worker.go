@@ -1281,6 +1281,12 @@ type LoopOptions struct {
 	// OnTask observes each completed attempt. It is invoked from worker
 	// goroutines — callbacks must synchronize themselves.
 	OnTask func(*controlplane.Task)
+	// OnError observes every RunOnce error (claim/execute/control-plane
+	// failures — empty claims do not count). The drain still parks on the
+	// error and its exit code is unchanged; the callback lets the caller
+	// distinguish "queue drained" from "control-plane failure" (#394 PR-A2).
+	// It is invoked from worker goroutines — callbacks must synchronize.
+	OnError func(error)
 }
 
 // maxLoopConcurrency caps the drain pool so an internal caller passing an
@@ -1313,6 +1319,9 @@ func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
 		}
 		task, err := s.RunOnce(ctx, RunOptions{WorkerID: opts.WorkerID, LeaseSeconds: opts.LeaseSeconds})
 		if err != nil || task == nil {
+			if err != nil && opts.OnError != nil {
+				opts.OnError(err)
+			}
 			return 0
 		}
 		if opts.OnTask != nil {
@@ -1394,6 +1403,9 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 				mu.Lock()
 				active--
 				if err != nil || task == nil {
+					if err != nil && opts.OnError != nil {
+						opts.OnError(err)
+					}
 					parked++
 					if parked == n && active == 0 {
 						stop = true
