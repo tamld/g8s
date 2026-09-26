@@ -145,6 +145,10 @@ func (s *Store) initialize() error {
 		rollbackInit(conn)
 		return err
 	}
+	if err := migrateSessionsSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
 	if err := migrateReceiptLake(conn); err != nil {
 		rollbackInit(conn)
 		return err
@@ -243,6 +247,16 @@ func applyBaseSchema(conn *sql.Conn) error {
 			created_at REAL NOT NULL,
 			updated_at REAL NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id            TEXT PRIMARY KEY,
+			started_at    REAL NOT NULL,
+			heartbeat_at  REAL NOT NULL,
+			status        TEXT NOT NULL DEFAULT 'active',
+			mode          TEXT NOT NULL DEFAULT 'in_place',
+			worktree_path TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_active
+			ON sessions(id) WHERE status = 'active'`,
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
@@ -473,6 +487,71 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 				"ALTER TABLE "+table+" ADD COLUMN "+col+" TEXT"); err != nil {
 				return fmt.Errorf("migrate %s.%s: %w", table, col, err)
 			}
+		}
+	}
+	return nil
+}
+
+// migrateSessionsSchema upgrades pre-existing databases to the sessions
+// registry (#393). Fresh databases already get the latest shape from
+// applyBaseSchema and the lifecycle write_receipts DDL; this path covers
+// databases created before SchemaVersion 11. All steps are idempotent.
+func migrateSessionsSchema(conn *sql.Conn) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id            TEXT PRIMARY KEY,
+			started_at    REAL NOT NULL,
+			heartbeat_at  REAL NOT NULL,
+			status        TEXT NOT NULL DEFAULT 'active',
+			mode          TEXT NOT NULL DEFAULT 'in_place',
+			worktree_path TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_active
+			ON sessions(id) WHERE status = 'active'`,
+	}
+	for _, stmt := range stmts {
+		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
+			return fmt.Errorf("ensure sessions schema: %w", err)
+		}
+	}
+	// The worker-side write_receipts mirror may predate the session_id
+	// provenance column, or may not exist yet (it is ensured lazily by
+	// lifecycle.go, fresh shapes include the column).
+	var tableCount int
+	if err := conn.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'write_receipts'").Scan(&tableCount); err != nil {
+		return fmt.Errorf("inspect write_receipts presence: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+	var hasSessionID int
+	rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(write_receipts)")
+	if err != nil {
+		return fmt.Errorf("inspect write_receipts columns: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan write_receipts columns: %w", err)
+		}
+		if name == "session_id" {
+			hasSessionID = 1
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate write_receipts columns: %w", err)
+	}
+	rows.Close()
+	if hasSessionID == 0 {
+		if _, err := conn.ExecContext(context.Background(),
+			"ALTER TABLE write_receipts ADD COLUMN session_id TEXT"); err != nil {
+			return fmt.Errorf("migrate write_receipts.session_id: %w", err)
 		}
 	}
 	return nil

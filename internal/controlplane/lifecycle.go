@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS write_receipts (
 	tool_version                  TEXT,
 	trace_id                      TEXT,
 	actor_chain_json              TEXT,
-	source_commit                 TEXT
+	source_commit                 TEXT,
+	session_id                    TEXT
 )`
 
 // ConsumeWriteReceipt atomically marks a delegated-write receipt as consumed
