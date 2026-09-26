@@ -69,6 +69,12 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 		return nil, fmt.Errorf("open control-plane database: %w", err)
 	}
 	s := &Store{db: db, clock: clock, dbPath: dbPath}
+	// #380: cap the connection pool — SQLite WAL allows concurrent readers
+	// but a single writer; unlimited connections cause fd exhaustion and
+	// "database is locked" under concurrent workers.
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	if err := s.initialize(); err != nil {
 		db.Close()
 		return nil, err
@@ -356,6 +362,11 @@ func migrateTasksTable(conn *sql.Conn) error {
 			"ALTER TABLE tasks ADD COLUMN session_id TEXT"); err != nil {
 			return fmt.Errorf("migrate session_id column: %w", err)
 		}
+	}
+	// #381: create session index AFTER the column exists (migration-safe).
+	if _, err := conn.ExecContext(context.Background(),
+		"CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, state)"); err != nil {
+		return fmt.Errorf("create session index: %w", err)
 	}
 	return nil
 }

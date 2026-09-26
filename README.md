@@ -82,7 +82,7 @@
 * **🧹 Lifecycle Hygiene & Resource Pruning**: Built-in sweeper to reap ghost processes, prune orphan worktrees, and evict stale scratch artifacts (`g8s cleanup`), with auto-cleanup hooks on orchestrator completion.
 * **📜 Decoupled Brief Dispatch Workflow**: Contract-driven brief issuance and atomic consumption (`g8s brief-issue`, `g8s brief-consume`).
 * **🔌 Stdio MCP Protocol (11 tools)**: Plugs directly into Claude Desktop, Cursor, Codex, and Windsurf via standard JSON-RPC. Tools: `g8s_dispatch`, `g8s_get_task`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`.
-* **🖥️ macOS Service Manager (LaunchAgent)** — Linux/Windows backends deferred: one-command hardened background service installation for macOS (`launchd`); Linux (`systemd`) and Windows backends are on the roadmap.
+* **🖥️ Service Manager (Multi-Platform)** — hardened background service installation: macOS LaunchAgent, Linux systemd, Windows sc.exe. Loopback bind + bearer auth by default.
 
 ---
 

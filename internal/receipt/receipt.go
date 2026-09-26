@@ -259,6 +259,10 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	if err != nil {
 		return nil, fmt.Errorf("open receipt database %q: %w", dbPath, err)
 	}
+	// #380: cap the connection pool for SQLite WAL.
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(3)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	m := &Manager{db: db, clock: clock}
 	if err := m.initialize(); err != nil {
 		db.Close()
