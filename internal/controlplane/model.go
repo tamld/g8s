@@ -42,7 +42,10 @@ import (
 //	    append-only state transition audit trail.
 //	v8 (Issue #291): adds session_id to tasks and supervisor_tasks, adds
 //	    session_quotas table for per-session quota tracking.
-const SchemaVersion = 10
+//	v11 (Issue #393): adds sessions registry table (live-vs-zombie truth via
+//	    status + heartbeat), active-session partial index, and session_id
+//	    provenance column on the worker-side write_receipts mirror.
+const SchemaVersion = 11
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
