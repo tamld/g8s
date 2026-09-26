@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-26
+
+Minor release: distributed reflex architecture (L1/L3/L6), closed-loop telemetry, adversarial eval harness, controlled API access. No breaking changes.
+
+### Added
+- **`g8s watch` push-channel primitive** (#372): blocking command exits when a watched condition is terminal — replaces supervisor sleep-polling
+- **`g8s eval` adversarial harness** (#377): `eval list` + `eval run` over 24 probes × 6 categories with Provider Reliability Index scoring; StaticProvider for CI, live providers via WorkerProvider
+- **`g8s reflex triage` CLI** (#345): System-1 reflex gate as enforce-code pre-mutation assessment
+- **Closed-loop telemetry** (#363): opt-in `G8S_TELEMETRY=1` — worker attempts emit terminal trace events; pre-flight injection surfaces distilled negative patterns on briefs (#375)
+- **L3 post-run Jev quality gate** (#387): after a worker completes, Jev assesses output quality (evidence vs hallucination) before it enters the control plane
+- **Workspace jail** (#355): scope-roots + `--scope-root` opt-in for cross-root workflows
+- **Dialectic Bounce FSM** (#377): hard ceiling N≤3, evidence-gated bounces, adversarial simulation suite
+
+### Fixed
+- **Windows SQLite file URIs** (#361): platform-aware escaping preserves drive colons/separators
+- **Windows two-stage signal handling** (#343): graceful `taskkill /T` for SIGTERM, force `/F` for SIGKILL
+- **Windows PEB CWD resolution** (#364): `NtQueryInformationProcess` replaces executable-dir shortcut
+- **Windows CPU sampling** (#362): real `GetProcessTimes` replaces the static 5.0 stub
+- **Worker output fidelity** (#376): sanitization preserves public literals (`token=False`); blocked patterns permission-aware
+- **DB connection pooling** (#386): `SetMaxOpenConns`/`SetMaxIdleConns`/`SetConnMaxLifetime` on controlplane + receipt + memory; memory adapter uses `pathutil.SQLiteURI`
+- **Session index** (#386): `idx_tasks_session ON tasks(session_id, state)` — per-session queries no longer full-scan
+- **Windows native batch ingest** (#356): telemetry batch loss fixed (1-of-N → full persist)
+
+### Security
+- **HTTP API controlled access** (#378): opt-in bearer token (`G8S_API_TOKEN`), loopback bind default, CORS off, 1 MiB body bounds, consistent JSON error envelope
+- **Reflex scope bypass** (#366): absolute paths rejected in `isWithinScope`; globstar (`**`) matching added
+- **Signtool hardening** (#368/#369): `CertThumbprint` mode (no secret in argv), password redaction in errors, https default timestamper
+- **Permission-aware patterns** (#376): destructive-execution patterns gate mutation-capable permissions only; sensitive-read patterns enforce everywhere
+
+### Docs
+- **Governance standards** (#357): campaign-proven DoR/DoD in DOD_DOR.md section 3
+- **Roadmap truth alignment** (#333): README + REFACTORING_PLAN aligned with shipped reality (v0.2.0→v0.10.1)
+- **ADR-0021** (standard operating model) + **ADR-0020** (reflex-gated campaign)
+
 ## [0.10.1] - 2026-09-25
 
 Maintenance release produced by the reflex-gated debt campaign (ADR-0020) and
