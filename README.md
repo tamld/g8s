@@ -21,7 +21,7 @@
 
 `g8s` (pronounced **"Gates"** — short for **G**atekeeper**s**) is a standalone, single-binary runtime designed for **Two-Tier Multi-Agent Systems**. It enables high-tier "Brain" orchestrators (Claude 3.7 Sonnet / Opus, GPT-4o, DeepSeek R1) to safely delegate heavy mechanical tasks (code scanning, unit test synthesis, MCP mapping, artifact extraction) to fast, lightweight CLI workers (Antigravity `agy`, Claude Code CLI, Gemini CLI, Ollama) behind **strict role contracts, sandboxes, and cryptographic/time-limited write receipts**.
 
-**v0.10.0 (2026-09-20)** delivers the complete **DELTA-11 Orchestration Roadmap**, Jev AI reflex sensor decoupling, native DiffDistiller & Verifier subagent pipeline, plus hardened governance gates:
+**v0.11.0 (2026-09-26)** delivers the complete **DELTA-11 Orchestration Roadmap**, Jev AI reflex sensor decoupling, native DiffDistiller & Verifier subagent pipeline, plus hardened governance gates:
 
 | Concern | Deliverable | Status |
 |---------|-------------|--------|
@@ -64,7 +64,7 @@
 
 ---
 
-## 🚀 Key Features (v0.10.1)
+## 🚀 Key Features (v0.11.0)
 
 * **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single ~15MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
 * **🛡️ Defense-in-Depth Safety Gates**:
@@ -219,28 +219,28 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ---
 
-## 📦 Release Artifacts (v0.10.1)
+## 📦 Release Artifacts (v0.11.0)
 
 Archives (GoReleaser v2 — macOS ships a single universal binary):
 
 | Artifact | Platform |
 |----------|----------|
-| `g8s_v0.10.1_darwin_all.tar.gz` | macOS universal (Intel + Apple Silicon) |
-| `g8s_v0.10.1_linux_amd64.tar.gz` | Linux x86_64 |
-| `g8s_v0.10.1_linux_arm64.tar.gz` | Linux ARM64 |
-| `g8s_v0.10.1_windows_amd64.zip` | Windows x86_64 |
+| `g8s_v0.11.0_darwin_all.tar.gz` | macOS universal (Intel + Apple Silicon) |
+| `g8s_v0.11.0_linux_amd64.tar.gz` | Linux x86_64 |
+| `g8s_v0.11.0_linux_arm64.tar.gz` | Linux ARM64 |
+| `g8s_v0.11.0_windows_amd64.zip` | Windows x86_64 |
 
-Packages (Linux, additionally published): `g8s_0.10.1_amd64.deb`, `g8s_0.10.1_arm64.deb`, `g8s-0.10.1-1.x86_64.rpm`, `g8s-0.10.1-1.aarch64.rpm`, `g8s_0.10.1_amd64.apk`, `g8s_0.10.1_aarch64.apk`. Always derive the exact asset names from the release page (`gh release view v0.10.1 --json assets`) — #338.
+Packages (Linux, additionally published): `g8s_0.11.0_amd64.deb`, `g8s_0.11.0_arm64.deb`, `g8s-0.11.0-1.x86_64.rpm`, `g8s-0.11.0-1.aarch64.rpm`, `g8s_0.11.0_amd64.apk`, `g8s_0.11.0_aarch64.apk`. Always derive the exact asset names from the release page (`gh release view v0.11.0 --json assets`) — #338.
 
 ### Verification
 ```bash
 # Checksums (SHA256)
-sha256sum g8s_v0.10.1_*.tar.gz g8s_v0.10.1_*.zip checksums.txt
+sha256sum g8s_v0.11.0_*.tar.gz g8s_v0.11.0_*.zip checksums.txt
 
 # Cosign signature verification (when published)
-cosign verify-blob --signature g8s_v0.10.1_darwin_all.tar.gz.sig \
-  --certificate g8s_v0.10.1_darwin_all.tar.gz.pem \
-  g8s_v0.10.1_darwin_all.tar.gz
+cosign verify-blob --signature g8s_v0.11.0_darwin_all.tar.gz.sig \
+  --certificate g8s_v0.11.0_darwin_all.tar.gz.pem \
+  g8s_v0.11.0_darwin_all.tar.gz
 ```
 
 ---
@@ -272,11 +272,37 @@ CGO_ENABLED=1 go test -race -count=1 ./...
 | **2026-08-30** | **v0.4.0** | Observability & hardening. | **Done** |
 | **2026-09** | **v0.5.0 → v0.9.2** | Incremental releases: DELTA-20 code-intel adapter (v0.7.0), Windows service backend (DEBT-44), knowledge vault, DX/AX wizard. | **Done** |
 | **2026-09-24** | **v0.10.0** | **Jev AI + DiffIntel + Governance** — Reflex sensor decoupling (`internal/reflex`), Native DiffDistiller & Verifier (`internal/diffintel`, `internal/review`), Supervisor coverage $\ge 93.6\%$, 11 MCP tools. | **Done** |
-| **2026-10-05** | v0.11.0 | DELTA-21 Unified Memory Facade (merged #325), Closed-Loop Telemetry Engine (#253), Adversarial Evaluations Harness (#254). | In Progress |
-| **2026-11-01** | v0.12.0 | DELTA-20 Code Intelligence Tiers 0.5–2, kardianos/service unification, debt-squad fixes (#326–#331). | Planned |
+| **2026-10-05** | v0.11.0 | **Distributed reflex architecture (L1/L3/L6), closed-loop telemetry, eval harness, workspace jail, controlled API, dialectic FSM.** | **Done** |
+| **2026-11-01** | v0.12.0 | Concurrent dispatch, session isolation, skills refactor, A2A surface, Windows residuals. | Planned |
 | **2026-12-15** | v1.0.0 | GA Release: 6-month homelab stability, Enterprise security signoff, Distributed fleet mTLS. | Planned |
 
 ---
+
+## 📁 Project Structure
+
+```
+g8s/
+├── cmd/g8s/           # CLI entrypoint (stdlib flag-based, no cobra)
+├── internal/          # All packages (private, not importable)
+│   ├── controlplane/  # SQLite WAL task queue (CAS leases, lineage)
+│   ├── reflex/        # System-1 Jev sensor + deterministic policy
+│   ├── worker/        # Supervisor, spawn, telemetry ingestion
+│   ├── dispatch/      # AGY CLI wrapper, argv builder, sanitizer
+│   ├── harness/       # Role/permission gates + adversarial probes
+│   ├── server/        # HTTP API daemon (loopback + bearer auth)
+│   ├── receipt/       # Zero-trust write receipts
+│   ├── memory/        # DELTA-21 unified memory facade
+│   ├── dialectic/     # Bounce FSM (ceiling N≤3, evidence gate)
+│   ├── watch/         # Push-channel primitive (block until terminal)
+│   └── ...
+├── packaging/         # Windows NSIS/WiX, Chocolatey
+├── docs/              # User guide, ADRs, specs
+├── plans/             # Campaign ledgers (dated, immutable)
+├── spec/openspec/     # OpenSpec deltas (DELTA-01..21)
+├── schemas/           # JSON schemas (task, receipt, result)
+├── tools/             # CI helper scripts
+└── .github/workflows/ # CI/CD pipelines
+```
 
 ## 📄 License
 
