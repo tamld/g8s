@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/telemetry"
 )
 
 func runBriefIssue(args []string) {
@@ -98,6 +100,15 @@ func executeBriefIssue(w io.Writer, store *controlplane.Store, title, payload, d
 		}
 	}
 
+	// #253 closed loop: when telemetry is enabled, surface the most frequent
+	// distilled negative patterns as pre-flight context on the brief —
+	// workers inherit the failure knowledge learned from past runs.
+	if os.Getenv("G8S_TELEMETRY") == "1" {
+		if section := preflightSection(); section != "" {
+			payload += section
+		}
+	}
+
 	b, err := brief.Issue(store, title, payload, dod, issuedBy, ttl)
 	if err != nil {
 		return brief.Brief{}, err
@@ -108,4 +119,29 @@ func executeBriefIssue(w io.Writer, store *controlplane.Store, title, payload, d
 		return brief.Brief{}, fmt.Errorf("format brief json: %w", err)
 	}
 	return b, nil
+}
+
+// preflightSection builds the negative-pattern pre-flight section from the
+// telemetry ledger (#253). Empty when telemetry is disabled, the ledger has
+// no distilled patterns yet, or the ledger cannot be opened — brief issuance
+// must never fail because of telemetry.
+func preflightSection() string {
+	cfg := telemetry.DefaultTelemetryConfig()
+	if p := os.Getenv("G8S_TELEMETRY_DB"); p != "" {
+		cfg.DBPath = p
+	}
+	eng, err := telemetry.NewTelemetryEngine(cfg)
+	if err != nil {
+		return ""
+	}
+	defer eng.Close()
+	patterns, err := eng.QueryTopPatterns(context.Background(), 3)
+	if err != nil || len(patterns) == 0 {
+		return ""
+	}
+	section, err := eng.InjectPreflightContext(context.Background(), &controlplane.BriefRow{}, patterns)
+	if err != nil {
+		return ""
+	}
+	return section
 }
