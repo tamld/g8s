@@ -70,3 +70,22 @@ never a silent footgun.
 RED-first tests (command + exit code quoted in ledger), dual-pass CI
 (`CGO_ENABLED=0` vet+test; `CGO_ENABLED=1 -race`), pre-push 12/12 gates,
 independent adversarial review, layer check W or C alone.
+
+## PR-A execution ledger (2026-09-26)
+
+- **RED**: `go vet ./internal/worker/` → `vet: worker_concurrency_test.go:31:98:
+  unknown field Concurrency in struct literal of type LoopOptions`.
+  Behavioral RED: `TestTelemetrySurvivesRepeatedSerialRuns` would count 1
+  distinct task (old code drops run 2+ events).
+- **GREEN**: `CGO_ENABLED=0 go test -count=1 ./...` → 0 failures;
+  `CGO_ENABLED=1 go test -race -count=1 ./...` → 0 failures (worker pkg
+  17.2s at N=4). Cross-platform build OK (windows/darwin/linux).
+- **Gates**: `tools/pre_push.sh --fast` 12/12 + full [12/12] windows build
+  run manually. Caught by gates before push: `ineffassign` on release
+  initializer (fixed).
+- **Review**: independent adversarial review — VERDICT: APPROVE; 3 MINOR +
+  3 NIT all fixed in follow-up commit (ctx-cancel exit precedence, Concurrency
+  clamp 64, isoErr first-writer-wins, dead telErr dropped, drain-invariant +
+  serial-routing + fail-fast tests added).
+- Mid-review the reviewer's own -race run surfaced a data race in the test
+  itself (unlocked `len(pending)` read) — fixed before push.
