@@ -716,14 +716,21 @@ func (s *Supervisor) collect(
 			signal, qerr := gate.EmitOutputQualitySignal(ctx, oqReq)
 			if qerr == nil {
 				verdict := reflex.EvaluateOutputQuality(signal)
+				// #411: Jev-judged quality is ADVISORY by default — a
+				// context-blind reject must not fail the attempt (ADR-0021
+				// §8 anti-pattern; same split as the #398 L2 floor). Blocking
+				// requires the explicit operator flag.
 				if verdict.Action == "reject" {
-					wr = workerResult{
-						OK:      false,
-						Status:  "blocked",
-						Reason:  verdict.Reason,
-						Summary: "L3 post-run quality gate: output failed Jev assessment",
+					fmt.Fprintf(os.Stderr, "[warn] L3 quality gate: Jev rejected output for %s: %s\n", taskID, verdict.Reason)
+					if l3RejectBlocks() {
+						wr = workerResult{
+							OK:      false,
+							Status:  "blocked",
+							Reason:  verdict.Reason,
+							Summary: "L3 post-run quality gate: output failed Jev assessment",
+						}
+						success = false
 					}
-					success = false
 				}
 			}
 		}
@@ -1704,4 +1711,12 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 		envelope["stderr"] = dispatch.SanitizeOutput(stderr)
 	}
 	return mustJSON(envelope)
+}
+
+// l3RejectBlocks reports whether a L3 Jev reject must fail the attempt
+// (#411): advisory by default — blocking is the operator's explicit opt-in
+// via G8S_L3_JEV_BLOCK=1, because the L3 assessment is context-blind
+// (ADR-0021 §8 anti-pattern).
+func l3RejectBlocks() bool {
+	return os.Getenv("G8S_L3_JEV_BLOCK") == "1"
 }

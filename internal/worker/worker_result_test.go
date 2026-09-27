@@ -184,3 +184,16 @@ func TestRejectionRewriteStripsResponse(t *testing.T) {
 		t.Fatalf("rejection envelope must carry ok=false: %s", got.Result)
 	}
 }
+
+// #411: the L3 Jev reject is advisory by default; blocking needs the
+// explicit G8S_L3_JEV_BLOCK=1 opt-in.
+func TestL3RejectIsAdvisoryByDefault(t *testing.T) {
+	t.Setenv("G8S_L3_JEV_BLOCK", "")
+	if l3RejectBlocks() {
+		t.Fatal("L3 reject must be advisory when the flag is unset")
+	}
+	t.Setenv("G8S_L3_JEV_BLOCK", "1")
+	if !l3RejectBlocks() {
+		t.Fatal("G8S_L3_JEV_BLOCK=1 must opt into blocking")
+	}
+}
