@@ -196,6 +196,24 @@ func WithCommandResolver(fn func(prompt, model, timeout string) ([]string, bool)
 	return func(s *Supervisor) { s.commandResolver = fn }
 }
 
+// WorktreeIsolator hands workspace_write attempts a private worktree
+// directory so concurrent code-writing attempts in one worker process
+// cannot clobber each other's uncommitted deliverables (#427). Implemented
+// by the cmd layer over the orchestrator pool; nil isolator = legacy
+// shared-checkout behavior.
+type WorktreeIsolator interface {
+	// AcquireWorktree returns the worktree directory for the task and a
+	// release function. release(true) keeps the worktree for inspection
+	// (deliverable survival — the point of #427); release(false) discards.
+	AcquireWorktree(ctx context.Context, taskID string) (dir string, release func(keep bool), err error)
+}
+
+// WithWorktreeIsolator wires the isolation seam. Only workspace_write
+// attempts consult it; read_only attempts keep the shared checkout.
+func WithWorktreeIsolator(iso WorktreeIsolator) Option {
+	return func(s *Supervisor) { s.isolator = iso }
+}
+
 // WithStreamCallback registers a callback invoked on real-time unbuffered stdout/stderr lines.
 func WithStreamCallback(fn StreamCallback) Option {
 	return func(s *Supervisor) { s.streamCallback = fn }
@@ -246,6 +264,12 @@ type Supervisor struct {
 	// commandResolver optionally overrides the dispatch-contract argv with
 	// an operator-defined invocation template (DELTA-10 R6).
 	commandResolver func(prompt, model, timeout string) ([]string, bool)
+
+	// isolator hands workspace_write attempts a private worktree directory
+	// so concurrent code-writing attempts in one worker process cannot
+	// clobber each other's uncommitted deliverables (#427). Nil = no
+	// isolation (legacy shared-checkout behavior).
+	isolator WorktreeIsolator
 
 	// Closed-loop telemetry ingestion (#253): opt-in via G8S_TELEMETRY=1
 	// (default ledger path) or G8S_TELEMETRY_DB=<path>. Lazily opened per
@@ -549,9 +573,30 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outWriter := outStreamer.PipeTee(outFile)
 	errWriter := errStreamer.PipeTee(errFile)
 
+	// #427: workspace_write attempts get per-attempt worktree isolation —
+	// concurrent code-writing attempts sharing one checkout destroy each
+	// other's uncommitted deliverables. Isolator failure degrades to the
+	// shared checkout (warn, never fail the task). read_only attempts are
+	// untouched. opts.Dir (concurrent-loop per-worker worktree) wins over
+	// the request default; the isolator wins over both for writes.
+	spawnDir := firstNonEmpty(opts.Dir, firstOf(req.AddDirs), s.runRoot)
+	var releaseWorktree func(keep bool)
+	if req.Permission == "workspace_write" && s.isolator != nil {
+		if wt, release, err := s.isolator.AcquireWorktree(ctx, task.TaskID); err == nil {
+			spawnDir = wt
+			releaseWorktree = release
+			fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
+		} else {
+			fmt.Fprintf(os.Stderr, "[warn] worker: worktree isolation unavailable for %s: %v\n", task.TaskID, err)
+		}
+	}
+	if releaseWorktree != nil {
+		defer func() { releaseWorktree(true) }()
+	}
+
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
-		Dir:        firstNonEmpty(opts.Dir, firstOf(req.AddDirs), s.runRoot),
+		Dir:        spawnDir,
 		Stdout:     outWriter,
 		Stderr:     errWriter,
 		ResultPath: resultPath,
