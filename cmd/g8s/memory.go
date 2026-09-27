@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/memory"
+	"github.com/tamld/g8s/internal/reflex"
 )
 
 func runMemory(args []string) {
@@ -48,6 +50,9 @@ func openMemoryAdapter() *memory.LocalSQLiteMemoryAdapter {
 	if err != nil {
 		exitRuntime("memory", "", "", cli.CodeRuntime, err, "", false)
 	}
+	// #411b: the promotion gate carries a real Jev sensor — promotion is
+	// Brain-side only, and the gate must not be a pass-through.
+	adapter.SetGateSensor(memorySensorAdapter(reflex.NewReflexGate().TriageMutation))
 	return adapter
 }
 
@@ -105,4 +110,32 @@ func runMemoryRevoke(args []string) {
 		return
 	}
 	fmt.Printf("revoked %d entries from session %s (tombstones written)\n", n, *session)
+}
+
+// memorySensorAdapter translates the reflex gate (Jev) into the memory
+// promotion gate's sensor contract (#411b): naked payload in, allowlist
+// verdict out. instant_kill → blocked; grant_receipt → clean; anything else
+// (including escalate_hitl) is an unrecognized verdict — the promotion gate
+// fails CLOSED on those. Transport errors fail OPEN unverified upstream
+// (ADR-0023 DEGRADED) with a broker_failure sink event.
+func memorySensorAdapter(triage func(ctx context.Context, req reflex.TriageRequest) (reflex.TriageVerdict, error)) memory.GateSensor {
+	return func(nakedPayload string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		verdict, err := triage(ctx, reflex.TriageRequest{
+			TaskID:      "memory-promotion-gate",
+			DiffSummary: nakedPayload,
+		})
+		if err != nil {
+			return "", err
+		}
+		switch verdict.Action {
+		case reflex.ActionInstantKill:
+			return "blocked", nil
+		case reflex.ActionGrantReceipt:
+			return "clean", nil
+		default:
+			return "", fmt.Errorf("unrecognized sensor action %q", verdict.Action)
+		}
+	}
 }
