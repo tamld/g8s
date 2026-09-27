@@ -44,5 +44,9 @@ func spawnJobHandle(cmd *exec.Cmd) (uintptr, error) {
 // closeJobHandle is a POSIX stub — nothing to close.
 func closeJobHandle(h uintptr) {}
 
-// closeJob is a POSIX no-op: the process group sweep covers containment.
-func (c *processChild) closeJob() {}
+// closeJob is a POSIX no-op on the handle (nothing to close — process-
+// group containment applies), kept in parity with the Windows path so the
+// shared Terminate/collect call sites stay branch-free.
+func (c *processChild) closeJob() {
+	c.jobClose.Do(func() { closeJobHandle(0) })
+}
