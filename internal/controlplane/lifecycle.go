@@ -436,16 +436,17 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	}
 
 	// Transition to WorkerCompleted instead of directly to final state
-	// Supervisor will then accept/reject the result
+	// Supervisor will then accept/reject the result. result_validation and
+	// error_call_history are written by the supervisor before this call
+	// (#383) — they must survive the finish, not be reset to empty.
 	res, err := tx.Exec(
 		`UPDATE tasks SET state = ?, result_json = ?, result_hash = ?, updated_at = ?,
 		 completed_at = ?, last_error = ?, lease_owner = NULL, lease_token = NULL,
 		 lease_expires_at = NULL, receipt_hash = NULL,
-		 error_call_history = ?, result_validation = ?, supervisor_feedback = NULL
+		 supervisor_feedback = NULL
 		 WHERE task_id = ? AND lease_owner = ? AND lease_token = ? AND state = 'RUNNING'`,
 		nextState, resultCanonical, resultHash, now,
 		now, params.Err, // Use now for completed_at
-		"[]", "{}", // empty error_call_history and result_validation for now
 		taskID, workerID, leaseToken)
 	if err != nil {
 		return nil, err
