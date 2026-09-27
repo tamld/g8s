@@ -224,7 +224,7 @@ jobs:
 
           trap 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm" "$PAYLOAD_FILE" "$DOD_FILE" "$BRIEF_FILE" "$BIN_PATH"' EXIT
 
-          echo "# CI Dogfooding Task" > "$PAYLOAD_FILE"
+          printf "# CI Dogfooding Task\nScope: internal/brief/brief.go\n" > "$PAYLOAD_FILE"
           echo "- [x] Self-dogfooding brief dispatch validated" > "$DOD_FILE"
 
           go build -o "$BIN_PATH" ./cmd/g8s

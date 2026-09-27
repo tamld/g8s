@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	g8scontext "github.com/tamld/g8s/internal/context"
 )
 
 // TriageAction defines the concrete operational decision emitted by the g8s Supervisor policy engine.
@@ -36,6 +38,11 @@ type TriageRequest struct {
 	FilesModified []string `json:"files_modified"`
 	DiffSummary   string   `json:"diff_summary"`
 	AllowedPaths  []string `json:"allowed_paths"`
+
+	// ContextPacket is the v2 enrichment (#396, ADR-0021 §8.2): assembled by
+	// the Context Broker from vault / telemetry / SOM. Nil = legacy v1
+	// request (byte-compatible; Constitution Axiom 5).
+	ContextPacket *g8scontext.ContextPacket `json:"context_packet,omitempty"`
 }
 
 // OutputQualityRequest carries the L3 post-run context (#253): after a

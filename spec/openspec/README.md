@@ -23,6 +23,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-12`](12-lineage-cte-and-stream-pipe-spec.md)** | Recursive CTE Lineage & Stream Pipe | `internal/controlplane` | M3 (OS Daemon) | `APPLIED` |
 | **[`DELTA-13`](13-dx-ax-init-and-autorepair-spec.md)** | DX/AX Multi-IDE Init & Auto-Repair | `internal/initwiz` | M4 (DX & AX) | `APPLIED` |
 | **[`DELTA-20`](20-code-intel-adapter-spec.md)** | Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius | `internal/codeintel` | M5 (Robustness & Evals) | `PROPOSED` |
+| **[`DELTA-22`](22-brief-dor-floor-spec.md)** | Brief DoR Floor + Advisory Skill Routing | `internal/brief` | M6 (Memory & Routing) | `PROPOSED` |
 
 ---
 

@@ -28,7 +28,7 @@ func TestDogfoodE2E(t *testing.T) {
 	payloadPath := filepath.Join(tempDir, "payload.md")
 	dodPath := filepath.Join(tempDir, "dod.md")
 
-	if err := os.WriteFile(payloadPath, []byte("# CI Dogfood Payload\nTest payload"), 0o600); err != nil {
+	if err := os.WriteFile(payloadPath, []byte("# CI Dogfood Payload\nTest payload\nScope: internal/brief/brief.go"), 0o600); err != nil {
 		t.Fatalf("write payload: %v", err)
 	}
 	if err := os.WriteFile(dodPath, []byte("- [x] Dogfood DoD item"), 0o600); err != nil {
