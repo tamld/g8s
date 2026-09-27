@@ -33,8 +33,9 @@ import (
 // the result status. We parse the last valid JSON object with a "result" field.
 type agyResult struct {
 	Result struct {
-		Status string `json:"status"`
-		Error  string `json:"error,omitempty"`
+		Status   string `json:"status"`
+		Error    string `json:"error,omitempty"`
+		Response string `json:"response,omitempty"`
 	} `json:"result"`
 }
 
@@ -386,7 +387,33 @@ type workerResult struct {
 	Status            string          `json:"status"`
 	Reason            string          `json:"reason,omitempty"`
 	Summary           string          `json:"summary,omitempty"`
+	Response          string          `json:"response,omitempty"`
 	ContractViolation json.RawMessage `json:"contract_violation,omitempty"`
+}
+
+// degenerateResponse reports whether a stream-sourced model response carries
+// no deliverable content (#383): an explicit empty JSON object. An absent
+// response field is NOT degenerate — legacy/synthetic streams may omit it.
+func degenerateResponse(response string) bool {
+	trimmed := strings.TrimSpace(response)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var obj map[string]any
+	return json.Unmarshal([]byte(trimmed), &obj) == nil && len(obj) == 0
+}
+
+// isWrapperEnvelope reports whether raw matches the wrap-exec adapter's
+// synthetic envelope shape (exactly the keys ok + exit_code), which the
+// supervisor itself controls and therefore does not schema-validate (#383).
+func isWrapperEnvelope(raw []byte) bool {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil || len(m) != 2 {
+		return false
+	}
+	_, hasOK := m["ok"]
+	_, hasExit := m["exit_code"]
+	return hasOK && hasExit
 }
 
 var fencedJSONPattern = regexp.MustCompile("(?s)(?:```|`)(?:json)?\\s*(\\{.*?\\})\\s*(?:```|`)")
@@ -721,12 +748,13 @@ func (s *Supervisor) collect(
 
 		// Perform result validation before finishing attempt
 		resultJSON := mustResultJSON(wr, stdoutText, stderrText)
+		rawResult, _ := os.ReadFile(resultPath)
 		task, _ := s.cp.GetTask(ctx, taskID)
 		attempt := 1
 		if task != nil {
 			attempt = task.Attempts
 		}
-		validation, errorCalls := s.validateResult(ctx, taskID, workerID, attempt, wr, resultJSON, stdoutText, stderrText)
+		validation, errorCalls := s.validateResult(ctx, taskID, workerID, attempt, wr, resultJSON, rawResult, stdoutText, stderrText)
 
 		// Store error calls if any
 		for _, ec := range errorCalls {
@@ -742,6 +770,19 @@ func (s *Supervisor) collect(
 		if !validation.Valid {
 			success = false
 			finishErr = firstNonEmpty(finishErr, "validation failed")
+			// #383: the stored envelope must carry the rejection verdict —
+			// never the worker's self-reported success. Legitimate failures
+			// already carry ok=false; only a self-reported success that
+			// failed schema validation needs the rewrite.
+			if wr.OK {
+				rejected := wr
+				rejected.OK = false
+				rejected.Response = ""
+				rejected.Status = "failed"
+				rejected.Reason = firstNonEmpty(wr.Reason, firstOf(validation.SchemaErrors), "result rejected by schema validation")
+				rejected.Summary = "worker result failed schema validation"
+				resultJSON = mustResultJSON(rejected, stdoutText, stderrText)
+			}
 		}
 
 		// Perform contract validation
@@ -965,10 +1006,22 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 			}
 		}
 		if agyRes.Result.Status == "SUCCESS" {
+			// #383: the model's response text IS the deliverable. A SUCCESS
+			// stream with an empty or empty-object response produced no
+			// evidence — reject it instead of sealing a hollow completion.
+			if degenerateResponse(agyRes.Result.Response) {
+				return workerResult{
+					OK:      false,
+					Status:  "failed",
+					Reason:  "worker stream reported SUCCESS without deliverable content (empty response)",
+					Summary: "no task evidence produced by the worker response",
+				}
+			}
 			return workerResult{
-				OK:      true,
-				Status:  "succeeded",
-				Summary: "AGY completed successfully",
+				OK:       true,
+				Status:   "succeeded",
+				Response: agyRes.Result.Response,
+				Summary:  "AGY completed successfully",
 			}
 		}
 	}
@@ -1030,6 +1083,7 @@ func (s *Supervisor) validateResult(
 	attempt int,
 	wr workerResult,
 	resultJSON json.RawMessage,
+	rawResult []byte,
 	stdoutText, stderrText string,
 ) (controlplane.ResultValidation, []controlplane.ErrorCallRecord) {
 	validation := controlplane.ResultValidation{
@@ -1040,6 +1094,74 @@ func (s *Supervisor) validateResult(
 		Details:       map[string]string{},
 	}
 	var errorCalls []controlplane.ErrorCallRecord
+
+	// #383: the worker-written result file is the worker-controlled artifact
+	// — a compromised worker must not be able to poison result_json with an
+	// arbitrary shape. Require boolean `ok` and a non-empty string `status`.
+	// The wrap-exec adapter's own synthetic envelope (exactly {ok, exit_code})
+	// is trusted infrastructure, not worker-authored — exempt it.
+	if len(rawResult) > 0 && !isWrapperEnvelope(rawResult) {
+		var rawMap map[string]any
+		if err := json.Unmarshal(rawResult, &rawMap); err != nil {
+			validation.Valid = false
+			validation.SchemaErrors = append(validation.SchemaErrors, fmt.Sprintf("worker result file is not a JSON object: %v", err))
+			errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+				Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+				WorkerID:   workerID,
+				Attempt:    attempt,
+				ErrorType:  "schema_error",
+				ErrorMsg:   "worker result file is not a JSON object",
+				StackTrace: "",
+			})
+		} else {
+			if okVal, present := rawMap["ok"]; !present {
+				validation.Valid = false
+				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file missing required boolean field \"ok\"")
+				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+					WorkerID:   workerID,
+					Attempt:    attempt,
+					ErrorType:  "schema_error",
+					ErrorMsg:   "worker result file missing \"ok\"",
+					StackTrace: "",
+				})
+			} else if _, isBool := okVal.(bool); !isBool {
+				validation.Valid = false
+				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file field \"ok\" is not a boolean")
+				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+					WorkerID:   workerID,
+					Attempt:    attempt,
+					ErrorType:  "schema_error",
+					ErrorMsg:   "worker result file \"ok\" not boolean",
+					StackTrace: "",
+				})
+			}
+			if statusVal, present := rawMap["status"]; !present {
+				validation.Valid = false
+				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file missing required string field \"status\"")
+				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+					WorkerID:   workerID,
+					Attempt:    attempt,
+					ErrorType:  "schema_error",
+					ErrorMsg:   "worker result file missing \"status\"",
+					StackTrace: "",
+				})
+			} else if statusStr, isStr := statusVal.(string); !isStr || statusStr == "" {
+				validation.Valid = false
+				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file field \"status\" must be a non-empty string")
+				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+					WorkerID:   workerID,
+					Attempt:    attempt,
+					ErrorType:  "schema_error",
+					ErrorMsg:   "worker result file \"status\" empty or not a string",
+					StackTrace: "",
+				})
+			}
+		}
+	}
 
 	// Schema validation: check result has required structure
 	if len(resultJSON) == 0 {
@@ -1553,6 +1675,9 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 	}
 	if wr.Summary != "" {
 		envelope["summary"] = wr.Summary
+	}
+	if wr.Response != "" {
+		envelope["response"] = wr.Response
 	}
 	if len(wr.ContractViolation) > 0 {
 		envelope["contract_violation"] = wr.ContractViolation

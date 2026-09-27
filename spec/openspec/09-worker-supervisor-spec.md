@@ -159,3 +159,29 @@ mutex-guarded, so concurrent runs may ingest simultaneously without data races.
 #### Scenario: concurrent runs close the engine exactly once
 - With N runs in flight, the engine closes only after the last run exits, and
   every run's events reach the ledger.
+
+### Requirement: Worker result envelope is schema-validated and carries the deliverable (#383)
+
+The AGY stream-json terminal `result` event's `response` text is the task's
+deliverable: it is surfaced on the worker result and stored in the result
+envelope, not discarded. A stream-sourced success whose response is empty,
+whitespace, or an empty JSON object is a **rejection**: the attempt finishes
+FAILED (never COMPLETED) with a no-deliverable reason. A worker-written result
+file must parse to a JSON object with boolean `ok` and non-empty string
+`status`; any other shape is a schema validation failure recorded in
+`result_validation` and finishes the attempt FAILED — a prompt-injected worker
+cannot poison `result_json` with arbitrary shapes.
+
+#### Scenario: stream response reaches the stored envelope
+- A captured stdout with a terminal `{"event":"result","result":{"status":
+  "SUCCESS","response":"<text>"}}` event produces a succeeded result whose
+  envelope includes `response` equal to `<text>`.
+
+#### Scenario: degenerate stream response is rejected
+- A terminal `SUCCESS` event whose response is `"{}"` or empty finishes the
+  attempt FAILED with a no-deliverable reason instead of COMPLETED.
+
+#### Scenario: raw result file without ok/status fails validation
+- A worker-written result file `{"unexpected":1}` yields
+  `result_validation.valid = false` with a schema error, and the task state is
+  FAILED — not WORKER_COMPLETED.
