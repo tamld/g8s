@@ -89,3 +89,24 @@ independent adversarial review, layer check W or C alone.
   serial-routing + fail-fast tests added).
 - Mid-review the reviewer's own -race run surfaced a data race in the test
   itself (unlocked `len(pending)` read) — fixed before push.
+
+## PR-B execution ledger (2026-09-27) + dogfood evidence
+
+- **PR-B (#405, merged cafdb2b)**: RED `flag provided but not defined:
+  -concurrency` → GREEN dual-pass + windows build + pre-push 12/12.
+  Independent review round 1: CHANGES REQUIRED (2 MAJOR) → fixed: crash
+  recovery via per-attempt session rows aligned with the #401 `sess/`
+  reaper sweep (+ per-attempt heartbeats), error surfacing via #404
+  OnError → exit 1. 3 MINOR + 3 NIT also fixed. PR-A2 (#404, merged
+  ef37800) delivered LoopOptions.OnError.
+- **Dogfood Mode-1 (operator mandate: use g8s+agy on g8s itself)**:
+  2 real read_only scout dispatches (submit → worker → agy 1.2.11 →
+  receipt). Zero-change oracle clean both runs. agy stream-json terminal
+  events carried substantive recon for #383 BOTH times, but
+  `parseAGYResult` discarded the model's `response` — the stored result
+  had no deliverable. Live proof of #383's thesis; also verified the
+  #401 reaper, sessions registry, and version-sync gates on real runs.
+  Scout artifact: /tmp/g8s-pilot-state/recon-final.txt (readWorkerResult
+  :978/:985 fields validated vs unvalidated).
+- Author identity per operator: all commits/pushes as
+  `Tâm <63218248+tamld@users.noreply.github.com>` (repo config fixed).
