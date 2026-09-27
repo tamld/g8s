@@ -48,7 +48,7 @@ Never place in any packet, draft, log, or issue — internal or external:
   worker's citation instead)
 - secrets, tokens, API keys, passwords, `.env` values, connection strings
 - provider configuration, model quotas, account identifiers
-- absolute paths containing usernames (`/Users/<name>/…`, `C:\Users\<name>\…`)
+- absolute paths containing usernames (`~<user>/…`, `<drive>:\Users\<user>\…`)
 - hostnames, internal URLs, IPs, repo names/URLs of private projects
 - emails, real names, team/org identifiers
 - raw receipts and raw logs (use the sanitized, bounded capture)
