@@ -67,6 +67,14 @@ func runBriefIssue(args []string) {
 		exitUsage("brief-issue", "dor-floor", *traceID, brief.FloorFailureError(floor).Error(), "Fix the listed DoR checks before issuing", *jsonl)
 	}
 
+	// L2 Jev-judged quality (#398, DELTA-22 r3): advisory only, gated on
+	// broker availability. Never blocks issuance.
+	if jevVerdict, jevErr := brief.ApplyJevQuality(*title, payload); jevErr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] brief-issue: %v\n", jevErr)
+	} else if jevVerdict != "" {
+		fmt.Fprintf(os.Stderr, "[info] brief-issue: Jev quality verdict: %s\n", jevVerdict)
+	}
+
 	ttl, err := time.ParseDuration(*ttlStr)
 	if err != nil {
 		exitRuntime("brief-issue", "", *traceID, cli.CodeInvalid, err, "Use valid duration format (e.g. 2h, 30m)", *jsonl)
