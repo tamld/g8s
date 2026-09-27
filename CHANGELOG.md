@@ -2,15 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.12.0] - 2026-09-27
-
-### Added
-- 
-
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.12.0] - 2026-09-27
+
+### Added
+- **Concurrent worker drain (#394)**: `g8s worker --concurrency N` — up to N simultaneous supervised attempts, per-attempt worktree isolation via the orchestrator pool, sessions-registry crash recovery, hard usage error outside a git checkout. Internal `RunLoop` gains `Concurrency`/`Isolation`/`OnTask`/`OnError`.
+- **Memory promotion gate (#395, ADR-0023)**: entry FSM (7 states) + label schema (kind/lifecycle/trust/salience/scope/provenance), payload-hash tombstones (G1, monotone), naked-payload Jev gate with allowlist verdicts (G3), meta-entry rejection (G4), provenance bulk revocation (`g8s memory revoke --session`), out-of-sample-only salience. Jev-free read path by construction.
+- **Context Broker (#396, ADR-0021 §8.2)**: `internal/context` assembles bounded `ContextPacket`s (≤4096 chars, fail-open per source, `broker_failure` observability); `TriageRequest` v2 with byte-compatible flags; L1 `reflex triage` pilot wiring (`--no-enrich` for legacy).
+- **Brief DoR floor + advisory skill routing (#398, DELTA-22)**: deterministic blocking floor (goal/scope/DoD/receipt-for-workspace_write), `skill_suggestions` envelope field (zero enforcement), Jev quality advisory behind `G8S_BRIEF_JEV_QUALITY`.
+- **Live eval (#379)**: agy/claude `WorkerProvider` adapters (read-only dispatch, bounded timeout, sanitized capture) + deterministic semantic-class scoring (refusal signatures → BLOCKED). First live PRI recorded: 0.625 (15/24).
+- **Vendored operator skills**: `skills/g8s-supervisor` charter v4.0.0 + `skills/manifest.json` — the supervisor/worker operating practice ships with the repo.
+
+### Fixed
+- **Worker result schema validation (#383, SEC)**: worker-authored result files are whitelist-schema-validated (boolean `ok`, non-empty `status`, size cap); self-reported successes failing validation are rewritten to `ok=false` rejection envelopes; the deliverable `response` is surfaced through central sanitization; `result_validation`/`error_call_history` survive `FinishAttempt`.
+- **Telemetry lifecycle (#253 latent)**: per-run close silenced every later run's telemetry in one process; engine lifecycle is now refcounted (concurrency-safe, closes exactly once).
+- **L3 Jev quality gate is advisory by default (#411)**: context-blind rejects no longer fail attempts (`G8S_L3_JEV_BLOCK=1` to opt back in); the memory promotion sensor is wired in production (fail-closed on unknown verdicts).
+- **eval list JSON envelope** silently emitted zero bytes (unmarshalable `Runner` func).
 
 ## [0.11.0] - 2026-09-26
 
