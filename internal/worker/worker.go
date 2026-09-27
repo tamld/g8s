@@ -297,10 +297,14 @@ type processChild struct {
 	cmd  *exec.Cmd
 	done chan struct{}
 	code int
+	// job holds the Windows Job Object handle (KILL_ON_JOB_CLOSE, #415
+	// PR-2); 0 on POSIX where containment is the process group.
+	job      uintptr
+	jobClose sync.Once
 }
 
-func newProcessChild(cmd *exec.Cmd) *processChild {
-	c := &processChild{cmd: cmd, done: make(chan struct{})}
+func newProcessChild(cmd *exec.Cmd, job uintptr) *processChild {
+	c := &processChild{cmd: cmd, done: make(chan struct{}), job: job}
 	go func() {
 		err := cmd.Wait()
 		c.code = exitCodeOf(err)
@@ -346,6 +350,10 @@ func (c *processChild) Terminate(grace time.Duration) {
 	case <-c.done:
 	case <-time.After(grace + time.Second):
 	}
+	// #415 PR-2 (Windows): closing the Job Object handle hard-terminates
+	// every process still in the job (KILL_ON_JOB_CLOSE) — the belt to the
+	// taskkill suspenders. POSIX no-op.
+	c.closeJob()
 }
 
 // processRunner is the production Runner: exec with POSIX process groups.
@@ -378,7 +386,15 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	}
 	_ = os.WriteFile(filepath.Join(opts.RunDir, "child.pid"),
 		[]byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
-	return newProcessChild(cmd), nil
+	// #415 PR-2 (Windows): contain the whole tree in a Job Object with
+	// KILL_ON_JOB_CLOSE — the kernel kills every process (including
+	// detached grandchildren) the moment the handle closes. POSIX returns
+	// a zero handle (process-group containment applies instead).
+	job, jerr := spawnJobHandle(cmd)
+	if jerr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] worker: job object containment unavailable: %v\n", jerr)
+	}
+	return newProcessChild(cmd, job), nil
 }
 
 // workerResult is the JSON contract a worker writes to result.json.
@@ -659,6 +675,12 @@ func (s *Supervisor) collect(
 		child.Terminate(terminateGrace)
 	}
 	code := child.WaitCode()
+	// #415 PR-2 (Windows): the attempt has reached its terminal branch —
+	// close the Job Object handle so the kernel reaps the whole tree
+	// (KILL_ON_JOB_CLOSE), including grandchildren that survived taskkill.
+	if jc, ok := child.(interface{ closeJob() }); ok {
+		jc.closeJob()
+	}
 
 	stdoutRaw, _ := os.ReadFile(stdoutPath)
 	stderrRaw, _ := os.ReadFile(stderrPath)
