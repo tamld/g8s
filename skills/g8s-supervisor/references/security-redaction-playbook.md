@@ -88,9 +88,9 @@ at all.
 
 ### Worked example
 
-Finding (raw, internal): "TamLD's g8s repo: `bin/g8s get <task>` on the
-/home/tamld/Documents/github/g8s pilot showed ok:true while the agy response
-was `{}`".
+Finding (raw, internal — deliberately shown WITH a leak for contrast):
+"`bin/g8s get <task>` run in `<workspace>` during the pilot showed ok:true
+while the agy response was `{}`".
 
 - L2 upstream packet: "The supervisor accepts a stream-terminated result
   whose `response` field is an empty JSON object and stores it as a
