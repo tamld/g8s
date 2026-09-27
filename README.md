@@ -202,48 +202,48 @@ Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and 
 g8s/
 ├── cmd/g8s/                # CLI entrypoint (stdlib flag-based, no cobra)
 ├── internal/               # All packages (private, not importable)
-│   ├── analyzer/ —  implements AST-based reference tracking and Blast Radius
-│   ├── autopilot/ —  implements the cron-based supervisor trigger that scans
-│   ├── brief/ —  implements structured brief dispatch and consumption contracts
-│   ├── cleanup/ —  implements ghost process and orphan resource detection
-│   ├── cli/ —  defines the unified JSON envelope and standard flag parsing
-│   ├── codeintel/ —  implements multi-tier code intelligence and blast radius
-│   ├── completion/ —  generates shell auto-completion scripts for bash, zsh, and fish
-│   ├── config/ —  loads the operator-declared provider registry that feeds
-│   ├── context/ —  is the Context Broker (ADR-0021 §8
-│   ├── controlplane/ —  implements the DELTA-03 SQLite-backed task queue with
+│   ├── analyzer/ — implements AST-based reference tracking and Blast Radius
+│   ├── autopilot/ — implements the cron-based supervisor trigger that scans
+│   ├── brief/ — implements structured brief dispatch and consumption contracts
+│   ├── cleanup/ — implements ghost process and orphan resource detection
+│   ├── cli/ — defines the unified JSON envelope and standard flag parsing
+│   ├── codeintel/ — implements multi-tier code intelligence and blast radius
+│   ├── completion/ — generates shell auto-completion scripts for bash, zsh, and fish
+│   ├── config/ — loads the operator-declared provider registry that feeds
+│   ├── context/ — is the Context Broker (ADR-0021 §8
+│   ├── controlplane/ — implements the DELTA-03 SQLite-backed task queue with
 │   ├── conv/ — (no package doc — add one)
-│   ├── dialectic/ —  implements the Dialectic Bounce lifecycle (#258 Phase A):
-│   ├── diffintel/ —  implements pure-Go unified diff parsing, noise pruning,
-│   ├── dispatch/ —  implements the bounded AGY CLI dispatch wrapper ported
-│   ├── doctor/ —  implements diagnostic sanity checks for g8s environment,
+│   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A):
+│   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning,
+│   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported
+│   ├── doctor/ — implements diagnostic sanity checks for g8s environment,
 │   ├── harness/ — (no package doc — add one)
-│   ├── heartbeat/ —  implements per-session worker heartbeat tracking and freshness
-│   ├── hooks/ —  provides lifecycle hook implementations for g8s orchestrator workers
-│   ├── initwiz/ —  provides interactive and headless onboarding wizards for g8s,
-│   ├── lockfile/ —  provides non-blocking exclusive advisory file locks used
-│   ├── mcp/ —  implements the g8s Model Context Protocol (MCP) server over
+│   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness
+│   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers
+│   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s,
+│   ├── lockfile/ — provides non-blocking exclusive advisory file locks used
+│   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over
 │   ├── memory/ — (no package doc — add one)
-│   ├── orchestrator/ —  implements the Brain→Worker fan-out layer that sits
-│   ├── pathutil/ —  provides cross-platform path resolution for g8s data,
-│   ├── process/ —  provides cross-platform process discovery, inspection, and
-│   ├── provider/ —  implements native discovery and concurrency governance
-│   ├── receipt/ —  implements zero-trust write receipts for delegated
-│   ├── reflex/ —  implements a System 1 non-autoregressive decision gate
-│   ├── registry/ —  provides a cross-platform wrapper around Windows registry operations
+│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits
+│   ├── pathutil/ — provides cross-platform path resolution for g8s data,
+│   ├── process/ — provides cross-platform process discovery, inspection, and
+│   ├── provider/ — implements native discovery and concurrency governance
+│   ├── receipt/ — implements zero-trust write receipts for delegated
+│   ├── reflex/ — implements a System 1 non-autoregressive decision gate
+│   ├── registry/ — provides a cross-platform wrapper around Windows registry operations
 │   ├── review/ — (no package doc — add one)
-│   ├── runtime/ —  provides runtime verification utilities for executable identity
-│   ├── server/ —  implements the g8s daemon mode with HTTP API server
-│   ├── service/ —  manages the g8s background worker as an OS daemon
-│   ├── settings/ —  manages persistent, atomic user and system configurations for g8s
-│   ├── signing/ —  provides code signing and signature verification primitives
+│   ├── runtime/ — provides runtime verification utilities for executable identity
+│   ├── server/ — implements the g8s daemon mode with HTTP API server
+│   ├── service/ — manages the g8s background worker as an OS daemon
+│   ├── settings/ — manages persistent, atomic user and system configurations for g8s
+│   ├── signing/ — provides code signing and signature verification primitives
 │   ├── sleep/ — (no package doc — add one)
-│   ├── state/ —  implements pure FSM transition validation and append-only event logging
-│   ├── supervisor/ —  — enforcer
+│   ├── state/ — implements pure FSM transition validation and append-only event logging
+│   ├── supervisor/ — enforcer
 │   ├── telemetry/ — (no package doc — add one)
-│   ├── vault/ —  implements a Zero-CGO, decoupled Knowledge Vault for g8s
-│   ├── watch/ —  implements the blocking watch primitive (#371): poll a
-│   ├── worker/ —  provides worker lifecycle supervision, execution containment,
+│   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s
+│   ├── watch/ — implements the blocking watch primitive (#371): poll a
+│   ├── worker/ — provides worker lifecycle supervision, execution containment,
 │   └── ...                 # supporting packages
 ├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)
 ├── packaging/              # Windows NSIS/WiX, Chocolatey, winget

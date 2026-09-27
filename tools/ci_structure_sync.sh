@@ -26,6 +26,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 cd "$REPO_ROOT"
+export LC_ALL=C # byte-determinism: identical string ops on every platform
 
 START_MARKER="<!-- structure:start -->"
 END_MARKER="<!-- structure:end -->"
@@ -48,22 +49,26 @@ static_entry() {
 }
 
 # doc_summary extracts the one-line package summary from the source files
-# of a package directory: the first `// Package <name>` line, trimmed of
-# the prefix, terminated at the first sentence boundary.
+# of a package directory: the first `// Package <name>` line, stripped of
+# the prefix and separators, terminated at the first sentence period.
+# Byte-deterministic across platforms: LC_ALL=C, POSIX [[:space:]] classes
+# only (never \s — BSD and GNU sed disagree), no length-based truncation
+# (the #419 CI drift was a BSD-vs-GNU \s mismatch producing an extra space).
 doc_summary() {
     local dir="$1" pkg="$2"
     local line
-    line=$(grep -h "^// Package ${pkg}\b" "$dir"/*.go 2>/dev/null | head -1 || true)
+    line=$(grep -hE "^// Package ${pkg}([^[:alnum:]]|$)" "$dir"/*.go 2>/dev/null | head -1 || true)
     [ -n "$line" ] || { echo "(no package doc — add one)"; return; }
     line=${line#*Package ${pkg}}
-    line=${line##*(—|:| - )}
-    line=$(echo "$line" | sed 's/^\s*[-—:]*\s*//')
-    # terminate at first sentence period
+    while true; do
+        case "$line" in
+            [[:space:]]*) line=${line#?} ;;
+            [-—:]*) line=${line#?} ;;
+            *) break ;;
+        esac
+    done
     line=${line%%.*}
-    if [ "${#line}" -gt 90 ]; then
-        line="${line:0:90}"
-    fi
-    [ -n "$(echo "$line" | tr -d ' ')" ] && echo "$line" || echo "(no package doc — add one)"
+    [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ] && printf '%s\n' "$line" || echo "(no package doc — add one)"
 }
 
 render() {
