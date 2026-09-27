@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tamld/g8s/internal/brief"
@@ -23,6 +25,7 @@ func runBriefIssue(args []string) {
 	payloadStr := fs.String("payload", "", "inline markdown payload")
 	dodFile := fs.String("dod-file", "", "path to markdown DoD file")
 	dodStr := fs.String("dod", "", "inline markdown DoD")
+	permission := fs.String("permission", "read_only", "dispatch permission class (read_only|workspace_write) — workspace_write requires a receipt reference")
 	issuedBy := fs.String("issued-by", "", "issuer identity (defaults to --actor)")
 	ttlStr := fs.String("ttl", "2h", "time-to-live duration (e.g. 2h, 30m, 3600s)")
 	if err := fs.Parse(args); err != nil {
@@ -55,6 +58,13 @@ func runBriefIssue(args []string) {
 	}
 	if dod == "" {
 		exitUsage("brief-issue", "", *traceID, "brief-issue requires --dod-file or --dod", "Provide either --dod-file or --dod", *jsonl)
+	}
+
+	// L2 deterministic DoR floor (#398): mechanical, blocking, no Jev, no
+	// broker dependency. A floor failure is a usage error naming every
+	// failed check.
+	if floor := brief.CheckDoRFloor(*title, payload, dod, *permission); !floor.OK {
+		exitUsage("brief-issue", "dor-floor", *traceID, brief.FloorFailureError(floor).Error(), "Fix the listed DoR checks before issuing", *jsonl)
 	}
 
 	ttl, err := time.ParseDuration(*ttlStr)
@@ -113,12 +123,36 @@ func executeBriefIssue(w io.Writer, store *controlplane.Store, title, payload, d
 	if err != nil {
 		return brief.Brief{}, err
 	}
-	env := cli.NewEnvelope("brief", "brief-issue", "", b)
+	// L4 advisory skill routing (#398): deterministic keyword/manifest match
+	// over the operator-local skill bank — display-only, zero enforcement,
+	// silent degradation when the bank is absent. The envelope stays
+	// flat-backward-compatible: brief fields at data.* plus one new
+	// skill_suggestions key.
+	data := map[string]any{}
+	if raw, merr := json.Marshal(b); merr == nil {
+		_ = json.Unmarshal(raw, &data)
+	}
+	if bank := brief.ScanSkillBank(skillBankDir()); bank != nil {
+		data["skill_suggestions"] = brief.SuggestSkills(title, payload, bank, 3)
+	}
+	env := cli.NewEnvelope("brief", "brief-issue", "", data)
 	env.TraceID = traceID
 	if err := cli.WriteResponse(w, env, jsonl); err != nil {
 		return brief.Brief{}, fmt.Errorf("format brief json: %w", err)
 	}
 	return b, nil
+}
+
+// skillBankDir resolves the operator-local skill bank (L4 advisory routing).
+func skillBankDir() string {
+	if p := os.Getenv("G8S_SKILL_BANK"); p != "" {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".agents", "skills")
 }
 
 // preflightSection builds the negative-pattern pre-flight section from the
