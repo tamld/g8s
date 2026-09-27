@@ -7,6 +7,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
 // workerConcurrencyEnv builds the binary plus a mock-provider environment
@@ -100,18 +103,37 @@ func submitTasks(t *testing.T, binPath string, run func(dir string, args ...stri
 }
 
 // N>1 in a directory that cannot provide worktree isolation must be a hard
-// usage error (exit 2) — ratified wording, never a warning.
+// usage error — exit 2, ratified wording, and no session row may exist.
 func TestWorkerConcurrencyRequiresWorktreeIsolation(t *testing.T) {
-	_, run, _ := workerConcurrencyEnv(t)
+	_, run, dbPath := workerConcurrencyEnv(t)
 	plainDir := t.TempDir() // not a git repo
 
 	cmd := run(plainDir, "worker", "--once=false", "--concurrency", "2", "--json")
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected usage error outside a git checkout, got success: %s", out)
+	exitCode := 0
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			exitCode = ee.ExitCode()
+		}
+	}
+	if exitCode != 2 {
+		t.Fatalf("expected usage exit code 2, got %d (%s)", exitCode, out)
 	}
 	if !strings.Contains(envelopeMessage(t, out), "concurrency>1 requires worktree isolation") {
 		t.Fatalf("expected ratified hard-gate message, got: %s", out)
+	}
+	var rows int
+	db, derr := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=ro"))
+	if derr != nil {
+		t.Fatalf("open control plane: %v", derr)
+	}
+	defer db.Close()
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&rows); err != nil {
+		t.Fatalf("query sessions: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("no session row may exist when the gate rejects, got %d", rows)
 	}
 }
 
@@ -128,6 +150,21 @@ func TestWorkerConcurrencyOnceIsUsageError(t *testing.T) {
 	}
 	if !strings.Contains(envelopeMessage(t, out), "--once=false") {
 		t.Fatalf("expected remediation hint pointing at --once=false, got: %s", out)
+	}
+}
+
+// --concurrency < 1 is rejected at the CLI instead of silently meaning 1.
+func TestWorkerConcurrencyBelowOneIsUsageError(t *testing.T) {
+	_, run, _ := workerConcurrencyEnv(t)
+	repoDir := initGitRepo(t)
+
+	cmd := run(repoDir, "worker", "--once=false", "--concurrency", "0", "--json")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected usage error for --concurrency 0, got success: %s", out)
+	}
+	if !strings.Contains(envelopeMessage(t, out), "--concurrency must be >= 1") {
+		t.Fatalf("expected >= 1 validation message, got: %s", out)
 	}
 }
 
@@ -158,8 +195,10 @@ func TestWorkerConcurrentDrainE2E(t *testing.T) {
 		}
 	}
 
-	// Session provenance (#393): exactly one registered session, finished dead.
-	db, derr := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	// Session provenance (#393): one drain row + one row per attempt, all
+	// finished dead; attempt rows carry their private worktree path so the
+	// #401 reaper can sweep a SIGKILLed drain (crash-recovery contract).
+	db, derr := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=ro"))
 	if derr != nil {
 		t.Fatalf("open control plane: %v", derr)
 	}
@@ -168,8 +207,15 @@ func TestWorkerConcurrentDrainE2E(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE status = 'dead' AND mode = 'worktree'`).Scan(&sessions); err != nil {
 		t.Fatalf("query sessions: %v", err)
 	}
-	if sessions != 1 {
-		t.Fatalf("expected exactly 1 finished session row, got %d", sessions)
+	if sessions != 3 { // 1 drain + 2 attempts (concurrency 2, 3 tasks)
+		t.Fatalf("expected 3 finished session rows (drain + 2 attempts), got %d", sessions)
+	}
+	var unpathed int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE status = 'dead' AND mode = 'worktree' AND (worktree_path IS NULL OR worktree_path = '') AND id LIKE 'worker-%'`).Scan(&unpathed); err != nil {
+		t.Fatalf("query attempt rows: %v", err)
+	}
+	if unpathed != 0 {
+		t.Fatalf("attempt rows must carry their worktree path for the reaper, got %d without", unpathed)
 	}
 }
 
@@ -178,15 +224,19 @@ func TestWorkerConcurrentDrainE2E(t *testing.T) {
 func TestWorkerDefaultDrainUnchanged(t *testing.T) {
 	binPath, run, _ := workerConcurrencyEnv(t)
 	repoDir := initGitRepo(t)
-	submitTasks(t, binPath, run, "serial-drain", 1)
+	ids := submitTasks(t, binPath, run, "serial-drain", 1)
 
 	cmd := run(repoDir, "worker", "--once=false", "--json")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("serial drain failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), `"drained"`) {
-		t.Fatalf("expected drained envelope, got: %s", out)
+	stdout := string(out)
+	if !strings.Contains(stdout, "worker_task") || !strings.Contains(stdout, ids[0]) {
+		t.Fatalf("expected worker_task envelope for %s, got: %s", ids[0], stdout)
+	}
+	if !strings.Contains(stdout, `"drained"`) {
+		t.Fatalf("expected drained envelope, got: %s", stdout)
 	}
 }
 
