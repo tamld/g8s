@@ -65,3 +65,10 @@ func forceKillProcessTree(pid int) error {
 	}
 	return err
 }
+
+// groupAlive is a Windows stub: POSIX process-group probing does not apply.
+// Real Windows containment (Job Objects with KILL_ON_JOB_CLOSE) lands in
+// #415 PR-2.
+func groupAlive(pid int) bool {
+	return false
+}
