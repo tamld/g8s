@@ -1,6 +1,6 @@
 # ADR-0023: Memory Lifecycle — States, Labels, Gates, and Termination Guarantees
 
-**Status**: Proposed
+**Status**: Accepted (implemented in #408; red contract C1–C9 green)
 **Date**: 2026-09-26
 **Deciders**: Operator via 3-round T1 brainstorm (states → protocol → termination); drafted by Brain/main agent
 **Related**: #395 (promotion gate slice), #396 (Context Broker consumer), ADR-0021 §8.2 (Context Broker sketch), ADR-0022 (session protocol), PR #399 (sessions registry — same pattern, prior application), DELTA-11/21 (storage+retrieval SSoT — unchanged by this ADR)

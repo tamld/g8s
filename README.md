@@ -21,7 +21,7 @@
 
 `g8s` (pronounced **"Gates"** — short for **G**atekeeper**s**) is a standalone, single-binary runtime designed for **Two-Tier Multi-Agent Systems**. It enables high-tier "Brain" orchestrators (Claude 3.7 Sonnet / Opus, GPT-4o, DeepSeek R1) to safely delegate heavy mechanical tasks (code scanning, unit test synthesis, MCP mapping, artifact extraction) to fast, lightweight CLI workers (Antigravity `agy`, Claude Code CLI, Gemini CLI, Ollama) behind **strict role contracts, sandboxes, and cryptographic/time-limited write receipts**.
 
-**v0.11.0 (2026-09-26)** delivers the complete **DELTA-11 Orchestration Roadmap**, Jev AI reflex sensor decoupling, native DiffDistiller & Verifier subagent pipeline, plus hardened governance gates:
+**v0.12.0 (2026-09-27)** delivers the complete **DELTA-11 Orchestration Roadmap**, Jev AI reflex sensor decoupling, native DiffDistiller & Verifier subagent pipeline, plus hardened governance gates:
 
 | Concern | Deliverable | Status |
 |---------|-------------|--------|
@@ -64,7 +64,7 @@
 
 ---
 
-## 🚀 Key Features (v0.11.0)
+## 🚀 Key Features (v0.12.0)
 
 * **⚡ Ultra Fast & Lightweight**: Written in Pure Go (Zero CGO). Single ~15MB binary, starts in < 15ms, uses < 15MB RAM as a background daemon.
 * **🛡️ Defense-in-Depth Safety Gates**:
@@ -219,28 +219,28 @@ Add to your `claude_desktop_config.json` or `.cursor/mcp.json`:
 
 ---
 
-## 📦 Release Artifacts (v0.11.0)
+## 📦 Release Artifacts (v0.12.0)
 
 Archives (GoReleaser v2 — macOS ships a single universal binary):
 
 | Artifact | Platform |
 |----------|----------|
-| `g8s_v0.11.0_darwin_all.tar.gz` | macOS universal (Intel + Apple Silicon) |
-| `g8s_v0.11.0_linux_amd64.tar.gz` | Linux x86_64 |
-| `g8s_v0.11.0_linux_arm64.tar.gz` | Linux ARM64 |
-| `g8s_v0.11.0_windows_amd64.zip` | Windows x86_64 |
+| `g8s_v0.12.0_darwin_all.tar.gz` | macOS universal (Intel + Apple Silicon) |
+| `g8s_v0.12.0_linux_amd64.tar.gz` | Linux x86_64 |
+| `g8s_v0.12.0_linux_arm64.tar.gz` | Linux ARM64 |
+| `g8s_v0.12.0_windows_amd64.zip` | Windows x86_64 |
 
-Packages (Linux, additionally published): `g8s_0.11.0_amd64.deb`, `g8s_0.11.0_arm64.deb`, `g8s-0.11.0-1.x86_64.rpm`, `g8s-0.11.0-1.aarch64.rpm`, `g8s_0.11.0_amd64.apk`, `g8s_0.11.0_aarch64.apk`. Always derive the exact asset names from the release page (`gh release view v0.11.0 --json assets`) — #338.
+Packages (Linux, additionally published): `g8s_0.12.0_amd64.deb`, `g8s_0.12.0_arm64.deb`, `g8s-0.11.0-1.x86_64.rpm`, `g8s-0.11.0-1.aarch64.rpm`, `g8s_0.12.0_amd64.apk`, `g8s_0.12.0_aarch64.apk`. Always derive the exact asset names from the release page (`gh release view v0.12.0 --json assets`) — #338.
 
 ### Verification
 ```bash
 # Checksums (SHA256)
-sha256sum g8s_v0.11.0_*.tar.gz g8s_v0.11.0_*.zip checksums.txt
+sha256sum g8s_v0.12.0_*.tar.gz g8s_v0.12.0_*.zip checksums.txt
 
 # Cosign signature verification (when published)
-cosign verify-blob --signature g8s_v0.11.0_darwin_all.tar.gz.sig \
-  --certificate g8s_v0.11.0_darwin_all.tar.gz.pem \
-  g8s_v0.11.0_darwin_all.tar.gz
+cosign verify-blob --signature g8s_v0.12.0_darwin_all.tar.gz.sig \
+  --certificate g8s_v0.12.0_darwin_all.tar.gz.pem \
+  g8s_v0.12.0_darwin_all.tar.gz
 ```
 
 ---
