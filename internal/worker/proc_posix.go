@@ -34,3 +34,19 @@ func groupAlive(pid int) bool {
 	}
 	return syscall.Kill(-pid, 0) == nil
 }
+
+// spawnJobHandle is a POSIX stub: attempt containment uses process groups
+// (Setpgid + killProcessGroup); Job Objects are Windows-only (#415 PR-2).
+func spawnJobHandle(cmd *exec.Cmd) (uintptr, error) {
+	return 0, nil
+}
+
+// closeJobHandle is a POSIX stub — nothing to close.
+func closeJobHandle(h uintptr) {}
+
+// closeJob is a POSIX no-op on the handle (nothing to close — process-
+// group containment applies), kept in parity with the Windows path so the
+// shared Terminate/collect call sites stay branch-free.
+func (c *processChild) closeJob() {
+	c.jobClose.Do(func() { closeJobHandle(0) })
+}
