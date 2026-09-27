@@ -1459,8 +1459,17 @@ func runWorker(args []string) {
 	once := fs.Bool("once", true, "claim and execute a single task, then exit")
 	model := fs.String("model", "", "restrict to tasks targeting this model")
 	lease := fs.Int("lease", 60, "lease duration seconds")
+	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("worker", "", *traceID, err.Error(), "", *jsonl)
+	}
+	if *concurrency < 1 {
+		exitUsage("worker", "concurrency", *traceID, "--concurrency must be >= 1", "", *jsonl)
+	}
+	if *concurrency > 1 && *once {
+		exitUsage("worker", "concurrency", *traceID,
+			"--concurrency N>1 requires --once=false",
+			"usage: g8s worker --once=false --concurrency N", *jsonl)
 	}
 	dbPath, dbErr := databasePath()
 	if dbErr != nil {
@@ -1521,6 +1530,12 @@ func runWorker(args []string) {
 		}))
 
 	ctx := context.Background()
+	if *concurrency > 1 {
+		// #394 PR-B: concurrent drain — hard-gated on worktree isolation,
+		// session-registered for provenance and cleanup.
+		runWorkerConcurrentDrain(ctx, sup, store, *actor, *lease, *concurrency, *jsonMode, *jsonl, *traceID)
+		return
+	}
 	for {
 		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: *actor, LeaseSeconds: *lease})
 		if err != nil {
