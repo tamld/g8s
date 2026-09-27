@@ -1,0 +1,47 @@
+# Layer 1 Lane Bundles Configuration (ADR-0024 / docs/designs/gate-lane-routing.md)
+# Maps each PR lane to its required gate bundle.
+
+lanes:
+  0:
+    name: hotfix
+    description: "Emergency hotfix with supervisor approval"
+    gates:
+      - build
+      - targeted-tests
+      - retro-gate
+  D:
+    name: docs
+    description: "Documentation only changes (docs/* or *.md)"
+    gates:
+      - G2
+      - G3
+      - doc-contract
+  R:
+    name: refactor
+    description: "Refactoring without behavior change, mechanical edits"
+    gates:
+      - G2
+      - G4
+      - G5
+  F:
+    name: feature
+    description: "Default for features and fixes (>200 lines or behavior change)"
+    gates:
+      - G1
+      - G2
+      - G4
+      - G5
+      - G6
+  S:
+    name: security
+    description: "Changes touching declared trust boundaries"
+    gates:
+      - G1
+      - G2
+      - G3
+      - G4
+      - G5
+      - G6
+      - doc-contract
+      - redaction-scan
+      - review
