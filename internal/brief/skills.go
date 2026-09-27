@@ -73,7 +73,8 @@ func SuggestSkills(title, payload string, bank []SkillManifest, n int) []SkillMa
 	text := strings.ToLower(title + " " + payload)
 	words := map[string]bool{}
 	for _, w := range strings.FieldsFunc(text, func(r rune) bool {
-		return !('a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '-' || r == '_')
+		isWordByte := 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '-' || r == '_'
+		return !isWordByte
 	}) {
 		if len(w) >= 4 { // skip stopword-length noise
 			words[w] = true
