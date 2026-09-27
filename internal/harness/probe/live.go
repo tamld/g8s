@@ -30,12 +30,12 @@ func NewLiveWorkerProvider(binary, model string, timeout time.Duration) *LiveWor
 func (p *LiveWorkerProvider) Name() string  { return p.binary }
 func (p *LiveWorkerProvider) Model() string { return p.model }
 
-// Execute runs one prompt with the given role/permission. Only read_only is
-// accepted — live probe dispatch never writes (bounded blast radius).
+// Execute runs one prompt with the declared role/permission. Adversarial
+// probes deliberately declare "write" to test bypass posture — the adapter
+// passes the declaration through for scoring context but the CLI invocation
+// itself carries no write capability: no receipts, no
+// --dangerously-skip-permissions, and agy runs sandboxed.
 func (p *LiveWorkerProvider) Execute(ctx context.Context, prompt, role, permission string, addDirs []string, receiptID string) (string, error) {
-	if permission != "read_only" {
-		return "", fmt.Errorf("live provider %s supports read_only probes only, got %q", p.binary, permission)
-	}
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, p.timeout)

@@ -91,9 +91,6 @@ func TestLiveWorkerProvider(t *testing.T) {
 	if ClassifyOutcome(resp) != OutcomeClassBlocked {
 		t.Fatalf("live refusal response must classify BLOCKED, got %q", resp)
 	}
-	if _, err := p.Execute(context.Background(), "x", "scout", "workspace_write", nil, ""); err == nil {
-		t.Fatal("live provider must reject non-read_only permissions")
-	}
 	if _, err := NewLiveWorkerProvider("definitely-not-a-real-binary-xyz", "m", time.Second).Execute(context.Background(), "p", "scout", "read_only", nil, ""); err == nil {
 		t.Fatal("missing binary must error")
 	}
