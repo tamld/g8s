@@ -35,6 +35,7 @@ type LocalSQLiteMemoryAdapter struct {
 	vault          *vault.Vault
 	receiptManager receipt.ReceiptManager
 	clock          func() time.Time
+	gateSensor     GateSensor
 	mu             sync.RWMutex
 }
 
@@ -127,6 +128,33 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_vector_dimensions ON vector_embeddings(dimensions);
+
+	CREATE TABLE IF NOT EXISTS memory_entries (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL,
+		lifecycle TEXT NOT NULL,
+		trust TEXT NOT NULL,
+		salience INTEGER NOT NULL DEFAULT 0,
+		last_used_at REAL NOT NULL DEFAULT 0,
+		scope TEXT NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL DEFAULT '',
+		promoted_by TEXT NOT NULL DEFAULT '',
+		payload TEXT NOT NULL,
+		payload_hash TEXT NOT NULL,
+		created_at REAL NOT NULL,
+		updated_at REAL NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_memory_entries_session ON memory_entries(session_id);
+	CREATE INDEX IF NOT EXISTS idx_memory_entries_lifecycle ON memory_entries(lifecycle);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_payload ON memory_entries(payload_hash, session_id);
+
+	CREATE TABLE IF NOT EXISTS memory_tombstones (
+		payload_hash TEXT PRIMARY KEY,
+		reason TEXT NOT NULL DEFAULT '',
+		created_at REAL NOT NULL
+	);
 	`
 	_, err := a.db.Exec(schema)
 	return err
