@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	g8scontext "github.com/tamld/g8s/internal/context"
 )
 
 func TestKeyPoolLoading(t *testing.T) {
@@ -526,5 +528,81 @@ func TestPathMatchesGlobstar(t *testing.T) {
 		if got := pathMatches(tc.file, tc.pattern); got != tc.want {
 			t.Errorf("pathMatches(%q, %q) = %v, want %v", tc.file, tc.pattern, got, tc.want)
 		}
+	}
+}
+
+func TestEmitOutputQualitySignalIncludesContextPacket(t *testing.T) {
+	var capturedPayload map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
+		resp := JevResponse{
+			Model: "jev-latest",
+			Answers: map[string]Answer{
+				"output_quality":      {Type: "score", Score: 4.5, Confidence: 0.9},
+				"output_authenticity": {Type: "noul", Noul: 0.05, Confidence: 0.95},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(
+		WithEndpoint(ts.URL),
+		WithKeys([]string{"test-key"}),
+		WithEnvFile(false),
+	)
+
+	// Case 1: with ContextPacket
+	reqWithContext := OutputQualityRequest{
+		TaskID:        "task-oq-1",
+		OutputExcerpt: "success stdout",
+		ExpectedShape: "analysis",
+		ExitCode:      0,
+		DurationSec:   2,
+		ContextPacket: &g8scontext.ContextPacket{
+			RecentOutcomes: []string{"task_completed task-prev"},
+		},
+	}
+
+	_, err := gate.EmitOutputQualitySignal(context.Background(), reqWithContext)
+	if err != nil {
+		t.Fatalf("EmitOutputQualitySignal with context failed: %v", err)
+	}
+
+	state, ok := capturedPayload["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing state in payload: %v", capturedPayload)
+	}
+	cp, hasCP := state["context_packet"].(map[string]any)
+	if !hasCP || cp == nil {
+		t.Fatalf("expected context_packet in state payload, got %v", state)
+	}
+	outcomes, ok := cp["recent_outcomes"].([]any)
+	if !ok || len(outcomes) == 0 {
+		t.Fatalf("expected recent_outcomes in context_packet, got %v", cp)
+	}
+
+	// Case 2: nil ContextPacket (v1 backward compat)
+	reqNilContext := OutputQualityRequest{
+		TaskID:        "task-oq-2",
+		OutputExcerpt: "success stdout",
+		ExpectedShape: "analysis",
+		ExitCode:      0,
+		DurationSec:   2,
+		ContextPacket: nil,
+	}
+
+	capturedPayload = nil
+	_, err = gate.EmitOutputQualitySignal(context.Background(), reqNilContext)
+	if err != nil {
+		t.Fatalf("EmitOutputQualitySignal nil context failed: %v", err)
+	}
+	state, ok = capturedPayload["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing state in payload: %v", capturedPayload)
+	}
+	if _, hasCP := state["context_packet"]; hasCP {
+		t.Fatalf("v1 request must not contain context_packet, got %v", state)
 	}
 }

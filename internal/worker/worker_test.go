@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -1187,5 +1188,114 @@ func TestTelemetryIngestionHook(t *testing.T) {
 	s2.ingestTrace(telemetry.TraceEventTaskFailed, "task-tel-2", nil, "x")
 	if s2.telEngine != nil {
 		t.Fatal("engine must stay nil when telemetry is not enabled")
+	}
+}
+
+// fakeQualityGate captures OutputQualityRequest for L3 testing.
+type fakeQualityGate struct {
+	mu       sync.Mutex
+	captured []reflex.OutputQualityRequest
+}
+
+func (f *fakeQualityGate) EmitOutputQualitySignal(ctx context.Context, req reflex.OutputQualityRequest) (reflex.ReflexSignal, error) {
+	f.mu.Lock()
+	f.captured = append(f.captured, req)
+	f.mu.Unlock()
+	return reflex.ReflexSignal{
+		Source:     "fake",
+		RiskScore:  0.5,
+		Confidence: 0.9,
+	}, nil
+}
+
+// #418: TestL3EnrichmentIncludesContext tests that the worker L3 post-run path
+// assembles situational context from the telemetry engine and passes it in
+// the OutputQualityRequest to EmitOutputQualitySignal.
+func TestL3EnrichmentIncludesContext(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telemetry.db")
+	t.Setenv("G8S_TELEMETRY", "1")
+	t.Setenv("G8S_TELEMETRY_DB", dbPath)
+
+	env := newWorkerEnv(t, time.Now)
+	gate := &fakeQualityGate{}
+	env.sup.qualityGate = gate
+
+	// Seed telemetry with events prior to the task run
+	ec := 0
+	env.sup.ingestTrace(telemetry.TraceEventTaskCompleted, "prior-task-1", &ec, "")
+	ecFail := 1
+	env.sup.ingestTrace(telemetry.TraceEventTaskFailed, "prior-task-2", &ecFail, "syntax error")
+	env.sup.closeTelemetry()
+
+	task := submitTask(t, env, "idem-l3-enrichment", 1, nil)
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-l3",
+		LeaseSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil || claimed.TaskID != task.TaskID {
+		t.Fatalf("expected claimed task %s, got %+v", task.TaskID, claimed)
+	}
+
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if len(gate.captured) == 0 {
+		t.Fatal("expected EmitOutputQualitySignal to be invoked at L3 post-run gate")
+	}
+	oqReq := gate.captured[0]
+	if oqReq.ContextPacket == nil {
+		t.Fatal("expected non-nil ContextPacket in OutputQualityRequest")
+	}
+	if len(oqReq.ContextPacket.RecentOutcomes) == 0 {
+		t.Fatalf("expected RecentOutcomes to contain telemetry events, got %+v", oqReq.ContextPacket)
+	}
+
+	// Verify that the recent events were formatted into RecentOutcomes
+	foundPrior := false
+	for _, o := range oqReq.ContextPacket.RecentOutcomes {
+		if strings.Contains(o, "prior-task-1") || strings.Contains(o, "prior-task-2") {
+			foundPrior = true
+			break
+		}
+	}
+	if !foundPrior {
+		t.Fatalf("expected recent outcomes to mention seeded tasks, got %v", oqReq.ContextPacket.RecentOutcomes)
+	}
+}
+
+// TestL3EnrichmentFailOpenWithoutTelemetry verifies that if telemetry engine
+// is nil or disabled, the broker fails open: NewBroker+Assemble succeeds,
+// yielding a minimal packet, and L3 quality gate evaluation proceeds normally.
+func TestL3EnrichmentFailOpenWithoutTelemetry(t *testing.T) {
+	t.Setenv("G8S_TELEMETRY", "1")
+	// Non-existent invalid DB path to force telemetry initialization error or disabled engine
+	t.Setenv("G8S_TELEMETRY_DB", "")
+
+	env := newWorkerEnv(t, time.Now)
+	gate := &fakeQualityGate{}
+	env.sup.qualityGate = gate
+
+	task := submitTask(t, env, "idem-l3-failopen", 1, nil)
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-failopen",
+		LeaseSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil || claimed.TaskID != task.TaskID {
+		t.Fatalf("expected claimed task %s, got %+v", task.TaskID, claimed)
+	}
+
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if len(gate.captured) == 0 {
+		t.Fatal("expected EmitOutputQualitySignal to be invoked at L3 post-run gate")
+	}
+	oqReq := gate.captured[0]
+	if oqReq.ContextPacket == nil {
+		t.Fatal("expected non-nil ContextPacket even when telemetry is empty (fail-open)")
 	}
 }
