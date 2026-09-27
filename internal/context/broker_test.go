@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func testSources(vault []string, vErr error, outcomes []string, oErr error, phase string, pErr error) Sources {
@@ -73,5 +74,67 @@ func TestAssembleBudgetCap(t *testing.T) {
 	}
 	if !p.Truncated {
 		t.Fatal("packet must be flagged truncated when the budget cut content")
+	}
+}
+
+// Helper-path coverage: rune-safe truncation, deterministic sort, budget
+// drop order (outcomes before notes), huge SomPhase, fit boundary.
+func TestTruncateRuneSafeMultibyte(t *testing.T) {
+	s := strings.Repeat("đ perpetual context €", 400)
+	got := truncateRuneSafe(s, 1000)
+	if len(got) > 1000 {
+		t.Fatalf("clamp exceeded budget: %d", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("clamp split a rune: invalid UTF-8")
+	}
+}
+
+func TestSortStringsDeterministic(t *testing.T) {
+	items := []string{"m", "a", "z"}
+	SortStrings(items, func(a, b string) bool { return a < b })
+	if items[0] != "a" || items[2] != "z" {
+		t.Fatalf("sort not applied: %v", items)
+	}
+}
+
+func TestAssembleBudgetDropsOutcomesBeforeNotes(t *testing.T) {
+	notes := []string{strings.Repeat("n", 500), strings.Repeat("n", 500)}
+	outcomes := make([]string, 20)
+	for i := range outcomes {
+		outcomes[i] = strings.Repeat("o", 500)
+	}
+	b := NewBroker(testSources(notes, nil, outcomes, nil, "", nil), nil)
+	p := b.Assemble(context.Background())
+	if len(p.VaultNotes) != 2 {
+		t.Fatalf("notes must survive outcome dropping, got %d", len(p.VaultNotes))
+	}
+	if len(p.RecentOutcomes) >= 20 {
+		t.Fatalf("outcomes must be dropped first under budget, got %d", len(p.RecentOutcomes))
+	}
+	if p.Bytes() > 4096 {
+		t.Fatalf("packet still over budget: %d", p.Bytes())
+	}
+	if !p.Truncated {
+		t.Fatal("budget drop must flag truncation")
+	}
+}
+
+func TestAssembleHugeSomPhaseClamped(t *testing.T) {
+	b := NewBroker(testSources(nil, nil, nil, nil, strings.Repeat("p", 5000), nil), nil)
+	p := b.Assemble(context.Background())
+	if p.Bytes() > maxPacketChars {
+		t.Fatalf("huge SomPhase blew the budget: %d", p.Bytes())
+	}
+	if !p.Truncated {
+		t.Fatal("clamp must flag truncation")
+	}
+}
+
+func TestFitBoundaryAtFive(t *testing.T) {
+	items := []string{"1", "2", "3", "4", "5"}
+	kept, cut := fit(items)
+	if cut || len(kept) != 5 {
+		t.Fatalf("exactly-5 must not be flagged cut, got cut=%v len=%d", cut, len(kept))
 	}
 }

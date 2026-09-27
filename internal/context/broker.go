@@ -117,12 +117,14 @@ func (b *Broker) Assemble(ctx context.Context) *ContextPacket {
 		case len(p.VaultNotes) > 1:
 			p.VaultNotes = p.VaultNotes[:len(p.VaultNotes)-1]
 		default:
-			rest := maxPacketChars - (len(p.SomPhase) + 16)
-			if rest < 0 {
-				rest = 0
+			if len(p.VaultNotes) == 1 {
+				if rest := maxPacketChars - (len(p.SomPhase) + 16); rest > 0 && len(p.VaultNotes[0]) > rest {
+					p.VaultNotes[0] = truncateRuneSafe(p.VaultNotes[0], rest)
+				}
 			}
-			if len(p.VaultNotes) == 1 && len(p.VaultNotes[0]) > rest {
-				p.VaultNotes[0] = truncateRuneSafe(p.VaultNotes[0], rest)
+			if len(p.SomPhase) > maxPacketChars {
+				p.SomPhase = truncateRuneSafe(p.SomPhase, maxPacketChars)
+				p.Truncated = true
 			}
 			return p
 		}
