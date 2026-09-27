@@ -1,0 +1,90 @@
+# Issue Packet Template (Fix / Optimization)
+
+> **Use for**: Fix (observed `kind:"error"`) or Optimization (success violates acceptance check)
+> **Required**: All sections. Incomplete = `EVIDENCE_GAP` → retest or stop.
+
+---
+
+## Issue Type
+
+- [ ] **Fix** — Observed `kind:"error"` envelope
+- [ ] **Optimization** — Successful run violates declared acceptance check
+
+---
+
+## Executable Identity (Binary Admission — REQUIRED)
+
+| Field | Value | Source |
+|-------|-------|--------|
+| Canonical path | `{{CANONICAL_PATH}}` | `which g8s` |
+| SHA-256 digest | `{{SHA256}}` | `sha256sum bin/g8s` |
+| Self-reported version | `{{VERSION_JSON}}` | `g8s version --json` |
+| Immutable provenance | `{{PROVENANCE}}` | Git commit from version |
+| Safe capability evidence | `{{DOCTOR_JSON}}` | `g8s doctor --json` |
+| Regression result | `{{REGRESSION}}` | `g8s cleanup --dry-run` + `g8s status --worker --json` |
+
+---
+
+## Context & Reproduction
+
+| Field | Value |
+|-------|-------|
+| OS/Arch | `{{OS_ARCH}}` |
+| g8s mode | `{{MODE}}` (CLI direct / MCP stdio / Service daemon) |
+| Command executed | `{{COMMAND}}` (exact with flags) |
+| Worker model | `{{WORKER_MODEL}}` |
+| Role/Permission | `{{ROLE_PERMISSION}}` |
+
+---
+
+## Observed Behavior
+
+```
+{{SANITIZED_RECEIPT_JSON}}
+```
+
+- **Expected**: Task state `SUCCEEDED`, receipt consumed, evidence valid
+- **Actual**: Task state `{{ACTUAL_STATE}}`, error envelope: `{{ERROR_ENVELOPE}}`
+
+---
+
+## Logs & Evidence (Attach)
+
+- [ ] `g8s get {{TASK_ID}} --json` output
+- [ ] `g8s status --worker --json` (heartbeat snapshot)
+- [ ] Run directory: `{{RUN_ROOT}}/{{TASK_ID}}/attempt-{{ATTEMPT}}/receipt.json`
+- [ ] Control plane query: `sqlite3 control.db "SELECT * FROM tasks WHERE id='{{TASK_ID}}'"`
+
+---
+
+## Competing Hypotheses (Supervisor Analysis)
+
+1. **H1**: `{{HYPOTHESIS_1}}` (Reference: `{{REF_1}}`)
+2. **H2**: `{{HYPOTHESIS_2}}` (Reference: `{{REF_2}}`)
+3. **H3**: `{{HYPOTHESIS_3}}` (Reference: `{{REF_3}}`)
+4. **H4**: `{{HYPOTHESIS_4}}` (Reference: `{{REF_4}}`)
+
+---
+
+## Proposed Resolution (Supervisor Opinion)
+
+> `{{PROPOSED_RESOLUTION}}`
+
+---
+
+## Acceptance Checks (DoD for Fix)
+
+- [ ] `go test -race ./...` passes
+- [ ] `golangci-lint` clean
+- [ ] New test case in `internal/{{PKG}}/{{PKG}}_test.go` covering scenario
+- [ ] OpenSpec delta updated (if behavior change)
+
+---
+
+## Cross-Check Evidence (Pre-Publication)
+
+> **Required before GitHub issue draft**. Only fresh `clear` → `ISSUE_DRAFTED`.
+
+- [ ] Upstream ref: `{{UPSTREAM_REF}}` (commit/tag/PR)
+- [ ] Cross-check result: `{{CROSS_CHECK}}` (clear/duplicate/stale/unknown/expired/mismatch)
+- [ ] Evidence attached: `{{CROSS_CHECK_EVIDENCE}}`

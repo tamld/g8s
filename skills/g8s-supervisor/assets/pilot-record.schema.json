@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "g8s Pilot Record",
+  "type": "object",
+  "required": [
+    "objective",
+    "task_class",
+    "expected_result",
+    "executable_identity",
+    "admission_state",
+    "allowed_paths",
+    "permission",
+    "worker_role",
+    "worker_timeout",
+    "acceptance_checks",
+    "evidence_sink",
+    "redaction_declaration",
+    "competing_hypotheses",
+    "stop_conditions"
+  ],
+  "properties": {
+    "objective": { "type": "string", "minLength": 10 },
+    "task_class": { "type": "string", "enum": ["pilot", "regression", "qualification", "investigation"] },
+    "expected_result": { "type": "string", "minLength": 10 },
+    "executable_identity": {
+      "type": "object",
+      "required": ["canonical_path", "sha256", "version_json", "provenance", "doctor_json", "regression_pass"],
+      "properties": {
+        "canonical_path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "version_json": { "type": "object" },
+        "provenance": {
+          "type": "object",
+          "required": ["git_commit", "build_timestamp", "builder"],
+          "properties": {
+            "git_commit": { "type": "string" },
+            "build_timestamp": { "type": "string", "format": "date-time" },
+            "builder": { "type": "string" },
+            "release_tag": { "type": "string" }
+          }
+        },
+        "doctor_json": { "type": "object" },
+        "regression_pass": { "type": "boolean" }
+      }
+    },
+    "admission_state": { "type": "string", "enum": ["UNQUALIFIED", "QUALIFIED_LIMITED", "QUALIFIED_CURRENT", "QUARANTINED"] },
+    "allowed_paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "permission": { "type": "string", "enum": ["read_only", "automation_read", "workspace_write"] },
+    "worker_role": { "type": "string", "enum": ["collector", "scout", "mcp-mapper", "summarizer", "verifier", "test-runner"] },
+    "worker_timeout": { "type": "string", "pattern": "^\\d+[smh]$" },
+    "acceptance_checks": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "evidence_sink": { "type": "string", "description": "Path for evidence artifacts (e.g., plans/reports/g8s/)" },
+    "redaction_declaration": {
+      "type": "object",
+      "required": ["strategy", "patterns"],
+      "properties": {
+        "strategy": { "type": "string", "enum": ["sanitize", "redact"] },
+        "patterns": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "competing_hypotheses": {
+      "type": "array",
+      "items": { "type": "object", "required": ["id", "description"], "properties": { "id": { "type": "string" }, "description": { "type": "string" } } },
+      "minItems": 2
+    },
+    "stop_conditions": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  },
+  "additionalProperties": false
+}
