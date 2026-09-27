@@ -36,6 +36,7 @@ type LocalSQLiteMemoryAdapter struct {
 	receiptManager receipt.ReceiptManager
 	clock          func() time.Time
 	gateSensor     GateSensor
+	sinkFn         GateEventSink
 	mu             sync.RWMutex
 }
 
@@ -89,6 +90,10 @@ func NewLocalSQLiteMemoryAdapter(opts AdapterOptions) (*LocalSQLiteMemoryAdapter
 	if err := adapter.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("memory: init schema: %w", err)
+	}
+
+	if adapter.sinkFn == nil {
+		adapter.sinkFn = func(event, detail string) {}
 	}
 
 	return adapter, nil
@@ -148,7 +153,8 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_memory_entries_session ON memory_entries(session_id);
 	CREATE INDEX IF NOT EXISTS idx_memory_entries_lifecycle ON memory_entries(lifecycle);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_payload ON memory_entries(payload_hash, session_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_payload ON memory_entries(payload_hash, session_id)
+		WHERE lifecycle NOT IN ('scratch', 'working');
 
 	CREATE TABLE IF NOT EXISTS memory_tombstones (
 		payload_hash TEXT PRIMARY KEY,

@@ -35,10 +35,10 @@ func (s *stubSensor) assess(payload string) (string, error) {
 	return s.verdict, s.err
 }
 
-func entry(kind, payload, session string) *MemoryEntry {
+func entry(kind MemoryKind, payload, session string) *MemoryEntry {
 	return &MemoryEntry{
-		ID:        "e-" + kind + "-" + session,
-		Kind:      MemoryKind(kind),
+		ID:        "e-" + string(kind) + "-" + session,
+		Kind:      kind,
 		Lifecycle: LifecycleScratch,
 		Trust:     TrustUnverified,
 		Scope:     ScopeSession,
@@ -236,5 +236,129 @@ func TestBulkRevokeBySession(t *testing.T) {
 	}
 	if got, _ := a.GetEntry(ctx, other.ID); got.Lifecycle != LifecycleActive {
 		t.Fatal("entry from another session must be untouched")
+	}
+}
+
+// --- #395 review-hardening pins ---
+
+// CRITICAL pin: the capture → promote flow (ADR §4). A payload captured as
+// scratch in its own session must be PROMOTED (the row transitions), not
+// dropped for a UNIQUE-index collision with a fabricated duplicate.
+func TestProposePromotesCapturedScratchRow(t *testing.T) {
+	a, _ := newGateEnv(t)
+	ctx := context.Background()
+	e := entry("fact", "captured then promoted", "s-flow")
+	if err := a.CaptureScratch(ctx, e); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if err := a.ProposeEntry(ctx, e); err != nil {
+		t.Fatalf("propose after capture: %v", err)
+	}
+	got, err := a.GetEntry(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Lifecycle != LifecycleActive || got.ID != e.ID {
+		t.Fatalf("scratch row must transition to active in place, got %s/%s", got.ID, got.Lifecycle)
+	}
+}
+
+// The gate's primary "say no" path: a blocked verdict must reject.
+func TestGateBlockedVerdictRejects(t *testing.T) {
+	a, s := newGateEnv(t)
+	a.SetGateSensor(s.assess)
+	s.verdict = "blocked"
+	if err := a.ProposeEntry(context.Background(), entry("fact", "poison attempt", "sb")); err == nil {
+		t.Fatal("blocked verdict must reject promotion")
+	}
+}
+
+// Sensor down (error) = DEGRADED: fail-open with trust=unverified + a
+// broker_failure event on the sink.
+func TestGateSensorDownFailsOpenUnverified(t *testing.T) {
+	a, s := newGateEnv(t)
+	a.SetGateSensor(s.assess)
+	s.err = errors.New("sensor offline")
+	var events []string
+	a.SetGateEventSink(func(event, detail string) { events = append(events, event) })
+	e := entry("fact", "entry during sensor outage", "sd")
+	if err := a.ProposeEntry(context.Background(), e); err != nil {
+		t.Fatalf("sensor-down must fail open: %v", err)
+	}
+	if e.Trust != TrustUnverified {
+		t.Fatalf("fail-open must never grant trust, got %s", e.Trust)
+	}
+	found := false
+	for _, ev := range events {
+		if ev == "broker_failure" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("DEGRADED must emit broker_failure telemetry, got %v", events)
+	}
+}
+
+// Unknown sensor verdicts fail CLOSED (a drifted verdict must not silently
+// promote).
+func TestGateUnknownVerdictFailsClosed(t *testing.T) {
+	a, s := newGateEnv(t)
+	a.SetGateSensor(s.assess)
+	s.verdict = "PROBABLY FINE"
+	if err := a.ProposeEntry(context.Background(), entry("fact", "verdict drift", "su")); err == nil {
+		t.Fatal("unrecognized verdict must fail closed")
+	}
+}
+
+// G1 monotonicity: repeated revocation sweeps add nothing and never delete
+// tombstones.
+func TestTombstoneMonotonicity(t *testing.T) {
+	a, _ := newGateEnv(t)
+	ctx := context.Background()
+	e := entry("fact", "tombstone me once", "st")
+	if err := a.ProposeEntry(ctx, e); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if n, _ := a.RevokeBySession(ctx, "st"); n != 1 {
+		t.Fatalf("first sweep = %d", n)
+	}
+	if n, _ := a.RevokeBySession(ctx, "st"); n != 0 {
+		t.Fatalf("second sweep must find nothing, got %d", n)
+	}
+	reborn := entry("fact", "tombstone me once", "st2")
+	reborn.ID = "e-reborn"
+	if err := a.ProposeEntry(ctx, reborn); err == nil {
+		t.Fatal("tombstoned payload must stay rejected after re-sweep")
+	}
+}
+
+func TestListEntriesFilters(t *testing.T) {
+	a, _ := newGateEnv(t)
+	ctx := context.Background()
+	for _, seed := range []struct {
+		id, session string
+		kind        MemoryKind
+	}{
+		{"e-l1", "sA", KindFact},
+		{"e-l2", "sA", KindJudgment},
+		{"e-l3", "sB", KindFact},
+	} {
+		e := entry(seed.kind, "payload "+seed.id, seed.session)
+		e.ID = seed.id
+		if err := a.ProposeEntry(ctx, e); err != nil {
+			t.Fatalf("propose %s: %v", seed.id, err)
+		}
+	}
+	bySession, err := a.ListEntries(ctx, MemoryFilter{SessionID: "sA"})
+	if err != nil || len(bySession) != 2 {
+		t.Fatalf("session filter: %d entries (%v)", len(bySession), err)
+	}
+	byKind, err := a.ListEntries(ctx, MemoryFilter{SessionID: "sA", Kind: KindJudgment})
+	if err != nil || len(byKind) != 1 || byKind[0].ID != "e-l2" {
+		t.Fatalf("kind filter: %+v (%v)", byKind, err)
+	}
+	byState, err := a.ListEntries(ctx, MemoryFilter{Lifecycle: LifecycleActive})
+	if err != nil || len(byState) != 3 {
+		t.Fatalf("lifecycle filter: %d entries (%v)", len(byState), err)
 	}
 }

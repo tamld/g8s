@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/pathutil"
@@ -935,20 +936,21 @@ func RenderPreflightContext(patterns []NegativePattern) string {
 		fmt.Fprintf(&section, "- **Remediation**: %s\n", p.Remediation)
 		fmt.Fprintf(&section, "- **Confidence**: %.0f%% (%d occurrences)\n\n", p.ConfidenceScore*100, p.OccurrenceCount)
 		if sb.Len()+section.Len() > preflightBudgetCap {
-			remaining := preflightBudgetCap - sb.Len()
-			if remaining > 0 {
-				text := section.String()
-				if remaining <= len(text) {
-					sb.WriteString(text[:remaining])
-				}
-			}
+			// #395 review: prefer dropping a whole section over cutting it
+			// mid-line; the final clamp below is the only partial render and
+			// it is rune-safe.
 			break
 		}
 		sb.WriteString(section.String())
 	}
 	out := sb.String()
 	if len(out) > preflightBudgetCap {
-		out = out[:preflightBudgetCap]
+		// Rune-safe clamp: never emit invalid UTF-8 mid-rune.
+		cut := out[:preflightBudgetCap]
+		for !utf8.ValidString(cut) {
+			cut = cut[:len(cut)-1]
+		}
+		out = cut
 	}
 	return out
 }

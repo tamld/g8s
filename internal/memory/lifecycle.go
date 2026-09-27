@@ -78,11 +78,18 @@ type MemoryEntry struct {
 }
 
 // GateSensor scores the NAKED payload (trust labels stripped — G3). The
-// production sensor is the Jev/reflex gate; tests inject stubs. Sensor
-// contract: return "blocked" to reject, any other verdict to pass; an error
-// means sensor-down and the gate fails open with trust=unverified (ADR-0023
-// DEGRADED state) — fail-open never grants trust.
+// production sensor is the Jev/reflex gate; tests inject stubs. Verdict
+// contract (allowlist, #395 review): only "clean" passes; "blocked" rejects;
+// ANY other non-error verdict is a sensor fault and fails CLOSED — a verdict
+// drift must disable promotion loudly, never silently. An error from the
+// sensor means sensor-down (DEGRADED): the gate fails OPEN with
+// trust=unverified and a broker_failure event — fail-open never grants trust.
 type GateSensor func(nakedPayload string) (verdict string, err error)
+
+// GateEventSink receives gate lifecycle events ("broker_failure" on sensor
+// down, "gate_rejected" on rejection) so DEGRADED is observable. Never nil
+// after the adapter is constructed.
+type GateEventSink func(event, detail string)
 
 // Lifecycle gate errors.
 var (
@@ -90,20 +97,28 @@ var (
 	ErrTombstoned        = errors.New("memory: payload hash is tombstoned (revoked payload cannot re-enter)")
 	ErrMetaEntry         = errors.New("memory: meta-entry rejected (memory-about-memory is forbidden, recursion depth 1)")
 	ErrGateBlocked       = errors.New("memory: promotion blocked by gate sensor")
+	ErrSensorFault       = errors.New("memory: gate sensor returned an unrecognized verdict (fail-closed)")
 	ErrInvalidEntry      = errors.New("memory: entry fails deterministic checks")
 	ErrUnknownEntry      = errors.New("memory: unknown entry")
 	ErrIllegalTransition = errors.New("memory: illegal FSM transition")
 )
 
-// legalTransitions encodes the ADR-0023 trust DAG: no upward re-entry,
-// doctrine/revoked absorbing. scratch→active exists only through ProposeEntry.
+// legalTransitions encodes the ADR-0023 trust DAG. Revocation is special:
+// bulk revoke sweeps every non-terminal state (RevokeBySession), so `to ==
+// revoked` bypasses this map for everything except the absorbing states.
+// working→scratch is the capture edge (ADR §1); scratch→active exists only
+// through ProposeEntry.
 var legalTransitions = map[MemoryLifecycle][]MemoryLifecycle{
+	LifecycleWorking:   {LifecycleScratch},
 	LifecycleActive:    {LifecycleDistilled, LifecycleArchived, LifecycleRevoked},
 	LifecycleArchived:  {LifecycleActive},
 	LifecycleDistilled: {LifecycleDoctrine},
 }
 
 func legalTransition(from, to MemoryLifecycle) bool {
+	if to == LifecycleRevoked && from != LifecycleRevoked && from != LifecycleDoctrine {
+		return true // bulk revocation sweeps any non-terminal state
+	}
 	for _, t := range legalTransitions[from] {
 		if t == to {
 			return true
@@ -111,6 +126,8 @@ func legalTransition(from, to MemoryLifecycle) bool {
 	}
 	return false
 }
+
+const maxMetaScanEntries = 10000
 
 func (a *LocalSQLiteMemoryAdapter) SetGateSensor(sensor GateSensor) {
 	a.mu.Lock()
@@ -124,7 +141,8 @@ func payloadHash(payload string) string {
 }
 
 // validateLabels runs the deterministic pre-gate checks (ADR-0023 §3.1):
-// required labels present, enums in range, payload non-empty.
+// required labels present, enums in range, payload non-empty. (Tri-anchor
+// verification is deferred per the v1 scope — see the S3a plan ledger.)
 func validateLabels(e *MemoryEntry) error {
 	if e == nil || e.ID == "" || e.Payload == "" {
 		return fmt.Errorf("%w: id and payload are required", ErrInvalidEntry)
@@ -143,9 +161,11 @@ func validateLabels(e *MemoryEntry) error {
 }
 
 // metaEntryRef checks G4: a payload that references another entry's ID is
-// memory-about-memory — recursion depth is 1 by fiat.
+// memory-about-memory — recursion depth is 1 by fiat. The scan is capped
+// (v1); G1 blocks exact-payload resurrection only, near-duplicate poison is
+// the sensor wall's problem.
 func (a *LocalSQLiteMemoryAdapter) metaEntryRef(payload string) (bool, error) {
-	rows, err := a.db.Query(`SELECT id FROM memory_entries`)
+	rows, err := a.db.Query(`SELECT id FROM memory_entries LIMIT ?`, maxMetaScanEntries)
 	if err != nil {
 		return false, err
 	}
@@ -155,16 +175,18 @@ func (a *LocalSQLiteMemoryAdapter) metaEntryRef(payload string) (bool, error) {
 		if err := rows.Scan(&id); err != nil {
 			return false, err
 		}
-		if id != "" && len(payload) >= len(id) && strings.Contains(payload, id) {
+		if id != "" && strings.Contains(payload, id) {
 			return true, nil
 		}
 	}
 	return false, rows.Err()
 }
 
-// ProposeEntry runs the promotion gate (scratch → active). Workers never call
-// this — promotion is Brain-side (ADR-0023 §3.1). On success the entry is
-// stored active with its gate-derived trust label.
+// ProposeEntry runs the promotion gate (scratch → active, ADR §3.1). Workers
+// never call this — promotion is Brain-side. It promotes an EXISTING
+// scratch/working row when one matches by ID or by (payload_hash, session_id)
+// — the true FSM edge — and otherwise inserts a fresh active entry. On
+// success the row is active with the gate-derived trust label.
 func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEntry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -190,21 +212,28 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 		return fmt.Errorf("memory: meta-entry scan: %w", err)
 	}
 	if meta {
+		a.sink("gate_rejected", "meta-entry: "+e.ID)
 		return ErrMetaEntry
 	}
 
 	// G3: the sensor sees the NAKED payload — no trust labels, no provenance.
+	// Verdict allowlist: only "clean" grants trust; "blocked" rejects; any
+	// other verdict is a sensor fault (fail-closed). Sensor-down errors fail
+	// OPEN with trust=unverified and a broker_failure event (DEGRADED).
 	trust := TrustUnverified
 	if a.gateSensor != nil {
 		verdict, serr := a.gateSensor(e.Payload)
 		switch {
 		case serr != nil:
-			// sensor down → fail-open without granting trust (DEGRADED)
-			trust = TrustUnverified
-		case verdict == "blocked":
+			a.sink("broker_failure", "sensor down: "+serr.Error())
+		case strings.EqualFold(verdict, "blocked"):
+			a.sink("gate_rejected", "sensor blocked: "+e.ID)
 			return ErrGateBlocked
-		case verdict == "clean":
+		case strings.EqualFold(verdict, "clean"):
 			trust = TrustJevChecked
+		default:
+			a.sink("broker_failure", "unrecognized sensor verdict: "+verdict)
+			return fmt.Errorf("%w: %q", ErrSensorFault, verdict)
 		}
 	}
 
@@ -212,18 +241,45 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 	e.Lifecycle = LifecycleActive
 	e.Trust = trust
 	e.PayloadHash = hash
+	// Resolve the promotion target: the entry's own scratch/working row, else
+	// an already-captured scratch row with the same payload in the same
+	// session (capture → promote, ADR §4), else a fresh insert.
+	var rowID string
+	if err := a.db.QueryRowContext(ctx,
+		`SELECT id FROM memory_entries WHERE id = ? AND lifecycle IN ('scratch', 'working')`,
+		e.ID).Scan(&rowID); errors.Is(err, sql.ErrNoRows) {
+		err = a.db.QueryRowContext(ctx,
+			`SELECT id FROM memory_entries WHERE payload_hash = ? AND session_id = ? AND lifecycle IN ('scratch', 'working')`,
+			hash, e.SessionID).Scan(&rowID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("memory: resolve promotion target: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("memory: resolve promotion target: %w", err)
+	}
+
+	if rowID != "" {
+		if _, err := a.db.ExecContext(ctx, `
+			UPDATE memory_entries
+			SET lifecycle = ?, trust = ?, payload_hash = ?, promoted_by = ?, updated_at = ?
+			WHERE id = ?`,
+			string(LifecycleActive), string(trust), hash, e.PromotedBy, now, rowID); err != nil {
+			return fmt.Errorf("memory: promote %s: %w", rowID, err)
+		}
+		e.ID = rowID
+	} else {
+		if _, err := a.db.ExecContext(ctx, `
+			INSERT INTO memory_entries
+				(id, kind, lifecycle, trust, salience, last_used_at, scope,
+				 session_id, task_id, promoted_by, payload, payload_hash, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			e.ID, string(e.Kind), string(LifecycleActive), string(trust), string(e.Scope),
+			e.SessionID, e.TaskID, e.PromotedBy, e.Payload, hash, now, now); err != nil {
+			return fmt.Errorf("memory: insert entry: %w", err)
+		}
+	}
 	e.CreatedAt = now
 	e.UpdatedAt = now
-	_, err = a.db.ExecContext(ctx, `
-		INSERT INTO memory_entries
-			(id, kind, lifecycle, trust, salience, last_used_at, scope,
-			 session_id, task_id, promoted_by, payload, payload_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, string(e.Kind), string(e.Lifecycle), string(e.Trust), string(e.Scope),
-		e.SessionID, e.TaskID, e.PromotedBy, e.Payload, e.PayloadHash, e.CreatedAt, e.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("memory: insert entry: %w", err)
-	}
 	return nil
 }
 
@@ -238,9 +294,7 @@ func (a *LocalSQLiteMemoryAdapter) CaptureScratch(ctx context.Context, e *Memory
 	}
 	now := float64(time.Now().UnixNano()) / 1e9
 	e.Lifecycle = LifecycleScratch
-	if e.Trust == "" || e.Trust != TrustUnverified {
-		e.Trust = TrustUnverified
-	}
+	e.Trust = TrustUnverified
 	e.PayloadHash = payloadHash(e.Payload)
 	e.CreatedAt = now
 	e.UpdatedAt = now
@@ -266,7 +320,7 @@ func (a *LocalSQLiteMemoryAdapter) TransitionEntry(ctx context.Context, id strin
 	if err != nil {
 		return err
 	}
-	if to == LifecycleActive && e.Lifecycle == LifecycleScratch {
+	if to == LifecycleActive && (e.Lifecycle == LifecycleScratch || e.Lifecycle == LifecycleWorking) {
 		return ErrGateRequired
 	}
 	if !legalTransition(e.Lifecycle, to) {
@@ -282,13 +336,22 @@ func (a *LocalSQLiteMemoryAdapter) TransitionEntry(ctx context.Context, id strin
 	return nil
 }
 
-// RevokeBySession bulk-revokes every entry promoted by sessionID and writes a
-// content-hash tombstone per swept entry (G1: the tombstone set is monotone —
-// un-revoke is operator-only and outside this API). Returns the swept count.
+// RevokeBySession bulk-revokes every entry promoted by sessionID in a single
+// immediate transaction (a concurrent propose cannot resurrect between scan
+// and tombstone — #395 review), writes one content-hash tombstone per swept
+// payload (G1: monotone set — un-revoke is operator-only and outside this
+// API), and reconciles same-hash active entries from OTHER sessions so a
+// late-arriving copy cannot survive its own tombstone. Returns swept count.
 func (a *LocalSQLiteMemoryAdapter) RevokeBySession(ctx context.Context, sessionID string) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	rows, err := a.db.QueryContext(ctx,
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("memory: revoke tx: %w", err)
+	}
+	defer tx.Rollback()
+	now := float64(time.Now().UnixNano()) / 1e9
+	rows, err := tx.Query(
 		`SELECT id, payload_hash FROM memory_entries
 		 WHERE session_id = ? AND lifecycle NOT IN ('revoked', 'doctrine')`, sessionID)
 	if err != nil {
@@ -308,24 +371,35 @@ func (a *LocalSQLiteMemoryAdapter) RevokeBySession(ctx context.Context, sessionI
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	now := float64(time.Now().UnixNano()) / 1e9
 	for _, v := range victims {
-		if _, err := a.db.ExecContext(ctx,
+		if _, err := tx.Exec(
 			`UPDATE memory_entries SET lifecycle = 'revoked', updated_at = ? WHERE id = ?`, now, v.id); err != nil {
 			return 0, fmt.Errorf("memory: revoke %s: %w", v.id, err)
 		}
-		if _, err := a.db.ExecContext(ctx,
+		if _, err := tx.Exec(
 			`INSERT OR IGNORE INTO memory_tombstones (payload_hash, reason, created_at) VALUES (?, ?, ?)`,
 			v.hash, "revoked session "+sessionID, now); err != nil {
 			return 0, fmt.Errorf("memory: tombstone %s: %w", v.id, err)
 		}
+	}
+	// Reconcile: tombstoned payloads must not stay active anywhere.
+	for _, v := range victims {
+		if _, err := tx.Exec(
+			`UPDATE memory_entries SET lifecycle = 'revoked', updated_at = ? WHERE payload_hash = ? AND lifecycle NOT IN ('revoked', 'doctrine')`,
+			now, v.hash); err != nil {
+			return 0, fmt.Errorf("memory: reconcile %s: %w", v.hash, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("memory: revoke commit: %w", err)
 	}
 	return len(victims), nil
 }
 
 // RecordReuse bumps salience for OUT-OF-SAMPLE corroboration only (G2's v1
 // deterministic subset): the promoting session re-reading its own entry is a
-// no-op — belief must be re-earned against other sessions, not itself.
+// no-op, an empty reader session is in-sample, and only active entries
+// accumulate salience — revoked/archived entries must not heat back up.
 func (a *LocalSQLiteMemoryAdapter) RecordReuse(ctx context.Context, id, readerSessionID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -333,12 +407,13 @@ func (a *LocalSQLiteMemoryAdapter) RecordReuse(ctx context.Context, id, readerSe
 	if err != nil {
 		return err
 	}
-	if readerSessionID == e.SessionID {
-		return nil // in-sample: no-op
+	if readerSessionID == "" || readerSessionID == e.SessionID || e.Lifecycle != LifecycleActive {
+		return nil // in-sample or non-active: no-op
 	}
+	now := float64(time.Now().UnixNano()) / 1e9
 	_, err = a.db.ExecContext(ctx,
 		`UPDATE memory_entries SET salience = salience + 1, last_used_at = ?, updated_at = ? WHERE id = ?`,
-		float64(time.Now().UnixNano())/1e9, float64(time.Now().UnixNano())/1e9, id)
+		now, now, id)
 	return err
 }
 
@@ -416,4 +491,21 @@ func scanEntry(row rowScanner) (*MemoryEntry, error) {
 	e.Trust = MemoryTrust(trust)
 	e.Scope = MemoryScope(scope)
 	return e, nil
+}
+
+// SetGateEventSink wires the DEGRADED observability sink (e.g. telemetry
+// broker_failure ingestion). Must be called before any gate evaluation to be
+// meaningful; the default sink is a no-op.
+func (a *LocalSQLiteMemoryAdapter) SetGateEventSink(sink GateEventSink) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if sink != nil {
+		a.sinkFn = sink
+	}
+}
+
+func (a *LocalSQLiteMemoryAdapter) sink(event, detail string) {
+	if a.sinkFn != nil {
+		a.sinkFn(event, detail)
+	}
 }
