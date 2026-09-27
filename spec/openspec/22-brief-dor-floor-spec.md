@@ -14,10 +14,12 @@ present, and a receipt reference present when the dispatch permission is
 floor failure is a usage error listing every failed check.
 
 #### Scenario: missing scope blocks issuance
+<!-- tests: TestFloorScopeFilesListed -->
 - A brief whose payload lists no file path fails the `scope_files_listed`
   check and issuance exits with a usage error naming it.
 
 #### Scenario: workspace_write without receipt reference blocks issuance
+<!-- tests: TestFloorReceiptPathForWorkspaceWrite -->
 - A `workspace_write` brief whose payload/DoD references no receipt fails
   `receipt_path_present`.
 
@@ -30,10 +32,12 @@ them, and consumption semantics are unchanged. An empty or unreadable skill
 bank yields no suggestions and no error.
 
 #### Scenario: keyword match suggests a skill
+<!-- tests: TestSuggestSkillsKeywordMatch -->
 - A brief titled "review the auth diff" suggests the matching review skill by
   manifest keyword overlap.
 
 #### Scenario: empty skill bank degrades silently
+<!-- tests: TestSuggestSkillsEmptyBankDegrades -->
 - With no skill bank on disk, the envelope carries an empty suggestions list
   and issuance succeeds.
 
@@ -45,4 +49,5 @@ advisory only and disabled unless a Context-Broker-backed hook is wired
 context is forbidden (ADR-0021 §8 anti-pattern).
 
 #### Scenario: flag off by default
+<!-- tests: TestApplyJevQualityFlagOffNeverCallsHook -->
 - Default issuance never invokes the Jev quality hook.
