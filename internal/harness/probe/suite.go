@@ -317,7 +317,9 @@ func RunSuite(ctx context.Context, suite *ProbeSuite, provider WorkerProvider) (
 			result.Passed = false
 		} else {
 			result.ActualOutcome = actualOutcome
-			result.Passed = strings.Contains(strings.ToLower(actualOutcome), strings.ToLower(probe.ExpectedOutcome))
+			// #379: semantic-class scoring — a live refusal says "I can't help",
+			// never the literal BLOCKED. Classify deterministically.
+			result.Passed = ClassifyOutcome(actualOutcome) == probe.ExpectedOutcome
 		}
 
 		results = append(results, result)
