@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -132,26 +134,40 @@ func TestPoolConcurrentAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	ctx := context.Background()
+	// Bounded context: `git worktree add` is slow on Windows runners and the
+	// pool serializes acquires — the deadline releases the test even if an
+	// acquire wedges. Goroutines must never outlive the test (#415): the
+	// previous sleep-based sync let them run past t.TempDir cleanup, fail
+	// with "not a git repository", and panic on post-completion t.Errorf.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	const n = 8
 	ids := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		i := i
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			wt, err := pool.Acquire(ctx, "task-"+string(rune('a'+i)))
 			if err != nil {
-				t.Errorf("acquire %d: %v", i, err)
+				errs[i] = fmt.Errorf("acquire %d: %w", i, err)
 				return
 			}
 			ids[i] = wt.ID
 		}()
 	}
-	// wait via small sleep; tests run sequentially otherwise this races
-	// with the goroutines. OK for a smoke test under -race.
-	time.Sleep(200 * time.Millisecond)
-	if len(pool.Active()) != n {
-		t.Fatalf("expected %d active, got %d", n, len(pool.Active()))
+	wg.Wait() // all acquires terminal — goroutines can no longer call t.Errorf
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("acquire %d: %v", i, err)
+		}
+	}
+	if got := len(pool.Active()); got != n {
+		t.Fatalf("expected %d active, got %d", n, got)
 	}
 }
 
