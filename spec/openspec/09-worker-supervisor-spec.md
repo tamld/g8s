@@ -163,25 +163,36 @@ mutex-guarded, so concurrent runs may ingest simultaneously without data races.
 ### Requirement: Worker result envelope is schema-validated and carries the deliverable (#383)
 
 The AGY stream-json terminal `result` event's `response` text is the task's
-deliverable: it is surfaced on the worker result and stored in the result
-envelope, not discarded. A stream-sourced success whose response is empty,
-whitespace, or an empty JSON object is a **rejection**: the attempt finishes
-FAILED (never COMPLETED) with a no-deliverable reason. A worker-written result
-file must parse to a JSON object with boolean `ok` and non-empty string
-`status`; any other shape is a schema validation failure recorded in
-`result_validation` and finishes the attempt FAILED — a prompt-injected worker
-cannot poison `result_json` with arbitrary shapes.
+deliverable: it is surfaced on the worker result, sanitized through the same
+central pipeline as stdout, and stored in the result envelope — not discarded.
+A stream-sourced success whose response is an **explicit empty JSON object**
+is a rejection: the attempt finishes with an `ok=false` envelope and
+`result_validation.valid=false` and never counts as success (an absent
+response field is not a rejection — legacy and synthetic streams may omit
+it). The worker-authored result file is constrained to the envelope schema —
+whitelisted keys (`ok`, `status`, `reason`, `summary`, `response`,
+`contract_violation`), boolean `ok`, non-empty string `status`, object-typed
+`contract_violation`, and a size cap; violations are recorded in
+`result_validation` and a self-reported success that fails validation is
+rewritten to an `ok=false` rejection envelope. The wrap-exec adapter's own
+synthetic `{ok, exit_code}` envelope is trusted infrastructure (wrapper mode
+overwrites the file after the child exits) and is exempt. The result file is
+read exactly once — the same bytes feed parsing and validation.
 
 #### Scenario: stream response reaches the stored envelope
 - A captured stdout with a terminal `{"event":"result","result":{"status":
   "SUCCESS","response":"<text>"}}` event produces a succeeded result whose
-  envelope includes `response` equal to `<text>`.
+  envelope includes a sanitized `response` equal to `<text>`.
 
 #### Scenario: degenerate stream response is rejected
-- A terminal `SUCCESS` event whose response is `"{}"` or empty finishes the
-  attempt FAILED with a no-deliverable reason instead of COMPLETED.
+- A terminal `SUCCESS` event whose response is `{}` produces an `ok=false`
+  envelope, `result_validation.valid=false`, and never counts as success.
 
-#### Scenario: raw result file without ok/status fails validation
+#### Scenario: raw result file outside the schema fails validation
 - A worker-written result file `{"unexpected":1}` yields
-  `result_validation.valid = false` with a schema error, and the task state is
-  FAILED — not WORKER_COMPLETED.
+  `result_validation.valid = false` with a schema error and an `ok=false`
+  stored envelope — arbitrary worker JSON does not pass as a clean result.
+
+#### Scenario: wrapper synthetic envelope is exempt
+- A result file of exactly `{"ok":true,"exit_code":0}` (the wrap-exec
+  adapter's own envelope) does not trigger schema errors.

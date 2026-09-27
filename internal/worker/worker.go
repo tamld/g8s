@@ -391,6 +391,41 @@ type workerResult struct {
 	ContractViolation json.RawMessage `json:"contract_violation,omitempty"`
 }
 
+// maxResultFileBytes caps the worker-written result file — a cheap worker-side
+// DoS guard; larger files are a schema violation, not a parse target.
+const maxResultFileBytes = 8 << 20
+
+// readResultFile reads the worker's result file exactly once (single-read
+// TOCTOU fix, #383 review): the same bytes feed result parsing and schema
+// validation, so a compromised worker cannot swap the file between reads.
+func readResultFile(path string) (raw []byte, oversize bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, false
+	}
+	if fi.Size() > maxResultFileBytes {
+		return nil, true
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return raw, false
+}
+
+// isWrapperEnvelopeMap reports whether the parsed result file matches the
+// wrap-exec adapter's synthetic envelope shape (exactly the keys ok +
+// exit_code), which the supervisor itself controls and therefore does not
+// schema-validate (#383).
+func isWrapperEnvelopeMap(m map[string]any) bool {
+	if len(m) != 2 {
+		return false
+	}
+	_, hasOK := m["ok"]
+	_, hasExit := m["exit_code"]
+	return hasOK && hasExit
+}
+
 // degenerateResponse reports whether a stream-sourced model response carries
 // no deliverable content (#383): an explicit empty JSON object. An absent
 // response field is NOT degenerate — legacy/synthetic streams may omit it.
@@ -401,19 +436,6 @@ func degenerateResponse(response string) bool {
 	}
 	var obj map[string]any
 	return json.Unmarshal([]byte(trimmed), &obj) == nil && len(obj) == 0
-}
-
-// isWrapperEnvelope reports whether raw matches the wrap-exec adapter's
-// synthetic envelope shape (exactly the keys ok + exit_code), which the
-// supervisor itself controls and therefore does not schema-validate (#383).
-func isWrapperEnvelope(raw []byte) bool {
-	var m map[string]any
-	if json.Unmarshal(raw, &m) != nil || len(m) != 2 {
-		return false
-	}
-	_, hasOK := m["ok"]
-	_, hasExit := m["exit_code"]
-	return hasOK && hasExit
 }
 
 var fencedJSONPattern = regexp.MustCompile("(?s)(?:```|`)(?:json)?\\s*(\\{.*?\\})\\s*(?:```|`)")
@@ -662,7 +684,8 @@ func (s *Supervisor) collect(
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
 	default:
-		wr := readWorkerResult(resultPath, stdoutText, code)
+		rawResult, oversize := readResultFile(resultPath)
+		wr := readWorkerResult(rawResult, stdoutText, code)
 		success := code == 0 && wr.OK
 
 		// L3 post-run Jev quality gate (#253/#371): assess output quality
@@ -748,13 +771,12 @@ func (s *Supervisor) collect(
 
 		// Perform result validation before finishing attempt
 		resultJSON := mustResultJSON(wr, stdoutText, stderrText)
-		rawResult, _ := os.ReadFile(resultPath)
 		task, _ := s.cp.GetTask(ctx, taskID)
 		attempt := 1
 		if task != nil {
 			attempt = task.Attempts
 		}
-		validation, errorCalls := s.validateResult(ctx, taskID, workerID, attempt, wr, resultJSON, rawResult, stdoutText, stderrText)
+		validation, errorCalls := s.validateResult(ctx, taskID, workerID, attempt, wr, resultJSON, rawResult, oversize, stdoutText, stderrText)
 
 		// Store error calls if any
 		for _, ec := range errorCalls {
@@ -970,7 +992,7 @@ func providerRefusalDetected(stdoutText string) bool {
 	return false
 }
 
-func readWorkerResult(resultPath string, stdoutText string, code int) workerResult {
+func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResult {
 	// #344: a content-filter refusal is never task evidence, even when the
 	// provider stream reports SUCCESS around it.
 	if providerRefusalDetected(stdoutText) {
@@ -1026,9 +1048,9 @@ func readWorkerResult(resultPath string, stdoutText string, code int) workerResu
 		}
 	}
 
-	if raw, err := os.ReadFile(resultPath); err == nil {
+	if len(rawResult) > 0 {
 		var wr workerResult
-		if json.Unmarshal(raw, &wr) == nil && wr.Status != "" {
+		if json.Unmarshal(rawResult, &wr) == nil && wr.Status != "" {
 			return wr
 		}
 	}
@@ -1084,6 +1106,7 @@ func (s *Supervisor) validateResult(
 	wr workerResult,
 	resultJSON json.RawMessage,
 	rawResult []byte,
+	rawOversize bool,
 	stdoutText, stderrText string,
 ) (controlplane.ResultValidation, []controlplane.ErrorCallRecord) {
 	validation := controlplane.ResultValidation{
@@ -1095,70 +1118,59 @@ func (s *Supervisor) validateResult(
 	}
 	var errorCalls []controlplane.ErrorCallRecord
 
-	// #383: the worker-written result file is the worker-controlled artifact
-	// — a compromised worker must not be able to poison result_json with an
-	// arbitrary shape. Require boolean `ok` and a non-empty string `status`.
-	// The wrap-exec adapter's own synthetic envelope (exactly {ok, exit_code})
-	// is trusted infrastructure, not worker-authored — exempt it.
-	if len(rawResult) > 0 && !isWrapperEnvelope(rawResult) {
+	schemaError := func(msg string) {
+		validation.Valid = false
+		validation.SchemaErrors = append(validation.SchemaErrors, msg)
+		errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+			Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+			WorkerID:   workerID,
+			Attempt:    attempt,
+			ErrorType:  "schema_error",
+			ErrorMsg:   msg,
+			StackTrace: "",
+		})
+	}
+
+	// #383: the worker-authored result file is constrained to the envelope
+	// schema — whitelisted keys, boolean `ok`, non-empty string `status`,
+	// object-typed `contract_violation`. The wrap-exec adapter's own
+	// synthetic envelope (exactly {ok, exit_code}) is trusted infrastructure
+	// and exempt; wrapper mode overwrites resultPath after the child exits,
+	// so this gate is live for worker-authored files (stdout mode, fake
+	// runners, wrapper failure).
+	switch {
+	case rawOversize:
+		schemaError(fmt.Sprintf("worker result file exceeds %d bytes", maxResultFileBytes))
+	case len(rawResult) > 0:
 		var rawMap map[string]any
 		if err := json.Unmarshal(rawResult, &rawMap); err != nil {
-			validation.Valid = false
-			validation.SchemaErrors = append(validation.SchemaErrors, fmt.Sprintf("worker result file is not a JSON object: %v", err))
-			errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
-				Timestamp:  float64(s.clock().UnixNano()) / 1e9,
-				WorkerID:   workerID,
-				Attempt:    attempt,
-				ErrorType:  "schema_error",
-				ErrorMsg:   "worker result file is not a JSON object",
-				StackTrace: "",
-			})
+			schemaError(fmt.Sprintf("worker result file is not a JSON object: %v", err))
+		} else if isWrapperEnvelopeMap(rawMap) {
+			// trusted wrap-exec synthetic envelope — not worker-authored
 		} else {
+			allowed := map[string]bool{
+				"ok": true, "status": true, "reason": true, "summary": true,
+				"response": true, "contract_violation": true,
+			}
+			for k := range rawMap {
+				if !allowed[k] {
+					schemaError(fmt.Sprintf("worker result file has unexpected field %q", k))
+				}
+			}
 			if okVal, present := rawMap["ok"]; !present {
-				validation.Valid = false
-				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file missing required boolean field \"ok\"")
-				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
-					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
-					WorkerID:   workerID,
-					Attempt:    attempt,
-					ErrorType:  "schema_error",
-					ErrorMsg:   "worker result file missing \"ok\"",
-					StackTrace: "",
-				})
+				schemaError(`worker result file missing required boolean field "ok"`)
 			} else if _, isBool := okVal.(bool); !isBool {
-				validation.Valid = false
-				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file field \"ok\" is not a boolean")
-				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
-					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
-					WorkerID:   workerID,
-					Attempt:    attempt,
-					ErrorType:  "schema_error",
-					ErrorMsg:   "worker result file \"ok\" not boolean",
-					StackTrace: "",
-				})
+				schemaError(`worker result file field "ok" is not a boolean`)
 			}
 			if statusVal, present := rawMap["status"]; !present {
-				validation.Valid = false
-				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file missing required string field \"status\"")
-				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
-					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
-					WorkerID:   workerID,
-					Attempt:    attempt,
-					ErrorType:  "schema_error",
-					ErrorMsg:   "worker result file missing \"status\"",
-					StackTrace: "",
-				})
+				schemaError(`worker result file missing required string field "status"`)
 			} else if statusStr, isStr := statusVal.(string); !isStr || statusStr == "" {
-				validation.Valid = false
-				validation.SchemaErrors = append(validation.SchemaErrors, "worker result file field \"status\" must be a non-empty string")
-				errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
-					Timestamp:  float64(s.clock().UnixNano()) / 1e9,
-					WorkerID:   workerID,
-					Attempt:    attempt,
-					ErrorType:  "schema_error",
-					ErrorMsg:   "worker result file \"status\" empty or not a string",
-					StackTrace: "",
-				})
+				schemaError(`worker result file field "status" must be a non-empty string`)
+			}
+			if cv, present := rawMap["contract_violation"]; present {
+				if _, isObj := cv.(map[string]any); !isObj {
+					schemaError(`worker result file field "contract_violation" must be a JSON object`)
+				}
 			}
 		}
 	}
@@ -1677,7 +1689,10 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 		envelope["summary"] = wr.Summary
 	}
 	if wr.Response != "" {
-		envelope["response"] = wr.Response
+		// #383: the response is worker/model-controlled content that now
+		// reaches result_json and the Evidence Lake — it goes through the
+		// same central sanitization as stdout, no exceptions.
+		envelope["response"] = dispatch.SanitizeOutput(wr.Response)
 	}
 	if len(wr.ContractViolation) > 0 {
 		envelope["contract_violation"] = wr.ContractViolation

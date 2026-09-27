@@ -847,20 +847,20 @@ func (c *instantChild) Terminate(time.Duration) {}
 
 func TestReadWorkerResultFallbacks(t *testing.T) {
 	// Case 1: result file missing, exit code 0 -> synthesized success
-	wr := readWorkerResult("/nonexistent/path.json", "some random logs", 0)
+	wr := readWorkerResult(nil, "some random logs", 0)
 	if !wr.OK || wr.Status != "succeeded" {
 		t.Fatalf("expected synthesized success for exit code 0, got %+v", wr)
 	}
 
 	// Case 2: result file missing, exit code 1 -> failure
-	wr = readWorkerResult("/nonexistent/path.json", "some error logs", 1)
+	wr = readWorkerResult(nil, "some error logs", 1)
 	if wr.OK || wr.Status != "failed" {
 		t.Fatalf("expected failure for exit code 1, got %+v", wr)
 	}
 
 	// Case 3: result file missing, fenced JSON in stdout
 	fencedStdout := "Task execution:\n```json\n{\"ok\": false, \"status\": \"BLOCKED\", \"reason\": \"needs write receipt\"}\n```\nDone."
-	wr = readWorkerResult("/nonexistent/path.json", fencedStdout, 0)
+	wr = readWorkerResult(nil, fencedStdout, 0)
 	if wr.Status != "BLOCKED" || wr.Reason != "needs write receipt" {
 		t.Fatalf("expected extracted fenced JSON, got %+v", wr)
 	}
@@ -871,7 +871,7 @@ func TestReadWorkerResultAGYResult(t *testing.T) {
 	agyStdout := `{"type":"progress","progress":50}
 {"result":{"status":"ERROR","error":"output token limit exceeded"}}
 `
-	wr := readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	wr := readWorkerResult(nil, agyStdout, 0)
 	if wr.OK || wr.Status != "failed" || wr.Reason != "output token limit exceeded" {
 		t.Fatalf("expected AGY ERROR result, got %+v", wr)
 	}
@@ -880,7 +880,7 @@ func TestReadWorkerResultAGYResult(t *testing.T) {
 	agyStdout = `{"type":"progress","progress":100}
 {"result":{"status":"SUCCESS"}}
 `
-	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	wr = readWorkerResult(nil, agyStdout, 0)
 	if !wr.OK || wr.Status != "succeeded" {
 		t.Fatalf("expected AGY SUCCESS result, got %+v", wr)
 	}
@@ -888,7 +888,7 @@ func TestReadWorkerResultAGYResult(t *testing.T) {
 	// Case 3: AGY result with ERROR status takes precedence over exit code 0
 	agyStdout = `{"result":{"status":"ERROR","error":"rate limited"}}
 `
-	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 0)
+	wr = readWorkerResult(nil, agyStdout, 0)
 	if wr.OK || wr.Status != "failed" || wr.Reason != "rate limited" {
 		t.Fatalf("expected AGY ERROR to override exit code 0, got %+v", wr)
 	}
@@ -897,7 +897,7 @@ func TestReadWorkerResultAGYResult(t *testing.T) {
 	agyStdout = `{"type":"progress","progress":50}
 {"result":{"status":"UNKNOWN"}}
 `
-	wr = readWorkerResult("/nonexistent/path.json", agyStdout, 1)
+	wr = readWorkerResult(nil, agyStdout, 1)
 	if wr.OK || wr.Status != "failed" {
 		t.Fatalf("expected fallback failure for unknown AGY status, got %+v", wr)
 	}
@@ -1090,7 +1090,7 @@ func TestReadWorkerResultErrorTail(t *testing.T) {
 	stream := "{\"event\":\"init\"}\n" +
 		"{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\"}}\n" +
 		"{\"event\":\"step_update\",\"step_update\":{\"step_index\":155,\"state\":\"DONE\",\"step_type\":\"error_message\"}}\n"
-	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	wr := readWorkerResult(nil, stream, 0)
 	if wr.OK {
 		t.Errorf("error-tail stream with exit 0 must not be OK: %+v", wr)
 	}
@@ -1103,7 +1103,7 @@ func TestReadWorkerResultErrorTail(t *testing.T) {
 func TestReadWorkerResultResultSupersedesError(t *testing.T) {
 	stream := "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"error_message\"}}\n" +
 		"{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\"}}\n"
-	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	wr := readWorkerResult(nil, stream, 0)
 	if !wr.OK {
 		t.Errorf("SUCCESS result event must win over earlier error step: %+v", wr)
 	}
@@ -1131,7 +1131,7 @@ func TestAgyStreamErrorTailUnit(t *testing.T) {
 func TestReadWorkerResultProviderRefusal(t *testing.T) {
 	stream := "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"This request was blocked by Gemini's filters.\"}}\n" +
 		"{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"This request was blocked by Gemini's filters.\"}}\n"
-	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	wr := readWorkerResult(nil, stream, 0)
 	if wr.OK {
 		t.Fatalf("provider refusal must not classify as OK: %+v", wr)
 	}
@@ -1144,7 +1144,7 @@ func TestReadWorkerResultProviderRefusal(t *testing.T) {
 // false-positive the refusal detector.
 func TestReadWorkerResultFilterDiscussionNoFalsePositive(t *testing.T) {
 	stream := "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"The harness documents how blocked task patterns are matched before dispatch.\"}}\n"
-	wr := readWorkerResult(t.TempDir()+"/nope.json", stream, 0)
+	wr := readWorkerResult(nil, stream, 0)
 	if !wr.OK {
 		t.Fatalf("legitimate evidence discussing filters must stay OK: %+v", wr)
 	}
