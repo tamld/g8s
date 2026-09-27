@@ -79,6 +79,8 @@ jobs:
     if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -212,6 +214,29 @@ jobs:
             echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
             exit 1
           }
+
+      - name: Coverage Ratchet
+        shell: bash
+        run: |
+          read avg count < /tmp/cov_result.txt
+          BASELINE_FILE=".g8s/coverage-baseline"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            mkdir -p .g8s
+            echo "$avg" > "$BASELINE_FILE"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$BASELINE_FILE"
+            if ! git diff --staged --quiet; then
+              git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
+              git push origin main || echo "::warning::Failed to push coverage baseline"
+            fi
+          else
+            if [ -f "$BASELINE_FILE" ]; then
+              bash tools/ci_coverage_ratchet.sh --baseline "$BASELINE_FILE" --current "$avg"
+            else
+              echo "::warning::No coverage baseline found at $BASELINE_FILE; skipping ratchet check."
+            fi
+          fi
 
       - name: Dogfooding CI Gate (Brief Issue & Consume Roundtrip)
         shell: bash
