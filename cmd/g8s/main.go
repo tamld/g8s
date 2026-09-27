@@ -24,6 +24,7 @@ import (
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/initwiz"
 	"github.com/tamld/g8s/internal/mcp"
+	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
@@ -1509,7 +1510,11 @@ func runWorker(args []string) {
 	}
 	defer store.Close()
 
-	sup := worker.NewSupervisor(store, filepath.Join(filepath.Dir(dbPath), "runs"),
+	// #427 PR-2: workspace_write attempts get per-attempt worktree
+	// isolation when running inside a git checkout (concurrent code-writing
+	// attempts would otherwise clobber each other in the shared tree).
+	// Non-git cwd / pool failure → legacy shared-checkout behavior.
+	opts := []worker.Option{
 		worker.WithCommandResolver(func(prompt, modelID, taskTimeout string) ([]string, bool) {
 			tmpl, ok := templates[modelID]
 			if !ok {
@@ -1529,7 +1534,15 @@ func runWorker(args []string) {
 				}
 			}
 			return out, true
-		}))
+		}),
+	}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		if pool, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd, Prefix: "wt"}); poolErr == nil {
+			opts = append(opts, worker.WithWorktreeIsolator(workerPoolIsolator{pool: pool}))
+		}
+	}
+
+	sup := worker.NewSupervisor(store, filepath.Join(filepath.Dir(dbPath), "runs"), opts...)
 
 	ctx := context.Background()
 	if *concurrency > 1 {
@@ -1740,4 +1753,24 @@ func runStateReplay(args []string) {
 		}
 		fmt.Println(string(line))
 	}
+}
+
+// workerPoolIsolator adapts the orchestrator worktree pool to the worker
+// loop's WorktreeIsolator seam (#427 PR-2): each workspace_write attempt
+// gets a private worktree; release(keep=true) preserves the deliverable
+// (worktree dir + branch) for inspection/merge.
+type workerPoolIsolator struct {
+	pool *orchestrator.Pool
+}
+
+func (p workerPoolIsolator) AcquireWorktree(ctx context.Context, taskID string) (string, func(keep bool), error) {
+	wt, err := p.pool.Acquire(ctx, taskID)
+	if err != nil {
+		return "", nil, err
+	}
+	return wt.Path, func(keep bool) {
+		if rerr := p.pool.Release(context.Background(), wt, keep); rerr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] worker: release worktree: %v\n", rerr)
+		}
+	}, nil
 }
