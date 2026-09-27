@@ -1,0 +1,12 @@
+# Layer 3 / ADR-0024 Trust Boundaries Registry
+# Paths matching these patterns represent critical security & trust surfaces
+# (receipt generation/verification, process isolation, server auth surfaces,
+# harness governance, memory poison surfaces, and dispatch sanitizers).
+# PRs touching any of these paths route to Lane S (security).
+trust_boundaries:
+  - "internal/receipt/*"
+  - "internal/worker/proc_*"
+  - "internal/server/*"
+  - "internal/harness/*"
+  - "internal/memory/*"
+  - "internal/dispatch/*"
