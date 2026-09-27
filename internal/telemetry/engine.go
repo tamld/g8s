@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/pathutil"
@@ -901,21 +903,63 @@ func relevanceScore(pattern NegativePattern, role, path, prompt string) float64 
 	return score
 }
 
+// preflightBudgetCap is the hard injection budget (ADR-0023 G6): every
+// preflight injection is a read with a ≤4096-char ceiling, ranked truncation.
+const preflightBudgetCap = 4096
+
+// RenderPreflightContext renders the preflight injection for the given
+// patterns — a pure, deterministic read. It NEVER calls the Jev sensor (C8:
+// the read path is Jev-free by construction) and hard-caps the output at
+// 4096 chars (G6): patterns are ranked by confidence × occurrences and
+// truncated; the render never fails, only shrinks.
+func RenderPreflightContext(patterns []NegativePattern) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	ranked := make([]NegativePattern, len(patterns))
+	copy(ranked, patterns)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return ranked[i].ConfidenceScore*float64(ranked[i].OccurrenceCount) >
+			ranked[j].ConfidenceScore*float64(ranked[j].OccurrenceCount)
+	})
+
+	var sb strings.Builder
+	sb.WriteString("\n\n## Relevant Failure Patterns (Pre-flight Injection)\n\n")
+	for _, p := range ranked {
+		if sb.Len() >= preflightBudgetCap {
+			break
+		}
+		var section strings.Builder
+		fmt.Fprintf(&section, "### %s\n", p.Title)
+		fmt.Fprintf(&section, "- **Type**: %s\n", p.PatternType)
+		fmt.Fprintf(&section, "- **Root Cause**: %s\n", p.RootCause)
+		fmt.Fprintf(&section, "- **Remediation**: %s\n", p.Remediation)
+		fmt.Fprintf(&section, "- **Confidence**: %.0f%% (%d occurrences)\n\n", p.ConfidenceScore*100, p.OccurrenceCount)
+		if sb.Len()+section.Len() > preflightBudgetCap {
+			// #395 review: prefer dropping a whole section over cutting it
+			// mid-line; the final clamp below is the only partial render and
+			// it is rune-safe.
+			break
+		}
+		sb.WriteString(section.String())
+	}
+	out := sb.String()
+	if len(out) > preflightBudgetCap {
+		// Rune-safe clamp: never emit invalid UTF-8 mid-rune.
+		cut := out[:preflightBudgetCap]
+		for !utf8.ValidString(cut) {
+			cut = cut[:len(cut)-1]
+		}
+		out = cut
+	}
+	return out
+}
+
 func (e *TelemetryEngine) InjectPreflightContext(ctx context.Context, brief *controlplane.BriefRow, patterns []NegativePattern) (string, error) {
 	if len(patterns) == 0 {
 		return "", nil
 	}
-
-	var sb strings.Builder
-	sb.WriteString("\n\n## Relevant Failure Patterns (Pre-flight Injection)\n\n")
-	for _, p := range patterns {
-		fmt.Fprintf(&sb, "### %s\n", p.Title)
-		fmt.Fprintf(&sb, "- **Type**: %s\n", p.PatternType)
-		fmt.Fprintf(&sb, "- **Root Cause**: %s\n", p.RootCause)
-		fmt.Fprintf(&sb, "- **Remediation**: %s\n", p.Remediation)
-		fmt.Fprintf(&sb, "- **Confidence**: %.0f%% (%d occurrences)\n\n", p.ConfidenceScore*100, p.OccurrenceCount)
-	}
-	return sb.String(), nil
+	return RenderPreflightContext(patterns), nil
 }
 
 func randomString(n int) string {

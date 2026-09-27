@@ -118,6 +118,8 @@ func main() {
 		runService(os.Args[2:])
 	case "worker":
 		runWorker(os.Args[2:])
+	case "memory":
+		runMemory(os.Args[2:])
 	case "analyze":
 		runAnalyze(os.Args[2:])
 	case "vault":
