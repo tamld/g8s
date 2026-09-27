@@ -128,3 +128,40 @@ If `g8s submit` returns `harness validation failed`:
 1. Check if the prompt contains blocked shell patterns (`rm -rf`, `drop table`, `git push --force`).
 2. Check if `--add-dir` points inside a denied path fragment (`.ssh`, `.aws`, `.env`, `.gnupg`).
 3. If `--permission workspace_write` was requested, ensure a valid `--receipt-id` is provided.
+
+### Runbook 4: Process Containment & Orphan Diagnostics (#415)
+
+**Containment model per entry point** — who owns the lifecycle of spawned
+process trees:
+
+| Entry point | Spawns OS children? | Containment |
+|---|---|---|
+| `g8s worker` (incl. `--concurrency N`) | Yes — worker attempts | POSIX: own process group + SIGTERM→SIGKILL escalation + post-run group sweep (`orphan_killed` telemetry). Windows: Job Object with `KILL_ON_JOB_CLOSE` — closing the handle (every terminal branch, `Terminate`, daemon death) makes the kernel kill the whole tree. |
+| `g8s serve` / `mcp` | No — API surfaces only | Own graceful shutdown. |
+| `g8s autopilot` | No — in-process scheduler + queue handler | Worker containment applies when the queue is drained by `g8s worker` processes. |
+| `g8s orchestrate` | Yes — via the same supervisor spawn path | Same containment as `g8s worker`. |
+
+**Known boundary**: a worker child that deliberately escapes its process
+group (`setsid` on POSIX, `DETACHED_PROCESS` on Windows) is outside the
+group sweep — Windows containment still catches it (Job Object membership
+survives detachment), POSIX does not (tracked as a hardening candidate in
+#415 PR-2 follow-ups).
+
+**Diagnostics:**
+
+```bash
+# Zombie check — defunct processes waiting on a parent that never reaped
+ps aux | grep defunct | grep -v grep
+
+# Stray attempt processes — anything still holding a run dir
+g8s cleanup --dry-run          # ghost-process + orphan-session targets
+g8s status --worker --json     # live worker heartbeats
+
+# Force-reap a crashed predecessor's leftovers (pid files under state/runs)
+g8s cleanup --force            # ghost-process target applies them
+```
+
+Rules of thumb: a `defunct` entry means the PARENT is alive but never
+waited — restart or signal the parent, not the zombie. An orphan (live
+process, dead parent, holding a run dir) is reaped by the next `g8s
+worker` start (`reapOrphans` sweeps stale pid files) or by `g8s cleanup`.
