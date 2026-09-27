@@ -54,3 +54,20 @@ loop closing.
 From the profile's audit-cadence recommendation. The deep-audit runner
 (`tools/run_audit_fanout.sh` in the g8s repo) is the reference for
 multi-dimension sweeps; adopt or adapt.
+
+## Agent pull path (fastest — no git)
+
+An autonomous agent pulls the offer without cloning:
+
+```bash
+# 1. the onboarding guide (entry point)
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/ONBOARDING.md
+# 2. the profile for the project's nature
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/profiles/security.md
+# 3. the three generic gate scripts (+ their test suites)
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/tools/ci_link_integrity.sh
+```
+
+Total: 5 fetches, zero git state in the target repo, ~30 seconds. The
+profile text is self-sufficient for the agent to scaffold `.g8s/` itself —
+the offer's value is the knowledge, not the files.
