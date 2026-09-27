@@ -79,3 +79,20 @@ At campaign close and on autopilot cadence: a fan-out of read-only verifier work
 ## Next Steps
 
 S6-1: G1 spec↔code sync gate + G2 structure regen gate (includes the generator). S6-2: G3 link integrity + G4 coverage ratchet. S6-3: G5 PR contract + G6 ledger-by-size (policy sign-off). Tracked in the S6 issue; each slice runs the full ALDC cycle.
+
+---
+
+## Addendum — Distribution model: pull-based bundle (2026-09-27, ratified)
+
+The offer bundle ships in-repo (`offer/`): per-type profiles (knowledge /
+security / infra / utility) + a self-service onboarding guide. Distribution
+is **pull-based**: each sibling project's main agent adopts at its own
+pace — nothing is pushed, no cross-project control plane exists (single-
+tenant non-goal holds).
+
+The learning loop closes via the existing Mode-3 contribution flow
+(sanitized packets → PR), not telemetry harvesting: projects contribute
+operational evidence (gate catches, PRI scores, audit findings) as
+reviewable packets. Cross-project pattern promotion follows the same
+falsification clause: two onboarding cycles without a cross-project
+pattern improving g8s → the bundle simplifies to profiles-only.
