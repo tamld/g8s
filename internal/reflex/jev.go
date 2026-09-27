@@ -56,6 +56,11 @@ type OutputQualityRequest struct {
 	ExpectedShape string `json:"expected_shape"` // "code" | "docs" | "json" | "analysis"
 	ExitCode      int    `json:"exit_code"`
 	DurationSec   int    `json:"duration_sec"`
+
+	// ContextPacket is the v2 enrichment (#418, ADR-0021 §8.2): assembled by
+	// the Context Broker from vault / telemetry / SOM. Nil = legacy v1
+	// request (byte-compatible; Constitution Axiom 5).
+	ContextPacket *g8scontext.ContextPacket `json:"context_packet,omitempty"`
 }
 
 // OutputQualityVerdict is the L3 policy decision.
@@ -387,15 +392,20 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, "keyless offline fallback"), nil
 	}
 
+	state := map[string]any{
+		"task_id":       req.TaskID,
+		"output":        req.OutputExcerpt,
+		"expected_type": req.ExpectedShape,
+		"exit_code":     req.ExitCode,
+		"duration_sec":  req.DurationSec,
+	}
+	if req.ContextPacket != nil {
+		state["context_packet"] = req.ContextPacket
+	}
+
 	payload := map[string]any{
 		"model": g.model,
-		"state": map[string]any{
-			"task_id":       req.TaskID,
-			"output":        req.OutputExcerpt,
-			"expected_type": req.ExpectedShape,
-			"exit_code":     req.ExitCode,
-			"duration_sec":  req.DurationSec,
-		},
+		"state": state,
 		"questions": map[string]any{
 			"output_quality": map[string]any{
 				"type":         "score",
