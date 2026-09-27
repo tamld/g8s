@@ -41,7 +41,7 @@ ci-layer-check:
 
 dogfood:
 	@$(GO) build -o /tmp/g8s-dogfood ./cmd/g8s
-	@echo "# Dogfood Payload" > /tmp/g8s-dogfood-payload.md
+	@printf "# Dogfood Payload\nScope: internal/brief/brief.go\n" > /tmp/g8s-dogfood-payload.md
 	@echo "- [x] Dogfood DoD" > /tmp/g8s-dogfood-dod.md
 	@printf "# Dogfood Orchestrate Brief\n## Context\nTesting brief orchestration\n## DoD\n- [x] DoD verified\n" > /tmp/g8s-dogfood-brief.md
 	@BRIEF_ID=$$(G8S_DB=/tmp/g8s-dogfood.db /tmp/g8s-dogfood brief-issue --title "make-dogfood" --payload-file /tmp/g8s-dogfood-payload.md --dod-file /tmp/g8s-dogfood-dod.md --issued-by make --ttl 5m | jq -r '.data.id // .id // empty'); \
