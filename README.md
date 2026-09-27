@@ -178,7 +178,7 @@ Plug into Claude Desktop, Cursor, Codex, or Windsurf via stdio JSON-RPC (11 tool
 | Governing rules | [spec/constitution.md](spec/constitution.md) — Zero-CGO, two-tier governance, process containment |
 | Technical deltas | [spec/openspec/](spec/openspec/) — DELTA-01..22 with lifecycle status |
 | Architecture decisions | [docs/decisions/](docs/decisions/) — ADR-0001…0023 |
-| Release history | [docs/CHANGELOG.md](docs/CHANGELOG.md) |
+| Release history | [CHANGELOG.md](CHANGELOG.md) |
 
 Key ADRs: [ADR-0001](docs/decisions/0001-supervisor-driven-fix-loop.md) (supervisor fix loop) · [ADR-0020](docs/decisions/0020-reflex-gated-debt-campaign.md) (System-1 reflex gate) · [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard operating model, accepted) · [ADR-0022](docs/decisions/0022-strategic-session-protocol.md) (session protocol, accepted) · [ADR-0023](docs/decisions/0023-memory-lifecycle.md) (memory lifecycle, accepted).
 

@@ -164,7 +164,7 @@ g8s/
 | Quy tắc quản trị | [spec/constitution.md](spec/constitution.md) |
 | Đặc tả kỹ thuật | [spec/openspec/](spec/openspec/) — DELTA-01..22 |
 | Quyết định kiến trúc | [docs/decisions/](docs/decisions/) — ADR-0001…0023 |
-| Lịch sử phát hành | [docs/CHANGELOG.md](docs/CHANGELOG.md) |
+| Lịch sử phát hành | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Giấy phép
 
