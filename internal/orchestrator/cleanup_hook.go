@@ -1,4 +1,4 @@
-// Package orchestrator — cleanup_hook.go implements post-terminal lifecycle
+// cleanup_hook.go implements post-terminal lifecycle
 // cleanup hooks per DEBT-32 (#124).
 package orchestrator
 

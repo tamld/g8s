@@ -9,8 +9,16 @@
 #   3. Go toolchain version contract: checks go.mod vs docs
 #   4. Receipt verification contract: checks presence of ReceiptVerifier & StdoutEnvelopeVerifier
 #   5. Unowned TODO/FIXME scanning in docs
+#   6. OpenSpec registry file existence
+#   7. Session-type markers on campaign ledgers (ADR-0022 §6)
+#   8. Spec↔code sync: delta scenarios pinned to real Go tests (ADR-0024 G1)
+#   9. README structure sync: Project Structure matches the filesystem (ADR-0024 G2)
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -20,7 +28,7 @@ FAILED=0
 echo "==> Running Documentation ↔ Code Contract Checks..."
 
 # 1. Orchestrator FSM States Contract
-echo "--> [1/7] Verifying Orchestrator FSM states contract..."
+echo "--> [1/9] Verifying Orchestrator FSM states contract..."
 EXPECTED_ORCH_STATES=("PLAN" "SPAWN" "MONITOR" "RECEIPT" "MERGE" "ESCALATE" "CANCEL" "CONFLICT")
 for state in "${EXPECTED_ORCH_STATES[@]}"; do
     if ! grep -qi "OrchestratorState$state" internal/state/state.go; then
@@ -34,7 +42,7 @@ for state in "${EXPECTED_ORCH_STATES[@]}"; do
 done
 
 # 2. Task FSM States Contract
-echo "--> [2/7] Verifying Task FSM states contract..."
+echo "--> [2/9] Verifying Task FSM states contract..."
 EXPECTED_TASK_STATES=("QUEUED" "LEASED" "RUNNING" "NEEDS_INFO" "BLOCKED" "SUCCEEDED" "FAILED" "CANCELLED")
 for state in "${EXPECTED_TASK_STATES[@]}"; do
     clean_state="${state//_/}"
@@ -45,7 +53,7 @@ for state in "${EXPECTED_TASK_STATES[@]}"; do
 done
 
 # 3. Go Version Contract
-echo "--> [3/7] Verifying Go version consistency across SSoT docs..."
+echo "--> [3/9] Verifying Go version consistency across SSoT docs..."
 GO_MOD_VER=$(grep -E '^go ' go.mod | awk '{print $2}')
 if [ -z "$GO_MOD_VER" ]; then
     echo "::error::Unable to determine go version in go.mod"
@@ -74,7 +82,7 @@ else
 fi
 
 # 4. Receipt Verification Contract
-echo "--> [4/7] Verifying Receipt Verifier layer contract..."
+echo "--> [4/9] Verifying Receipt Verifier layer contract..."
 if [ ! -f "internal/orchestrator/verify.go" ]; then
     echo "::error::internal/orchestrator/verify.go missing (ReceiptVerifier layer contract)"
     FAILED=$((FAILED + 1))
@@ -89,7 +97,7 @@ if ! grep -q "StdoutEnvelopeVerifier" internal/orchestrator/verify.go; then
 fi
 
 # 5. Doc Unowned TODO Check
-echo "--> [5/7] Checking for unowned TODO/FIXME in documentation..."
+echo "--> [5/9] Checking for unowned TODO/FIXME in documentation..."
 UNOWNED_DOC_TODOS=$(grep -rnE '(^|[[:space:]])//\s*(TODO|FIXME|XXX)' docs/ spec/ 2>/dev/null | grep -v 'OWNER=' | grep -v '`//' || true)
 if [ -n "$UNOWNED_DOC_TODOS" ]; then
     echo "::error::Found unowned TODO/FIXME in documentation:"
@@ -98,7 +106,7 @@ if [ -n "$UNOWNED_DOC_TODOS" ]; then
 fi
 
 # 6. OpenSpec File Link Consistency
-echo "--> [6/7] Verifying OpenSpec registry file existence..."
+echo "--> [6/9] Verifying OpenSpec registry file existence..."
 while IFS= read -r link; do
     if [ ! -f "spec/openspec/$link" ]; then
         echo "::error::spec/openspec/README.md references missing spec file: spec/openspec/$link"
@@ -108,7 +116,7 @@ done < <(grep -oE '\([0-9A-Za-z_-]+\.md\)' spec/openspec/README.md | tr -d '()')
 
 # 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger
 #    declares which session type produced it — T1 (strategy) or T2 (execution).
-echo "--> [7/7] Verifying session-type markers (ADR-0022)..."
+echo "--> [7/9] Verifying session-type markers (ADR-0022)..."
 for ledger in plans/*/plan.md plans/handoffs/*.md; do
     [ -e "$ledger" ] || continue
     if ! grep -qE '\*\*Session type\*\*: *T[12]' "$ledger"; then
@@ -117,6 +125,21 @@ for ledger in plans/*/plan.md plans/handoffs/*.md; do
         FAILED=$((FAILED + 1))
     fi
 done
+
+# 8. Spec↔code sync contract (S6-1 G1, #420): every scenario in an
+#    APPLIED/ACCEPTED delta with a tests-pin must map to a real Go test;
+#    changed enforced deltas must pin their scenarios.
+echo "--> [8/9] Verifying spec↔code sync (ADR-0024 G1)..."
+if ! bash "$SCRIPT_DIR/ci_spec_code_sync.sh" 2>&1 | grep -vE '^\s+\[grandfathered\]'; then
+    FAILED=$((FAILED + 1))
+fi
+
+# 9. Structure regen contract (S6-1 G2, #420): the README Project Structure
+#    region must match a fresh render from the live filesystem.
+echo "--> [9/9] Verifying README structure sync (ADR-0024 G2)..."
+if ! bash "$SCRIPT_DIR/ci_structure_sync.sh" 2>&1; then
+    FAILED=$((FAILED + 1))
+fi
 
 if [ "$FAILED" -gt 0 ]; then
     echo ""
