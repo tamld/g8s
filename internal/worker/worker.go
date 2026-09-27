@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	g8scontext "github.com/tamld/g8s/internal/context"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/reflex"
@@ -200,6 +201,16 @@ func WithStreamCallback(fn StreamCallback) Option {
 	return func(s *Supervisor) { s.streamCallback = fn }
 }
 
+// OutputQualityGate defines the interface for L3 post-run quality evaluations.
+type OutputQualityGate interface {
+	EmitOutputQualitySignal(ctx context.Context, req reflex.OutputQualityRequest) (reflex.ReflexSignal, error)
+}
+
+// WithQualityGate injects a custom quality gate for L3 post-run checks.
+func WithQualityGate(g OutputQualityGate) Option {
+	return func(s *Supervisor) { s.qualityGate = g }
+}
+
 // substituteTemplate replaces {prompt}, {model} and {timeout} placeholders
 // verbatim in an operator-defined invocation template (DELTA-10 R6).
 func substituteTemplate(tmpl []string, prompt, model, timeout string) []string {
@@ -247,8 +258,9 @@ type Supervisor struct {
 	telEngine *telemetry.TelemetryEngine
 	telRuns   int
 
-	// L3 post-run quality gate reflex (#253/#371): cached to avoid per-attempt
+	// L3 post-run quality gate reflex (#253/#371/#418): cached to avoid per-attempt
 	// .env scanning and http.Client allocation.
+	qualityGate   OutputQualityGate
 	reflexOnce    sync.Once
 	reflexGateIns *reflex.ReflexGate
 }
@@ -729,10 +741,11 @@ func (s *Supervisor) collect(
 		wr := readWorkerResult(rawResult, stdoutText, code)
 		success := code == 0 && wr.OK
 
-		// L3 post-run Jev quality gate (#253/#371): assess output quality
+		// L3 post-run Jev quality gate (#253/#371/#418): assess output quality
 		// before structural validation — catches hallucination that passes
 		// schema checks but fails semantic review. DurationSec computed via
-		// the injectable clock (worker review finding: fix 1).
+		// the injectable clock (worker review finding: fix 1). ContextPacket
+		// enriched from the closed-loop telemetry ledger (#418).
 		if success && os.Getenv("G8S_TELEMETRY") == "1" {
 			gate := s.reflexGate()
 			excerpt := stdoutText
@@ -747,12 +760,35 @@ func (s *Supervisor) collect(
 			if elapsed < 0 {
 				elapsed = 0
 			}
+			broker := g8scontext.NewBroker(g8scontext.Sources{
+				RecentOutcomes: func(ctx context.Context) ([]string, error) {
+					eng := s.telemetry()
+					if eng == nil {
+						return nil, errors.New("telemetry engine not available")
+					}
+					events, err := eng.QueryEvents(ctx, telemetry.TraceFilter{Limit: 5})
+					if err != nil {
+						return nil, err
+					}
+					var out []string
+					for _, ev := range events {
+						out = append(out, fmt.Sprintf("%s %s %s", ev.EventType, ev.TaskID, ev.Error))
+					}
+					return out, nil
+				},
+				VaultNotes: nil,
+				SomPhase:   nil,
+			}, func(event, detail string) {
+				fmt.Fprintf(os.Stderr, "[warn] L3 context broker: %s: %s\n", event, detail)
+			})
+			packet := broker.Assemble(ctx)
 			oqReq := reflex.OutputQualityRequest{
 				TaskID:        taskID,
 				OutputExcerpt: excerpt,
 				ExpectedShape: "analysis",
 				ExitCode:      code,
 				DurationSec:   elapsed,
+				ContextPacket: packet,
 			}
 			signal, qerr := gate.EmitOutputQualitySignal(ctx, oqReq)
 			if qerr == nil {
@@ -890,8 +926,11 @@ func (s *Supervisor) collect(
 }
 
 // reflexGate lazily creates the Jev gate for the L3 post-run quality check
-// (#253/#371). Cached per Supervisor to reuse the HTTP client and key pool.
-func (s *Supervisor) reflexGate() *reflex.ReflexGate {
+// (#253/#371/#418). Cached per Supervisor to reuse the HTTP client and key pool.
+func (s *Supervisor) reflexGate() OutputQualityGate {
+	if s.qualityGate != nil {
+		return s.qualityGate
+	}
 	s.reflexOnce.Do(func() {
 		s.reflexGateIns = reflex.NewReflexGate()
 	})
@@ -1755,9 +1794,9 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 }
 
 // l3RejectBlocks reports whether a L3 Jev reject must fail the attempt
-// (#411): advisory by default — blocking is the operator's explicit opt-in
-// via G8S_L3_JEV_BLOCK=1, because the L3 assessment is context-blind
-// (ADR-0021 §8 anti-pattern).
+// (#411, #418): advisory by default — blocking is the operator's explicit opt-in
+// via G8S_L3_JEV_BLOCK=1. With #418 L3 context enrichment wired via ContextPacket,
+// enabling G8S_L3_JEV_BLOCK=1 becomes rational for campaigns requiring strict semantic review.
 func l3RejectBlocks() bool {
 	return os.Getenv("G8S_L3_JEV_BLOCK") == "1"
 }
