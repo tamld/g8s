@@ -567,6 +567,10 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
 
+	// #415 PR-1: post-run orphan sweep — on every terminal branch of this
+	// attempt, verify the attempt process group is gone (no silent orphans).
+	defer s.sweepAttemptGroup(child, task.TaskID)
+
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
 	// Close capture handles before collect reads and removes the files; on
 	// Windows an open handle makes os.Remove fail with a sharing violation.
@@ -622,6 +626,21 @@ func (s *Supervisor) awaitOutcome(
 		case <-time.After(s.pollInterval):
 		}
 	}
+}
+
+// sweepAttemptGroup is the post-run orphan sweep (#415 PR-1, POSIX): after
+// the attempt has ended, verify the attempt's process group is gone — a
+// worker that exits while its same-group grandchildren keep running leaves
+// silent orphans. Survivors get SIGKILL (best-effort) and an
+// `orphan_killed` trace event; the stale pid file is removed either way.
+// Windows containment lands in #415 PR-2 (Job Objects).
+func (s *Supervisor) sweepAttemptGroup(child Child, taskID string) {
+	pid := child.PID()
+	if !groupAlive(pid) {
+		return
+	}
+	_ = killProcessGroup(pid, syscallSIGKILL)
+	s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "same-group survivor killed after attempt end")
 }
 
 // collect terminates any surviving child, applies the terminal branch, and

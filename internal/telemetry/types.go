@@ -33,6 +33,7 @@ const (
 	TraceEventTaskCancelled   TraceEventType = "task_cancelled"
 	TraceEventWorkerStarted   TraceEventType = "worker_started"
 	TraceEventWorkerCompleted TraceEventType = "worker_completed"
+	TraceEventOrphanKilled    TraceEventType = "orphan_killed"
 	TraceEventWorkerFailed    TraceEventType = "worker_failed"
 	TraceEventReceiptEmitted  TraceEventType = "receipt_emitted"
 	TraceEventReceiptVerified TraceEventType = "receipt_verified"
