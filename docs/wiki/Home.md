@@ -10,9 +10,9 @@
 | Section | Description | Target Page |
 | :--- | :--- | :--- |
 | **🏛️ Architecture & Governance** | Foundational Axioms, Two-Tier Hierarchy, Process Group Sandbox | [Two-Tier Governance & Architecture](Two-Tier-Governance-and-Receipt-Engine.md) |
-| **🎟️ Capability Receipts (Schema v3)** | Zero-Trust Write Delegation, Single-Use Invalidation, Path Scoping | [Receipt Engine & Lifecycle](Receipt-Engine-and-Lifecycle.md) |
-| **🧠 Supervisor & Self-Healing Loop** | Bounded 3x3 Fix Loops, RCA Confidence, Envelope Gating (DoR/DoD) | [Supervisor & Fix Loop](Supervisor-and-Fix-Loop.md) |
-| **🔌 Tool Integrations & MCP** | Claude Desktop, Windsurf, Cursor, AGY integration via 11 Stdio MCP tools | [MCP & Tool Integrations](MCP-and-Tool-Integrations.md) |
+| **🎟️ Capability Receipts (Schema v3)** | Zero-Trust Write Delegation, Single-Use Invalidation, Path Scoping | [Receipt Engine & Lifecycle](../user-guide/receipt-workflow.md) |
+| **🧠 Supervisor & Self-Healing Loop** | Bounded 3x3 Fix Loops, RCA Confidence, Envelope Gating (DoR/DoD) | [Supervisor & Fix Loop](../designs/supervisor-fix-loop.md) |
+| **🔌 Tool Integrations & MCP** | Claude Desktop, Windsurf, Cursor, AGY integration via 11 Stdio MCP tools | [MCP & Tool Integrations](../user-guide/mcp-tools.md) |
 | **🗄️ Decoupled Memory & Vault** | SQLite FTS5 Full-Text Search, BM25 ranking, Contextual Distillation | [Decoupled Memory Vault](Decoupled-Memory-Vault.md) |
 | **🛠️ CLI Command Reference** | Command syntax, flags, JSON output envelopes, and troubleshooting | [CLI Command Reference](CLI-Command-Reference.md) |
 
