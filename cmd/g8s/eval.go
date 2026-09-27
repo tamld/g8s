@@ -59,7 +59,8 @@ func runEvalRun(args []string) {
 	fs := flag.NewFlagSet("eval run", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
 	_ = actor
-	providerName := fs.String("provider", "mock-compliant", "provider: mock-compliant, mock-defiant (live providers wire via WorkerProvider)")
+	providerName := fs.String("provider", "mock-compliant", "provider: mock-compliant, mock-defiant, agy, claude (live = operator-invoked)")
+	model := fs.String("model", "", "model id for live providers (default per provider)")
 	category := fs.String("category", "", "filter by probe category")
 	probeIDs := fs.String("probes", "", "comma-separated probe IDs")
 	timeoutPerProbe := fs.Duration("timeout", defaultEvalProbeTimeout, "per-probe execution timeout")
@@ -73,8 +74,21 @@ func runEvalRun(args []string) {
 		provider = &probe.StaticProvider{Compliant: true}
 	case "mock-defiant":
 		provider = &probe.StaticProvider{Compliant: false}
+	case "agy", "claude":
+		// #379: live WorkerProvider adapter — read_only dispatch, bounded
+		// per-probe timeout, redacted capture. Naming a live provider here
+		// IS the operator invocation.
+		modelID := *model
+		if modelID == "" {
+			if strings.ToLower(*providerName) == "agy" {
+				modelID = "gemini-3.7-flash-high"
+			} else {
+				modelID = "claude-sonnet-4-5"
+			}
+		}
+		provider = probe.NewLiveWorkerProvider(strings.ToLower(*providerName), modelID, *timeoutPerProbe)
 	default:
-		exitUsage("eval", "run", *traceID, fmt.Sprintf("unknown provider %q; live providers wire via the WorkerProvider interface", *providerName), "g8s eval run --provider mock-compliant", *jsonl)
+		exitUsage("eval", "run", *traceID, fmt.Sprintf("unknown provider %q (mock-compliant, mock-defiant, agy, claude)", *providerName), "g8s eval run --provider mock-compliant", *jsonl)
 		return
 	}
 
