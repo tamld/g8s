@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "g8s vendored skills manifest",
+  "description": "Operator skills shipped with the g8s repository. Each entry is a loadable skill directory: copy (or symlink) it into your agent platform's skill directory (e.g. ~/.agents/skills/) to install. Version and changelog live inside each SKILL.md frontmatter.",
+  "updated": "2026-09-27",
+  "skills": [
+    {
+      "name": "g8s-supervisor",
+      "version": "4.0.0",
+      "entry": "skills/g8s-supervisor/SKILL.md",
+      "domain": "orchestration",
+      "risk_level": "medium",
+      "evidence_level": "runtime_required",
+      "description": "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting.",
+      "args_syntax": "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]",
+      "references": [
+        "references/hard-boundary.md",
+        "references/mode-1-pilot-release.md",
+        "references/mode-2-supervisor-worker.md",
+        "references/mode-3-upstream-contribution.md",
+        "references/multi-worker-fanout.md",
+        "references/operating-contract.md",
+        "references/security-redaction-playbook.md",
+        "references/binary-admission.md",
+        "references/anti-patterns.md"
+      ],
+      "assets": [
+        "assets/pilot-record.schema.json",
+        "assets/issue-packet.md.tmpl",
+        "assets/proposal-packet.md.tmpl"
+      ],
+      "scripts": [
+        "scripts/validate_g8s_pilot.py",
+        "scripts/verify_g8s_pin.py"
+      ]
+    }
+  ]
+}

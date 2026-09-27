@@ -1,0 +1,90 @@
+# Proposal Packet Template (New Scope)
+
+> **Use for**: Verified behavior + new scope proposal
+> **Required**: All sections. Missing/unknown/extra acceptance evidence = `EVIDENCE_GAP`.
+
+---
+
+## Proposal Type
+
+- [ ] **Proposal** — Verified behavior + new scope
+
+---
+
+## Executable Identity (Binary Admission — REQUIRED)
+
+| Field | Value | Source |
+|-------|-------|--------|
+| Canonical path | `{{CANONICAL_PATH}}` | `which g8s` |
+| SHA-256 digest | `{{SHA256}}` | `sha256sum bin/g8s` |
+| Self-reported version | `{{VERSION_JSON}}` | `g8s version --json` |
+| Immutable provenance | `{{PROVENANCE}}` | Git commit from version |
+| Safe capability evidence | `{{DOCTOR_JSON}}` | `g8s doctor --json` |
+| Regression result | `{{REGRESSION}}` | `g8s cleanup --dry-run` + `g8s status --worker --json` |
+
+---
+
+## Verified Behavior Summary
+
+> **Must reference successful pilot with SUBSTANCE_VERIFIED state**
+
+- Pilot ID: `{{PILOT_ID}}`
+- Objective: `{{OBJECTIVE}}`
+- Evidence: `{{EVIDENCE_SUMMARY}}` (tests passed, lint clean, diff bounded)
+- Receipt: `{{RECEIPT_REF}}`
+
+---
+
+## Proposed New Scope
+
+> **What new capability/behavior is proposed? Why?**
+
+`{{PROPOSED_SCOPE_DESCRIPTION}}`
+
+---
+
+## OpenSpec Delta (REQUIRED — Spec-First)
+
+- [ ] Delta file exists: `spec/openspec/{{DELTA_NUM}}-{{FEATURE_NAME}}.md`
+- [ ] Delta reviewed and approved
+
+---
+
+## Implementation Sketch
+
+```go
+// {{PACKAGE}}: {{HIGH_LEVEL_DESCRIPTION}}
+// 
+// {{KEY_INTERFACES}}
+// {{STATE_CHANGES}}
+```
+
+---
+
+## Acceptance Checks (DoD for Proposal)
+
+- [ ] `go test -race ./...` passes
+- [ ] `golangci-lint` clean
+- [ ] New test cases covering proposed behavior
+- [ ] OpenSpec delta updated and approved
+- [ ] Documentation updated (README, CONTRIBUTING, Constitution if needed)
+
+---
+
+## Competing Hypotheses (Why This Approach)
+
+1. **H1 (Proposed)**: `{{H1_DESCRIPTION}}` — `{{H1_EVIDENCE}}`
+2. **H2 (Alternative)**: `{{H2_DESCRIPTION}}` — `{{H2_EVIDENCE}}`
+3. **H3 (Alternative)**: `{{H3_DESCRIPTION}}` — `{{H3_EVIDENCE}}`
+
+**Selected**: H1 because `{{SELECTION_REASON}}`
+
+---
+
+## Cross-Check Evidence (Pre-Publication)
+
+> **Required before GitHub discussion/PR**. Only fresh `clear` → proceed.
+
+- [ ] Upstream ref: `{{UPSTREAM_REF}}`
+- [ ] Cross-check result: `{{CROSS_CHECK}}`
+- [ ] Evidence attached: `{{CROSS_CHECK_EVIDENCE}}`
