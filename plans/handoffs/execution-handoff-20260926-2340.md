@@ -1,5 +1,7 @@
 # HANDOFF: S1 Complete — Next: #394 Concurrent Dispatch + v0.12.0
 
+**Session type**: T2 (execution)
+
 **Date**: 2026-09-26 ~23:40 · **Branch**: main @ 26c07f6 · **Written by**: T2 execution session (ZCode, ALDC-driven)
 
 ## Mission and current status

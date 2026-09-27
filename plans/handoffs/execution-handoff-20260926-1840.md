@@ -1,5 +1,7 @@
 # HANDOFF: g8s T2 Campaign — S1 Execution Start (ALDC Stage 3 Ready)
 
+**Session type**: T2 (execution)
+
 **Date**: 2026-09-26 ~18:35 · **Branch**: main @ 007e463 · **Written by**: T1→T2 transition session (ZCode)
 
 ## Mission and current status

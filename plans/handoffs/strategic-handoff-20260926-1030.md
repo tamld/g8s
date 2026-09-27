@@ -1,5 +1,7 @@
 # HANDOFF: g8s Orchestrator Framework — Strategic Session Handoff
 
+**Session type**: T1 (strategy)
+
 ## Mission and current status
 
 g8s is a Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers. Pure Go, Zero-CGO, single binary ~15MB. v0.11.0 released (11 assets, GoReleaser).

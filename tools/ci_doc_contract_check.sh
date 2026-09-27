@@ -109,7 +109,7 @@ done < <(grep -oE '\([0-9A-Za-z_-]+\.md\)' spec/openspec/README.md | tr -d '()')
 # 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger
 #    declares which session type produced it — T1 (strategy) or T2 (execution).
 echo "--> [7/7] Verifying session-type markers (ADR-0022)..."
-for ledger in plans/*/plan.md; do
+for ledger in plans/*/plan.md plans/handoffs/*.md; do
     [ -e "$ledger" ] || continue
     if ! grep -qE '\*\*Session type\*\*: *T[12]' "$ledger"; then
         echo "::error::$ledger missing session-type marker (ADR-0022 §6)"
