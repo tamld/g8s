@@ -136,7 +136,7 @@ process trees:
 
 | Entry point | Spawns OS children? | Containment |
 |---|---|---|
-| `g8s worker` (incl. `--concurrency N`) | Yes — worker attempts | POSIX: own process group + SIGTERM→SIGKILL escalation + post-run group sweep (`orphan_killed` telemetry). Windows: Job Object with `KILL_ON_JOB_CLOSE` — closing the handle (every terminal branch, `Terminate`, daemon death) makes the kernel kill the whole tree. |
+| `g8s worker` (incl. `--concurrency N`) | Yes — worker attempts | POSIX: own process group + SIGTERM→SIGKILL escalation + post-run group sweep (`orphan_killed` telemetry). Windows: Job Object with `KILL_ON_JOB_CLOSE` (kernel kills the tree on handle close — daemon death included). PLUS: `workspace_write` attempts get per-attempt worktree isolation when running from a git checkout (#427) — deliverable kept for inspection/merge. |
 | `g8s serve` / `mcp` | No — API surfaces only | Own graceful shutdown. |
 | `g8s autopilot` | No — in-process scheduler + queue handler | Worker containment applies when the queue is drained by `g8s worker` processes. |
 | `g8s orchestrate` | Yes — via the same supervisor spawn path | Same containment as `g8s worker`. |
