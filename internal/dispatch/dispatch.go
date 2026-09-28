@@ -50,8 +50,8 @@ var sensitivePatterns = []struct {
 	pattern     *regexp.Regexp
 	replacement string
 }{
-	{regexp.MustCompile(`postgresql://[^\s"\x60]+`), "postgresql://<REDACTED>"},
-	{regexp.MustCompile(`://[^\s"\x60/:]+:[^\s"\x60/@]+@`), "://<REDACTED>:<REDACTED>@"},
+	{regexp.MustCompile(`postgresql://[^\s"\\\x60]+`), "postgresql://<REDACTED>"},
+	{regexp.MustCompile(`://[^\s"\\\x60/:]+:[^\s"\\\x60/@]+@`), "://<REDACTED>:<REDACTED>@"},
 	{regexp.MustCompile(`specifically \x60[^\x60]+\x60`), "specifically `<REDACTED>`"},
 }
 
@@ -59,7 +59,7 @@ var sensitivePatterns = []struct {
 // the replacement can keep public literals intact while normalizing the
 // separator (password: x -> password=<REDACTED>, matching the historical
 // sanitizer output format).
-var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)([^"'\s,}\]]{3,})`)
+var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)((?:\\.|[^"'\s,}\]\\]){3,})`)
 
 // publicLiteralPattern matches values that are public API arguments, not
 // secrets (token=False, retries=0, timeout=None).
@@ -74,8 +74,12 @@ func redactCredentialAssignments(value string) string {
 		if len(subs) < 4 {
 			return m
 		}
-		if publicLiteralPattern.MatchString(subs[3]) {
-			return m // public literal — keep as-is
+		core := subs[3]
+		if i := strings.IndexByte(subs[3], '\\'); i >= 0 {
+			core = subs[3][:i]
+		}
+		if publicLiteralPattern.MatchString(core) {
+			return m // public literal (possibly followed by transport escapes) — keep
 		}
 		return subs[1] + "=<REDACTED>"
 	})
