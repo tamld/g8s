@@ -81,6 +81,8 @@ func main() {
 		runVersion(os.Args[2:])
 	case "eval":
 		runEval(os.Args[2:])
+	case "offer":
+		runOffer(os.Args[2:])
 	case "watch":
 		runWatch(os.Args[2:])
 	case "reflex":

@@ -1,0 +1,4 @@
+# knowledge profile — content integrity is the security surface
+trust_boundaries:
+  - "00-Inbox/**"
+  - "1-Knowledge/**"
