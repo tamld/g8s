@@ -445,7 +445,7 @@ func (g *DefaultCleanupGitRunner) WorktreePrune(ctx context.Context, repoDir str
 }
 
 func (g *DefaultCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", wtPath)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "remove", "--", wtPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -506,7 +506,7 @@ func (g *DefaultCleanupGitRunner) DeleteBranch(ctx context.Context, repoDir, bra
 	if force {
 		flag = "-D"
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", flag, branch)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "branch", flag, "--", branch)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git branch %s %s: %w (%s)", flag, branch, err, strings.TrimSpace(string(out)))
@@ -586,7 +586,7 @@ func (g *DefaultCleanupGitRunner) BranchTipInfo(ctx context.Context, repoDir, br
 
 // CreateTag creates a lightweight tag at commit.
 func (g *DefaultCleanupGitRunner) CreateTag(ctx context.Context, repoDir, tag, commit string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", tag, commit)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "--", tag, commit)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git tag %s %s: %w (%s)", tag, commit, err, strings.TrimSpace(string(out)))
@@ -652,7 +652,7 @@ func (g *DefaultCleanupGitRunner) RemoteTags(ctx context.Context, repoDir string
 }
 
 func (g *DefaultCleanupGitRunner) DeleteTag(ctx context.Context, repoDir, tag string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "-d", tag)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "tag", "-d", "--", tag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git tag -d %s: %w (%s)", tag, err, strings.TrimSpace(string(out)))
