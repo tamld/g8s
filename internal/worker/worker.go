@@ -1125,16 +1125,6 @@ func providerRefusalDetected(stdoutText string) bool {
 }
 
 func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResult {
-	// #344: a content-filter refusal is never task evidence, even when the
-	// provider stream reports SUCCESS around it.
-	if providerRefusalDetected(stdoutText) {
-		return workerResult{
-			OK:      false,
-			Status:  "blocked",
-			Reason:  "provider content filter refused the prompt (no task evidence produced)",
-			Summary: "worker response is a provider refusal, not a result",
-		}
-	}
 	if envErr := dispatch.ParseWorkerEnvelope([]byte(stdoutText)); envErr != nil {
 		var envE *dispatch.WorkerEnvelopeError
 		reason := envErr.Error()
@@ -1150,7 +1140,8 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 	}
 
 	// Check for AGY result format (JSONL with result.status field)
-	if agyRes := parseAGYResult(stdoutText); agyRes != nil {
+	agyRes := parseAGYResult(stdoutText)
+	if agyRes != nil {
 		if agyRes.Result.Status == "ERROR" {
 			return workerResult{
 				OK:      false,
@@ -1160,6 +1151,20 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			}
 		}
 		if agyRes.Result.Status == "SUCCESS" {
+			// #344: a content-filter refusal is never task evidence, even
+			// when the provider stream reports SUCCESS around it. #443: the
+			// scan is scoped to the final response — the stream routinely
+			// echoes boilerplate (tool output, diffs of our own fixtures;
+			// TestReadWorkerResultProviderRefusal embeds the phrase), and a
+			// mid-stream echo must not outweigh a completed run.
+			if providerRefusalDetected(agyRes.Result.Response) {
+				return workerResult{
+					OK:      false,
+					Status:  "blocked",
+					Reason:  "provider content filter refused the prompt (no task evidence produced)",
+					Summary: "worker response is a provider refusal, not a result",
+				}
+			}
 			// #383: the model's response text IS the deliverable. A SUCCESS
 			// stream with an empty or empty-object response produced no
 			// evidence — reject it instead of sealing a hollow completion.
@@ -1177,6 +1182,18 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 				Response: agyRes.Result.Response,
 				Summary:  "AGY completed successfully",
 			}
+		}
+	}
+
+	// #344/#443: no final result event — the stream is the only evidence, so
+	// the whole-stream refusal scan still applies there (true prompt-level
+	// refusals emit no result event).
+	if providerRefusalDetected(stdoutText) {
+		return workerResult{
+			OK:      false,
+			Status:  "blocked",
+			Reason:  "provider content filter refused the prompt (no task evidence produced)",
+			Summary: "worker response is a provider refusal, not a result",
 		}
 	}
 

@@ -1151,6 +1151,42 @@ func TestReadWorkerResultFilterDiscussionNoFalsePositive(t *testing.T) {
 	}
 }
 
+// #443: the stream routinely echoes refusal boilerplate — tool output, diffs
+// of our own fixtures (TestReadWorkerResultProviderRefusal embeds the phrase),
+// model self-reference. A mid-stream echo must not outweigh a completed run:
+// the final response is the deliverable and it is clean, so the run is
+// succeeded.
+func TestReadWorkerResultStreamEchoNotBlocked(t *testing.T) {
+	stream := "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"diff --git a/internal/worker/worker_test.go ... text_delta=\\\"This request was blocked by Gemini's filters.\\\"\"}}\n" +
+		"{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"--- PASS: TestReadWorkerResultProviderRefusal\"}}\n" +
+		"{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"Implemented the repair packet exactly as written. All tests pass.\"}}\n"
+	wr := readWorkerResult(nil, stream, 0)
+	if !wr.OK {
+		t.Fatalf("mid-stream boilerplate echo must not block a completed run: %+v", wr)
+	}
+	if wr.Status != "succeeded" {
+		t.Errorf("expected succeeded status, got %q", wr.Status)
+	}
+	if wr.Response != "Implemented the repair packet exactly as written. All tests pass." {
+		t.Errorf("final response must be preserved: %q", wr.Response)
+	}
+}
+
+// #443: with no final result event the stream is the only evidence — the
+// #344 whole-stream refusal scan still applies there (true prompt-level
+// refusals emit no result event).
+func TestReadWorkerResultNoResultEventRefusalStillBlocked(t *testing.T) {
+	stream := "{\"event\":\"init\",\"init\":{\"model\":\"gemini-3.8-flash-high\"}}\n" +
+		"{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"This request was blocked by Gemini's filters.\"}}\n"
+	wr := readWorkerResult(nil, stream, 0)
+	if wr.OK {
+		t.Fatalf("prompt-level refusal without a result event must stay blocked: %+v", wr)
+	}
+	if wr.Status != "blocked" {
+		t.Errorf("expected blocked status, got %q", wr.Status)
+	}
+}
+
 // #253: the ingestion hook persists trace events to the telemetry ledger
 // when enabled, and no-ops when disabled.
 func TestTelemetryIngestionHook(t *testing.T) {
