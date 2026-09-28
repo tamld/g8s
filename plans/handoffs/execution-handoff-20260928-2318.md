@@ -41,6 +41,10 @@ Five-dimension scores (full review in session log):
 
 | # | Issue | Priority | Slice size |
 |---|---|---|---|
+| #434 | **Sanitization corrupts public literals in JSON strings** (field-found on v0.12.0 — #407 over-reach; highest priority, regression-class) | P1 · field-found | small-medium |
+| #433 | **v0.12.0 macOS download matrix names unavailable assets** (field-found) | P1 · field-found | small |
+| #436 | **watch: worker-complete milestone for supervisor wake-up** (field-found) | P2 | small |
+| #435 | **Knowledge offer link gate reports OK without examining pillar content** (audit-depth gap) | P2 | medium |
 | #438 | **Threat model STRIDE** over trust surfaces (registry = ready asset inventory) | P2 · spearhead 2 | 1-2 slices |
 | #442 | **Offer rollout waves** wiki → DiD → aegis/homelab → hash-checker + SCORECARD | P2 · bundle proof | per-wave |
 | #439 | **POSIX setsid escape hardening** (process-tree accounting layer 2) | P2 | 1 slice |
