@@ -1,0 +1,4 @@
+# knowledge profile — docs lane dominant, weekly freshness audit
+default_lane: D
+audit_cadence: weekly
+dominant_dimensions: [docs-freshness, spec-sync, evidence]
