@@ -47,15 +47,6 @@ func printOfferUsage() {
 	fmt.Println("  version                                   Print the offer bundle version")
 }
 
-// offerFS exposes the embedded bundle (root package offer).
-var offerFS = struct {
-	Profiles    func() map[string]string
-	Seed        func(profile, kind string) (string, bool)
-	GateScript  func(name string) (string, bool)
-	GateScripts func() []string
-	Onboarding  func() string
-}{Profiles: offer.Profiles, Seed: offer.Seed, GateScript: offer.GateScript, GateScripts: offer.GateScripts, Onboarding: offer.Onboarding}
-
 func runOfferInit(args []string) {
 	fs := flag.NewFlagSet("offer init", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
