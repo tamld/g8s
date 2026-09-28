@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -997,5 +998,120 @@ func TestSanitizePreservesPublicLiterals(t *testing.T) {
 	}
 	if !strings.Contains(out, "api_key=<REDACTED>") {
 		t.Errorf("secret assignments must still be redacted: %q", out)
+	}
+}
+
+// #434: repair output-fidelity regression in the output redaction policy
+// ensuring JSON transport escapes are preserved and escaped quotes in secrets
+// are normalized properly.
+func TestSanitizeJSONTransportFidelity434(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		validate func(t *testing.T, in, out string)
+	}{
+		{
+			name:  "case 1: exact issue repro JSON with public literals and escapes",
+			input: `{"code":"def public_fixture(u):\n    token = False\n    return u.password is None and token is False\n","quoted_data":"fixture-payload-0042"}`,
+			validate: func(t *testing.T, in, out string) {
+				if out != in {
+					t.Fatalf("case 1: want byte-exact identical output, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 2: escaped quote inside secret preserves JSONL validity",
+			input: `{"type":"item.completed","text":"set password: abc\"def\" here"}`,
+			validate: func(t *testing.T, in, out string) {
+				if !strings.Contains(out, "password=<REDACTED>") {
+					t.Errorf("case 2: expected password=<REDACTED>, got %q", out)
+				}
+				if !json.Valid([]byte(out)) {
+					t.Errorf("case 2: expected valid JSON, got %q", out)
+				}
+				if strings.Contains(out, `abc"def"`) || strings.Contains(out, `abc\"def\"`) {
+					t.Errorf("case 2: secret value leaked in %q", out)
+				}
+				if strings.Contains(out, "example-value-77") {
+					t.Errorf("case 2: unexpected example-value-77 remainder in %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 3: source_lines array with public literal",
+			input: `{"source_lines":["def public_fixture(u):","    token = False","    return u.password is None and token is False"]}`,
+			validate: func(t *testing.T, in, out string) {
+				if out != in {
+					t.Fatalf("case 3: want byte-exact unchanged output, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 4: public literal keeps following escape and content",
+			input: `{"code":"token = False\ngood = True"}`,
+			validate: func(t *testing.T, in, out string) {
+				if out != in {
+					t.Fatalf("case 4: want byte-exact unchanged output, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 5: public literal function arguments unchanged",
+			input: `{"code":"x = f(token=False, retries=0, timeout=None)"}`,
+			validate: func(t *testing.T, in, out string) {
+				if out != in {
+					t.Fatalf("case 5: want byte-exact unchanged output, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 6: non-public secret followed by escape is redacted and line stays json valid",
+			input: `{"cred":"credential=example-value-77\nnext chunk"}`,
+			validate: func(t *testing.T, in, out string) {
+				if !strings.Contains(out, "credential=<REDACTED>") && !strings.Contains(out, "cred=<REDACTED>") {
+					t.Errorf("case 6: expected credential redaction marker, got %q", out)
+				}
+				if strings.Contains(out, "example-value-77") {
+					t.Errorf("case 6: secret value example-value-77 leaked in %q", out)
+				}
+				if !json.Valid([]byte(out)) {
+					t.Errorf("case 6: expected valid JSON, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 7: URL fully redacted preserving trailing escape",
+			input: "{\"dsn\":\"postgresql://user:pass@db.example.com/sales\\n\"}",
+			validate: func(t *testing.T, in, out string) {
+				if !strings.Contains(out, "postgresql://<REDACTED>") {
+					t.Errorf("case 7: expected postgresql://<REDACTED>, got %q", out)
+				}
+				if strings.Contains(out, "user:pass") {
+					t.Errorf("case 7: leaked credentials user:pass in %q", out)
+				}
+				if !strings.HasSuffix(out, `\n"}`) {
+					t.Errorf("case 7: trailing \\n escape not preserved in %q", out)
+				}
+				if !json.Valid([]byte(out)) {
+					t.Errorf("case 7: expected valid JSON, got %q", out)
+				}
+			},
+		},
+		{
+			name:  "case 8: escaped quotes around the value normalized",
+			input: `password:\"example-value-77\"`,
+			validate: func(t *testing.T, in, out string) {
+				if out != "password=<REDACTED>" {
+					t.Errorf("case 8: want password=<REDACTED>, got %q", out)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := SanitizeOutput(tc.input)
+			tc.validate(t, tc.input, out)
+		})
 	}
 }
