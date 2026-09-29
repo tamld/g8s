@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,7 @@ type Child interface {
 type SpawnOptions struct {
 	Argv       []string
 	Dir        string
+	Env        []string
 	Stdout     io.Writer
 	Stderr     io.Writer
 	ResultPath string
@@ -415,6 +417,9 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	}
 	configureSysProcAttr(cmd)
 	cmd.Dir = opts.Dir
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	if err := cmd.Start(); err != nil {
@@ -594,9 +599,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		defer func() { releaseWorktree(true) }()
 	}
 
+	marker := attemptMarker(task.TaskID, task.Attempts)
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,
+		Env:        []string{runMarkerEnv + "=" + marker},
 		Stdout:     outWriter,
 		Stderr:     errWriter,
 		ResultPath: resultPath,
@@ -640,9 +647,10 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
 
-	// #415 PR-1: post-run orphan sweep — on every terminal branch of this
-	// attempt, verify the attempt process group is gone (no silent orphans).
-	defer s.sweepAttemptGroup(child, task.TaskID)
+	// #415 PR-1 & #439: post-run orphan sweep — on every terminal branch of this
+	// attempt, verify the attempt process group is gone (PR-1) and perform a
+	// layer-2 marker-based walk for any setsid grandchild escapes (#439).
+	defer s.sweepAttemptGroup(child, task.TaskID, marker)
 
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
 	// Close capture handles before collect reads and removes the files; on
@@ -701,19 +709,219 @@ func (s *Supervisor) awaitOutcome(
 	}
 }
 
-// sweepAttemptGroup is the post-run orphan sweep (#415 PR-1, POSIX): after
+// sweepAttemptGroup is the post-run orphan sweep (#415 PR-1 & #439): after
 // the attempt has ended, verify the attempt's process group is gone — a
 // worker that exits while its same-group grandchildren keep running leaves
 // silent orphans. Survivors get SIGKILL (best-effort) and an
 // `orphan_killed` trace event; the stale pid file is removed either way.
 // Windows containment lands in #415 PR-2 (Job Objects).
-func (s *Supervisor) sweepAttemptGroup(child Child, taskID string) {
-	pid := child.PID()
-	if !groupAlive(pid) {
-		return
+// Layer 2 (#439): If a marker is provided, candidate processes outside the
+// process group (e.g. grandchildren that escaped via setsid) are swept.
+func (s *Supervisor) sweepAttemptGroup(child Child, taskID string, marker ...string) {
+	if child != nil {
+		pid := child.PID()
+		if groupAlive(pid) {
+			_ = killProcessGroup(pid, syscallSIGKILL)
+			if s != nil {
+				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "same-group survivor killed after attempt end")
+			}
+		}
 	}
-	_ = killProcessGroup(pid, syscallSIGKILL)
-	s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "same-group survivor killed after attempt end")
+	if len(marker) > 0 && marker[0] != "" && child != nil {
+		s.sweepAttemptMarker(child, taskID, marker[0])
+	}
+}
+
+const (
+	runMarkerEnv            = "G8S_RUN_MARKER"
+	defaultMaxCandidatePIDs = 512
+	defaultPgrepDepth       = 8
+	defaultSweepBudget      = 2 * time.Second
+)
+
+func attemptMarker(taskID string, attempts int) string {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	return fmt.Sprintf("%s-%d", taskID, attempts)
+}
+
+// sweepAttemptMarker performs the Layer 2 containment escape sweep (#439).
+// It searches candidate processes (descendants and orphaned processes) and
+// kills any process whose environment matches G8S_RUN_MARKER=<marker> exactly.
+func (s *Supervisor) sweepAttemptMarker(child Child, taskID, marker string) int {
+	if child == nil {
+		return 0
+	}
+	return s.sweepAttemptMarkerPID(child.PID(), taskID, marker)
+}
+
+// sweepAttemptMarkerPID executes the Layer 2 escape sweep starting from childPID.
+func (s *Supervisor) sweepAttemptMarkerPID(childPID int, taskID, marker string) int {
+	if runtime.GOOS == "windows" || marker == "" {
+		return 0
+	}
+	candidates := collectMarkerCandidates(childPID, defaultMaxCandidatePIDs)
+	killed, _ := s.sweepCandidatePIDs(candidates, taskID, marker, hasRunMarker, defaultMaxCandidatePIDs, defaultSweepBudget)
+	return killed
+}
+
+// collectMarkerCandidates gathers candidate PIDs for the Layer 2 sweep:
+// 1. Descendants of childPID via `pgrep -P` iterated to bounded depth.
+// 2. Orphaned processes with PPID 1 owned by the current user (newest PIDs first).
+func collectMarkerCandidates(childPID, maxPIDs int) []int {
+	if maxPIDs <= 0 {
+		maxPIDs = defaultMaxCandidatePIDs
+	}
+	var (
+		candidates []int
+		visited    = make(map[int]bool)
+	)
+
+	// 1. Descendant walk from childPID
+	if childPID > 0 {
+		visited[childPID] = true
+		current := []int{childPID}
+		for depth := 0; depth < defaultPgrepDepth && len(current) > 0 && len(candidates) < maxPIDs; depth++ {
+			var next []int
+			for _, parent := range current {
+				out, err := exec.Command("pgrep", "-P", strconv.Itoa(parent)).Output()
+				if err != nil {
+					continue
+				}
+				for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+					line = strings.TrimSpace(line)
+					if line == "" {
+						continue
+					}
+					pid, perr := strconv.Atoi(line)
+					if perr == nil && pid > 0 && !visited[pid] {
+						visited[pid] = true
+						candidates = append(candidates, pid)
+						next = append(next, pid)
+						if len(candidates) >= maxPIDs {
+							break
+						}
+					}
+				}
+				if len(candidates) >= maxPIDs {
+					break
+				}
+			}
+			current = next
+		}
+	}
+
+	// 2. Orphaned processes (PPID 1) owned by current user (for double-fork setsid escapes)
+	if len(candidates) < maxPIDs {
+		uid := os.Getuid()
+		out, err := exec.Command("pgrep", "-u", strconv.Itoa(uid), "-P", "1").Output()
+		if err == nil {
+			var orphanPIDs []int
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if pid, perr := strconv.Atoi(line); perr == nil && pid > 1 && !visited[pid] {
+					orphanPIDs = append(orphanPIDs, pid)
+				}
+			}
+			// Sort newest PIDs first so recent escapes are checked first
+			sort.Slice(orphanPIDs, func(i, j int) bool {
+				return orphanPIDs[i] > orphanPIDs[j]
+			})
+			for _, pid := range orphanPIDs {
+				visited[pid] = true
+				candidates = append(candidates, pid)
+				if len(candidates) >= maxPIDs {
+					break
+				}
+			}
+		}
+	}
+
+	return candidates
+}
+
+// hasRunMarker checks whether the process with the given PID has an exact match
+// for G8S_RUN_MARKER=<marker> in its environment.
+//
+// INVARIANT (POSIX Layer 2 Containment):
+// A candidate process is killed if and only if its environment contains an exact
+// match for G8S_RUN_MARKER=<attempt-unique-value>. We NEVER kill by process age,
+// binary name, or parent heuristics alone. This eliminates accidental
+// termination of unrelated system or user processes.
+func hasRunMarker(pid int, marker string) bool {
+	if pid <= 1 || marker == "" {
+		return false
+	}
+	target := runMarkerEnv + "=" + marker
+
+	if runtime.GOOS == "linux" {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+		if err != nil {
+			return false
+		}
+		for _, entry := range strings.Split(string(data), "\x00") {
+			if entry == target {
+				return true
+			}
+		}
+		return false
+	}
+
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("ps", "-E", "-ww", "-p", strconv.Itoa(pid)).Output()
+		if err != nil {
+			return false
+		}
+		re := regexp.MustCompile(`(^|\s)` + regexp.QuoteMeta(target) + `($|\s)`)
+		return re.Match(out)
+	}
+
+	return false
+}
+
+// sweepCandidatePIDs examines candidate PIDs up to maxPIDs within the budget,
+// killing any process where check(pid, marker) returns true.
+func (s *Supervisor) sweepCandidatePIDs(
+	candidates []int,
+	taskID, marker string,
+	check func(int, string) bool,
+	maxPIDs int,
+	budget time.Duration,
+) (killed, examined int) {
+	if check == nil {
+		check = hasRunMarker
+	}
+	if maxPIDs <= 0 {
+		maxPIDs = defaultMaxCandidatePIDs
+	}
+	if budget <= 0 {
+		budget = defaultSweepBudget
+	}
+
+	start := time.Now()
+	for _, pid := range candidates {
+		if examined >= maxPIDs {
+			break
+		}
+		if time.Since(start) >= budget {
+			break
+		}
+		examined++
+		if check(pid, marker) {
+			if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Kill()
+			}
+			if s != nil {
+				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "layer=2: setsid survivor killed after attempt end")
+			}
+			killed++
+		}
+	}
+	return killed, examined
 }
 
 // collect terminates any surviving child, applies the terminal branch, and
