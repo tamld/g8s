@@ -874,10 +874,18 @@ func (e *TelemetryEngine) GetRelevantPatterns(ctx context.Context, role string, 
 		return nil, err
 	}
 
+	// ⚡ Bolt Optimization: Hoist ToLower computations outside the loop to avoid redundant allocations
+	lowerRole := strings.ToLower(role)
+	promptPrefix := prompt
+	if len(promptPrefix) > 20 {
+		promptPrefix = promptPrefix[:20]
+	}
+	lowerPromptPrefix := strings.ToLower(promptPrefix)
+
 	// Filter by relevance to role, path, and prompt
 	relevant := make([]NegativePattern, 0)
 	for _, p := range patterns {
-		score := relevanceScore(p, role, path, prompt)
+		score := relevanceScore(p, lowerRole, path, lowerPromptPrefix)
 		if score > 0.3 {
 			relevant = append(relevant, p)
 		}
@@ -885,17 +893,17 @@ func (e *TelemetryEngine) GetRelevantPatterns(ctx context.Context, role string, 
 	return relevant, nil
 }
 
-func relevanceScore(pattern NegativePattern, role, path, prompt string) float64 {
+func relevanceScore(pattern NegativePattern, lowerRole, path, lowerPromptPrefix string) float64 {
 	score := 0.0
 	pkgStr := strings.Join(pattern.AffectedPackages, " ")
 	if strings.Contains(pkgStr, path) {
 		score += 0.4
 	}
-	if strings.Contains(strings.ToLower(string(pattern.PatternType)), strings.ToLower(role)) {
+	if strings.Contains(strings.ToLower(string(pattern.PatternType)), lowerRole) {
 		score += 0.2
 	}
 	for _, ctx := range pattern.ExampleContexts {
-		if strings.Contains(strings.ToLower(ctx), strings.ToLower(prompt[:min(20, len(prompt))])) {
+		if strings.Contains(strings.ToLower(ctx), lowerPromptPrefix) {
 			score += 0.3
 			break
 		}

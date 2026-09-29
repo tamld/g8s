@@ -17,3 +17,7 @@
 ## 2026-09-23 - Avoid dynamic regexp compilation in loops/functions
 **Learning:** In Go, calling `regexp.MustCompile` inside function bodies or loops causes expensive dynamic recompilation on every invocation, unnecessarily consuming CPU and creating memory pressure.
 **Action:** Always hoist `regexp.MustCompile` calls to package-level variables so they are compiled exactly once at startup.
+
+## 2025-02-28 - Avoid redundant ToLower inside hot loops
+**Learning:** Functions like `strings.ToLower()` allocate new memory for strings. If performed inside a hot loop (like scanning hundreds of negative patterns or their context examples), this causes significant CPU overhead and garbage collection pressure, leading to measurable performance degradation. In `relevanceScore`, recomputing `strings.ToLower(role)` and string truncations per pattern caused unnecessary overhead.
+**Action:** Always hoist expensive string manipulations (e.g., lowercase conversions, truncations) outside of loop iterations when the values being modified don't change within the loop. Pre-compute and pass the result inwards.
