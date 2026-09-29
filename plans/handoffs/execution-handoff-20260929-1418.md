@@ -3,12 +3,15 @@ handoff-version: 1
 generated: 2026-09-29T14:18:00+07:00
 generator: handoff@1.0.0
 focus: "continue g8s debt-zero: self-audit suite and delivery contract"
+session-type: T2 (execution)
 workspace: $G8S_REPO_ROOT
 branch: main
 head: 3393a2c
 ---
 
 # HANDOFF: Debt-zero complete — continue with self-audit suite & delivery contract
+
+**Session type**: T2 (execution)
 
 ## Mission and current status
 
