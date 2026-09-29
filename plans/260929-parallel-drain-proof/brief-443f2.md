@@ -7,8 +7,8 @@ Repo: g8s. Tracking: tamld/g8s#443 (facet 2) + tamld/g8s#448 (acceptance item 2)
 Your current working directory is a scratch worktree. Write your changes
 DIRECTLY to these receipt-scoped repository files (absolute paths):
 
-- /Users/tamld/Documents/github/g8s/internal/orchestrator/worktree.go
-- /Users/tamld/Documents/github/g8s/internal/orchestrator/worktree_edge_test.go
+- $G8S_REPO_ROOT/internal/orchestrator/worktree.go
+- $G8S_REPO_ROOT/internal/orchestrator/worktree_edge_test.go
 
 Do NOT run git commit. Do NOT modify any other file. Another worker is
 operating on unrelated files in parallel — touching anything outside the
