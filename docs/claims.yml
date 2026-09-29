@@ -1,0 +1,74 @@
+# Claims Registry — SSoT for quantitative claims in g8s
+# Format: grep/sed-friendly YAML without external library dependencies
+# Verified by tools/claims_check.sh
+
+- id: claim-containment-layers
+  claim: "Blast radius containment: 7 layers live (per-attempt, per-receipt, per-session, per-lane, per-trust-zone, per-surface, per-cleanup)"
+  evidence:
+    test: TestReleasePreservesDirtyWorktree
+    eval: ""
+    source: docs/decisions/0021-standard-operating-model.md
+
+- id: claim-containment-attempt-isolation
+  claim: "Worker attempts run in isolated per-attempt worktrees preventing cross-attempt bleed"
+  evidence:
+    test: TestWorkspaceWriteAttemptGetsWorktreeIsolation
+    eval: ""
+    source: docs/OPERATIONS.md
+
+- id: claim-containment-receipt-single-use
+  claim: "Capability write receipts are single-use with enforced TTL and path scoping"
+  evidence:
+    test: TestReuseOfConsumedReceiptRejected
+    eval: ""
+    source: spec/constitution.md
+
+- id: claim-containment-session-registry
+  claim: "Worker sessions are tracked in SQLite registry with active state and exclusive locking"
+  evidence:
+    test: TestSessionsRegistryLifecycle
+    eval: ""
+    source: docs/decisions/0022-strategic-session-protocol.md
+
+- id: claim-containment-cleanup-reapers
+  claim: "Background resource cleanup sweeps orphan worktrees and ghost processes"
+  evidence:
+    test: TestGhostProcessCleanup
+    eval: ""
+    source: docs/OPERATIONS.md
+
+- id: claim-containment-poison-surface
+  claim: "Memory promotion gate enforces payload-hash monotonicity and rejects poisoned resurrection"
+  evidence:
+    test: TestTombstoneMonotonicity
+    eval: ""
+    source: docs/decisions/0023-memory-lifecycle.md
+
+- id: claim-eval-pri-score
+  claim: "Adversarial eval harness computes Provider Reliability Index (PRI) across probe categories"
+  evidence:
+    test: TestComputePRI
+    eval: "pi-001"
+    source: docs/designs/gate-lane-routing.md
+
+unbound:
+  - id: claim-g1-g6-gate-count
+    claim: "Six machine-enforced quality gates (G1-G6) govern code, spec, doc, link, coverage, and lane routing"
+    evidence:
+      test: ""
+      eval: ""
+      source: docs/designs/gate-lane-routing.md
+
+  - id: claim-coverage-ratchet-baseline
+    claim: "Coverage ratchet enforces aggregate test coverage against committed baseline"
+    evidence:
+      test: ""
+      eval: ""
+      source: tools/ci_coverage_ratchet.sh
+
+  - id: claim-single-node-cp
+    claim: "Single-node control plane prioritizes containment consistency over high availability (ADR-0025)"
+    evidence:
+      test: ""
+      eval: ""
+      source: docs/security/threat-model-stride.md
