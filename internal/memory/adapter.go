@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,7 +18,7 @@ import (
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/vault"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // AdapterOptions configures the LocalSQLiteMemoryAdapter.
@@ -176,6 +179,63 @@ func (a *LocalSQLiteMemoryAdapter) Close() error {
 	return nil
 }
 
+// Package-level retry configuration for SQLITE_BUSY handling (#440).
+var (
+	busyRetryAttempts = 3
+	busyBackoff       = func(attempt int) time.Duration {
+		return time.Duration(50+rand.IntN(151)) * time.Millisecond
+	}
+)
+
+// isBusyErr reports whether err is a SQLITE_BUSY-class error.
+func isBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		code := se.Code()
+		if code == 5 || (code&0xff) == 5 || code == 6 || (code&0xff) == 6 {
+			return true
+		}
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked") {
+		return true
+	}
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "database is locked") ||
+		strings.Contains(lower, "database table is locked") ||
+		strings.Contains(lower, "sqlite_busy")
+}
+
+// withBusyRetry runs op, retrying on SQLITE_BUSY-class errors up to busyRetryAttempts.
+func withBusyRetry(op func() error) error {
+	attempts := busyRetryAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		err = op()
+		if err == nil {
+			return nil
+		}
+		if !isBusyErr(err) {
+			return err
+		}
+		if attempt < attempts-1 {
+			if busyBackoff != nil {
+				d := busyBackoff(attempt)
+				if d > 0 {
+					time.Sleep(d)
+				}
+			}
+		}
+	}
+	return err
+}
+
 // -----------------------------------------------------------------------------
 // Working Memory
 // -----------------------------------------------------------------------------
@@ -214,16 +274,19 @@ func (a *LocalSQLiteMemoryAdapter) StoreWorkingContext(ctx context.Context, task
 		updated_at = excluded.updated_at
 	`
 
-	_, err = a.db.ExecContext(ctx, query,
-		taskID,
-		wCtx.Prompt,
-		wCtx.Role,
-		string(pathsJSON),
-		string(status),
-		wCtx.RedactedDigest,
-		createdAt,
-		now,
-	)
+	err = withBusyRetry(func() error {
+		_, execErr := a.db.ExecContext(ctx, query,
+			taskID,
+			wCtx.Prompt,
+			wCtx.Role,
+			string(pathsJSON),
+			string(status),
+			wCtx.RedactedDigest,
+			createdAt,
+			now,
+		)
+		return execErr
+	})
 	if err != nil {
 		return fmt.Errorf("memory: store working context: %w", err)
 	}
@@ -243,8 +306,6 @@ func (a *LocalSQLiteMemoryAdapter) LoadWorkingContext(ctx context.Context, taskI
 	WHERE task_id = ?
 	`
 
-	row := a.db.QueryRowContext(ctx, query, taskID)
-
 	var (
 		tID            string
 		prompt         string
@@ -256,7 +317,10 @@ func (a *LocalSQLiteMemoryAdapter) LoadWorkingContext(ctx context.Context, taskI
 		updatedAt      time.Time
 	)
 
-	err := row.Scan(&tID, &prompt, &role, &pathsJSON, &statusStr, &redactedDigest, &createdAt, &updatedAt)
+	err := withBusyRetry(func() error {
+		row := a.db.QueryRowContext(ctx, query, taskID)
+		return row.Scan(&tID, &prompt, &role, &pathsJSON, &statusStr, &redactedDigest, &createdAt, &updatedAt)
+	})
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
