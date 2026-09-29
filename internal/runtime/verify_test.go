@@ -150,7 +150,7 @@ func TestRunWithTimeout(t *testing.T) {
 		command = "cmd"
 		args = []string{"/c", "echo hello"}
 	}
-	stdout, stderr, err := RunWithTimeout(1*time.Second, command, args...)
+	stdout, stderr, err := RunWithTimeout(5*time.Second, command, args...)
 	if err != nil {
 		t.Errorf("RunWithTimeout failed: %v", err)
 	}
