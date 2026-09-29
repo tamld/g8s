@@ -2017,13 +2017,29 @@ func mustJSON(v any) json.RawMessage {
 	return data
 }
 
+func sanitizeTrack(raw string, name string, altered *[]string) string {
+	sanitized := dispatch.SanitizeOutput(raw)
+	if sanitized != raw {
+		*altered = append(*altered, name)
+	}
+	return sanitized
+}
+
 func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
-	return map[string]any{
+	var altered []string
+	sanStdout := sanitizeTrack(stdout, "stdout", &altered)
+	sanStderr := sanitizeTrack(stderr, "stderr", &altered)
+	env := map[string]any{
 		"ok":     ok,
 		"status": status,
-		"stdout": dispatch.SanitizeOutput(stdout),
-		"stderr": dispatch.SanitizeOutput(stderr),
+		"stdout": sanStdout,
+		"stderr": sanStderr,
 	}
+	if len(altered) > 0 {
+		env["artifact_altered"] = true
+		env["altered_fields"] = altered
+	}
+	return env
 }
 
 // verifyExecutableIdentity checks if the executable is what it claims to be.
@@ -2045,20 +2061,25 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 	if wr.Summary != "" {
 		envelope["summary"] = wr.Summary
 	}
+	var altered []string
 	if wr.Response != "" {
 		// #383: the response is worker/model-controlled content that now
 		// reaches result_json and the Evidence Lake — it goes through the
 		// same central sanitization as stdout, no exceptions.
-		envelope["response"] = dispatch.SanitizeOutput(wr.Response)
+		envelope["response"] = sanitizeTrack(wr.Response, "response", &altered)
 	}
 	if len(wr.ContractViolation) > 0 {
 		envelope["contract_violation"] = wr.ContractViolation
 	}
 	if stdout != "" {
-		envelope["stdout"] = dispatch.SanitizeOutput(stdout)
+		envelope["stdout"] = sanitizeTrack(stdout, "stdout", &altered)
 	}
 	if stderr != "" {
-		envelope["stderr"] = dispatch.SanitizeOutput(stderr)
+		envelope["stderr"] = sanitizeTrack(stderr, "stderr", &altered)
+	}
+	if len(altered) > 0 {
+		envelope["artifact_altered"] = true
+		envelope["altered_fields"] = altered
 	}
 	return mustJSON(envelope)
 }
