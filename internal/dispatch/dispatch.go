@@ -440,6 +440,7 @@ type Runner func(command []string) (ExecResult, error)
 // RunOptions parameterizes one dispatch envelope invocation.
 type RunOptions struct {
 	Prompt          string
+	Provider        string
 	Model           string
 	Role            string
 	Permission      string
@@ -473,6 +474,7 @@ type Result struct {
 	ReturnCode        int                      `json:"returncode"`
 	HarnessReturnCode int                      `json:"harness_returncode"`
 	DurationSeconds   float64                  `json:"duration_seconds"`
+	Provider          string                   `json:"provider,omitempty"`
 	Model             string                   `json:"model"`
 	Role              string                   `json:"role"`
 	Permission        string                   `json:"permission"`
@@ -575,6 +577,7 @@ func Run(opts RunOptions) (Result, error) {
 		ReturnCode:        execResult.ReturnCode,
 		HarnessReturnCode: harnessReturnCode,
 		DurationSeconds:   duration,
+		Provider:          opts.Provider,
 		Model:             model,
 		Role:              role,
 		Permission:        permission,
