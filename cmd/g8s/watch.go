@@ -16,12 +16,67 @@ import (
 	"github.com/tamld/g8s/internal/watch"
 )
 
+// Supported milestone modes for watch (#436).
+const (
+	MilestoneAccept         = "accept"
+	MilestoneWorkerComplete = "worker-complete"
+
+	// StateWorkerComplete indicates worker finished; awaiting supervisor acceptance (#436).
+	StateWorkerComplete watch.VerdictState = "worker-complete"
+
+	// DetailWorkerComplete is the detail message when WORKER_COMPLETED milestone is reached.
+	DetailWorkerComplete = "worker finished; awaiting supervisor acceptance"
+)
+
+// TaskVerdict represents the mapped resolution of a task observation under a milestone.
+type TaskVerdict struct {
+	Done     bool
+	State    watch.VerdictState
+	Failed   []string
+	Detail   string
+	ExitCode int
+}
+
+// resolveTaskVerdict maps a CheckResult and milestone into a TaskVerdict.
+func resolveTaskVerdict(res watch.CheckResult, milestone string) TaskVerdict {
+	if !res.Done {
+		return TaskVerdict{
+			Done:     false,
+			Detail:   res.Detail,
+			ExitCode: -1,
+		}
+	}
+	if !res.Passed {
+		return TaskVerdict{
+			Done:     true,
+			State:    watch.StateFailed,
+			Failed:   res.Failed,
+			Detail:   res.Detail,
+			ExitCode: 1,
+		}
+	}
+	if milestone == MilestoneWorkerComplete && res.Detail == DetailWorkerComplete {
+		return TaskVerdict{
+			Done:     true,
+			State:    StateWorkerComplete,
+			Detail:   DetailWorkerComplete,
+			ExitCode: 0,
+		}
+	}
+	return TaskVerdict{
+		Done:     true,
+		State:    watch.StatePassed,
+		Detail:   res.Detail,
+		ExitCode: 0,
+	}
+}
+
 // runWatch blocks until a watched condition reaches a terminal state (#371).
 // Run it as a background process: the process-exit notification is the push
 // channel that wakes the supervisor without any sleep-polling.
 //
 //	g8s watch --pr 356 [--interval 60s] [--timeout 30m]
-//	g8s watch --task <task-id> [--interval 10s]
+//	g8s watch --task <task-id> [--interval 10s] [--milestone <accept|worker-complete>]
 func runWatch(args []string) {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
@@ -30,11 +85,16 @@ func runWatch(args []string) {
 	taskFlag := fs.String("task", "", "g8s task id: watch its state until terminal")
 	interval := fs.Duration("interval", 60*time.Second, "poll interval")
 	timeout := fs.Duration("timeout", 30*time.Minute, "give up after this long (verdict=timeout)")
+	milestone := fs.String("milestone", MilestoneAccept, "watch milestone: accept (default) or worker-complete")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("watch", "", *traceID, err.Error(), "", *jsonl)
 	}
 	if (*prFlag == 0) == (*taskFlag == "") {
 		exitUsage("watch", "", *traceID, "exactly one of --pr or --task is required", "g8s watch --pr 356 --interval 60s", *jsonl)
+		return
+	}
+	if *milestone != MilestoneAccept && *milestone != MilestoneWorkerComplete {
+		exitUsage("watch", "", *traceID, fmt.Sprintf("invalid --milestone %q (must be %s or %s)", *milestone, MilestoneAccept, MilestoneWorkerComplete), "g8s watch --task <task-id> --milestone worker-complete", *jsonl)
 		return
 	}
 
@@ -62,7 +122,7 @@ func runWatch(args []string) {
 		}
 		defer store.Close()
 		checker = func(ctx context.Context) (watch.CheckResult, error) {
-			return checkTask(ctx, store, taskID)
+			return checkTask(ctx, store, taskID, *milestone)
 		}
 	}
 
@@ -73,6 +133,10 @@ func runWatch(args []string) {
 	if err != nil {
 		exitRuntime("watch", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		return
+	}
+
+	if *milestone == MilestoneWorkerComplete && verdict.Detail == DetailWorkerComplete {
+		verdict.State = StateWorkerComplete
 	}
 
 	data := map[string]any{
@@ -95,7 +159,7 @@ func runWatch(args []string) {
 	}
 
 	switch verdict.State {
-	case watch.StatePassed:
+	case watch.StatePassed, StateWorkerComplete:
 		return
 	case watch.StateFailed:
 		os.Exit(1)
@@ -142,8 +206,12 @@ func checkPR(ctx context.Context, pr int) (watch.CheckResult, error) {
 	return res, nil
 }
 
-// checkTask observes one g8s task's state via the control plane.
-func checkTask(ctx context.Context, store *controlplane.Store, taskID string) (watch.CheckResult, error) {
+// checkTask observes one g8s task's state via the control plane (#436).
+func checkTask(ctx context.Context, store *controlplane.Store, taskID string, milestone ...string) (watch.CheckResult, error) {
+	m := MilestoneAccept
+	if len(milestone) > 0 && milestone[0] != "" {
+		m = milestone[0]
+	}
 	task, err := store.GetTask(ctx, taskID)
 	if err != nil {
 		return watch.CheckResult{}, fmt.Errorf("get task: %w", err)
@@ -154,7 +222,16 @@ func checkTask(ctx context.Context, store *controlplane.Store, taskID string) (w
 	switch task.State {
 	case "SUCCEEDED":
 		return watch.CheckResult{Done: true, Passed: true, Detail: "task " + taskID + " succeeded"}, nil
-	case "FAILED", "CANCELLED":
+	case "WORKER_COMPLETED":
+		if m == MilestoneWorkerComplete {
+			return watch.CheckResult{
+				Done:   true,
+				Passed: true,
+				Detail: DetailWorkerComplete,
+			}, nil
+		}
+		return watch.CheckResult{Done: false, Detail: "state " + task.State}, nil
+	case "FAILED", "CANCELLED", "TIMED_OUT":
 		return watch.CheckResult{Done: true, Passed: false, Failed: []string{task.State}, Detail: "task " + taskID + " ended " + task.State}, nil
 	default:
 		return watch.CheckResult{Done: false, Detail: "state " + task.State}, nil
