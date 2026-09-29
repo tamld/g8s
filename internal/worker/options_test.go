@@ -43,7 +43,7 @@ func TestSubstituteTemplate(t *testing.T) {
 		{[]string{"{prompt}", "{model}", "{timeout}"}, "x", "y", "z", "x y z"},
 	}
 	for _, tt := range tests {
-		got := substituteTemplate(tt.tmpl, tt.prompt, tt.model, tt.timeout)
+		got := SubstituteTemplate(tt.tmpl, tt.prompt, tt.model, tt.timeout)
 		joined := ""
 		for i, s := range got {
 			if i > 0 {
@@ -52,7 +52,7 @@ func TestSubstituteTemplate(t *testing.T) {
 			joined += s
 		}
 		if joined != tt.wantJoined {
-			t.Errorf("substituteTemplate(%v) joined=%q, want %q", tt.tmpl, joined, tt.wantJoined)
+			t.Errorf("SubstituteTemplate(%v) joined=%q, want %q", tt.tmpl, joined, tt.wantJoined)
 		}
 	}
 }

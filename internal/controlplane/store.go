@@ -1308,6 +1308,19 @@ func parentKeyOfReq(req SubmitTaskRequest) string {
 // ClaimTask leases the highest-priority QUEUED task to workerID under a
 // BEGIN IMMEDIATE transaction so concurrent claimers elect a single winner.
 func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*Task, error) {
+	return s.claimTaskInternal(ctx, workerID, leaseDurationSeconds, "")
+}
+
+// ClaimTaskProvider leases the highest-priority QUEUED task matching provider to workerID.
+// Empty provider = no filter (delegates to existing ClaimTask logic).
+func (s *Store) ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error) {
+	if provider == "" {
+		return s.ClaimTask(ctx, workerID, leaseDurationSeconds)
+	}
+	return s.claimTaskInternal(ctx, workerID, leaseDurationSeconds, provider)
+}
+
+func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error) {
 	if strings.TrimSpace(workerID) == "" {
 		return nil, errors.New("worker_id is required")
 	}
@@ -1341,11 +1354,21 @@ func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSec
 		return nil, fmt.Errorf("read maintenance: %w", err)
 	}
 
-	row := tx.QueryRowContext(ctx, `
+	var row *sql.Row
+	if provider != "" {
+		row = tx.QueryRowContext(ctx, `
+		SELECT `+taskColumns+` FROM tasks
+		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
+		  AND json_extract(request_json, '$.provider') = ?
+		ORDER BY priority DESC, created_at ASC
+		LIMIT 1`, provider)
+	} else {
+		row = tx.QueryRowContext(ctx, `
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
 		ORDER BY priority DESC, created_at ASC
 		LIMIT 1`)
+	}
 	candidate, scanErr := scanTask(row)
 	if scanErr != nil {
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)

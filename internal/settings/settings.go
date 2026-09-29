@@ -19,24 +19,26 @@ var (
 
 // AllowedConfigKeys defines the valid configuration keys and their description.
 var AllowedConfigKeys = map[string]string{
-	"data_dir":        "Directory for g8s database and persistent storage",
-	"scope":           "Installation and execution scope (user or system)",
-	"evidence_dir":    "Centralized directory for exported task execution receipts and logs",
-	"default_timeout": "Default maximum execution duration for submitted tasks (e.g. 60s, 5m)",
-	"default_model":   "Default target model for dispatch executions",
-	"default_role":    "Default worker role profile for submitted tasks",
-	"log_level":       "Verbosity level for daemon and CLI operations (debug, info, warn, error)",
+	"data_dir":         "Directory for g8s database and persistent storage",
+	"scope":            "Installation and execution scope (user or system)",
+	"evidence_dir":     "Centralized directory for exported task execution receipts and logs",
+	"default_timeout":  "Default maximum execution duration for submitted tasks (e.g. 60s, 5m)",
+	"default_model":    "Default target model for dispatch executions",
+	"default_role":     "Default worker role profile for submitted tasks",
+	"default_provider": "Default target provider for dispatch executions and queue submissions",
+	"log_level":        "Verbosity level for daemon and CLI operations (debug, info, warn, error)",
 }
 
 // Config represents the loaded configuration values.
 type Config struct {
-	DataDir        string `json:"data_dir,omitempty"`
-	Scope          string `json:"scope,omitempty"`
-	EvidenceDir    string `json:"evidence_dir,omitempty"`
-	DefaultTimeout string `json:"default_timeout,omitempty"`
-	DefaultModel   string `json:"default_model,omitempty"`
-	DefaultRole    string `json:"default_role,omitempty"`
-	LogLevel       string `json:"log_level,omitempty"`
+	DataDir         string `json:"data_dir,omitempty"`
+	Scope           string `json:"scope,omitempty"`
+	EvidenceDir     string `json:"evidence_dir,omitempty"`
+	DefaultTimeout  string `json:"default_timeout,omitempty"`
+	DefaultModel    string `json:"default_model,omitempty"`
+	DefaultRole     string `json:"default_role,omitempty"`
+	DefaultProvider string `json:"default_provider,omitempty"`
+	LogLevel        string `json:"log_level,omitempty"`
 }
 
 // Manager coordinates atomic reads and writes of the configuration store.

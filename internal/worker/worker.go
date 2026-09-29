@@ -95,6 +95,7 @@ func parseAGYResult(stdoutText string) *agyResult {
 // *controlplane.Store satisfies it directly.
 type WorkerControlPlane interface {
 	ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*controlplane.Task, error)
+	ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*controlplane.Task, error)
 	StartTask(taskID, workerID, leaseToken string) bool
 	RenewHeartbeat(ctx context.Context, taskID, workerID string, extensionSeconds int) error
 	FinishAttempt(taskID, workerID, leaseToken string, params controlplane.FinishAttemptParams) (*controlplane.Task, error)
@@ -116,6 +117,7 @@ type WorkerControlPlane interface {
 // taskRequest mirrors the worker-facing payload stored on every task.
 type taskRequest struct {
 	Prompt      string   `json:"prompt"`
+	Provider    string   `json:"provider,omitempty"`
 	Model       string   `json:"model"`
 	Role        string   `json:"role"`
 	Permission  string   `json:"permission"`
@@ -191,11 +193,21 @@ func WithBinaryPath(path string) Option { return func(s *Supervisor) { s.binaryP
 // WithEvidenceDir overrides the centralized Evidence Lake storage directory.
 func WithEvidenceDir(dir string) Option { return func(s *Supervisor) { s.evidenceDir = dir } }
 
-// WithCommandResolver installs an optional resolver that maps a decoded
-// WithCommandResolver optionally overrides the dispatch-contract argv with
-// an operator-defined invocation template (DELTA-10 R6).
+// WithCommandResolver installs an optional legacy resolver that maps a
+// decoded task request to an operator-defined invocation template by model
+// ID (DELTA-10 R6). Superseded by WithProviderCommandResolver; the two are
+// mutually exclusive and the provider-aware resolver wins when both are set.
 func WithCommandResolver(fn func(prompt, model, timeout string) ([]string, bool)) Option {
 	return func(s *Supervisor) { s.commandResolver = fn }
+}
+
+// WithProviderCommandResolver installs a provider-aware resolver
+// (DELTA-10 R6). It receives the task's provider so templates can be keyed
+// by provider name; a returned error fails the attempt (no silent fallback
+// to the default argv), while a nil error with empty argv falls through to
+// the dispatch-contract default.
+func WithProviderCommandResolver(fn func(prompt, provider, model, timeout string) ([]string, error)) Option {
+	return func(s *Supervisor) { s.providerResolver = fn }
 }
 
 // WorktreeIsolator hands workspace_write attempts a private worktree
@@ -231,9 +243,9 @@ func WithQualityGate(g OutputQualityGate) Option {
 	return func(s *Supervisor) { s.qualityGate = g }
 }
 
-// substituteTemplate replaces {prompt}, {model} and {timeout} placeholders
+// SubstituteTemplate replaces {prompt}, {model} and {timeout} placeholders
 // verbatim in an operator-defined invocation template (DELTA-10 R6).
-func substituteTemplate(tmpl []string, prompt, model, timeout string) []string {
+func SubstituteTemplate(tmpl []string, prompt, model, timeout string) []string {
 	out := make([]string, len(tmpl))
 	for i, part := range tmpl {
 		switch part {
@@ -250,6 +262,45 @@ func substituteTemplate(tmpl []string, prompt, model, timeout string) []string {
 	return out
 }
 
+// ProviderResolverOptions configures template resolution for providers and models.
+type ProviderResolverOptions struct {
+	ProviderTemplates     map[string][]string
+	ModelTemplates        map[string][]string
+	PlatformDispatchNames []string
+	APICallNames          map[string]bool
+}
+
+// NewProviderCommandResolver builds a command resolver implementing DELTA-10 resolution order.
+func NewProviderCommandResolver(opts ProviderResolverOptions) func(prompt, provider, model, timeout string) ([]string, error) {
+	return func(prompt, provider, model, timeout string) ([]string, error) {
+		if provider == "" {
+			if tmpl, ok := opts.ModelTemplates[model]; ok {
+				return SubstituteTemplate(tmpl, prompt, model, timeout), nil
+			}
+			return nil, nil // miss -> fallback to default agy argv
+		}
+
+		// provider != ""
+		if opts.APICallNames != nil && opts.APICallNames[provider] {
+			return nil, fmt.Errorf("provider %q is an api_call provider and is not executable on the queue path", provider)
+		}
+
+		if tmpl, ok := opts.ProviderTemplates[provider]; ok {
+			return SubstituteTemplate(tmpl, prompt, model, timeout), nil
+		}
+
+		// Not found among platform_dispatch entries
+		names := make([]string, len(opts.PlatformDispatchNames))
+		copy(names, opts.PlatformDispatchNames)
+		sort.Strings(names)
+		available := strings.Join(names, ", ")
+		if available == "" {
+			available = "none"
+		}
+		return nil, fmt.Errorf("provider %q not found among platform_dispatch entries (available: %s)", provider, available)
+	}
+}
+
 // Supervisor executes claimed tasks one attempt at a time with containment,
 // bounded capture, and sealed evidence export.
 type Supervisor struct {
@@ -264,8 +315,14 @@ type Supervisor struct {
 	streamCallback  StreamCallback
 
 	// commandResolver optionally overrides the dispatch-contract argv with
-	// an operator-defined invocation template (DELTA-10 R6).
+	// an operator-defined invocation template keyed by model ID (DELTA-10
+	// R6, legacy seam).
 	commandResolver func(prompt, model, timeout string) ([]string, bool)
+
+	// providerResolver is the provider-aware resolver seam (DELTA-10 R6).
+	// When set it wins over commandResolver and receives the task's
+	// provider; errors fail the attempt instead of falling back silently.
+	providerResolver func(prompt, provider, model, timeout string) ([]string, error)
 
 	// isolator hands workspace_write attempts a private worktree directory
 	// so concurrent code-writing attempts in one worker process cannot
@@ -324,6 +381,7 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 type RunOptions struct {
 	WorkerID     string
 	LeaseSeconds int
+	Provider     string
 	// Dir optionally overrides the child process working directory — the
 	// concurrent loop's per-worker worktree (#394). Empty keeps the
 	// request-driven default (first AddDir, else the run root).
@@ -500,7 +558,13 @@ var fencedJSONPattern = regexp.MustCompile("(?s)(?:```|`)(?:json)?\\s*(\\{.*?\\}
 // RunOnce claims one task and drives a single supervised attempt to a
 // terminal or paused outcome, cleaning private artifacts either way.
 func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplane.Task, error) {
-	task, err := s.cp.ClaimTask(ctx, opts.WorkerID, opts.LeaseSeconds)
+	var task *controlplane.Task
+	var err error
+	if opts.Provider != "" {
+		task, err = s.cp.ClaimTaskProvider(ctx, opts.WorkerID, opts.LeaseSeconds, opts.Provider)
+	} else {
+		task, err = s.cp.ClaimTask(ctx, opts.WorkerID, opts.LeaseSeconds)
+	}
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -557,7 +621,27 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	defer errFile.Close()
 
 	childArgv := s.buildArgv(req, promptPath, resultPath)
-	if s.commandResolver != nil {
+	if s.providerResolver != nil {
+		templateArgv, err := s.providerResolver(req.Prompt, req.Provider, req.Model, req.Timeout)
+		if err != nil {
+			outFile.Close()
+			errFile.Close()
+			errMsg := dispatch.SanitizeOutput(err.Error())
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+			}
+			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result:    mustJSON(map[string]any{"ok": false, "status": "resolution_failed"}),
+				Success:   false,
+				Retryable: false,
+				Err:       errMsg,
+			})
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+		}
+		if len(templateArgv) > 0 {
+			childArgv = templateArgv
+		}
+	} else if s.commandResolver != nil {
 		if templateArgv, ok := s.commandResolver(req.Prompt, req.Model, req.Timeout); ok {
 			childArgv = templateArgv
 		}
