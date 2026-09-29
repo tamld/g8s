@@ -26,6 +26,7 @@ g8s submit \
   --role "collector" \
   --permission "read_only" \
   --add-dir "." \
+  --provider "agy" \
   --model "gemini-3.8-flash-high" \
   --priority 10 \
   --max-attempts 3
@@ -42,9 +43,12 @@ g8s submit \
 | `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). |
 | `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
 | `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
+| `--provider` | `string` | `""` | Target provider name (`agy`, `codex`, etc.). Stored durably in task payload for worker claim affinity. Falls back to `default_provider` setting if omitted. Precedence: CLI flag > settings default > absent (legacy). |
 | `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
+
+> See [providers.md](providers.md) for multi-provider setup.
 
 ---
 
@@ -208,12 +212,18 @@ g8s worker --once
 
 # Run continuous worker for a specific model with 120s lease
 g8s worker --once=false --model "gemini-3.8-flash-high" --lease 120
+
+# Run worker with strict provider claim affinity
+g8s worker --provider agy
 ```
+
+When `--provider` is specified, the worker claims only tasks whose payload `provider` matches the flag value (strict claim affinity; provider-filtered workers never claim legacy provider-less tasks, while unfiltered workers claim all queued tasks). See [providers.md](providers.md) for multi-provider setup.
 
 #### Flags:
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--once` | `bool` | `true` | Claim and execute a single task, then exit. |
+| `--provider` | `string` | `""` | Restrict claiming to tasks targeting this provider (strict claim affinity). |
 | `--model` | `string` | `""` | Restrict claiming to tasks targeting this model. |
 | `--lease` | `int` | `60` | Lease duration in seconds. |
 
@@ -514,11 +524,33 @@ g8s doctor --fix
 Runtime initialization, persistent key-value configuration, shell completion generation, and OS service management.
 
 ```sh
+# Runtime initialization
 g8s init
-g8s config get G8S_DB
+
+# Configuration management
+g8s config list
+g8s config get default_provider
+g8s config set default_provider agy
+g8s config unset default_provider
+
+# Shell completion
 g8s completion zsh > ~/.zsh/completions/_g8s
+
+# OS service management
 g8s service install --user
 ```
+
+#### Persistent Configuration Keys (`g8s config`):
+| Key | Description |
+| :--- | :--- |
+| `default_provider` | Default provider name used during `g8s submit` when `--provider` is omitted. |
+| `default_model` | Default target model identifier for dispatch executions. |
+| `default_role` | Default worker role profile for submitted tasks. |
+| `default_timeout` | Default maximum execution duration for tasks (e.g. `60s`, `5m`). |
+| `data_dir` | Directory for g8s database and persistent storage. |
+| `scope` | Installation and execution scope (`user` or `system`). |
+| `evidence_dir` | Centralized directory for exported task execution receipts and logs. |
+| `log_level` | Verbosity level for daemon and CLI operations (`debug`, `info`, `warn`, `error`). |
 
 ---
 
