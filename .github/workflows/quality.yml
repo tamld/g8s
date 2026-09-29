@@ -229,6 +229,10 @@ jobs:
             # artifact maintained by this bot, so force-add is required.
             git add -f "$BASELINE_FILE"
             if ! git diff --staged --quiet; then
+              # [skip ci] is intentional loop prevention: without it this bot
+              # commit triggers Quality again, the ratchet writes a new
+              # baseline, and commits forever. The skipped commit changes
+              # exactly one tracked file (.g8s/coverage-baseline) — no code.
               git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
               git push origin main || echo "::warning::Failed to push coverage baseline"
             fi
