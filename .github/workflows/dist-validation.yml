@@ -7,6 +7,7 @@ on:
     paths:
       - '.goreleaser.yaml'
       - '.github/workflows/dist-validation.yml'
+      - 'tools/release_matrix_check*'
       - 'cmd/**'
       - 'internal/**'
       - 'go.mod'
@@ -46,3 +47,6 @@ jobs:
         with:
           version: latest
           args: release --snapshot --clean --skip=publish,sign,nfpm
+
+      - name: Validate Release Matrix
+        run: bash tools/release_matrix_check.sh

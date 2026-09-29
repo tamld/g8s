@@ -75,8 +75,8 @@ release:
 
     | Platform | Architecture | Binary / Archive |
     |:---|:---|:---|
-    | **macOS (Apple Silicon)** | `darwin/arm64` (M1/M2/M3/M4) | `g8s_{{ .Version }}_darwin_arm64.tar.gz` |
-    | **macOS (Intel)** | `darwin/amd64` (x86_64) | `g8s_{{ .Version }}_darwin_amd64.tar.gz` |
+    | **macOS (Apple Silicon)** | `darwin/arm64` (M1/M2/M3/M4) | `g8s_{{ .Version }}_darwin_all.tar.gz` |
+    | **macOS (Intel)** | `darwin/amd64` (x86_64) | `g8s_{{ .Version }}_darwin_all.tar.gz` |
     | **Linux** | `linux/amd64` | `g8s_{{ .Version }}_linux_amd64.tar.gz` (also `.deb`, `.rpm`, `.apk`) |
     | **Linux** | `linux/arm64` | `g8s_{{ .Version }}_linux_arm64.tar.gz` (also `.deb`, `.rpm`, `.apk`) |
     | **Windows** | `windows/amd64` | `g8s_{{ .Version }}_windows_amd64.zip` |
