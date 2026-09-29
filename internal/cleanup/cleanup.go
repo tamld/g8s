@@ -335,6 +335,13 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 
 		lastUpdate, parseErr := time.Parse(time.RFC3339, hb.LastUpdate)
 		if parseErr != nil {
+			// #465: an unparseable heartbeat is not identity evidence — PIDs
+			// are recycled, so this PID may now belong to another session's
+			// live worker. Require CWD or command-line corroboration before
+			// declaring it this project's ghost.
+			if !cwdInProject && !cmdInProject {
+				continue
+			}
 			ghosts = append(ghosts, ProcessInfo{
 				PID:          pid,
 				ParentPID:    ppid,
@@ -348,6 +355,13 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 		}
 
 		if now.Sub(lastUpdate) > maxAge {
+			// #465: same recycle rule as above — a stale heartbeat keyed by
+			// PID alone never kills a process whose CWD and command line
+			// carry no reference to this repo (live cross-session workers
+			// were killed this way; see issue #465).
+			if !cwdInProject && !cmdInProject {
+				continue
+			}
 			ghosts = append(ghosts, ProcessInfo{
 				PID:          pid,
 				ParentPID:    ppid,
@@ -1045,7 +1059,13 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 	if cfg.WorktreeBaseDir != "" {
 		candidateDirs = append(candidateDirs, cfg.WorktreeBaseDir)
 	} else {
-		candidateDirs = append(candidateDirs, filepath.Join(os.TempDir(), "g8s-worktrees"))
+		// #465: scan THIS instance's state-dir worktree root, not the
+		// host-global TMPDIR — worktrees of other sessions/repos on the
+		// same host are invisible to this repo's worktree list and were
+		// being removed as "unregistered" (live cross-session data loss).
+		// The legacy TMPDIR root stays reachable only via an explicit
+		// --worktree-base-dir override for one-time migration.
+		candidateDirs = append(candidateDirs, filepath.Join(pathutil.DefaultStateDir(), "worktrees"))
 	}
 
 	var items []CleanupItem
