@@ -65,7 +65,7 @@ ratification is the operator's decision gate.
   - Falsification doctrine: every gate/rule/claim cites a catch; claims
     bind to tests via docs/claims.yml (claims_check.sh must stay exit 0).
   - In-repo brief pattern: commit briefs to plans/, submit tiny neutral
-    prompts; brief files must NOT contain /Users/... paths (AI-lint gate).
+    prompts; brief files must NOT contain local absolute home paths (AI-lint gate).
   - Commits: author `Tâm <63218248+tamld@users.noreply.github.com>`.
 - Safety boundaries: never widen receipts beyond issue scope; never force-
   delete unmerged branches without export; never run sudo in automations;
