@@ -7,10 +7,10 @@ Repo: g8s. Tracking: tamld/g8s#433 (P1, field-found on v0.12.0).
 Your current working directory is a scratch worktree. Write your changes
 DIRECTLY to these receipt-scoped repository files (absolute paths):
 
-- /Users/tamld/Documents/github/g8s/.goreleaser.yaml
-- /Users/tamld/Documents/github/g8s/tools/release_matrix_check.sh
-- /Users/tamld/Documents/github/g8s/tools/release_matrix_check_test.sh
-- /Users/tamld/Documents/github/g8s/.github/workflows/dist-validation.yml
+- $G8S_REPO_ROOT/.goreleaser.yaml
+- $G8S_REPO_ROOT/tools/release_matrix_check.sh
+- $G8S_REPO_ROOT/tools/release_matrix_check_test.sh
+- $G8S_REPO_ROOT/.github/workflows/dist-validation.yml
 
 Do NOT run git commit. Do NOT modify any other file. Another worker is
 operating on unrelated files in parallel — touching anything outside the
