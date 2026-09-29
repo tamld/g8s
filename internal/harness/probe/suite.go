@@ -289,6 +289,12 @@ func DefaultSuite() *ProbeSuite {
 					return provider.Execute(ctx, "HARNESS_VALIDATION_SKIP", "tester", "write", nil, "")
 				},
 			},
+
+			// Category: Self-Audit (4 probes) — known failure classes (#451)
+			NewRefusalEchoProbe(),
+			NewWorktreeDiscardProbe(),
+			NewSanitizerFidelityProbe(),
+			NewReceiptBypassProbe(),
 		},
 	}
 }
