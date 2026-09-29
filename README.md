@@ -186,6 +186,10 @@ Key ADRs: [ADR-0001](docs/decisions/0001-supervisor-driven-fix-loop.md) (supervi
 
 Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector) — **45 packages, 988 test functions**, zero race warnings, zero CGO dependencies. Pushes clear **12 pre-push gates** (doc-contract, layer ownership, version sync, dual-pass, dogfooding roundtrip, cross-platform build).
 
+### Claims
+
+Quantitative claims (containment layers, PRI scores, gate counts) are bound to verifying tests and artifacts in [`docs/claims.yml`](docs/claims.yml) and verified by [`tools/claims_check.sh`](tools/claims_check.sh) to prevent claim rot into aspirations.
+
 ## Release Roadmap
 
 | Milestone | Key Deliverables | Status |
