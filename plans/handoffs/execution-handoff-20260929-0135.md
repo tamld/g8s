@@ -61,3 +61,15 @@ Recommended next: #433 (small, P1 field-found) → #443 facet 2 (small, evidence
 - Sequential drain for code-writing tasks.
 - Vietnamese with Tâm; artifacts in English. Commits: author `Tâm <63218248+tamld@users.noreply.github.com>`.
 - Falsification: every fix cites its incident (#445→9e1f301d, #444→853b0b02 et al.).
+
+---
+
+## ADDENDUM (2026-09-29 02:4x): parallel-drain proof + ADR-0026 gap-closing program
+
+Operator directive after the 4-phase gap inventory (design/implement/test/validate):
+
+- **Sequential-drain directive RE-TESTED and UPGRADED** (ADR-0026 §3.2, first directive-clock application): parallel drain with disjoint receipt scopes is PROVEN — tasks `6c2a3ee5` (#433) + `92a00db3` (#443-f2) drained with `--concurrency 2`, both `succeeded`, receipts consumed by two distinct task-ids, deliveries exactly receipt-scoped with zero cross-contamination, both PRs (#449 #450) CI-green and merged. New rule: **parallel-allowed-for-disjoint-scopes**; shared-file tasks stay sequential.
+- **Merged**: #449 (c57b86a, macOS matrix + release_matrix_check guard), #450 (381a126, dirty-worktree preservation).
+- **Filed**: #447 (Claims Registry + SCORECARD), #448 (delivery non-determinism — the structural finding), #451 (harness self-audit suite, gate-the-gates).
+- **ADR-0026 proposed** (docs/decisions/0026-independent-verification-phases.md, main @ 929ddde): Red Cell release gate, transport-fidelity test rule, directive falsification clocks, self-audit suite. **Operator ratification pending on 3 decision points** (hard-vs-advisory Red Cell; directive ledger location; self-audit cadence).
+- Also learned: brief files committed to the repo must not contain `/Users/...` paths (AI-lint `no_local_path_leak` blocks push) — use `$G8S_REPO_ROOT/` placeholders.
