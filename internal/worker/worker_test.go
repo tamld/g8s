@@ -1335,3 +1335,278 @@ func TestL3EnrichmentFailOpenWithoutTelemetry(t *testing.T) {
 		t.Fatal("expected non-nil ContextPacket even when telemetry is empty (fail-open)")
 	}
 }
+
+// #446: artifact-altered metadata on sanitized results.
+// When SanitizeOutput alters a surfaced field (response, stdout, stderr),
+// the envelope gains artifact_altered=true and altered_fields with the affected field names.
+func TestArtifactAlteredMetadata(t *testing.T) {
+	tests := []struct {
+		name               string
+		workerRes          workerResult
+		stdout             string
+		stderr             string
+		wantAltered        bool
+		wantAlteredFields  []string
+		wantResponseSubstr string
+	}{
+		{
+			name: "Clean payload (no sanitization match) -> no artifact_altered key",
+			workerRes: workerResult{
+				OK:       true,
+				Status:   "succeeded",
+				Response: "all generated output is clean and contains no secrets",
+			},
+			stdout:            "standard execution log",
+			stderr:            "",
+			wantAltered:       false,
+			wantAlteredFields: nil,
+		},
+		{
+			name: "Payload with a credential-shaped assignment in response",
+			workerRes: workerResult{
+				OK:       true,
+				Status:   "succeeded",
+				Response: "config: password=secret123\ncompleted",
+			},
+			stdout:             "execution started",
+			stderr:             "",
+			wantAltered:        true,
+			wantAlteredFields:  []string{"response"},
+			wantResponseSubstr: "password=<REDACTED>",
+		},
+		{
+			name: "Payload altered in both stdout and stderr",
+			workerRes: workerResult{
+				OK:       true,
+				Status:   "succeeded",
+				Response: "task completed normally",
+			},
+			stdout:            "export api_key=hunter2secret\n",
+			stderr:            "failed attempt with token=tok-abcdef123456",
+			wantAltered:       true,
+			wantAlteredFields: []string{"stdout", "stderr"},
+		},
+		{
+			name: "Payload altered in response, stdout, and stderr",
+			workerRes: workerResult{
+				OK:       true,
+				Status:   "succeeded",
+				Response: "password=supersecret99",
+			},
+			stdout:             "api_key=hunter2secret",
+			stderr:             "token=tok-abcdef123456",
+			wantAltered:        true,
+			wantAlteredFields:  []string{"response", "stdout", "stderr"},
+			wantResponseSubstr: "password=<REDACTED>",
+		},
+		{
+			name: "Clean empty payload -> no artifact_altered key",
+			workerRes: workerResult{
+				OK:     true,
+				Status: "succeeded",
+			},
+			stdout:            "",
+			stderr:            "",
+			wantAltered:       false,
+			wantAlteredFields: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run("mustResultJSON/"+tc.name, func(t *testing.T) {
+			rawJSON := mustResultJSON(tc.workerRes, tc.stdout, tc.stderr)
+			var env map[string]any
+			if err := json.Unmarshal(rawJSON, &env); err != nil {
+				t.Fatalf("unmarshal result JSON: %v", err)
+			}
+
+			val, hasAltered := env["artifact_altered"]
+			if tc.wantAltered {
+				if !hasAltered {
+					t.Fatalf("expected artifact_altered key in %s", string(rawJSON))
+				}
+				if alteredBool, ok := val.(bool); !ok || !alteredBool {
+					t.Fatalf("expected artifact_altered=true, got %v", val)
+				}
+				fieldsVal, hasFields := env["altered_fields"]
+				if !hasFields {
+					t.Fatalf("expected altered_fields key in %s", string(rawJSON))
+				}
+				fieldsSlice, ok := fieldsVal.([]any)
+				if !ok {
+					t.Fatalf("expected altered_fields to be a slice, got %T", fieldsVal)
+				}
+				var gotFields []string
+				for _, f := range fieldsSlice {
+					gotFields = append(gotFields, fmt.Sprint(f))
+				}
+				if len(gotFields) != len(tc.wantAlteredFields) {
+					t.Fatalf("altered_fields mismatch: got %v, want %v", gotFields, tc.wantAlteredFields)
+				}
+				for i := range gotFields {
+					if gotFields[i] != tc.wantAlteredFields[i] {
+						t.Fatalf("altered_fields[%d] = %q, want %q", i, gotFields[i], tc.wantAlteredFields[i])
+					}
+				}
+			} else {
+				if hasAltered {
+					t.Fatalf("expected no artifact_altered key, got %v in %s", val, string(rawJSON))
+				}
+				if _, hasFields := env["altered_fields"]; hasFields {
+					t.Fatalf("expected no altered_fields key in %s", string(rawJSON))
+				}
+			}
+
+			if tc.wantResponseSubstr != "" {
+				resp, _ := env["response"].(string)
+				if !strings.Contains(resp, tc.wantResponseSubstr) {
+					t.Fatalf("expected response to contain %q, got %q", tc.wantResponseSubstr, resp)
+				}
+			}
+		})
+	}
+
+	outcomeTests := []struct {
+		name              string
+		ok                bool
+		status            string
+		stdout            string
+		stderr            string
+		wantAltered       bool
+		wantAlteredFields []string
+	}{
+		{
+			name:              "Clean outcomeEnvelope",
+			ok:                false,
+			status:            "cancelled",
+			stdout:            "process cancelled gracefully",
+			stderr:            "",
+			wantAltered:       false,
+			wantAlteredFields: nil,
+		},
+		{
+			name:              "outcomeEnvelope with altered stdout",
+			ok:                false,
+			status:            "timeout",
+			stdout:            "partial dump: password=secret123",
+			stderr:            "timeout reached",
+			wantAltered:       true,
+			wantAlteredFields: []string{"stdout"},
+		},
+		{
+			name:              "outcomeEnvelope with altered stdout and stderr",
+			ok:                false,
+			status:            "timeout",
+			stdout:            "partial dump: password=secret123",
+			stderr:            "failed on api_key=hunter2secret",
+			wantAltered:       true,
+			wantAlteredFields: []string{"stdout", "stderr"},
+		},
+	}
+	for _, tc := range outcomeTests {
+		t.Run("outcomeEnvelope/"+tc.name, func(t *testing.T) {
+			env := outcomeEnvelope(tc.ok, tc.status, tc.stdout, tc.stderr)
+			val, hasAltered := env["artifact_altered"]
+			if tc.wantAltered {
+				if !hasAltered {
+					t.Fatalf("expected artifact_altered key to be present: %+v", env)
+				}
+				if alteredBool, ok := val.(bool); !ok || !alteredBool {
+					t.Fatalf("expected artifact_altered=true, got %v", val)
+				}
+				fieldsVal, hasFields := env["altered_fields"]
+				if !hasFields {
+					t.Fatalf("expected altered_fields key to be present: %+v", env)
+				}
+				fieldsSlice, ok := fieldsVal.([]string)
+				if !ok {
+					t.Fatalf("expected altered_fields to be []string, got %T", fieldsVal)
+				}
+				if len(fieldsSlice) != len(tc.wantAlteredFields) {
+					t.Fatalf("altered_fields mismatch: got %v, want %v", fieldsSlice, tc.wantAlteredFields)
+				}
+				for i := range fieldsSlice {
+					if fieldsSlice[i] != tc.wantAlteredFields[i] {
+						t.Fatalf("altered_fields[%d] mismatch: got %s, want %s", i, fieldsSlice[i], tc.wantAlteredFields[i])
+					}
+				}
+			} else {
+				if hasAltered {
+					t.Fatalf("expected no artifact_altered key, got %v: %+v", val, env)
+				}
+				if _, hasFields := env["altered_fields"]; hasFields {
+					t.Fatalf("expected no altered_fields key: %+v", env)
+				}
+			}
+		})
+	}
+}
+
+// TestRunOnceArtifactAlteredEvidenceLake verifies #446 end-to-end:
+// When an attempt produces output containing secrets, the task result and
+// the exported receipt in Evidence Lake both inherit artifact_altered=true
+// and altered_fields=["response"].
+func TestRunOnceArtifactAlteredEvidenceLake(t *testing.T) {
+	tempEvidenceDir := t.TempDir()
+	env := newWorkerEnv(t, nil)
+	env.sup.evidenceDir = tempEvidenceDir
+
+	env.runner.factory = func(opts SpawnOptions) Child {
+		child := newFakeChild(0)
+		child.finishLater(opts.ResultPath, `{"ok":true,"status":"succeeded","response":"password=secret123"}`, 5*time.Millisecond)
+		return child
+	}
+
+	task := submitTask(t, env, "idem-artifact-altered-lake", 1, nil)
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-lake-altered",
+		LeaseSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected claimed task")
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(claimed.Result, &res); err != nil {
+		t.Fatalf("unmarshal claimed.Result: %v", err)
+	}
+	if res["artifact_altered"] != true {
+		t.Fatalf("expected artifact_altered=true in claimed.Result, got %+v", res)
+	}
+	fields, ok := res["altered_fields"].([]any)
+	if !ok || len(fields) != 1 || fields[0] != "response" {
+		t.Fatalf("expected altered_fields=[response], got %+v", res["altered_fields"])
+	}
+	respStr, _ := res["response"].(string)
+	if !strings.Contains(respStr, "password=<REDACTED>") || strings.Contains(respStr, "secret123") {
+		t.Fatalf("expected redacted response, got %q", respStr)
+	}
+
+	// Verify centralized Evidence Lake receipt
+	centralReceipt := filepath.Join(tempEvidenceDir, task.TaskID, "receipt.json")
+	if _, err := os.Stat(centralReceipt); os.IsNotExist(err) {
+		t.Fatalf("expected centralized receipt at %s", centralReceipt)
+	}
+	data, err := os.ReadFile(centralReceipt)
+	if err != nil {
+		t.Fatalf("read central receipt: %v", err)
+	}
+	var snap controlplane.Task
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("unmarshal central receipt: %v", err)
+	}
+	var receiptRes map[string]any
+	if err := json.Unmarshal(snap.Result, &receiptRes); err != nil {
+		t.Fatalf("unmarshal receipt.result: %v", err)
+	}
+	if receiptRes["artifact_altered"] != true {
+		t.Fatalf("expected artifact_altered=true in centralized receipt, got %+v", receiptRes)
+	}
+	receiptFields, ok := receiptRes["altered_fields"].([]any)
+	if !ok || len(receiptFields) != 1 || receiptFields[0] != "response" {
+		t.Fatalf("expected altered_fields=[response] in centralized receipt, got %+v", receiptRes["altered_fields"])
+	}
+}
