@@ -670,10 +670,12 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	// the request default; the isolator wins over both for writes.
 	spawnDir := firstNonEmpty(opts.Dir, firstOf(req.AddDirs), s.runRoot)
 	var releaseWorktree func(keep bool)
+	var isolatedWorktreeDir string
 	if req.Permission == "workspace_write" && s.isolator != nil {
 		if wt, release, err := s.isolator.AcquireWorktree(ctx, task.TaskID); err == nil {
 			spawnDir = wt
 			releaseWorktree = release
+			isolatedWorktreeDir = wt
 			fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
 		} else {
 			fmt.Fprintf(os.Stderr, "[warn] worker: worktree isolation unavailable for %s: %v\n", task.TaskID, err)
@@ -744,7 +746,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock())
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock(), isolatedWorktreeDir)
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -1017,6 +1019,7 @@ func (s *Supervisor) collect(
 	resultMode string,
 	permission, receiptID string,
 	startTime time.Time,
+	deliverableDir string,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -1249,6 +1252,16 @@ func (s *Supervisor) collect(
 
 		// Determine retryable: not retryable if contract violation or validation failed
 		hasContractViolation := len(wr.ContractViolation) > 0 || !contractValidation.Valid
+		if success && deliverableDir != "" {
+			var m map[string]any
+			if err := json.Unmarshal(resultJSON, &m); err == nil {
+				m["deliverable"] = map[string]any{
+					"mode": "worktree",
+					"dir":  deliverableDir,
+				}
+				resultJSON = mustJSON(m)
+			}
+		}
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    resultJSON,
 			Success:   success,
