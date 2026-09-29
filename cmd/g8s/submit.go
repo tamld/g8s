@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/settings"
 )
 
 // runSubmit queues one durable task through the control plane after validating
@@ -23,6 +25,7 @@ func runSubmit(args []string) {
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
 	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to gemini-3.8-flash-high)")
+	providerFlag := fs.String("provider", "", "target worker provider (e.g. codex, agy)")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
@@ -38,6 +41,33 @@ func runSubmit(args []string) {
 	scopeRootFlag := fs.String("scope-root", "", "comma-separated scope roots extending the jail beyond the working directory (#348)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
+	}
+
+	var providerPassed bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "provider" {
+			providerPassed = true
+		}
+	})
+
+	var effectiveProvider string
+	if providerPassed {
+		trimmed := strings.TrimSpace(*providerFlag)
+		if trimmed == "" {
+			exitUsage("submit", "provider", *traceID, "--provider must be a non-empty string when specified", "Provide a non-empty provider name", *jsonl)
+		}
+		effectiveProvider = trimmed
+	} else {
+		if mgr, err := settings.NewManager(""); err == nil {
+			if val, ok := mgr.Get("default_provider"); ok && val != nil {
+				if s, ok := val.(string); ok {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						effectiveProvider = s
+					}
+				}
+			}
+		}
 	}
 
 	var prompt string
@@ -110,6 +140,9 @@ func runSubmit(args []string) {
 		"timeout":    *timeout,
 		"add_dirs":   dirs,
 		"actor":      *actor,
+	}
+	if effectiveProvider != "" {
+		payloadMap["provider"] = effectiveProvider
 	}
 	if *receiptID != "" {
 		payloadMap["receipt_id"] = *receiptID

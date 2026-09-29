@@ -1463,6 +1463,7 @@ func runWorker(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	once := fs.Bool("once", true, "claim and execute a single task, then exit")
 	model := fs.String("model", "", "restrict to tasks targeting this model")
+	provider := fs.String("provider", "", "restrict to tasks targeting this provider")
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	if err := fs.Parse(args); err != nil {
@@ -1481,7 +1482,11 @@ func runWorker(args []string) {
 		exitRuntime("worker", "", *traceID, cli.CodeIO, dbErr, "", *jsonl)
 	}
 
-	templates := map[string][]string{}
+	modelTemplates := map[string][]string{}
+	providerTemplates := map[string][]string{}
+	var platformDispatchNames []string
+	apiCallNames := map[string]bool{}
+
 	providersPath := os.Getenv("G8S_PROVIDERS")
 	if providersPath == "" {
 		home, _ := os.UserHomeDir()
@@ -1496,11 +1501,23 @@ func runWorker(args []string) {
 				exitRuntime("worker", "", *traceID, cli.CodeRuntime, loadErr, "", *jsonl)
 			}
 			for _, entry := range cfgFile.Providers {
-				if entry.Class != "platform_dispatch" || len(entry.Args) == 0 {
-					continue
-				}
-				for _, m := range entry.Models {
-					templates[m.ID] = entry.Args
+				switch entry.Class {
+				case "platform_dispatch":
+					if entry.Name != "" {
+						platformDispatchNames = append(platformDispatchNames, entry.Name)
+						if len(entry.Args) > 0 {
+							providerTemplates[entry.Name] = entry.Args
+						}
+					}
+					if len(entry.Args) > 0 {
+						for _, m := range entry.Models {
+							modelTemplates[m.ID] = entry.Args
+						}
+					}
+				case "api_call":
+					if entry.Name != "" {
+						apiCallNames[entry.Name] = true
+					}
 				}
 			}
 		}
@@ -1517,26 +1534,12 @@ func runWorker(args []string) {
 	// attempts would otherwise clobber each other in the shared tree).
 	// Non-git cwd / pool failure → legacy shared-checkout behavior.
 	opts := []worker.Option{
-		worker.WithCommandResolver(func(prompt, modelID, taskTimeout string) ([]string, bool) {
-			tmpl, ok := templates[modelID]
-			if !ok {
-				return nil, false
-			}
-			out := make([]string, len(tmpl))
-			for i, part := range tmpl {
-				switch part {
-				case "{prompt}":
-					out[i] = prompt
-				case "{model}":
-					out[i] = modelID
-				case "{timeout}":
-					out[i] = taskTimeout
-				default:
-					out[i] = part
-				}
-			}
-			return out, true
-		}),
+		worker.WithProviderCommandResolver(worker.NewProviderCommandResolver(worker.ProviderResolverOptions{
+			ProviderTemplates:     providerTemplates,
+			ModelTemplates:        modelTemplates,
+			PlatformDispatchNames: platformDispatchNames,
+			APICallNames:          apiCallNames,
+		})),
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		if pool, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd, Prefix: "wt"}); poolErr == nil {
@@ -1554,7 +1557,7 @@ func runWorker(args []string) {
 		return
 	}
 	for {
-		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: *actor, LeaseSeconds: *lease})
+		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: *actor, LeaseSeconds: *lease, Provider: *provider})
 		if err != nil {
 			exitRuntime("worker", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
