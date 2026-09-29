@@ -13,7 +13,8 @@ Before cutting any release tag (`vX.Y.Z`), the release manager (Human or Agent) 
 - [ ] **Gate 3 (Multi-OS CI)**: GitHub Actions CI workflow on `main` is completely GREEN across macOS, Linux, and Windows.
 - [ ] **Gate 4 (Secret Hygiene)**: Run `gitleaks detect` or `trufflehog` to guarantee 0 secrets in Git history.
 - [ ] **Gate 5 (Spec Parity)**: All OpenSpec deltas targeted for this release in `spec/openspec/` are marked `APPLIED`.
-- [ ] **Gate 6 (Docs & Version Bump)**: Version string in `cmd/g8s/main.go` and `README.md` is updated.
+- [ ] **Gate 6 (Docs & Version Bump)**: Version string in `cmd/g8s/version.go` and `README.md` is updated.
+  - manifest.json version + latest_release are synced with version.go and the latest tag (enforced by the version-sync guard).
 
 ---
 

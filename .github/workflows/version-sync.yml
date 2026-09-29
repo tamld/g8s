@@ -98,3 +98,6 @@ jobs:
           fi
           
           echo "✓ Go version consistent"
+
+      - name: Run CI version sync check script
+        run: bash tools/ci_version_sync_check.sh

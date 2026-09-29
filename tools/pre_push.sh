@@ -143,6 +143,13 @@ if ! bash tools/ai_lint.sh; then
 fi
 pass "AI anti-pattern checks clean"
 
+# Claims Check Gate (#447)
+step "Claims" "Running Quantitative Claims Gate (#447)..."
+if ! bash tools/claims_check.sh; then
+    fail "Quantitative claims check failed."
+fi
+pass "Quantitative claims verified"
+
 # 5. Brief Anti-Pattern Gate
 step "5/11" "Running Brief Anti-Pattern Gate (DEBT-51)..."
 bash tools/brief_lint_test.sh >/dev/null
