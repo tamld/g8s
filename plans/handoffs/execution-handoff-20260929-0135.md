@@ -73,3 +73,27 @@ Operator directive after the 4-phase gap inventory (design/implement/test/valida
 - **Filed**: #447 (Claims Registry + SCORECARD), #448 (delivery non-determinism — the structural finding), #451 (harness self-audit suite, gate-the-gates).
 - **ADR-0026 proposed** (docs/decisions/0026-independent-verification-phases.md, main @ 929ddde): Red Cell release gate, transport-fidelity test rule, directive falsification clocks, self-audit suite. **Operator ratification pending on 3 decision points** (hard-vs-advisory Red Cell; directive ledger location; self-audit cadence).
 - Also learned: brief files committed to the repo must not contain `/Users/...` paths (AI-lint `no_local_path_leak` blocks push) — use `$G8S_REPO_ROOT/` placeholders.
+
+---
+
+## ADDENDUM 2 (2026-09-29 03:3x): debt-zero program — 4 waves executed
+
+Operator directive: "trả hết nợ kỹ thuật". Executed as parallel worker waves (the newly-proven pattern) + Brain-led docs:
+
+| Wave | Delivered | Merged |
+|---|---|---|
+| 1 | #453 (#439 setsid layer-2 marker sweep) ‖ #454 (#436 watch --milestone worker-complete) | 8f7167b, 242f060 |
+| 2 | #455 (#446 artifact_altered envelope) ‖ #456 (#447 Claims Registry + SCORECARD: 7 bound/3 unbound/0 broken) | 13d3c8c, f6b0ba9 |
+| Brain | ADR-0025 CAP/CP (a3f37d7) · STRIDE threat model (5b2431e) · #440 triaged | main |
+
+**Incident class for #451** (from this program): task d4159300 sealed FAILED on a provider malformed-function-call error in the final response — after all files were delivered to receipt-scoped paths. Inverse of #443's blocked-with-delivery. Supervisor accepted via on-disk verification. Probe: FAILED verdict + receipt-scoped files present → re-verify before treating as failure.
+
+**Remaining open debt (next session, priority order):**
+1. #451 self-audit suite — now has 3 concrete probe classes from this session (refusal echo #443, FAILED-with-delivery d4159300, worktree discard #443-f2).
+2. #448 remainder — deterministic delivery contract (`g8s deliver <task-id>` or supervisor-side apply); design slice.
+3. #435 offer link gate audit depth (medium slice).
+4. #441 Evidence Ledger (1 slice, P3).
+5. #440 conditional (fires on third SQLITE_BUSY; prior-art patch preserved).
+6. #442 Wave 1 (external-paced: wiki onboarding via offer pull path).
+
+**Main @ f6b0ba9. ADR-0026 decision points still await operator ratification.**
