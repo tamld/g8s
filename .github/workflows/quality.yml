@@ -225,7 +225,9 @@ jobs:
             echo "$avg" > "$BASELINE_FILE"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add "$BASELINE_FILE"
+            # .g8s/ is the gitignored runtime dir; the baseline is a tracked
+            # artifact maintained by this bot, so force-add is required.
+            git add -f "$BASELINE_FILE"
             if ! git diff --staged --quiet; then
               git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
               git push origin main || echo "::warning::Failed to push coverage baseline"
