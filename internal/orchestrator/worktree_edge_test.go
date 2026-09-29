@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -252,5 +254,301 @@ func TestFanOutMaxParallelCaps(t *testing.T) {
 		if !got[id] {
 			t.Errorf("missing receipt for task %s", id)
 		}
+	}
+}
+
+func TestReleasePreservesDirtyWorktree(t *testing.T) {
+	repo := setupGitRepo(t)
+	// Seed a tracked file in repo
+	trackedFile := filepath.Join(repo, "tracked.txt")
+	if err := os.WriteFile(trackedFile, []byte("initial"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	mustRunGit(t, repo, "add", "tracked.txt")
+	mustRunGit(t, repo, "commit", "-m", "add tracked file")
+
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt, err := pool.Acquire(ctx, "dirty-task")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// Modify tracked file in worktree without committing
+	wtTracked := filepath.Join(wt.Path, "tracked.txt")
+	if err := os.WriteFile(wtTracked, []byte("modified-deliverable"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+
+	// Release with keep=true
+	if err := pool.Release(ctx, wt, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	// 1. Directory still exists with modification
+	if _, err := os.Stat(wt.Path); os.IsNotExist(err) {
+		t.Fatalf("expected worktree directory %s to be preserved, but it was removed", wt.Path)
+	}
+	content, err := os.ReadFile(wtTracked)
+	if err != nil {
+		t.Fatalf("failed to read modified file: %v", err)
+	}
+	if string(content) != "modified-deliverable" {
+		t.Fatalf("expected modified content %q, got %q", "modified-deliverable", string(content))
+	}
+
+	// 2. Branch still exists
+	mustRunGit(t, repo, "rev-parse", "--verify", wt.Branch)
+
+	// 3. Lease bookkeeping cleaned up
+	if len(pool.Active()) != 0 {
+		t.Fatalf("expected 0 active leases in pool, got %d", len(pool.Active()))
+	}
+}
+
+func TestReleasePreservesUntrackedWorktree(t *testing.T) {
+	repo := setupGitRepo(t)
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt, err := pool.Acquire(ctx, "untracked-task")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// Add an untracked new file
+	untrackedFile := filepath.Join(wt.Path, "new-deliverable.txt")
+	if err := os.WriteFile(untrackedFile, []byte("untracked-deliverable"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	// Release with keep=true
+	if err := pool.Release(ctx, wt, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	// 1. Directory still exists with untracked file
+	if _, err := os.Stat(wt.Path); os.IsNotExist(err) {
+		t.Fatalf("expected worktree directory %s to be preserved, but it was removed", wt.Path)
+	}
+	content, err := os.ReadFile(untrackedFile)
+	if err != nil {
+		t.Fatalf("failed to read untracked file: %v", err)
+	}
+	if string(content) != "untracked-deliverable" {
+		t.Fatalf("expected untracked content %q, got %q", "untracked-deliverable", string(content))
+	}
+
+	// 2. Branch still exists
+	mustRunGit(t, repo, "rev-parse", "--verify", wt.Branch)
+
+	// 3. Lease bookkeeping cleaned up
+	if len(pool.Active()) != 0 {
+		t.Fatalf("expected 0 active leases in pool, got %d", len(pool.Active()))
+	}
+}
+
+func TestReleaseCleanWorktreeRemoved(t *testing.T) {
+	repo := setupGitRepo(t)
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt, err := pool.Acquire(ctx, "clean-task")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// Verify worktree exists prior to release
+	if _, err := os.Stat(wt.Path); os.IsNotExist(err) {
+		t.Fatalf("worktree directory %s does not exist before release", wt.Path)
+	}
+
+	// Release with keep=true on clean worktree
+	if err := pool.Release(ctx, wt, true); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	// 1. Directory is removed
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected clean worktree directory %s to be removed, but it still exists", wt.Path)
+	}
+
+	// 2. Branch still exists (keep=true preserves branch)
+	mustRunGit(t, repo, "rev-parse", "--verify", wt.Branch)
+
+	// 3. Lease bookkeeping cleaned up
+	if len(pool.Active()) != 0 {
+		t.Fatalf("expected 0 active leases in pool, got %d", len(pool.Active()))
+	}
+}
+
+func TestReleaseKeepFalseUnchanged(t *testing.T) {
+	repo := setupGitRepo(t)
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt, err := pool.Acquire(ctx, "keep-false-task")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// Add an uncommitted modification to make it dirty
+	dirtyFile := filepath.Join(wt.Path, "dirty.txt")
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted"), 0o644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	// Release with keep=false
+	if err := pool.Release(ctx, wt, false); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	// 1. Directory must be removed
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected dirty worktree directory %s to be removed on keep=false, but it still exists", wt.Path)
+	}
+
+	// 2. Branch must be deleted
+	cmd := exec.Command("git", "rev-parse", "--verify", wt.Branch)
+	cmd.Dir = repo
+	if err := cmd.Run(); err == nil {
+		t.Fatalf("expected branch %s to be deleted on keep=false, but it still exists", wt.Branch)
+	}
+
+	// 3. Lease bookkeeping cleaned up
+	if len(pool.Active()) != 0 {
+		t.Fatalf("expected 0 active leases in pool, got %d", len(pool.Active()))
+	}
+}
+
+func TestReleaseTable(t *testing.T) {
+	tests := []struct {
+		name             string
+		keep             bool
+		setup            func(t *testing.T, repo, wtPath string)
+		wantDirExists    bool
+		wantBranchExists bool
+	}{
+		{
+			name: "dirty tracked file preserved on keep=true",
+			keep: true,
+			setup: func(t *testing.T, repo, wtPath string) {
+				if err := os.WriteFile(filepath.Join(wtPath, "mod.txt"), []byte("tracked-data"), 0o644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			},
+			wantDirExists:    true,
+			wantBranchExists: true,
+		},
+		{
+			name: "untracked file preserved on keep=true",
+			keep: true,
+			setup: func(t *testing.T, repo, wtPath string) {
+				if err := os.WriteFile(filepath.Join(wtPath, "untracked.txt"), []byte("new-data"), 0o644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			},
+			wantDirExists:    true,
+			wantBranchExists: true,
+		},
+		{
+			name:             "clean worktree removed on keep=true",
+			keep:             true,
+			setup:            func(t *testing.T, repo, wtPath string) {},
+			wantDirExists:    false,
+			wantBranchExists: true,
+		},
+		{
+			name: "dirty worktree removed on keep=false",
+			keep: false,
+			setup: func(t *testing.T, repo, wtPath string) {
+				if err := os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("junk"), 0o644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			},
+			wantDirExists:    false,
+			wantBranchExists: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupGitRepo(t)
+			pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir()})
+			if err != nil {
+				t.Fatalf("NewPool: %v", err)
+			}
+			ctx := context.Background()
+			wt, err := pool.Acquire(ctx, "task-"+shortID())
+			if err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			tc.setup(t, repo, wt.Path)
+
+			if err := pool.Release(ctx, wt, tc.keep); err != nil {
+				t.Fatalf("Release: %v", err)
+			}
+
+			_, statErr := os.Stat(wt.Path)
+			dirExists := !os.IsNotExist(statErr)
+			if dirExists != tc.wantDirExists {
+				t.Errorf("dirExists = %v, want %v", dirExists, tc.wantDirExists)
+			}
+
+			cmd := exec.Command("git", "rev-parse", "--verify", wt.Branch)
+			cmd.Dir = repo
+			branchExists := cmd.Run() == nil
+			if branchExists != tc.wantBranchExists {
+				t.Errorf("branchExists = %v, want %v", branchExists, tc.wantBranchExists)
+			}
+
+			if len(pool.Active()) != 0 {
+				t.Errorf("active leases = %d, want 0", len(pool.Active()))
+			}
+		})
+	}
+}
+
+func TestWorktreeDirtyHelper(t *testing.T) {
+	repo := setupGitRepo(t)
+
+	// Clean repo -> not dirty
+	dirty, err := worktreeDirty(repo)
+	if err != nil {
+		t.Fatalf("worktreeDirty on clean repo: %v", err)
+	}
+	if dirty {
+		t.Fatalf("expected clean repo to not be dirty")
+	}
+
+	// Add untracked file -> dirty
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	dirty, err = worktreeDirty(repo)
+	if err != nil {
+		t.Fatalf("worktreeDirty on untracked repo: %v", err)
+	}
+	if !dirty {
+		t.Fatalf("expected untracked file to be dirty")
+	}
+
+	// Non-existent directory -> returns error
+	_, err = worktreeDirty(filepath.Join(t.TempDir(), "non-existent-dir"))
+	if err == nil {
+		t.Fatalf("expected error for non-existent path")
 	}
 }

@@ -119,7 +119,8 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 }
 
 // Release removes the worktree and prunes its branch. If keep is true,
-// the branch is retained (useful when the worker pushed it).
+// the branch is retained and a dirty worktree (uncommitted deliverables)
+// is preserved instead of being removed.
 func (p *Pool) Release(_ context.Context, wt Worktree, keep bool) error {
 	p.mu.Lock()
 	for taskID, allocated := range p.allocated {
@@ -129,6 +130,14 @@ func (p *Pool) Release(_ context.Context, wt Worktree, keep bool) error {
 		}
 	}
 	p.mu.Unlock()
+
+	if keep {
+		if dirty, derr := worktreeDirty(wt.Path); derr == nil && dirty {
+			// preserve: skip removal, keep branch implicitly (it exists)
+			fmt.Fprintf(os.Stderr, "[info] orchestrator: worktree %s preserved (uncommitted deliverables)\n", wt.Path)
+			return nil
+		}
+	}
 
 	if err := gitRemoveWorktree(p.repo, wt.Path); err != nil {
 		return fmt.Errorf("git worktree remove: %w", err)
@@ -211,4 +220,13 @@ func gitRevParse(repo, ref string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func worktreeDirty(path string) (bool, error) {
+	cmd := exec.Command("git", "-C", path, "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
 }
