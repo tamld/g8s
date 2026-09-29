@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
 // Pool allocates per-worker git worktrees so N workers can edit the same
@@ -53,7 +55,11 @@ func NewPool(opts PoolOptions) (*Pool, error) {
 	}
 	root := opts.Root
 	if root == "" {
-		root = filepath.Join(os.TempDir(), "g8s-worktrees")
+		// #465: pool worktrees under THIS instance's state dir, not the
+		// host-global TMPDIR — a host-wide cleanup sweep treating the
+		// shared TMPDIR root as its scan set destroyed other sessions'
+		// preserved worktrees. The state dir is the ownership boundary.
+		root = filepath.Join(pathutil.DefaultStateDir(), "worktrees")
 	}
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return nil, fmt.Errorf("orchestrator: mkdir pool root: %w", err)
