@@ -3,7 +3,7 @@ handoff-version: 1
 generated: 2026-09-29T14:18:00+07:00
 generator: handoff@1.0.0
 focus: "continue g8s debt-zero: self-audit suite and delivery contract"
-workspace: /Users/tamld/Documents/github/g8s
+workspace: $G8S_REPO_ROOT
 branch: main
 head: 3393a2c
 ---
@@ -43,7 +43,7 @@ ratification is the operator's decision gate.
 
 ## Scope and guardrails
 
-- Workspace: /Users/tamld/Documents/github/g8s (single repo, dual push remote:
+- Workspace: $G8S_REPO_ROOT (single repo, dual push remote:
   GitHub + LAN ct122 — every push lands on both).
 - In scope: g8s repo issues/PRs, dogfood dispatches through the local g8s
   binary (bin/g8s), docs/decisions + docs/security governance artifacts.
