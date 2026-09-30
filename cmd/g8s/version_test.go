@@ -133,9 +133,20 @@ func TestRunVersionCaptureStdout(t *testing.T) {
 	origClient := defaultHTTPClient
 	defer func() { defaultHTTPClient = origClient }()
 
+	// The mocked "latest" must stay one patch ahead of the built version —
+	// hardcoding it broke when the release bumped Version to the same value
+	// (UpdateAvailable flipped false). Computed, so the test is
+	// version-coupling-proof.
+	parts := strings.SplitN(Version, ".", 3)
+	if len(parts) != 3 {
+		t.Fatalf("cannot parse Version %q", Version)
+	}
+	nextPatch := fmt.Sprintf("%s.%s.%d", parts[0], parts[1], atoiOrZero(parts[2])+1)
+	mockTag := "v" + nextPatch
+
 	defaultHTTPClient = &mockHTTPClient{
 		doFunc: func(req *http.Request) (*http.Response, error) {
-			body := `{"tag_name":"v0.13.0","html_url":"https://github.com/tamld/g8s/releases/tag/v0.13.0"}`
+			body := fmt.Sprintf(`{"tag_name":%q,"html_url":"https://github.com/tamld/g8s/releases/tag/%s"}`, mockTag, mockTag)
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader(body)),
@@ -187,7 +198,18 @@ func TestRunVersionCaptureStdout(t *testing.T) {
 	if !env.Data.CheckUpdate.UpdateAvailable {
 		t.Errorf("UpdateAvailable = false, want true")
 	}
-	if env.Data.CheckUpdate.LatestVersion != "0.13.0" {
-		t.Errorf("LatestVersion = %q, want 0.12.0", env.Data.CheckUpdate.LatestVersion)
+	if env.Data.CheckUpdate.LatestVersion != nextPatch {
+		t.Errorf("LatestVersion = %q, want %q", env.Data.CheckUpdate.LatestVersion, nextPatch)
 	}
+}
+
+func atoiOrZero(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return n
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }

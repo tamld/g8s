@@ -3,10 +3,10 @@
   "name": "g8s",
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "go_version": "1.26.0",
   "latest_release": {
-    "tag": "v0.12.0",
+    "tag": "v0.13.0",
     "commit": "a255bd5",
     "date": "2026-09-27"
   },
