@@ -1,0 +1,16 @@
+# gitleaks allowlist — release gate (RELEASE_SOP Gate 4)
+# Every entry cites why the match is not a secret. Review on each release.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Verified false positives (audit 2026-09-30, issue #441 release checklist)"
+paths = [
+  '''internal/worker/worker_test\.go''',
+  '''\.opencode/''',
+]
+# worker_test.go 1385/1397: sanitizer redaction fixtures — the literal fake
+# values (hunter2secret, tok-abcdef123456, supersecret99) MUST exist in the
+# test to prove they are redacted from worker output. Not credentials.
+# .opencode/: local agent-tool memory prose, matched by generic-api-key
+# entropy heuristics; contains no credentials.
