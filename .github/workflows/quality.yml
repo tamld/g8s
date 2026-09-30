@@ -154,6 +154,10 @@ jobs:
         shell: bash
         run: bash tools/ci_doc_contract_check.sh
 
+      - name: Quantitative claims check (#447)
+        shell: bash
+        run: bash tools/claims_check.sh
+
       - name: No debug prints in library code
         shell: bash
         run: |

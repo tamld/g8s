@@ -5,7 +5,8 @@
 # This script validates:
 # 1. VERSION in cmd/g8s/version.go matches latest git tag (or is a valid prerelease)
 # 2. CHANGELOG.md has an entry for the current VERSION
-# 3. No uncommitted changes to version-related files without version bump
+# 3. manifest.json version and latest_release.tag match version.go and latest git tag
+# 4. No uncommitted changes to version-related files without version bump
 
 set -euo pipefail
 
@@ -100,8 +101,39 @@ else
     fail "CHANGELOG.md missing entry for version $VERSION_GO. Add release notes before pushing."
 fi
 
+# Check manifest.json version and latest_release.tag
+if [ ! -f "manifest.json" ]; then
+    fail "manifest.json not found"
+fi
+
+if command -v jq >/dev/null 2>&1; then
+    MANIFEST_VERSION=$(jq -r '.version // empty' manifest.json)
+    MANIFEST_TAG=$(jq -r '.latest_release.tag // empty' manifest.json)
+else
+    MANIFEST_VERSION=$(grep -E '^[[:space:]]*"version":' manifest.json | head -1 | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
+    MANIFEST_TAG=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' manifest.json | grep -E '"tag":' | head -1 | sed -E 's/.*"tag":[[:space:]]*"([^"]+)".*/\1/')
+fi
+
+if [ -z "$MANIFEST_VERSION" ]; then
+    fail "Could not extract version from manifest.json"
+fi
+
+if [ -z "$MANIFEST_TAG" ]; then
+    fail "Could not extract latest_release.tag from manifest.json"
+fi
+
+if [ "$MANIFEST_VERSION" != "$VERSION_GO" ]; then
+    fail "manifest.json version mismatch: field 'version' ($MANIFEST_VERSION) does not match cmd/g8s/version.go ($VERSION_GO)"
+fi
+
+if [ "$MANIFEST_TAG" != "v$LATEST_TAG" ]; then
+    fail "manifest.json latest_release.tag mismatch: field 'latest_release.tag' ($MANIFEST_TAG) does not match latest git tag (v$LATEST_TAG)"
+fi
+
+pass "manifest.json version ($MANIFEST_VERSION) and latest_release.tag ($MANIFEST_TAG) match codebase and git tag"
+
 # Check for uncommitted changes to version-related files
-VERSION_FILES=("cmd/g8s/version.go" "CHANGELOG.md")
+VERSION_FILES=("cmd/g8s/version.go" "CHANGELOG.md" "manifest.json")
 for f in "${VERSION_FILES[@]}"; do
     if git diff --name-only | grep -q "^$f$"; then
         warn "Uncommitted changes to $f - ensure version bump is intentional"
