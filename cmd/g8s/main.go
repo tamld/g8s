@@ -97,6 +97,8 @@ func main() {
 		runSubmit(os.Args[2:])
 	case "get":
 		runGet(os.Args[2:])
+	case "deliver":
+		runDeliver(os.Args[2:])
 	case "resume":
 		runResume(os.Args[2:])
 	case "tasks":
@@ -1411,6 +1413,7 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  submit       Queue an asynchronous durable task with harness safety checks")
 	fmt.Println("  get          Show the durable state of one queued task (g8s get <task-id>)")
+	fmt.Println("  deliver      Apply worktree deliverable to current checkout (g8s deliver <task-id> [--dry-run])")
 	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
 	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
 	fmt.Println("  cancel       Cancel an active or queued task (g8s cancel <task-id> [--reason <text>])")
