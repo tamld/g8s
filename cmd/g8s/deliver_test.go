@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -209,7 +210,9 @@ func TestDeliverInScopeFilesApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi2.Mode().Perm() != 0o755 {
+	// Windows does not carry Unix exec bits on regular files (0666);
+	// mode preservation is asserted on platforms with Unix semantics only.
+	if runtime.GOOS != "windows" && fi2.Mode().Perm() != 0o755 {
 		t.Errorf("expected mode 0755 preserved, got %o", fi2.Mode().Perm())
 	}
 }
