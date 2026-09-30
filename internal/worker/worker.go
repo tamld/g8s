@@ -1458,6 +1458,12 @@ var providerRefusalPhrases = []string{
 	"read more about [our policies here]",
 }
 
+func init() {
+	for i, phrase := range providerRefusalPhrases {
+		providerRefusalPhrases[i] = strings.ToLower(phrase)
+	}
+}
+
 // providerRefusalDetected reports whether the captured output is a provider
 // content-filter refusal rather than task evidence. A refusal is not a
 // result: classifying it as succeeded poisons the control plane with
@@ -1465,7 +1471,7 @@ var providerRefusalPhrases = []string{
 func providerRefusalDetected(stdoutText string) bool {
 	lower := strings.ToLower(stdoutText)
 	for _, phrase := range providerRefusalPhrases {
-		if strings.Contains(lower, strings.ToLower(phrase)) {
+		if strings.Contains(lower, phrase) {
 			return true
 		}
 	}
