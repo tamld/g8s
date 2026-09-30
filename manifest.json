@@ -7,7 +7,7 @@
   "go_version": "1.26.0",
   "latest_release": {
     "tag": "v0.13.0",
-    "commit": "a255bd5",
+    "commit": "90252b7b",
     "date": "2026-09-27"
   },
   "license": "MIT OR Apache-2.0",
