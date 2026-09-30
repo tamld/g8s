@@ -64,7 +64,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$HAS_EXPLICIT_ROOT_DIR" -eq 1 ]; then
-    for r in "${ROOT_FLAG_ARGS[@]}"; do
+    for r in ${ROOT_FLAG_ARGS[@]+"${ROOT_FLAG_ARGS[@]}"}; do
         CLI_ROOTS+=("$r")
         HAS_CLI_CONTENT_ROOTS=1
     done
@@ -87,7 +87,7 @@ else
                 HAS_CLI_CONTENT_ROOTS=1
             done
         else
-            for r in "${ROOT_FLAG_ARGS[@]}"; do
+            for r in ${ROOT_FLAG_ARGS[@]+"${ROOT_FLAG_ARGS[@]}"}; do
                 CLI_ROOTS+=("$r")
                 HAS_CLI_CONTENT_ROOTS=1
             done
@@ -103,7 +103,7 @@ if [ "$HAS_CLI_CONTENT_ROOTS" -eq 1 ]; then
     ROOTS_EXPLICIT=1
 elif [ -n "${LINK_INTEGRITY_ROOTS:-}" ]; then
     IFS=':' read -ra raw_roots <<< "$LINK_INTEGRITY_ROOTS"
-    for r in "${raw_roots[@]}"; do
+    for r in ${raw_roots[@]+"${raw_roots[@]}"}; do
         [ -n "$r" ] && ROOT_LIST+=("$r")
     done
     ROOTS_EXPLICIT=1

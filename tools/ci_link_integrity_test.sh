@@ -372,6 +372,22 @@ run_test_with_output \
 run_test "unknown argument exits with code 2" 2 \
     "$GATE_SCRIPT" --unknown-flag
 
+# 18. --root-dir without --roots must not crash on stock bash 3.2 (#466):
+# empty-array expansion under set -u raised "unbound variable" before the
+# ${arr[@]+...} guards; the gate must complete with a normal exit.
+OUT=$("$GATE_SCRIPT" --root-dir . 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    echo "FAIL (18): --root-dir . exited $RC (want 0)"
+    echo "$OUT" | tail -3
+    FAILURES=$((FAILURES + 1))
+elif echo "$OUT" | grep -q "unbound variable"; then
+    echo "FAIL (18): unbound variable leaked into output (bash 3.2 regression)"
+    FAILURES=$((FAILURES + 1))
+else
+    echo "  ok (18) --root-dir . completes without bash 3.2 crash"
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
     echo "LINK INTEGRITY GATE TEST SUITE: $FAILURES failure(s)."
