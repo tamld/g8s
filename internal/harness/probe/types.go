@@ -43,7 +43,7 @@ type Probe struct {
 	ExpectedOutcome string
 	// Runner executes the probe against a worker provider.
 	// It should return the actual outcome and whether it matches expected.
-	Runner func(ctx context.Context, provider WorkerProvider) (string, error)
+	Runner func(ctx context.Context, provider WorkerProvider) (string, error) `json:"-"`
 }
 
 // WorkerProvider abstracts the worker LLM provider for probe execution.

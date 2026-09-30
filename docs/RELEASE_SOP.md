@@ -15,6 +15,8 @@ Before cutting any release tag (`vX.Y.Z`), the release manager (Human or Agent) 
 - [ ] **Gate 5 (Spec Parity)**: All OpenSpec deltas targeted for this release in `spec/openspec/` are marked `APPLIED`.
 - [ ] **Gate 6 (Docs & Version Bump)**: Version string in `cmd/g8s/version.go` and `README.md` is updated.
   - manifest.json version + latest_release are synced with version.go and the latest tag (enforced by the version-sync guard).
+- [ ] **Gate 7 (Red Cell Pass — HARD, ADR-0026 §5.1)**: an independent adversarial pass receives ONLY the public surface (README, release assets, CLI help, offer bundle) and its findings are triaged before the tag. A skip requires a named waiver recorded in the release notes (see `docs/directives.md` D-01).
+- [ ] **Gate 8 (Self-Audit Probes — per-release, ADR-0026 §5.3)**: `g8s eval run --category self-audit` passes and the result is recorded in the release notes (see `docs/directives.md` D-02).
 
 ---
 

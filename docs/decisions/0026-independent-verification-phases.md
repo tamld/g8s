@@ -1,6 +1,6 @@
 # ADR-0026: Independent Verification Phases & Directive Falsification Clocks
 
-**Status**: Proposed (operator ratification pending on §5 decision points)
+**Status**: Accepted (2026-09-30 — operator ratified §5: Red Cell gate HARD with waiver path; directive ledger `docs/directives.md`; self-audit cadence per-release. First self-audit run recorded in the v0.13.0 release notes.)
 **Date**: 2026-09-29
 **Deciders**: Brain/main agent (operator-directed gap-closing program)
 **Related**: ADR-0021 (SOM §4 E2E checklist — amended by §3.2 here); ADR-0024 (falsification clock for gates — extended to directives and claims); #434 (escape incident); #443/#444 (self-referential harness defect); #447 (claims registry); #448 (delivery contract); #449 (self-audit suite)
@@ -105,10 +105,18 @@ self-trigger) both passing full suites; directive clock ← the
 sequential-drain directive surviving on stale evidence past #427 PR-2;
 self-audit suite ← #443's detector poisoning three deliveries in one day.
 
-## §5 Decision points for operator ratification
+## §5 Decision points — RATIFIED 2026-09-30 (operator)
 
-1. Red Cell gate becomes a hard release requirement (waiver path as
-   described) — or advisory for the next two releases?
-2. Directive clocks recorded in the SOM §6 automation loop vs a dedicated
-   `docs/directives.md` ledger?
-3. Self-audit cadence: per-release, per-campaign, or scheduled (weekly)?
+1. **Red Cell gate: HARD** (waiver path as described — a skip requires a
+   written, named waiver in the release notes). Rationale: internal gates
+   caught zero of #433–#436 (the operator's v0.12.0 field test caught all),
+   and the #435/#466 findings again arrived from outside; hard+waiver makes
+   every skip a signed artifact, advisory would allow silent drift.
+2. **Directive ledger: dedicated `docs/directives.md`** — machine-readable
+   rows (directive | born-from | clock | simplify-if), grep-friendly per
+   the claims.yml style; truths in two places diverge (changelog /
+   receipts-db split-brain precedents).
+3. **Self-audit cadence: per-release** — probes are hermetic and
+   seconds-cheap; the release is the highest-stakes moment and the one
+   event with a guaranteed reader (the release notes). First run recorded
+   in v0.13.0 release notes: 4/4 passed (sa-001…sa-004).

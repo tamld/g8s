@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-30
+
+### Added
+- Multi-provider worker dispatch on the durable queue path (#457): `g8s submit --provider` / `g8s worker --provider` with strict claim affinity; providers.json (`~/.config/g8s/providers.json`) remains the single worker manifest per DELTA-10; provider-name template > model template > legacy agy resolution; explicit unknown provider fails the attempt (no silent fallback); `default_provider` setting (#458, #460).
+- Deterministic delivery contract (#448): the supervisor injects a `deliverable {mode, dir}` pointer into attempt results (#467) and `g8s deliver <task-id>` applies receipt-validated worktree files to the checkout with atomic refusal on out-of-scope paths (#472). The receipt, not the agent, governs what lands.
+- Harness self-audit suite (#451, ADR-0026 §4): four self-audit probes registered in the eval suite (refusal-echo #443, worktree-discard #443-f2/#450, sanitizer-fidelity #434/#445, receipt-bypass) — **first recorded run: 4/4 passed** (`g8s eval run --category self-audit`, 2026-09-30).
+- Enterprise transparency (#441): `docs/ENTERPRISE_LEDGER.md` claim inventory (PROVEN/UNPROVEN/PARTIAL), access-audit design note, ADR-0027 (availability "not measured, by design" with recorded triggers).
+- Directive clocks ledger `docs/directives.md` (ADR-0026 §5.2): every directive carries its incident, clock, and simplify-if condition.
+- Release gates 7-8 wired into the release SOP (ADR-0026 §5.1/§5.3): Red Cell pass (hard, waiver path) and per-release self-audit probe run.
+- Multi-project ownership hardening (#465 P0): ghost-process sweep requires CWD/command-line identity corroboration (PID-recycle kills eliminated); orphan-worktree sweep and the worktree pool root moved under the state dir — host-global TMPDIR is no longer a shared blast radius (#468).
+
+### Fixed
+- `g8s eval list` printed nothing: `Probe.Runner` (func field) broke suite JSON marshaling; the envelope writer swallowed the error. `Runner` is now `json:"-"` + regression test (caught at the v0.13.0 release gate).
+- Memory adapter: bounded SQLITE_BUSY retry-with-backoff in working-context paths (#440/#464).
+- Link-integrity gate: configurable content roots with honest examined-counts reporting and a zero-examined NOT-EVALUATED guard (#435/#462); survives stock macOS bash 3.2 (#466/#475).
+- `TestRunWithTimeout` budget 1s → 5s (spawn latency, not product behavior) (#459/#463).
+
+### Changed
+- Release tooling hardened (#461/#471): manifest.json synced to the tag and guarded by the version-sync check; RELEASE_SOP Gate 6 names the correct file; `claims_check.sh` wired into pre-push and the Quality workflow.
+- Release-governance ratified (ADR-0026 §5): Red Cell gate HARD with named-waiver path; directive ledger `docs/directives.md`; self-audit cadence per-release.
+
+### Release-governance record for v0.13.0
+- Gate 7 (Red Cell, hard): **WAIVED by the operator** for this release — the waiver is the named artifact; the pass itself rides the next release cycle.
+- Gate 5 (Spec parity): **DELTA-20 remains PROPOSED (M5 scope)** — Gate 5 waived by the operator for this release; no shipped code depends on it.
+- Gate 8 (Self-audit): **4/4 probes passed** (sa-001 refusal-echo, sa-002 worktree-discard, sa-003 sanitizer-fidelity, sa-004 receipt-bypass) via `g8s eval run --category self-audit --provider mock-compliant`.
+
 ## [0.12.0] - 2026-09-27
 
 ### Added
