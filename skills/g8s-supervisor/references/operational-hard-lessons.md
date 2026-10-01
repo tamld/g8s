@@ -14,20 +14,30 @@ these into dispatch planning; they are contracts, not advice.
 - Incident cost: 6 delivery losses across 4 dispatch rounds when two
   supervisors shared one host.
 
-## 2. Worker liveness stack (DB `RUNNING` is the WEAKEST signal)
+## 2. Supervision is event-driven; polling is the fallback (operator directive 2026-10-02)
+
+A supervisor is server/client: it cannot pull and push continuously —
+deliberate repeated polling (heartbeat-delta probes every 12s, CI checks
+every 30s) burns quota on useless, intentionally repeated work. The wakeup
+model:
 
 ```
-1. DB state RUNNING        — stale-lease illusion (worker dead → state
-                              lingers up to the lease window)
-2. ps + child.pid           — process exists ≠ progressing
-   (run dir artifact)
-3. heartbeat delta          — sample lease_expires_at twice; advancing
-                              ≥ wall-clock = renewal loop alive (THE signal
-                              while a lease is held)
-4. disk harvest             — the only truth for "delivered"
+PRIMARY   — terminal-event signals: drain-shell completion notification,
+            `g8s watch --task <id> --milestone worker-complete` per task
+            (one sleeping long-poll per task, zero quota), the control
+            plane's own lease-expiry → FAILED transition (signal-file
+            design: issue #481)
+FALLBACK  — ONE one-shot deadline check per wave at timeout+buffer; it
+            exists only to catch a MISSED primary signal. A fallback that
+            fires while signals flowed normally is a bug in the wave plan.
+DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
+            fallback says something is wrong — never as a routine:
+            DB state RUNNING (weakest; stale-lease illusion)
+            → ps + child.pid (exists ≠ progressing)
+            → heartbeat delta (lease_expires_at advancing = renewing)
+            → disk harvest (the only truth for "delivered")
 ```
 
-- `g8s watch --task <id> --milestone worker-complete` for unattended drains.
 - CI poll scripts must exit on **`pending == 0`**, never `pass >= 5` (8
   pending checks hid behind 6 passes once).
 
