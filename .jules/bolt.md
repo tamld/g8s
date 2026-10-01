@@ -17,3 +17,6 @@
 ## 2026-09-23 - Avoid dynamic regexp compilation in loops/functions
 **Learning:** In Go, calling `regexp.MustCompile` inside function bodies or loops causes expensive dynamic recompilation on every invocation, unnecessarily consuming CPU and creating memory pressure.
 **Action:** Always hoist `regexp.MustCompile` calls to package-level variables so they are compiled exactly once at startup.
+## 2026-10-25 - Avoid regex and string split allocations in hot loops for environment parsing
+**Learning:** In Go, splitting environment strings using `strings.Split(string(data), "\x00")` or matching environment variables dynamically with `regexp.MustCompile(pattern).Match(out)` inside a hot loop (like process sweeping) forces multiple severe heap allocations on strings that scale linearly with the total string bytes and invocation count.
+**Action:** Replace split-driven search and dynamic regexp calls with zero-allocation byte scans using `bytes.Index()` and slice boundaries, validating delimiter boundaries (`\x00` on Linux, whitespaces on Darwin) directly against the `[]byte` buffer.
