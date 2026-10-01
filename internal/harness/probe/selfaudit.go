@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/cleanup"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/orchestrator"
@@ -189,6 +190,59 @@ func AuditWorktreeDiscard(ctx context.Context) (string, error) {
 	cmd.Dir = repoDir
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("branch %s was deleted on Release(keep=true): %w", wt.Branch, err)
+	}
+
+	// Hostile lifecycle:
+	// 1. git worktree prune
+	pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	pruneCmd.Dir = repoDir
+	if out, err := pruneCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree prune: %w (output: %s)", err, out)
+	}
+
+	// 2. Second Pool with 10 Acquire/Release cycles
+	pool2, err := orchestrator.NewPool(orchestrator.PoolOptions{
+		Repo: repoDir,
+		Root: filepath.Join(tmpDir, "worktrees"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("new pool2: %w", err)
+	}
+	for i := 0; i < 10; i++ {
+		taskID := fmt.Sprintf("hostile-task-%d", i)
+		wt2, err := pool2.Acquire(ctx, taskID)
+		if err != nil {
+			return "", fmt.Errorf("pool2 acquire %d: %w", i, err)
+		}
+		if err := pool2.Release(ctx, wt2, false); err != nil {
+			return "", fmt.Errorf("pool2 release %d: %w", i, err)
+		}
+	}
+
+	// 3. Cleanup sweep (reachable hermetically without credentials)
+	cleanupCfg := cleanup.CleanupConfig{
+		RepoDir:         repoDir,
+		WorktreeBaseDir: filepath.Join(tmpDir, "worktrees"),
+		AuditLogPath:    filepath.Join(tmpDir, ".cleanup-audit.jsonl"),
+		Targets:         []string{cleanup.TargetOrphanWT, cleanup.TargetOrphanDir},
+	}
+	if _, err := cleanup.RunCleanupSweep(ctx, cleanupCfg); err != nil {
+		return "", fmt.Errorf("cleanup sweep: %w", err)
+	}
+
+	// Re-assert preserved worktree dir and deliverable file still exist
+	if _, statErr := os.Stat(wt.Path); os.IsNotExist(statErr) {
+		return "", fmt.Errorf("dirty worktree directory %s was removed after hostile lifecycle", wt.Path)
+	}
+	content, rerr = os.ReadFile(dirtyFile)
+	if rerr != nil || string(content) != "uncommitted deliverable" {
+		return "", fmt.Errorf("uncommitted file missing or corrupted after hostile lifecycle: %v", rerr)
+	}
+
+	cmd = exec.CommandContext(ctx, "git", "rev-parse", "--verify", wt.Branch)
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("branch %s was deleted after hostile lifecycle: %w", wt.Branch, err)
 	}
 
 	return OutcomeClassCompleted, nil
