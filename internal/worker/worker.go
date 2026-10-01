@@ -6,6 +6,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -938,23 +939,66 @@ func collectMarkerCandidates(childPID, maxPIDs int) []int {
 // match for G8S_RUN_MARKER=<attempt-unique-value>. We NEVER kill by process age,
 // binary name, or parent heuristics alone. This eliminates accidental
 // termination of unrelated system or user processes.
+// hasRunMarkerLinuxOpt provides an allocation-free environment check for Linux.
+// ⚡ Bolt Optimization: Replace `strings.Split(string(data), "\x00")` with a direct byte scan
+// to avoid massive memory allocations scaling with environment size.
+func hasRunMarkerLinuxOpt(data []byte, targetBytes []byte) bool {
+	idx := 0
+	for {
+		j := bytes.Index(data[idx:], targetBytes)
+		if j < 0 {
+			break
+		}
+		matchIdx := idx + j
+		startOk := matchIdx == 0 || data[matchIdx-1] == 0
+		endIdx := matchIdx + len(targetBytes)
+		endOk := endIdx == len(data) || data[endIdx] == 0
+		if startOk && endOk {
+			return true
+		}
+		idx = matchIdx + 1
+	}
+	return false
+}
+
+func isSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+}
+
+// hasRunMarkerDarwinOpt provides a fast regexp-free environment check for Darwin.
+// ⚡ Bolt Optimization: Replace dynamic `regexp.MustCompile` inside the loop with zero-allocation `bytes.Index`.
+func hasRunMarkerDarwinOpt(out []byte, targetBytes []byte) bool {
+	idx := 0
+	for {
+		j := bytes.Index(out[idx:], targetBytes)
+		if j < 0 {
+			break
+		}
+		matchIdx := idx + j
+		startOk := matchIdx == 0 || isSpace(out[matchIdx-1])
+		endIdx := matchIdx + len(targetBytes)
+		endOk := endIdx == len(out) || isSpace(out[endIdx])
+		if startOk && endOk {
+			return true
+		}
+		idx = matchIdx + 1
+	}
+	return false
+}
+
 func hasRunMarker(pid int, marker string) bool {
 	if pid <= 1 || marker == "" {
 		return false
 	}
 	target := runMarkerEnv + "=" + marker
+	targetBytes := []byte(target)
 
 	if runtime.GOOS == "linux" {
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
 		if err != nil {
 			return false
 		}
-		for _, entry := range strings.Split(string(data), "\x00") {
-			if entry == target {
-				return true
-			}
-		}
-		return false
+		return hasRunMarkerLinuxOpt(data, targetBytes)
 	}
 
 	if runtime.GOOS == "darwin" {
@@ -962,8 +1006,7 @@ func hasRunMarker(pid int, marker string) bool {
 		if err != nil {
 			return false
 		}
-		re := regexp.MustCompile(`(^|\s)` + regexp.QuoteMeta(target) + `($|\s)`)
-		return re.Match(out)
+		return hasRunMarkerDarwinOpt(out, targetBytes)
 	}
 
 	return false
