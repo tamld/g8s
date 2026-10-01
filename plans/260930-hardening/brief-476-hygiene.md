@@ -16,8 +16,10 @@ $G8S_REPO_ROOT):
   internal/orchestrator/.heartbeat/ — trace it first; otherwise the test
   file that creates that path)
 - .gitignore (add the in-tree test-state patterns)
-- internal/cleanup/cleanup.go (ONLY: honor `--target scratch-branch`
-  without requiring --scratch, per the fix below)
+
+NOTE: internal/cleanup/cleanup.go is OUT OF SCOPE for this task (another
+worker owns it this wave) — the `--target scratch-branch` honesty fix is
+deferred to wave C. Do not touch that file.
 
 Do NOT run git commit. Do NOT modify any other file. Other workers own
 cmd/g8s/, internal/doctor/, Makefile, internal/worker/, internal/settings/
@@ -36,14 +38,7 @@ in parallel.
    - Fix the prerelease tag comparison so `rc.10` > `rc.9` (numeric
      segment compare instead of alphabetical sort) — unit-testable via the
      new test file.
-3. **cleanup `--target scratch-branch` honesty** (internal/cleanup/
-   cleanup.go ~line 878): when the operator selects target
-   `scratch-branch` but `--scratch` is not enabled, the sweep silently
-   no-ops. Fix: treat selecting the target as enabling it (or at minimum
-   emit a loud warning line: "target scratch-branch selected but --scratch
-   not set — sweep skipped"). Choose the honor-the-target fix; keep
-   `--scratch` working as before.
-4. **Orchestrator test litter**: trace which test writes
+3. **Orchestrator test litter**: trace which test writes
    `internal/orchestrator/.heartbeat/agy` and `internal/orchestrator/.g8s`
    into the source tree (start at mount_test.go); redirect it to
    t.TempDir(). Add the in-tree patterns (`.heartbeat/`, `.g8s/`) to
