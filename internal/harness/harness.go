@@ -54,6 +54,12 @@ var DeniedPathFragments = []string{
 	"id_ed25519",
 }
 
+func init() {
+	for i, fragment := range DeniedPathFragments {
+		DeniedPathFragments[i] = strings.ToLower(fragment)
+	}
+}
+
 // ValidateRequest checks if a task request passes all safety gates.
 func ValidateRequest(
 	prompt string,
@@ -115,7 +121,7 @@ func ValidateRequest(
 		normalized := strings.ToLower(filepath.ToSlash(absDir))
 
 		for _, fragment := range DeniedPathFragments {
-			if strings.Contains(normalized, strings.ToLower(fragment)) {
+			if strings.Contains(normalized, fragment) {
 				return fmt.Errorf("denied path fragment detected in add-dir: %s", rawDir)
 			}
 		}
@@ -142,7 +148,7 @@ func ValidateScopePath(rawPath string) error {
 	normalized := strings.ToLower(filepath.ToSlash(absDir))
 
 	for _, fragment := range DeniedPathFragments {
-		if strings.Contains(normalized, strings.ToLower(fragment)) {
+		if strings.Contains(normalized, fragment) {
 			return fmt.Errorf("denied path fragment detected in path: %s", rawPath)
 		}
 	}

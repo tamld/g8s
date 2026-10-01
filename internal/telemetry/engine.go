@@ -891,11 +891,16 @@ func relevanceScore(pattern NegativePattern, role, path, prompt string) float64 
 	if strings.Contains(pkgStr, path) {
 		score += 0.4
 	}
-	if strings.Contains(strings.ToLower(string(pattern.PatternType)), strings.ToLower(role)) {
+
+	lowerPatternType := strings.ToLower(string(pattern.PatternType))
+	lowerRole := strings.ToLower(role)
+	if strings.Contains(lowerPatternType, lowerRole) {
 		score += 0.2
 	}
+
+	lowerPromptPart := strings.ToLower(prompt[:min(20, len(prompt))])
 	for _, ctx := range pattern.ExampleContexts {
-		if strings.Contains(strings.ToLower(ctx), strings.ToLower(prompt[:min(20, len(prompt))])) {
+		if strings.Contains(strings.ToLower(ctx), lowerPromptPart) {
 			score += 0.3
 			break
 		}
