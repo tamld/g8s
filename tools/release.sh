@@ -27,7 +27,7 @@ NC='\033[0m'
 
 usage() {
     cat <<EOF
-Usage: $0 <patch|minor|major|VERSION> [--dry-run]
+Usage: $0 <patch|minor|major|VERSION> [--dry-run] [--no-push]
 
 Bumps version, updates CHANGELOG, creates tag, and pushes to origin.
 
@@ -39,6 +39,7 @@ Arguments:
 
 Options:
   --dry-run    Show what would be done without making changes
+  --no-push    Commit and tag locally but do not push to origin
   --help       Show this help
 
 Examples:
@@ -50,6 +51,7 @@ EOF
 }
 
 DRY_RUN=0
+NO_PUSH="${NO_PUSH:-${G8S_RELEASE_NO_PUSH:-0}}"
 VERSION_ARG=""
 
 # Parse arguments
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=1
+            shift
+            ;;
+        --no-push|--skip-push)
+            NO_PUSH=1
             shift
             ;;
         *)
@@ -82,7 +88,10 @@ if [ -z "$VERSION_ARG" ]; then
 fi
 
 # Get current version from cmd/g8s/version.go
-CURRENT_VERSION=$(grep 'Version' cmd/g8s/version.go | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+CURRENT_VERSION=$(grep -E '^[[:space:]]*Version[[:space:]]*=' cmd/g8s/version.go | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+if [ -z "$CURRENT_VERSION" ]; then
+    CURRENT_VERSION=$(grep 'Version' cmd/g8s/version.go | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+fi
 if [ -z "$CURRENT_VERSION" ]; then
     echo -e "${RED}Error: Could not extract current version${NC}" >&2
     exit 1
@@ -122,8 +131,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo -e "${YELLOW}DRY RUN - no changes will be made${NC}"
 fi
 
-# Check for uncommitted changes (excluding version.go and CHANGELOG.md which we'll modify)
-UNCOMMITTED=$(git status --porcelain | grep -v -E '^(M|M | M) (cmd/g8s/version\.go|CHANGELOG\.md)$' || true)
+# Check for uncommitted changes (excluding release-managed files)
+RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1"
+UNCOMMITTED=$(git status --porcelain | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
 if [ -n "$UNCOMMITTED" ] && [ "$DRY_RUN" -eq 0 ]; then
     echo -e "${RED}Error: Uncommitted changes detected. Commit or stash first.${NC}" >&2
     git status --short
@@ -164,8 +174,80 @@ ${CHANGELOG_HEADER}\\
     fi
 fi
 
+# Update manifest.json (version and latest_release.tag)
+# Note: latest_release.commit is intentionally NOT synced by this script
+# due to self-reference circularity: the release commit sha is only final
+# after the commit exists; the guard does not check it. commit and date
+# are left alone.
+if [ -f "manifest.json" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update manifest.json: version = \"${NEW_VERSION}\", latest_release.tag = \"v${NEW_VERSION}\"${NC}"
+    else
+        sed -i.bak -E "s/^([[:space:]]*\"version\":[[:space:]]*\")[^\"]+(\".*)$/\1${NEW_VERSION}\2/" manifest.json
+        sed -i.bak -E "s/^([[:space:]]*\"tag\":[[:space:]]*\")v?[^\"]+(\".*)$/\1v${NEW_VERSION}\2/" manifest.json
+        rm -f manifest.json.bak
+        echo -e "${GREEN}✓ Updated manifest.json${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: manifest.json not found, skipping manifest update${NC}" >&2
+fi
+
+# Update packaging templates (best-effort: warn loudly if missing, do not abort)
+if [ -f "packaging/windows/g8s.nsi" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update packaging/windows/g8s.nsi: VERSION = \"${NEW_VERSION}\"${NC}"
+    else
+        sed -i.bak -E "s/^([[:space:]]*!define[[:space:]]+VERSION[[:space:]]+\")[^\"]+(\".*)$/\1${NEW_VERSION}\2/" packaging/windows/g8s.nsi
+        rm -f packaging/windows/g8s.nsi.bak
+        echo -e "${GREEN}✓ Updated packaging/windows/g8s.nsi${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: packaging/windows/g8s.nsi not found, skipping packaging template update${NC}" >&2
+fi
+
+if [ -f "packaging/windows/g8s.wxs" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update packaging/windows/g8s.wxs: Version = \"${NEW_VERSION}\"${NC}"
+    else
+        sed -i.bak -E "s/^([[:space:]]*<\?define[[:space:]]+Version[[:space:]]*=[[:space:]]*\")[^\"]+(\".*)$/\1${NEW_VERSION}\2/" packaging/windows/g8s.wxs
+        rm -f packaging/windows/g8s.wxs.bak
+        echo -e "${GREEN}✓ Updated packaging/windows/g8s.wxs${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: packaging/windows/g8s.wxs not found, skipping packaging template update${NC}" >&2
+fi
+
+if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update packaging/chocolatey/tools/chocolateyinstall.ps1: download URL -> v${NEW_VERSION}${NC}"
+    else
+        sed -i.bak -E \
+            -e "s|(/download/)v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?/|\1v${NEW_VERSION}/|g" \
+            -e "s|(/g8s_)v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?_|\1${NEW_VERSION}_|g" \
+            packaging/chocolatey/tools/chocolateyinstall.ps1
+        rm -f packaging/chocolatey/tools/chocolateyinstall.ps1.bak
+        echo -e "${GREEN}✓ Updated packaging/chocolatey/tools/chocolateyinstall.ps1${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: packaging/chocolatey/tools/chocolateyinstall.ps1 not found, skipping chocolatey script update${NC}" >&2
+fi
+
+# Build list of release files to stage
+STAGE_FILES=("cmd/g8s/version.go")
+if [ -f "CHANGELOG.md" ]; then
+    STAGE_FILES+=("CHANGELOG.md")
+fi
+if [ -f "manifest.json" ]; then
+    STAGE_FILES+=("manifest.json")
+fi
+for pkg_file in "packaging/windows/g8s.nsi" "packaging/windows/g8s.wxs" "packaging/chocolatey/tools/chocolateyinstall.ps1"; do
+    if [ -f "$pkg_file" ]; then
+        STAGE_FILES+=("$pkg_file")
+    fi
+done
+
 if [ "$DRY_RUN" -eq 1 ]; then
-    echo -e "${YELLOW}Would run: git add cmd/g8s/version.go CHANGELOG.md${NC}"
+    echo -e "${YELLOW}Would run: git add ${STAGE_FILES[*]}${NC}"
     echo -e "${YELLOW}Would run: git commit -m \"chore: release ${NEW_VERSION}\"${NC}"
     echo -e "${YELLOW}Would run: git tag -a v${NEW_VERSION} -m \"Release ${NEW_VERSION}\"${NC}"
     echo -e "${YELLOW}Would run: git push origin main --tags${NC}"
@@ -173,15 +255,28 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 # Commit changes
-git add cmd/g8s/version.go CHANGELOG.md
-git commit -m "chore: release ${NEW_VERSION}"
+git add "${STAGE_FILES[@]}"
+
+if git diff --cached --quiet; then
+    echo -e "${YELLOW}No changes to commit (already at version ${NEW_VERSION})${NC}"
+else
+    git commit -m "chore: release ${NEW_VERSION}"
+fi
 
 # Create tag
-git tag -a "v${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+if git rev-parse "refs/tags/v${NEW_VERSION}" >/dev/null 2>&1; then
+    echo -e "${YELLOW}Tag v${NEW_VERSION} already exists${NC}"
+else
+    git tag -a "v${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+fi
 
 # Push
-echo -e "${BLUE}Pushing to origin...${NC}"
-git push origin main
-git push origin "v${NEW_VERSION}"
+if [ "$NO_PUSH" -eq 1 ]; then
+    echo -e "${YELLOW}Skipping push (--no-push)${NC}"
+else
+    echo -e "${BLUE}Pushing to origin...${NC}"
+    git push origin main
+    git push origin "v${NEW_VERSION}"
+fi
 
 echo -e "${GREEN}✓ Release ${NEW_VERSION} created and pushed!${NC}"
