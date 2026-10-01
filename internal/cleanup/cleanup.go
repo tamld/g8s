@@ -1083,6 +1083,21 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 			trimmedPath := strings.TrimPrefix(cleanPath, "/private")
 
 			if !activeMap[cleanPath] && !activeMap[trimmedPath] {
+				// #465/#477: a directory containing a `.git` entry is a LIVE
+				// worktree of some repo — on Windows the registry path
+				// comparison above can miss it (8.3 short names, case
+				// variants), and this sweep then deletes another session's
+				// preserved deliverables. Same rule as Pool.Acquire: never
+				// RemoveAll a live worktree.
+				if _, statErr := os.Stat(filepath.Join(dirPath, ".git")); statErr == nil {
+					items = append(items, CleanupItem{
+						Target: TargetOrphanDir,
+						ID:     dirPath,
+						Detail: "skipped: contains a .git entry (live worktree; registration check may have missed it cross-platform)",
+						Action: "skipped",
+					})
+					continue
+				}
 				if cfg.DryRun {
 					items = append(items, CleanupItem{
 						Target: TargetOrphanDir,
