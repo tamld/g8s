@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/cleanup"
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/heartbeat"
 	"github.com/tamld/g8s/internal/pathutil"
@@ -310,13 +312,17 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 	}
 
 	report.Checks = append(report.Checks, checkDatabase(dbPath))
+	stateDir := filepath.Dir(dbPath)
+	report.Checks = append(report.Checks, checkDiskSpace(stateDir))
 	report.Checks = append(report.Checks, checkWorkspace())
 	if runtime.GOOS == "windows" {
 		report.Checks = append(report.Checks, d.checkWindowsEnvironment()...)
 	}
 	report.Checks = append(report.Checks, checkWorkerBinaries()...)
 	report.Checks = append(report.Checks, checkProviders())
+	report.Checks = append(report.Checks, checkProvidersFile())
 	report.Checks = append(report.Checks, checkHarnessProfiles())
+	report.Checks = append(report.Checks, checkStaleBinary())
 
 	for _, check := range report.Checks {
 		if check.Status == "FAIL" {
@@ -500,6 +506,272 @@ func checkHarnessProfiles() DiagnosticResult {
 		Name:    "Security Harness",
 		Status:  "OK",
 		Message: fmt.Sprintf("%d roles, %d permissions active and validated", len(roles), len(perms)),
+	}
+}
+
+func resolveProvidersPath() string {
+	if env := os.Getenv("G8S_PROVIDERS"); env != "" {
+		return env
+	}
+	p := filepath.Join(pathutil.DefaultConfigDir(), "providers.json")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		legacy := filepath.Join(home, ".config", "g8s", "providers.json")
+		if _, err := os.Stat(legacy); err == nil {
+			return legacy
+		}
+	}
+	return p
+}
+
+func checkProvidersFile(customPath ...string) DiagnosticResult {
+	path := resolveProvidersPath()
+	if len(customPath) > 0 && customPath[0] != "" {
+		path = customPath[0]
+	}
+
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return DiagnosticResult{
+			Name:    "Providers File",
+			Status:  "OK",
+			Message: "providers.json absent (legacy default is legal; built-in providers active)",
+			Details: path,
+		}
+	}
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Providers File",
+			Status:  "FAIL",
+			Message: fmt.Sprintf("%v (fix providers.json or remove it to fall back to built-ins)", err),
+			Details: path,
+		}
+	}
+	if info.IsDir() {
+		return DiagnosticResult{
+			Name:    "Providers File",
+			Status:  "FAIL",
+			Message: fmt.Sprintf("path %s is a directory, expected a file (fix providers.json or remove it to fall back to built-ins)", path),
+			Details: path,
+		}
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Providers File",
+			Status:  "FAIL",
+			Message: fmt.Sprintf("%v (fix providers.json or remove it to fall back to built-ins)", err),
+			Details: path,
+		}
+	}
+
+	return DiagnosticResult{
+		Name:    "Providers File",
+		Status:  "OK",
+		Message: fmt.Sprintf("%d provider(s) loaded cleanly from %s", len(cfg.Providers), path),
+		Details: path,
+	}
+}
+
+const minFreeDiskSpaceBytes uint64 = 2 * 1024 * 1024 * 1024 // 2 GiB
+
+var diskFreeSpaceFunc = defaultDiskFreeSpace
+
+func defaultDiskFreeSpace(path string) (uint64, error) {
+	if runtime.GOOS == "windows" {
+		return windowsDiskFreeSpace(path)
+	}
+	return unixDiskFreeSpace(path)
+}
+
+func unixDiskFreeSpace(path string) (uint64, error) {
+	p := path
+	for p != "" && p != "." && p != "/" {
+		if _, err := os.Stat(p); err == nil {
+			break
+		}
+		p = filepath.Dir(p)
+	}
+	if p == "" {
+		p = "."
+	}
+	out, err := exec.Command("df", "-k", "-P", p).Output()
+	if err != nil {
+		return 0, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return 0, fmt.Errorf("unexpected df output: %s", string(out))
+	}
+	fields := strings.Fields(lines[len(lines)-1])
+	if len(fields) < 4 {
+		return 0, fmt.Errorf("unexpected df output format: %v", fields)
+	}
+	availKB, err := strconv.ParseUint(fields[3], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse available space from df: %w", err)
+	}
+	return availKB * 1024, nil
+}
+
+func windowsDiskFreeSpace(path string) (uint64, error) {
+	vol := filepath.VolumeName(path)
+	if vol == "" {
+		vol = "C:"
+	}
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		fmt.Sprintf("(Get-PSDrive %s).Free", strings.TrimSuffix(vol, ":")))
+	out, err := cmd.Output()
+	if err == nil {
+		if b, perr := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64); perr == nil {
+			return b, nil
+		}
+	}
+	cmdFs := exec.Command("fsutil", "volume", "diskfree", vol+"\\")
+	outFs, errFs := cmdFs.Output()
+	if errFs == nil {
+		for _, line := range strings.Split(string(outFs), "\n") {
+			if strings.Contains(strings.ToLower(line), "free bytes") {
+				parts := strings.Split(line, ":")
+				if len(parts) >= 2 {
+					valStr := strings.TrimSpace(parts[1])
+					valStr = strings.ReplaceAll(valStr, ",", "")
+					valStr = strings.ReplaceAll(valStr, " ", "")
+					if b, err := strconv.ParseUint(valStr, 10, 64); err == nil {
+						return b, nil
+					}
+				}
+			}
+		}
+	}
+	return 0, fmt.Errorf("unable to determine free disk space for %s", path)
+}
+
+func formatBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func checkDiskSpace(stateDir ...string) DiagnosticResult {
+	dir := pathutil.DefaultStateDir()
+	if len(stateDir) > 0 && stateDir[0] != "" {
+		dir = stateDir[0]
+	}
+
+	freeBytes, err := diskFreeSpaceFunc(dir)
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Disk Space",
+			Status:  "WARN",
+			Message: fmt.Sprintf("Failed to inspect disk space on %s: %v (disk exhaustion has masqueraded as random test/attempt failures twice)", dir, err),
+			Details: dir,
+		}
+	}
+
+	if freeBytes < minFreeDiskSpaceBytes {
+		return DiagnosticResult{
+			Name:    "Disk Space",
+			Status:  "WARN",
+			Message: fmt.Sprintf("Low free disk space on state volume (%s available < 2GiB threshold; disk exhaustion has masqueraded as random test/attempt failures twice)", formatBytes(freeBytes)),
+			Details: fmt.Sprintf("path: %s, free: %d bytes", dir, freeBytes),
+		}
+	}
+
+	return DiagnosticResult{
+		Name:    "Disk Space",
+		Status:  "OK",
+		Message: fmt.Sprintf("Sufficient disk space available on state volume (%s free)", formatBytes(freeBytes)),
+		Details: fmt.Sprintf("path: %s, free: %d bytes", dir, freeBytes),
+	}
+}
+
+func checkStaleBinary(workspaceDir ...string) DiagnosticResult {
+	dir, err := os.Getwd()
+	if len(workspaceDir) > 0 && workspaceDir[0] != "" {
+		dir = workspaceDir[0]
+	} else if err != nil {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "OK",
+			Message: fmt.Sprintf("Unable to determine working directory: %v (check skipped)", err),
+		}
+	}
+
+	// Check if bin/g8s exists
+	binPath := filepath.Join(dir, "bin", "g8s")
+	info, err := os.Stat(binPath)
+	if os.IsNotExist(err) && runtime.GOOS == "windows" {
+		binPath = filepath.Join(dir, "bin", "g8s.exe")
+		info, err = os.Stat(binPath)
+	}
+	if os.IsNotExist(err) {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "OK",
+			Message: "bin/g8s absent (check skipped)",
+			Details: binPath,
+		}
+	}
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "OK",
+			Message: fmt.Sprintf("Unable to stat %s: %v (check skipped)", binPath, err),
+			Details: binPath,
+		}
+	}
+
+	// Check newest commit time via git log -1 --format=%ct
+	cmd := exec.Command("git", "log", "-1", "--format=%ct")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "OK",
+			Message: "Git repository absent or inaccessible (check skipped)",
+			Details: binPath,
+		}
+	}
+
+	commitUnix, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "OK",
+			Message: fmt.Sprintf("Unable to parse commit timestamp %q (check skipped)", strings.TrimSpace(string(out))),
+			Details: binPath,
+		}
+	}
+
+	commitTime := time.Unix(commitUnix, 0)
+	binModTime := info.ModTime()
+
+	if binModTime.Before(commitTime) {
+		return DiagnosticResult{
+			Name:    "Stale Binary Check",
+			Status:  "WARN",
+			Message: fmt.Sprintf("bin/g8s predates latest commit (binary mtime: %s, commit: %s; stale-binary trap bit twice this campaign - rebuild with 'make local')", binModTime.UTC().Format(time.RFC3339), commitTime.UTC().Format(time.RFC3339)),
+			Details: binPath,
+		}
+	}
+
+	return DiagnosticResult{
+		Name:    "Stale Binary Check",
+		Status:  "OK",
+		Message: fmt.Sprintf("bin/g8s is up-to-date with repository (binary mtime: %s)", binModTime.UTC().Format(time.RFC3339)),
+		Details: binPath,
 	}
 }
 

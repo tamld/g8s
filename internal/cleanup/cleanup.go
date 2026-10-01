@@ -35,6 +35,7 @@ const (
 	TargetClosedPRBranch = "closed-pr-branch"
 	TargetOldTag         = "old-tag"
 	TargetScratchBranch  = "scratch-branch"
+	TargetEvidence       = "evidence"
 )
 
 // AllCleanupTargets lists all available cleanup target flags.
@@ -48,6 +49,7 @@ var AllCleanupTargets = []string{
 	TargetClosedPRBranch,
 	TargetOldTag,
 	TargetScratchBranch,
+	TargetEvidence,
 }
 
 // CleanupItem describes an individual resource identified for or subjected to cleanup.
@@ -743,6 +745,11 @@ type CleanupConfig struct {
 	// default (DefaultSessionGrace) — minutes-scale so a machine that
 	// sleeps does not come back to a reaped worktree.
 	SessionGracePeriod time.Duration
+	// Evidence directory retention (#476): per-attempt evidence directories
+	// under EvidenceDir older than EvidenceRetentionDays are pruned.
+	// Empty/zero means unlimited (no deletion).
+	EvidenceDir           string
+	EvidenceRetentionDays int
 }
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
@@ -882,6 +889,18 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetScratchBranch] = len(items)
+		}
+	}
+
+	// 9. Evidence retention (#476): age-gated removal of per-attempt evidence
+	// directories under the state dir's evidence/ root.
+	if targetSet[TargetEvidence] {
+		items, err := sweepEvidence(ctx, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] evidence sweep error: %v\n", err)
+		} else {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetEvidence] = len(items)
 		}
 	}
 
@@ -1461,6 +1480,100 @@ func sweepOldTags(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error)
 					Error:  errStr,
 				})
 			}
+		}
+	}
+
+	return items, nil
+}
+
+// 9. Evidence retention sweep (#476): age-gated removal of per-attempt evidence
+// directories under the state dir's evidence/ root.
+func sweepEvidence(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	if cfg.EvidenceRetentionDays <= 0 {
+		return nil, nil // unlimited retention (the default)
+	}
+
+	threshold := time.Duration(cfg.EvidenceRetentionDays) * 24 * time.Hour
+
+	evidenceDir := cfg.EvidenceDir
+	if evidenceDir == "" {
+		if env := os.Getenv("G8S_EVIDENCE_DIR"); env != "" {
+			evidenceDir = env
+		} else {
+			evidenceDir = pathutil.DefaultEvidenceDir()
+		}
+	}
+	evidenceDir = filepath.Clean(evidenceDir)
+	if evidenceDir == "" || evidenceDir == "/" || evidenceDir == "." {
+		return nil, fmt.Errorf("refusing to sweep invalid evidence root: %q", evidenceDir)
+	}
+
+	entries, err := os.ReadDir(evidenceDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	now := time.Now()
+	if cfg.Clock != nil {
+		now = cfg.Clock()
+	}
+
+	var items []CleanupItem
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue // NEVER touch non-directory files
+		}
+		dirPath := filepath.Join(evidenceDir, entry.Name())
+		cleanPath := filepath.Clean(dirPath)
+
+		// Safety check: ensure cleanPath is directly inside evidenceDir
+		if filepath.Dir(cleanPath) != evidenceDir {
+			continue
+		}
+
+		fi, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		mtime := fi.ModTime()
+		age := now.Sub(mtime)
+		if receiptFi, err := os.Stat(filepath.Join(cleanPath, "receipt.json")); err == nil {
+			receiptAge := now.Sub(receiptFi.ModTime())
+			if receiptAge > age {
+				age = receiptAge
+			}
+		}
+
+		if age <= threshold {
+			continue // within retention window
+		}
+
+		if cfg.DryRun {
+			items = append(items, CleanupItem{
+				Target: TargetEvidence,
+				ID:     cleanPath,
+				Detail: fmt.Sprintf("evidence directory older than retention threshold (%s)", threshold),
+				Action: "would_delete",
+			})
+		} else {
+			delErr := os.RemoveAll(cleanPath)
+			action := "deleted"
+			var errStr string
+			if delErr != nil {
+				action = "skipped"
+				errStr = delErr.Error()
+			}
+			items = append(items, CleanupItem{
+				Target: TargetEvidence,
+				ID:     cleanPath,
+				Detail: fmt.Sprintf("evidence directory older than retention threshold (%s)", threshold),
+				Action: action,
+				Error:  errStr,
+			})
 		}
 	}
 
