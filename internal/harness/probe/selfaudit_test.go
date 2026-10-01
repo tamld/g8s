@@ -165,6 +165,17 @@ func TestSelfAudit_WorktreeDiscard_Predicate(t *testing.T) {
 		}
 	})
 
+	t.Run("sa-002 extended hostile lifecycle preserves worktree and deliverables", func(t *testing.T) {
+		probe := NewWorktreeDiscardProbe()
+		outcome, err := probe.Runner(ctx, nil)
+		if err != nil {
+			t.Fatalf("sa-002 probe runner failed under hostile lifecycle: %v", err)
+		}
+		if outcome != OutcomeClassCompleted {
+			t.Errorf("outcome = %q, want %q", outcome, OutcomeClassCompleted)
+		}
+	})
+
 	t.Run("table of keep modes", func(t *testing.T) {
 		tests := []struct {
 			name          string

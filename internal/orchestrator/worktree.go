@@ -97,11 +97,26 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 		return wt, nil
 	}
 
-	id := "wt-" + shortID()
-	wtPath := filepath.Join(p.root, id)
 	branch := fmt.Sprintf("%s/%s", p.prefix, taskID)
-
 	_ = os.MkdirAll(p.root, 0o755)
+
+	var (
+		id     string
+		wtPath string
+	)
+	for attempt := 1; attempt <= 5; attempt++ {
+		id = "wt-" + shortIDFn()
+		wtPath = filepath.Join(p.root, id)
+		if isLiveWorktree(wtPath) {
+			if attempt == 5 {
+				p.mu.Unlock()
+				return Worktree{}, fmt.Errorf("worktree path collision with a live worktree after 5 attempts: %s", wtPath)
+			}
+			continue
+		}
+		break
+	}
+
 	_ = os.RemoveAll(wtPath)
 	if err := gitAddWorktree(p.repo, wtPath, branch, p.base); err != nil {
 		p.mu.Unlock()
@@ -178,6 +193,18 @@ func shortID() string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// shortIDFn is swappable in tests for deterministic collision testing.
+var shortIDFn = shortID
+
+// isLiveWorktree reports whether path exists and contains a .git entry (file or dir).
+func isLiveWorktree(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(path, ".git"))
+	return err == nil
 }
 
 // isGitRepo runs `git rev-parse --git-dir` in dir. Returns true if it
