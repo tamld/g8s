@@ -85,6 +85,8 @@ wt-*/
 internal/orchestrator/cwd/
 internal/orchestrator/worktree/
 internal/orchestrator/scratch/
+internal/orchestrator/.heartbeat/
+internal/orchestrator/.g8s/
 
 # Brief / receipt / handoff scratch
 /briefs/
