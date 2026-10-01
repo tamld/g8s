@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -475,8 +476,9 @@ func TestAgyWorkerWithMounts_PreSpawnAndPostWaitHooks(t *testing.T) {
 	mWorker := worker.WithMounts(*reg)
 
 	handle, err := mWorker.Spawn(context.Background(), Task{
-		ID:     "task-agy",
-		Prompt: "do task",
+		ID:      "task-agy",
+		Prompt:  "do task",
+		OutPath: filepath.Join(t.TempDir(), "receipt.json"),
 	})
 	if err != nil {
 		t.Fatalf("Spawn error: %v", err)

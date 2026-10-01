@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tamld/g8s/internal/heartbeat"
 )
 
 var fixedClock = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
@@ -286,7 +288,7 @@ func TestAgyHandleWaitRejectsErrorEnvelopeExitZero(t *testing.T) {
 		cmd:       cmd,
 		stdout:    &stdout,
 		stderr:    &stderr,
-		task:      Task{ID: "task-error-env-exit-0"},
+		task:      Task{ID: "task-error-env-exit-0", OutPath: filepath.Join(t.TempDir(), "receipt.json")},
 		startedAt: fixedClock(),
 		clock:     fixedClock,
 		mounts:    DefaultMountRegistry(),
@@ -365,7 +367,7 @@ func TestAgyHandleWaitTimeout(t *testing.T) {
 		cmd:       cmd,
 		stdout:    &stdout,
 		stderr:    &stderr,
-		task:      Task{ID: "task-timeout-test"},
+		task:      Task{ID: "task-timeout-test", OutPath: filepath.Join(t.TempDir(), "receipt.json")},
 		timeout:   50 * time.Millisecond,
 		startedAt: fixedClock(),
 		clock:     fixedClock,
@@ -386,16 +388,20 @@ func TestAgyHandleWaitTimeout(t *testing.T) {
 
 func TestAgyWorkerReadOnlyArgvContainsSandbox(t *testing.T) {
 	requireCommand(t, "true")
+	tempDir := t.TempDir()
+	mounts := NewMountRegistry()
+	mounts.RegisterHook(NewAttentionerHookWithRecorder(func(string, heartbeat.Event) error { return nil }))
 	w := &AgyWorker{
 		binary: "true",
 		clock:  fixedClock,
-		mounts: DefaultMountRegistry(),
+		mounts: mounts,
 	}
 	handle, err := w.Spawn(context.Background(), Task{
 		ID:         "task-ro-sandbox",
 		Role:       "scout",
 		Permission: "read_only",
 		Prompt:     "check files in repo",
+		OutPath:    filepath.Join(tempDir, "receipt.json"),
 	})
 	if err != nil {
 		t.Fatalf("Spawn() failed: %v", err)
@@ -421,10 +427,13 @@ func TestAgyWorkerReadOnlyArgvContainsSandbox(t *testing.T) {
 
 func TestAgyWorkerWorkspaceWriteArgvOmitsSandbox(t *testing.T) {
 	requireCommand(t, "true")
+	tempDir := t.TempDir()
+	mounts := NewMountRegistry()
+	mounts.RegisterHook(NewAttentionerHookWithRecorder(func(string, heartbeat.Event) error { return nil }))
 	w := &AgyWorker{
 		binary: "true",
 		clock:  fixedClock,
-		mounts: DefaultMountRegistry(),
+		mounts: mounts,
 	}
 	handle, err := w.Spawn(context.Background(), Task{
 		ID:           "task-ww-nosandbox",
@@ -433,6 +442,7 @@ func TestAgyWorkerWorkspaceWriteArgvOmitsSandbox(t *testing.T) {
 		Prompt:       "modify workspace files",
 		ReceiptID:    "rc-test-12345",
 		AllowedFiles: []string{"/tmp/allowed"},
+		OutPath:      filepath.Join(tempDir, "receipt.json"),
 	})
 	if err != nil {
 		t.Fatalf("Spawn() failed: %v", err)
@@ -469,7 +479,7 @@ func TestAgyWorkerReadOnlyFileMutationAttempt(t *testing.T) {
 		cmd:       cmd,
 		stdout:    &stdout,
 		stderr:    &stderr,
-		task:      Task{ID: "task-ro-mutation", Permission: "read_only"},
+		task:      Task{ID: "task-ro-mutation", Permission: "read_only", OutPath: filepath.Join(tempDir, "receipt.json")},
 		startedAt: fixedClock(),
 		clock:     fixedClock,
 		mounts:    DefaultMountRegistry(),
