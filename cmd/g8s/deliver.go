@@ -91,7 +91,11 @@ func runDeliver(args []string) {
 	// 2. Read the task's result JSON
 	var res deliverableResult
 	if len(task.Result) > 0 {
-		_ = json.Unmarshal(task.Result, &res)
+		if err := json.Unmarshal(task.Result, &res); err != nil {
+			exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
+				fmt.Errorf("corrupt result JSON for task %s: %w", taskID, err),
+				"Task result is not valid JSON", *jsonl)
+		}
 	}
 	if res.Deliverable == nil || res.Deliverable.Mode != "worktree" || strings.TrimSpace(res.Deliverable.Dir) == "" {
 		exitUsage("deliver", "", *traceID,
@@ -146,6 +150,23 @@ func runDeliver(args []string) {
 			continue
 		}
 
+		if x == 'C' || y == 'C' {
+			parts := strings.Split(rawPath, " -> ")
+			target := strings.TrimSpace(parts[len(parts)-1])
+			if len(target) >= 2 && target[0] == '"' && target[len(target)-1] == '"' {
+				if unquoted, uerr := strconv.Unquote(target); uerr == nil {
+					target = unquoted
+				}
+			}
+			cleanTarget := filepath.ToSlash(filepath.Clean(target))
+			if !seenSkipped[cleanTarget] {
+				seenSkipped[cleanTarget] = true
+				skipped = append(skipped, cleanTarget)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model copy in v1\n", rawPath)
+			continue
+		}
+
 		if x == 'D' || y == 'D' {
 			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
 			if !seenSkipped[cleanTarget] {
@@ -156,11 +177,38 @@ func runDeliver(args []string) {
 			continue
 		}
 
+		if x == 'T' || y == 'T' {
+			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
+			if !seenSkipped[cleanTarget] {
+				seenSkipped[cleanTarget] = true
+				skipped = append(skipped, cleanTarget)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model typechange in v1\n", rawPath)
+			continue
+		}
+
+		if x == 'U' || y == 'U' {
+			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
+			if !seenSkipped[cleanTarget] {
+				seenSkipped[cleanTarget] = true
+				skipped = append(skipped, cleanTarget)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model unmerged in v1\n", rawPath)
+			continue
+		}
+
 		if (x == '?' && y == '?') || x == 'M' || y == 'M' || x == 'A' || y == 'A' {
 			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
 			rawCandidates = append(rawCandidates, cleanTarget)
 			continue
 		}
+
+		cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
+		if !seenSkipped[cleanTarget] {
+			seenSkipped[cleanTarget] = true
+			skipped = append(skipped, cleanTarget)
+		}
+		fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model status %c%c in v1\n", rawPath, x, y)
 	}
 
 	candidates := []string{}
@@ -195,19 +243,22 @@ func runDeliver(args []string) {
 	var payload struct {
 		ReceiptID string `json:"receipt_id"`
 	}
+	var wrapper struct {
+		Payload struct {
+			ReceiptID string `json:"receipt_id"`
+		} `json:"payload"`
+	}
 	if len(task.Request) > 0 {
-		_ = json.Unmarshal(task.Request, &payload)
+		if err := json.Unmarshal(task.Request, &payload); err != nil {
+			exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
+				fmt.Errorf("corrupt request payload JSON for task %s: %w", taskID, err),
+				"Task request payload is not valid JSON", *jsonl)
+		}
+		_ = json.Unmarshal(task.Request, &wrapper)
 	}
 	receiptID := strings.TrimSpace(payload.ReceiptID)
 	if receiptID == "" {
-		var wrapper struct {
-			Payload struct {
-				ReceiptID string `json:"receipt_id"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(task.Request, &wrapper); err == nil {
-			receiptID = strings.TrimSpace(wrapper.Payload.ReceiptID)
-		}
+		receiptID = strings.TrimSpace(wrapper.Payload.ReceiptID)
 	}
 	if receiptID == "" {
 		exitRuntime("deliver", "", *traceID, cli.CodeDenied,
@@ -253,38 +304,132 @@ func runDeliver(args []string) {
 		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("resolve current working directory: %w", err), "", *jsonl)
 	}
 
+	var toApply []string
+	for _, rel := range candidates {
+		destPath := filepath.Join(cwd, filepath.FromSlash(rel))
+		if fi, err := os.Lstat(destPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			if !seenSkipped[rel] {
+				seenSkipped[rel] = true
+				skipped = append(skipped, rel)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: destination is a symlink\n", rel)
+			continue
+		}
+		toApply = append(toApply, rel)
+	}
+
 	applied := []string{}
 	if !*dryRun {
-		for _, rel := range candidates {
+		type stagedFile struct {
+			tmpPath  string
+			destPath string
+			rel      string
+		}
+		var staged []stagedFile
+		var createdTemps []string
+
+		cleanupTemps := func() {
+			for _, tmp := range createdTemps {
+				_ = os.Remove(tmp)
+			}
+			createdTemps = nil
+		}
+
+		for _, rel := range toApply {
 			srcPath := filepath.Join(deliverableDir, filepath.FromSlash(rel))
 			destPath := filepath.Join(cwd, filepath.FromSlash(rel))
 
 			srcInfo, err := os.Stat(srcPath)
 			if err != nil {
-				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("stat deliverable file %s: %w", rel, err), "", *jsonl)
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("stat deliverable file %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
 			}
 
 			destDir := filepath.Dir(destPath)
 			if err := os.MkdirAll(destDir, 0o755); err != nil {
-				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("create parent directory for %s: %w", rel, err), "", *jsonl)
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("create parent directory for %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
 			}
 
 			content, err := os.ReadFile(srcPath)
 			if err != nil {
-				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("read deliverable file %s: %w", rel, err), "", *jsonl)
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("read deliverable file %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
 			}
 
 			mode := srcInfo.Mode().Perm()
 			if mode == 0 {
 				mode = 0o644
 			}
-			if err := os.WriteFile(destPath, content, mode); err != nil {
-				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("write applied file %s: %w", rel, err), "", *jsonl)
+
+			tmpFile, err := os.CreateTemp(destDir, ".g8s-deliver-*")
+			if err != nil {
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("create temp file for %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
 			}
-			applied = append(applied, rel)
+			tmpPath := tmpFile.Name()
+			createdTemps = append(createdTemps, tmpPath)
+
+			if _, err := tmpFile.Write(content); err != nil {
+				tmpFile.Close()
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("write temp file for %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
+			}
+			_ = tmpFile.Chmod(mode)
+			if err := tmpFile.Close(); err != nil {
+				cleanupTemps()
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("close temp file for %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
+			}
+
+			staged = append(staged, stagedFile{tmpPath: tmpPath, destPath: destPath, rel: rel})
+		}
+
+		for i, s := range staged {
+			if err := os.Rename(s.tmpPath, s.destPath); err != nil {
+				for j := i; j < len(staged); j++ {
+					_ = os.Remove(staged[j].tmpPath)
+				}
+				landedStr := "none"
+				if len(applied) > 0 {
+					landedStr = strings.Join(applied, ", ")
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO,
+					fmt.Errorf("rename applied file %s: %w (files landed: %s)", s.rel, err, landedStr), "", *jsonl)
+			}
+			applied = append(applied, s.rel)
 		}
 	} else {
-		applied = append(applied, candidates...)
+		applied = append(applied, toApply...)
 	}
 
 	data := deliverData{

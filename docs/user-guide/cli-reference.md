@@ -121,6 +121,37 @@ g8s resume 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31 \
 
 ---
 
+### 5a. `g8s deliver <task-id>`
+Applies changes from an isolated worktree deliverable produced by a completed task to the current working checkout. Delivery enforces strict write receipt capability delegation and atomic per-file application.
+
+```sh
+# Apply deliverable from completed task to current checkout
+g8s deliver 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31
+
+# Validate changes and verify receipt scope without copying
+g8s deliver 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31 --dry-run
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task-id` | `string` | `""` | Task ID to deliver (can be specified as a positional argument). |
+| `--dry-run` | `bool` | `false` | Perform validation and list files without copying changes. |
+
+#### Receipt Gate Semantics:
+- **Capability Enforcement**: The task's request payload must contain a valid `receipt_id`. Delivery fails with `E_DENIED` if missing or invalid.
+- **Path Scope Verification**: All candidate files in the deliverable worktree are validated against the receipt's `allowed_paths` glob list before applying any changes.
+- **Zero-Partial Guarantee**: If even one modified path falls outside `allowed_paths`, delivery is completely refused and no files in the workspace are modified.
+
+#### File Application & Skipped Behavior:
+- **Atomic Apply**: Each file is written to a temporary file (`.g8s-deliver-*`) in the destination directory and atomically renamed (`os.Rename`) to its final destination. If a mid-loop failure occurs (e.g. read-only directory), all pending temporary files are removed and landed files are reported.
+- **Symlink Refusal**: `os.Lstat` checks destination paths in the checkout. If a destination exists and is a symlink, it is skipped with a warning to prevent writing through symlinks.
+- **Git Porcelain Status Handling**:
+  - **Applied**: `??` (untracked file), `M` (modified), `A` (added).
+  - **Skipped with Warning**: `R` (renamed), `D` (deleted), `C` (copied), `T` (typechange), `U` (unmerged conflict). Copy-apply in v1 does not model deletions, renames, copies, typechanges, or unresolved conflicts.
+
+---
+
 ### 6. `g8s lineage <task-id>`
 Prints the full ancestry chain of a task up to the root parent, ordered chronologically (`Root -> Child -> Grandchild`).
 
@@ -517,6 +548,50 @@ Runs health checks on binary integrity, SQLite database connectivity, and worker
 g8s doctor --json
 g8s doctor --fix
 ```
+
+---
+
+### 29a. `g8s eval` — Adversarial Probe Evaluation Harness
+Executes the adversarial probe evaluation harness (#254) to evaluate provider compliance, test defense invariants, or run release self-audit probes per ADR-0026. Computes and emits the Provider Reliability Index (PRI).
+
+```sh
+# Enumerate available evaluation probes
+g8s eval list
+
+# Filter probe suite by category
+g8s eval list --category self-audit
+
+# Run evaluation suite against mock compliant provider
+g8s eval run --provider mock-compliant
+
+# Run self-audit probes against live agy provider per ADR-0026 release gate
+g8s eval run --category self-audit --provider agy --model gemini-3.8-flash-high
+```
+
+#### Subcommands:
+- `g8s eval list`: Enumerates registered probes with category and description.
+- `g8s eval run`: Executes selected probe suite against a mock or live worker provider.
+
+#### Flags (`g8s eval list`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--category` | `string` | `""` | Filter probe suite by category (e.g. `self-audit`). |
+
+#### Flags (`g8s eval run`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--provider` | `string` | `"mock-compliant"` | Target provider: `mock-compliant`, `mock-defiant`, `agy`, `claude`. |
+| `--model` | `string` | `""` | Target model for live providers (defaults to `gemini-3.8-flash-high` for `agy`, `claude-sonnet-4-5` for `claude`). |
+| `--category` | `string` | `""` | Filter probe suite by category. |
+| `--probes` | `string` | `""` | Comma-separated list of probe IDs to execute. |
+| `--timeout` | `duration` | `30s` | Per-probe execution timeout. |
+
+#### Self-Audit Category (ADR-0026):
+The `self-audit` probe category verifies internal g8s harness integrity before release (ADR-0026 §4):
+- **Refusal-Echo (#443)**: Verifies that security boundary refusals correctly echo and redact without leaking confidential context.
+- **Worktree-Discard (#443-f2/#450)**: Verifies that rejected/failed attempts discard worktree debris without polluting the shared checkout.
+- **Sanitizer-Fidelity (#434/#445)**: Asserts prompt/payload escape pairs remain atomic and unaltered through transport.
+- **Receipt-Bypass**: Proves worker processes without valid Write Receipts cannot mutate workspace files.
 
 ---
 

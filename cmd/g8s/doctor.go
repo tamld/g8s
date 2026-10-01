@@ -11,6 +11,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/doctor"
 	"github.com/tamld/g8s/internal/pathutil"
+	"golang.org/x/term"
 )
 
 // runDoctor executes diagnostic sanity checks for environment, permissions, and tools,
@@ -113,9 +114,18 @@ func runDoctor(args []string) {
 
 	if *attentionCheck {
 		attReport := doc.RunAttentionCheck(context.Background(), *actor, "")
-		env := cli.NewEnvelope("attention_check", "doctor", "attention-check", attReport)
-		env.TraceID = *traceID
-		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		if *jsonMode || *jsonl || !term.IsTerminal(int(os.Stdout.Fd())) {
+			env := cli.NewEnvelope("attention_check", "doctor", "attention-check", attReport)
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			return
+		}
+
+		pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Attention Check (DEBT-47)")
+		for _, q := range attReport.Questions {
+			fmt.Printf("Q%d: %s\n", q.Number, q.Question)
+			fmt.Printf("    Answer: %s\n\n", q.Answer)
+		}
 		return
 	}
 
