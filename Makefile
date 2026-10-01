@@ -1,8 +1,11 @@
 GO ?= go
 
-.PHONY: all build test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check pre-push pre-push-fast lint setup-hooks
+.PHONY: all build local test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check pre-push pre-push-fast lint setup-hooks
 
 all: build
+
+local:
+	@$(GO) build -o bin/g8s ./cmd/g8s
 
 pre-push:
 	@bash tools/pre_push.sh
@@ -11,7 +14,7 @@ pre-push-fast:
 	@bash tools/pre_push.sh --fast
 
 lint:
-	@GOWORK=off GOTOOLCHAIN=go1.25.0 golangci-lint run
+	@GOWORK=off GOTOOLCHAIN=go1.26.0 golangci-lint run
 
 setup-hooks:
 	@bash tools/setup_hooks.sh

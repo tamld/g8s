@@ -27,6 +27,7 @@ import (
 	g8scontext "github.com/tamld/g8s/internal/context"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
 )
@@ -353,13 +354,7 @@ type Supervisor struct {
 func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Supervisor {
 	evidenceDir := os.Getenv("G8S_EVIDENCE_DIR")
 	if evidenceDir == "" {
-		if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-			evidenceDir = filepath.Join(xdg, "g8s", "evidence")
-		} else if home, _ := os.UserHomeDir(); home != "" {
-			evidenceDir = filepath.Join(home, ".local", "state", "g8s", "evidence")
-		} else {
-			evidenceDir = filepath.Join(os.TempDir(), "g8s", "evidence")
-		}
+		evidenceDir = pathutil.DefaultEvidenceDir()
 	}
 
 	s := &Supervisor{
