@@ -18,20 +18,29 @@ import (
 // Index. Live providers run operator-invoked (bounded token budget);
 // mock providers make the scoring pipeline CI-runnable.
 func runEval(args []string) {
+	if len(args) > 0 && (args[0] == "list" || args[0] == "run") {
+		sub := args[0]
+		switch sub {
+		case "list":
+			runEvalList(args[1:])
+			return
+		case "run":
+			runEvalRun(args[1:])
+			return
+		}
+	}
+
+	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
+	_, traceID, jsonl, _ := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = fs.Parse(args)
+
 	if len(args) == 0 {
-		exitUsage("eval", "", "", "unknown eval subcommand", "g8s eval list | g8s eval run --provider mock-compliant", false)
+		exitUsage("eval", "", *traceID, "unknown eval subcommand", "g8s eval list | g8s eval run --provider mock-compliant", *jsonl)
 		return
 	}
 
 	sub := args[0]
-	switch sub {
-	case "list":
-		runEvalList(args[1:])
-	case "run":
-		runEvalRun(args[1:])
-	default:
-		exitUsage("eval", strings.Join(args, " "), "", "unknown eval subcommand: "+sub, "g8s eval list | g8s eval run --provider mock-compliant", false)
-	}
+	exitUsage("eval", strings.Join(args, " "), *traceID, "unknown eval subcommand: "+sub, "g8s eval list | g8s eval run --provider mock-compliant", *jsonl)
 }
 
 func runEvalList(args []string) {
@@ -81,7 +90,7 @@ func runEvalRun(args []string) {
 		modelID := *model
 		if modelID == "" {
 			if strings.ToLower(*providerName) == "agy" {
-				modelID = "gemini-3.7-flash-high"
+				modelID = "gemini-3.8-flash-high"
 			} else {
 				modelID = "claude-sonnet-4-5"
 			}

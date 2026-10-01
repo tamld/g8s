@@ -446,3 +446,386 @@ func TestDeliverUntrackedAppliedRenamedSkipped(t *testing.T) {
 		t.Errorf("renamed.txt should not have been copied")
 	}
 }
+
+// 7. C (copied), T (typechange), U (unmerged) entries reported skipped with warnings; in-scope regular file applied.
+func TestDeliverCTUEntriesReportedSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks and merge conflicts tested with Unix semantics")
+	}
+
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+
+	// Configure copy detection
+	cfgCmd := exec.Command("git", "config", "status.renames", "copies")
+	cfgCmd.Dir = repoDir
+	if out, err := cfgCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config status.renames: %v\n%s", err, out)
+	}
+
+	// 1. Initial file for copy detection (long content)
+	var copyContent strings.Builder
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&copyContent, "line %d of content for copy detection\n", i)
+	}
+	origFile := filepath.Join(repoDir, "orig_copy.txt")
+	if err := os.WriteFile(origFile, []byte(copyContent.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Initial file for typechange
+	tcFile := filepath.Join(repoDir, "typechange.txt")
+	if err := os.WriteFile(tcFile, []byte("regular file before typechange"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Initial file for unmerged conflict
+	unmergedFile := filepath.Join(repoDir, "unmerged.txt")
+	if err := os.WriteFile(unmergedFile, []byte("base conflict line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	addCmd := exec.Command("git", "add", "orig_copy.txt", "typechange.txt", "unmerged.txt")
+	addCmd.Dir = repoDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "add c, t, u baseline")
+	commitCmd.Dir = repoDir
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Create conflicting branch for U
+	branchCmd := exec.Command("git", "branch", "conflict-source")
+	branchCmd.Dir = repoDir
+	if out, err := branchCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v\n%s", err, out)
+	}
+	coCmd := exec.Command("git", "checkout", "conflict-source")
+	coCmd.Dir = repoDir
+	if out, err := coCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(unmergedFile, []byte("change from conflict-source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitCmd2 := exec.Command("git", "commit", "-am", "conflict source change")
+	commitCmd2.Dir = repoDir
+	if out, err := commitCmd2.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Switch back to master/main
+	coMain := exec.Command("git", "checkout", "-")
+	coMain.Dir = repoDir
+	if out, err := coMain.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main: %v\n%s", err, out)
+	}
+
+	wtDir := createWorktree(t, repoDir, "case-ctu")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// In worktree:
+	// A) Produce U first: commit local change to unmerged.txt, then merge conflict-source (leaves conflict in index)
+	if err := os.WriteFile(filepath.Join(wtDir, "unmerged.txt"), []byte("change from worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitWTCmd := exec.Command("git", "commit", "-am", "worktree conflict commit")
+	commitWTCmd.Dir = wtDir
+	if out, err := commitWTCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit in wt: %v\n%s", err, out)
+	}
+	mergeCmd := exec.Command("git", "merge", "conflict-source")
+	mergeCmd.Dir = wtDir
+	_ = mergeCmd.Run() // expected to fail with conflict
+
+	// B) Produce T: remove typechange.txt, replace with symlink
+	if err := os.Remove(filepath.Join(wtDir, "typechange.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(wtDir, "typechange.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	// C) Produce C: duplicate orig_copy.txt to copied.txt, modify orig_copy.txt, git add both
+	if err := os.WriteFile(filepath.Join(wtDir, "copied.txt"), []byte(copyContent.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "orig_copy.txt"), []byte(copyContent.String()+"extra line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addCCmd := exec.Command("git", "add", "copied.txt", "orig_copy.txt")
+	addCCmd.Dir = wtDir
+	if out, err := addCCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add copy: %v\n%s", err, out)
+	}
+
+	// D) Also add a valid in-scope normal untracked file to verify it still lands
+	validPath := filepath.Join(wtDir, "normal_good.txt")
+	if err := os.WriteFile(validPath, []byte("normal content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"*"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+
+	// Verify normal_good.txt applied
+	foundNormal := false
+	for _, a := range data.Applied {
+		if a == "normal_good.txt" {
+			foundNormal = true
+		}
+	}
+	if !foundNormal {
+		t.Errorf("expected normal_good.txt in Applied, got: %v", data.Applied)
+	}
+
+	// Verify skipped contains copied.txt, typechange.txt, unmerged.txt
+	skippedMap := make(map[string]bool)
+	for _, s := range data.Skipped {
+		skippedMap[s] = true
+	}
+	if !skippedMap["copied.txt"] {
+		t.Errorf("expected copied.txt in Skipped, got: %v", data.Skipped)
+	}
+	if !skippedMap["typechange.txt"] {
+		t.Errorf("expected typechange.txt in Skipped, got: %v", data.Skipped)
+	}
+	if !skippedMap["unmerged.txt"] {
+		t.Errorf("expected unmerged.txt in Skipped, got: %v", data.Skipped)
+	}
+
+	// Verify warnings in stderr
+	if !strings.Contains(res.stderr, "copy") {
+		t.Errorf("expected copy skip warning in stderr: %s", res.stderr)
+	}
+	if !strings.Contains(res.stderr, "typechange") {
+		t.Errorf("expected typechange skip warning in stderr: %s", res.stderr)
+	}
+	if !strings.Contains(res.stderr, "unmerged") {
+		t.Errorf("expected unmerged skip warning in stderr: %s", res.stderr)
+	}
+}
+
+// 8. Corrupt result JSON or request payload JSON → explicit runtime error naming the task.
+func TestDeliverCorruptJSON(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+	wtDir := createWorktree(t, repoDir, "case-corrupt")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"*"})
+
+	// Case A: Corrupt task result JSON
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("UPDATE tasks SET result_json = ? WHERE task_id = ?", "{not-valid-json", taskID); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 1 {
+		t.Fatalf("expected runtime exit code 1 for corrupt result JSON, got %d. stderr: %s", res.exitCode, res.stderr)
+	}
+	combined := res.stderr + " " + res.stdout
+	if !strings.Contains(combined, taskID) || !strings.Contains(combined, "corrupt result JSON") {
+		t.Errorf("expected error naming task %s and corrupt result JSON, got:\nstderr: %s\nstdout: %s", taskID, res.stderr, res.stdout)
+	}
+
+	// Case B: Corrupt task request payload JSON
+	taskID2 := setupDeliverTask(t, dbPath, rcID, wtDir)
+	if _, err := db.Exec("UPDATE tasks SET request_json = ? WHERE task_id = ?", "{bad-request-json", taskID2); err != nil {
+		t.Fatal(err)
+	}
+	res2 := runDeliverCmd(t, binPath, repoDir, dbPath, taskID2)
+	if res2.exitCode != 1 {
+		t.Fatalf("expected runtime exit code 1 for corrupt request payload JSON, got %d. stderr: %s", res2.exitCode, res2.stderr)
+	}
+	combined2 := res2.stderr + " " + res2.stdout
+	if !strings.Contains(combined2, taskID2) || !strings.Contains(combined2, "corrupt request payload JSON") {
+		t.Errorf("expected error naming task %s and corrupt request payload JSON, got:\nstderr: %s\nstdout: %s", taskID2, res2.stderr, res2.stdout)
+	}
+}
+
+// 9. Atomic apply: inject a failure (read-only dest dir) and assert no partial delivery state.
+func TestDeliverAtomicApplyFailureRollback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directory permissions tested with Unix semantics")
+	}
+
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+	wtDir := createWorktree(t, repoDir, "case-atomic")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// Worktree has two files
+	f1Path := filepath.Join(wtDir, "file1.txt")
+	if err := os.WriteFile(f1Path, []byte("content 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f2Dir := filepath.Join(wtDir, "ro_dest")
+	if err := os.MkdirAll(f2Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f2Path := filepath.Join(f2Dir, "file2.txt")
+	if err := os.WriteFile(f2Path, []byte("content 2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// In repoDir, create ro_dest with 0555 (read-only)
+	destRO := filepath.Join(repoDir, "ro_dest")
+	if err := os.MkdirAll(destRO, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(destRO, 0o755)
+	})
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"*"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code on atomic apply failure, got 0")
+	}
+
+	// Assert NO partial delivery state: file1.txt must NOT have landed in repoDir
+	if _, err := os.Stat(filepath.Join(repoDir, "file1.txt")); !os.IsNotExist(err) {
+		t.Errorf("file1.txt should NOT have landed in repoDir due to atomic rollback")
+	}
+	// file2.txt must not exist in ro_dest
+	if _, err := os.Stat(filepath.Join(destRO, "file2.txt")); !os.IsNotExist(err) {
+		t.Errorf("file2.txt should NOT exist in ro_dest")
+	}
+
+	// Assert no temporary .g8s-deliver-* files left in repoDir or ro_dest
+	entries, _ := os.ReadDir(repoDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".g8s-deliver-") {
+			t.Errorf("leaked temp file in repoDir: %s", e.Name())
+		}
+	}
+	roEntries, _ := os.ReadDir(destRO)
+	for _, e := range roEntries {
+		if strings.HasPrefix(e.Name(), ".g8s-deliver-") {
+			t.Errorf("leaked temp file in ro_dest: %s", e.Name())
+		}
+	}
+}
+
+// 10. Symlink refusal: symlinked destination skipped with warning, target file untouched.
+func TestDeliverSymlinkDestinationSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+	wtDir := createWorktree(t, repoDir, "case-symlink")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// In repoDir (destination checkout):
+	// A target file with sensitive/initial content
+	targetFile := filepath.Join(repoDir, "real_target.txt")
+	if err := os.WriteFile(targetFile, []byte("protected target content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink pointing to real_target.txt
+	symlinkPath := filepath.Join(repoDir, "link_to_target.txt")
+	if err := os.Symlink("real_target.txt", symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// In worktree:
+	// Attacker/worker tries to write to link_to_target.txt
+	if err := os.WriteFile(filepath.Join(wtDir, "link_to_target.txt"), []byte("malicious overwrite!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Also a regular valid file
+	if err := os.WriteFile(filepath.Join(wtDir, "regular.txt"), []byte("legitimate content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"link_to_target.txt", "regular.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", res.exitCode, res.stderr)
+	}
+
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+
+	// Verify regular.txt applied
+	if len(data.Applied) != 1 || data.Applied[0] != "regular.txt" {
+		t.Errorf("expected Applied to contain ['regular.txt'], got: %v", data.Applied)
+	}
+
+	// Verify link_to_target.txt skipped
+	if len(data.Skipped) != 1 || data.Skipped[0] != "link_to_target.txt" {
+		t.Errorf("expected Skipped to contain ['link_to_target.txt'], got: %v", data.Skipped)
+	}
+
+	// Verify stderr reported the symlink warning
+	if !strings.Contains(res.stderr, "symlink") {
+		t.Errorf("expected symlink warning in stderr, got: %s", res.stderr)
+	}
+
+	// Verify target file untouched!
+	content, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "protected target content" {
+		t.Errorf("target file was overwritten through symlink! Content: %q", string(content))
+	}
+
+	// Verify link_to_target.txt is STILL a symlink
+	fi, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("link_to_target.txt is no longer a symlink")
+	}
+
+	// Verify regular.txt was applied
+	regContent, err := os.ReadFile(filepath.Join(repoDir, "regular.txt"))
+	if err != nil {
+		t.Fatalf("regular.txt not copied: %v", err)
+	}
+	if string(regContent) != "legitimate content" {
+		t.Errorf("regular.txt content mismatch: %q", string(regContent))
+	}
+}

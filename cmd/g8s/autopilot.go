@@ -79,7 +79,15 @@ func runAutopilotStart(args []string) {
 	handler := func(ctx context.Context, item *autopilot.WorkItem) error {
 		// This would integrate with the control plane to submit tasks
 		// For now, just log
-		fmt.Printf("Autopilot: would submit task %s (score=%.3f)\n", item.ID, item.Score)
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("autopilot_item", "autopilot", "item", map[string]any{
+				"item_id": item.ID,
+				"score":   item.Score,
+			})
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		} else {
+			fmt.Printf("Autopilot: would submit task %s (score=%.3f)\n", item.ID, item.Score)
+		}
 		return nil
 	}
 
@@ -94,20 +102,6 @@ func runAutopilotStart(args []string) {
 		exitRuntime("autopilot", "start", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
 
-	if *daemon {
-		// Block until signal
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-		fmt.Println("\nReceived shutdown signal, stopping...")
-		if err := scheduler.Stop(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error stopping scheduler: %v\n", err)
-		}
-	} else {
-		// Just start and exit (background)
-		fmt.Println("Autopilot scheduler started in background")
-	}
-
 	if *jsonMode || *jsonl {
 		env := cli.NewEnvelope("autopilot_start", "autopilot", "start", map[string]any{
 			"status": "started",
@@ -115,6 +109,22 @@ func runAutopilotStart(args []string) {
 		})
 		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+	} else if !*daemon {
+		// Just start and exit (background)
+		fmt.Println("Autopilot scheduler started in background")
+	}
+
+	if *daemon {
+		// Block until signal
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		if !*jsonMode && !*jsonl {
+			fmt.Println("\nReceived shutdown signal, stopping...")
+		}
+		if err := scheduler.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error stopping scheduler: %v\n", err)
+		}
 	}
 }
 
