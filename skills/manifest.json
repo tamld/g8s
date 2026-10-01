@@ -6,7 +6,7 @@
   "skills": [
     {
       "name": "g8s-supervisor",
-      "version": "4.0.0",
+      "version": "4.1.0",
       "entry": "skills/g8s-supervisor/SKILL.md",
       "domain": "orchestration",
       "risk_level": "medium",

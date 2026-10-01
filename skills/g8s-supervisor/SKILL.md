@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.0.0
-last_updated: "2026-09-27"
+version: 4.1.0
+last_updated: "2026-09-30"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -57,6 +57,7 @@ from (operator mandate 2026-09-27).
 | Verified g8s defect or contribution | **Mode 3** | `references/mode-3-upstream-contribution.md` |
 | Detect problems → report without leaking project data | **Security** | `references/security-redaction-playbook.md` |
 | Admission/failure patterns | **Reference** | `references/binary-admission.md`, `references/anti-patterns.md` |
+| Multi-project tenancy, worker liveness, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.1 addendum — field-proven contracts from the 2026-09-29/30 campaign) |
 
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 
