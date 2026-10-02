@@ -24,14 +24,25 @@
 
 g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng cao ("Brain": Claude, GPT, Codex) giao việc cơ học cho các CLI worker nhanh (`agy`, Claude Code, Gemini CLI, Ollama) **mà không trao chìa khóa máy của bạn**. Tầng model không thể được tin bằng quyền hạn; g8s thi hành điều đó ở tầng tiến trình:
 
-- **Hàng đợi tác vụ bền vững**: SQLite WAL, CAS lease nguyên tử, idempotency key, lineage cha–con. Task sống qua cái chết của session; queue là bộ nhớ.
-- **Receipt khả năng**: worker không thể ghi filesystem nếu không có receipt single-use, giới hạn thời gian và đường dẫn do Brain cấp.
-- **Cô lập tiến trình**: mỗi attempt chạy trong process group kill-able và worktree riêng; các attempt đồng thời không đụng nhau.
-- **Bằng chứng, không phán quyết**: mỗi lần chạy niêm phong receipt đã biên tập vào Evidence Lake. Verdict của worker là tuyên bố; file trên đĩa mới là bằng chứng.
+- **Hàng đợi bền vững**: hàng đợi lưu trong SQLite (chế độ WAL), có khóa lease nguyên tử, idempotency key chống nạp trùng, và dòng dõi cha–con. Session chết thì task vẫn còn; hàng đợi chính là bộ nhớ.
+- **Receipt (biên nhận quyền ghi)**: worker không thể ghi file nếu không có receipt — mỗi receipt chỉ dùng một lần, có thời hạn và giới hạn đường dẫn, do Brain cấp.
+- **Cách ly tiến trình**: mỗi lần chạy (attempt) nằm trong một nhóm tiến trình có thể kill và một worktree riêng; chạy song song cũng không ảnh hưởng nhau.
+- **Bằng chứng chứ không phải lời khẳng định**: mỗi lần chạy được niêm phong vào Evidence Lake. Lời "đã xong" của worker chỉ là tuyên bố; file trên đĩa mới là bằng chứng.
+
+**Thuật ngữ dùng trong tài liệu** (giữ nguyên tiếng Anh vì là tên gọi trong sản phẩm):
+
+| Từ | Nghĩa |
+|---|---|
+| **Brain** | orchestrator tầng cao (Claude, GPT, Codex) — người ra quyết định |
+| **worker** | tiến trình AI chạy lệnh (agy, Claude Code, Gemini CLI, Ollama) — người làm |
+| **task** | một đơn việc nằm trong hàng đợi của g8s |
+| **receipt** | biên nhận quyền ghi file: một lần dùng, có hạn, chặn đúng vùng |
+| **attempt** | một lần chạy cụ thể của task |
+| **signal** | dòng sự kiện báo "task đã kết thúc" trong `signals/tasks.jsonl` |
 
 ## Đã ship trong v0.13.0
 
-- **Giám sát event-driven**: transition về trạng thái terminal ghi thêm một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` đánh thức supervisor bằng đúng một process ngủ. Polling chỉ là phương án dự phòng.
+- **Giám sát theo sự kiện**: khi task kết thúc (thành công hay thất bại), g8s ghi một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` giữ đúng một process chờ và đánh thức supervisor khi có tín hiệu. Vòng lặp hỏi-đáp (polling) chỉ là phương án dự phòng.
 - **Queue đa provider**: `providers.json` là manifest; claim affinity theo provider, `--provider` trên submit lẫn worker, không fallback thầm lặng.
 - **Retry có ngân sách (đang land)**: task FAILED tự resubmit trong giới hạn: 2 lần mỗi task, 10 lần/giờ mỗi state dir, backoff luỹ thừa, flag mặc định OFF. Tick tự động chỉ đụng task không cần receipt.
 - **Dispatch đồng thời**: `g8s worker --concurrency N` — N attempt cách ly, worktree riêng từng attempt.
@@ -68,7 +79,7 @@ g8s submit \
   --timeout 60s \
   --prompt "Scan ./src and return a JSON inventory of entry points."
 
-# 2. Tháo hàng đợi (worker nhận task trong worktree cách ly)
+# 2. Cho worker nhận task và chạy (mỗi task một worktree cách ly)
 g8s worker --once                          # một attempt
 g8s worker --once=false --concurrency 4    # tháo song song (cần git checkout)
 
@@ -89,7 +100,7 @@ AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --role test-runner --permission works
   --prompt "Generate pytest tests. receipt_id=<receipt-id> allowed_paths=./tests/*.py"
 ```
 
-Chạy tự-audit, reflex gate và vệ sinh:
+Các lệnh kiểm tra và dọn dẹp hằng ngày:
 
 ```bash
 g8s eval run --provider agy      # bộ probe đối kháng
@@ -104,7 +115,7 @@ g8s ship chính kỷ luật vận hành của nó dưới dạng agent skill —
 
 | Skill | Mục đích |
 |---|---|
-| [`g8s-supervisor`](skills/g8s-supervisor/SKILL.md) | Hiến chương supervisor/worker: dispatch có admission-gate, fan-out đa worker, nghiệm thu theo bằng chứng, playbook xán lọc dữ liệu nhạy cảm khi báo cáo. |
+| [`g8s-supervisor`](skills/g8s-supervisor/SKILL.md) | Hiến chương supervisor/worker: phối việc có kiểm soát đầu vào, chạy song song nhiều worker, nghiệm thu theo bằng chứng, quy trình che dữ liệu nhạy cảm trước khi báo cáo lên. |
 
 Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn dùng.
 
@@ -113,7 +124,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 | Lĩnh vực | Không làm | Lý do |
 |------|----------|-----------|
 | **Điều phối container** | Kubernetes/nomad, service mesh | g8s là harness *tiến trình* — chạy g8s worker TRÊN k8s/nomad, không phải trong chúng. |
-| **Quản lý secret** | Vault/AWS/GCP Secret Manager | Credential không bao giờ vào sandbox của worker; tiêm qua môi trường trước khi g8s start. |
+| **Quản lý secret** | Vault/AWS/GCP Secret Manager | Credential không bao giờ vào sandbox của worker; cấp sẵn qua biến môi trường trước khi chạy g8s. |
 | **Multi-tenancy** | RBAC, namespace, SaaS audit | CLI single-tenant; một binary + state dir mỗi tenant ([ADR-0028](docs/decisions/0028-multi-project-tenancy.md)). |
 | **Dashboard GUI** | Web UI cho task/receipt | CLI-first; Evidence Lake + `g8s status` là bề mặt quan sát. |
 | **Worker SDK** | SDK Go/Rust/Python | Worker là bất kỳ CLI nào nói giao thức AIC. |
