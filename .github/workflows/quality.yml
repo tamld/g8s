@@ -316,6 +316,18 @@ jobs:
 
           echo "Dogfooding CI gate passed: Brief $BRIEF_ID and Dispatched $DISPATCH_ID verified consumed."
 
+      - name: Vulnerability scan (govulncheck)
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+      - name: Native fuzzing (external-input parsers)
+        # Note: deeper fuzzing runs are manual/quarterly.
+        shell: bash
+        run: |
+          go test -run '^$' -fuzz FuzzConfigLoad -fuzztime 30s ./internal/config/
+          go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 30s ./internal/receipt/
+          go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 30s ./internal/worker/
+          go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 30s ./internal/dispatch/
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v7
