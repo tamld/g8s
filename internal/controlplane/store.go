@@ -1481,14 +1481,16 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
 		  AND json_extract(request_json, '$.provider') = ?
+		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
 		ORDER BY priority DESC, created_at ASC
-		LIMIT 1`, provider)
+		LIMIT 1`, provider, now)
 	} else {
 		row = tx.QueryRowContext(ctx, `
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
+		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
 		ORDER BY priority DESC, created_at ASC
-		LIMIT 1`)
+		LIMIT 1`, now)
 	}
 	candidate, scanErr := scanTask(row)
 	if scanErr != nil {
@@ -1575,8 +1577,9 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
 		  AND session_id = ?
+		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
 		ORDER BY priority DESC, created_at ASC
-		LIMIT 1`, sessionID)
+		LIMIT 1`, sessionID, now)
 	candidate, scanErr := scanTask(row)
 	if scanErr != nil {
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
