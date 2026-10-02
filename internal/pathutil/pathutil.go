@@ -3,6 +3,8 @@
 package pathutil
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"path"
 	"path/filepath"
@@ -328,4 +330,31 @@ func escapeURIPath(p string) string {
 		}
 	}
 	return sb.String()
+}
+
+// InstanceID returns a persistent, unique identifier for the current g8s instance.
+// It reads <state_dir>/instance_id; if absent, it generates a 16-byte random hex
+// string (32 characters), writes it with mode 0o600, and returns it. Deterministic
+// per state directory afterwards.
+func InstanceID() string {
+	stateDir := DefaultStateDir()
+	idFile := filepath.Join(stateDir, "instance_id")
+	if data, err := os.ReadFile(idFile); err == nil {
+		id := strings.TrimSpace(string(data))
+		if id != "" {
+			return id
+		}
+	}
+
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	id := hex.EncodeToString(b)
+
+	_ = os.MkdirAll(stateDir, 0o700)
+	if err := os.WriteFile(idFile, []byte(id), 0o600); err == nil {
+		_ = os.Chmod(idFile, 0o600)
+	}
+	return id
 }

@@ -762,33 +762,152 @@ func (s *Supervisor) awaitOutcome(
 	heartbeat := clampDuration(time.Duration(leaseSeconds)*time.Second/3, minHeartbeatInterval, maxHeartbeatInterval)
 	nextBeat := s.clock().Add(heartbeat)
 
+	consecutiveErrors := 0
+	var lastErr error
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return "cancelled"
 		}
 		t, gerr := s.cp.GetTask(ctx, taskID)
-		if gerr != nil || t == nil || t.State != controlplane.StateRunning || !sameLease(t, workerID, token) {
-			return "lease_lost"
+		if gerr != nil {
+			consecutiveErrors++
+			lastErr = gerr
+			if consecutiveErrors >= 3 {
+				// Second authoritative check after one heartbeat interval of grace before giving up
+				select {
+				case <-ctx.Done():
+					return "cancelled"
+				case <-child.Done():
+					return ""
+				case <-time.After(heartbeat):
+				}
+				authTask, authErr := s.cp.GetTask(ctx, taskID)
+				if authErr != nil || authTask == nil {
+					return fmt.Sprintf("lease_lost: 3 consecutive transient errors in GetTask: %v", lastErr)
+				}
+				authNowSec := float64(s.clock().UnixNano()) / 1e9
+				if authTask.CancelRequested {
+					return "cancelled"
+				}
+				if authTask.State != controlplane.StateRunning {
+					return fmt.Sprintf("lease_lost: task state is %s", authTask.State)
+				}
+				if !sameLease(authTask, workerID, token) {
+					return fmt.Sprintf("lease_lost: lease owner/token mismatch (owner=%s, want=%s)", derefString(authTask.LeaseOwner), workerID)
+				}
+				if authTask.LeaseExpiresAt != nil && *authTask.LeaseExpiresAt <= authNowSec {
+					return fmt.Sprintf("lease_lost: lease expired at %f", *authTask.LeaseExpiresAt)
+				}
+				// Recovered during grace
+				consecutiveErrors = 0
+				t = authTask
+			} else {
+				// Transient error extends the loop
+				select {
+				case <-child.Done():
+					return ""
+				case <-time.After(s.pollInterval):
+				}
+				continue
+			}
+		} else {
+			consecutiveErrors = 0
+		}
+
+		if t == nil {
+			return "lease_lost: task not found in database"
 		}
 		if t.CancelRequested {
 			return "cancelled"
 		}
+
 		now := s.clock()
+		nowSec := float64(now.UnixNano()) / 1e9
+
+		// Authoritative check on DB task state and lease
+		if t.State != controlplane.StateRunning {
+			return fmt.Sprintf("lease_lost: task state is %s", t.State)
+		}
+		if !sameLease(t, workerID, token) {
+			return fmt.Sprintf("lease_lost: lease owner/token mismatch (owner=%s, want=%s)", derefString(t.LeaseOwner), workerID)
+		}
+		if t.LeaseExpiresAt != nil && *t.LeaseExpiresAt <= nowSec {
+			return fmt.Sprintf("lease_lost: lease expired at %f", *t.LeaseExpiresAt)
+		}
+
 		if !now.Before(deadline) {
 			return "timeout"
 		}
+
 		if !now.Before(nextBeat) {
 			if herr := s.cp.RenewHeartbeat(ctx, taskID, workerID, leaseSeconds); herr != nil {
-				return "lease_lost"
+				consecutiveErrors++
+
+				// Renewal error triggers a second authoritative check after one heartbeat interval of grace
+				select {
+				case <-ctx.Done():
+					return "cancelled"
+				case <-child.Done():
+					return ""
+				case <-time.After(heartbeat):
+				}
+
+				authTask, authErr := s.cp.GetTask(ctx, taskID)
+				if authErr != nil {
+					consecutiveErrors++
+					lastErr = authErr
+					if consecutiveErrors >= 3 {
+						return fmt.Sprintf("lease_lost: 3 consecutive transient errors in lease renewal: %v", lastErr)
+					}
+					nextBeat = s.clock().Add(heartbeat)
+					continue
+				}
+
+				authNowSec := float64(s.clock().UnixNano()) / 1e9
+				if authTask == nil {
+					return "lease_lost: task not found in database on authoritative re-check"
+				}
+				if authTask.CancelRequested {
+					return "cancelled"
+				}
+				if authTask.State != controlplane.StateRunning {
+					return fmt.Sprintf("lease_lost: task state is %s on authoritative re-check", authTask.State)
+				}
+				if !sameLease(authTask, workerID, token) {
+					return fmt.Sprintf("lease_lost: lease owner/token mismatch on authoritative re-check (owner=%s, want=%s)", derefString(authTask.LeaseOwner), workerID)
+				}
+				if authTask.LeaseExpiresAt != nil && *authTask.LeaseExpiresAt <= authNowSec {
+					return fmt.Sprintf("lease_lost: lease expired at %f", *authTask.LeaseExpiresAt)
+				}
+
+				// DB shows lease is still valid and not expired; continue loop
+				consecutiveErrors = 0
+			} else {
+				consecutiveErrors = 0
 			}
-			nextBeat = now.Add(heartbeat)
+			nextBeat = s.clock().Add(heartbeat)
 		}
+
 		select {
 		case <-child.Done():
 			return ""
 		case <-time.After(s.pollInterval):
 		}
 	}
+}
+
+var (
+	instanceIDOnce   sync.Once
+	cachedInstanceID string
+)
+
+// GetInstanceID returns the cached instance ID for the worker package (#465).
+func GetInstanceID() string {
+	instanceIDOnce.Do(func() {
+		cachedInstanceID = pathutil.InstanceID()
+	})
+	return cachedInstanceID
 }
 
 // sweepAttemptGroup is the post-run orphan sweep (#415 PR-1 & #439): after
@@ -805,7 +924,7 @@ func (s *Supervisor) sweepAttemptGroup(child Child, taskID string, marker ...str
 		if groupAlive(pid) {
 			_ = killProcessGroup(pid, syscallSIGKILL)
 			if s != nil {
-				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "same-group survivor killed after attempt end")
+				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, fmt.Sprintf("same-group survivor killed after attempt end (instance=%s)", GetInstanceID()))
 			}
 		}
 	}
@@ -1040,7 +1159,7 @@ func (s *Supervisor) sweepCandidatePIDs(
 				_ = proc.Kill()
 			}
 			if s != nil {
-				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, "layer=2: setsid survivor killed after attempt end")
+				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, fmt.Sprintf("layer=2: setsid survivor killed after attempt end (instance=%s)", GetInstanceID()))
 			}
 			killed++
 		}
@@ -1079,10 +1198,10 @@ func (s *Supervisor) collect(
 	os.Remove(stdoutPath) // worker output is never persisted.
 	os.Remove(stderrPath)
 
-	switch reason {
-	case "lease_lost":
+	switch {
+	case reason == "lease_lost" || strings.HasPrefix(reason, "lease_lost"):
 		return s.snapshot(ctx, taskID, runDir, promptPath)
-	case "cancelled":
+	case reason == "cancelled":
 		s.ingestTrace(telemetry.TraceEventTaskCancelled, taskID, nil, "cancelled by orchestrator")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "cancelled", stdoutText, stderrText)),
@@ -1093,7 +1212,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish cancelled attempt: %w", ferr)
 		}
-	case "timeout":
+	case reason == "timeout":
 		s.ingestTrace(telemetry.TraceEventTaskTimeout, taskID, nil, "execution deadline exceeded")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "timeout", stdoutText, stderrText)),
@@ -1104,7 +1223,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish timed-out attempt: %w", ferr)
 		}
-	case "invalid_timeout":
+	case reason == "invalid_timeout":
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "invalid_result", stdoutText, stderrText)),
 			Success:   false,

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,9 +16,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/state"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // Sentinel errors surfaced by query validation.
@@ -33,6 +35,9 @@ type Store struct {
 	db     *sql.DB
 	clock  func() time.Time
 	dbPath string
+
+	// leaseExecOverride allows tests to inject transient failures into extendLease (#465).
+	leaseExecOverride func(ctx context.Context, query string, args ...any) (sql.Result, error)
 
 	// receiptsMgr is the canonical receipt ledger (receipts.db, a sibling of
 	// g8s.db) — lazily opened on first delegated-write consume (#346). It is
@@ -1091,6 +1096,9 @@ func (s *Store) ActiveTaskCountInSession(ctx context.Context, sessionID string) 
 // (stale worker, expired lease, or unknown task).
 var ErrLeaseLost = errors.New("lease lost")
 
+// ErrBusy indicates that a database operation timed out due to transient locking or SQLite busy state (#465).
+var ErrBusy = errors.New("database busy")
+
 func prepareSubmitRequest(req SubmitTaskRequest) (SubmitTaskRequest, string, string, error) {
 	if req.IdempotencyKey == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return req, "", "", errors.New("idempotency_key is required")
@@ -1607,9 +1615,76 @@ func (s *Store) RenewHeartbeat(ctx context.Context, taskID, workerID string, ext
 // yields ErrLeaseLost.
 func (s *Store) Heartbeat(ctx context.Context, taskID, workerID, leaseToken string, extensionSeconds int) error {
 	if leaseToken == "" {
-		return fmt.Errorf("%w: task %s", ErrLeaseLost, taskID)
+		return fmt.Errorf("%w: task %s (instance %s)", ErrLeaseLost, taskID, pathutil.InstanceID())
 	}
 	return s.extendLease(ctx, taskID, workerID, leaseToken, extensionSeconds)
+}
+
+// Package-level retry configuration for SQLITE_BUSY handling in controlplane (#465).
+var (
+	busyRetryAttempts = 3
+	busyBackoff       = func(attempt int) time.Duration {
+		return time.Duration(50+rand.IntN(151)) * time.Millisecond
+	}
+)
+
+// isBusyErr reports whether err is a SQLITE_BUSY-class error.
+// Controlplane must not import internal/memory (#465 P1), so this helper is
+// replicated locally following the #440 idiom.
+func isBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrBusy) {
+		return true
+	}
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		code := se.Code()
+		if code == 5 || (code&0xff) == 5 || code == 6 || (code&0xff) == 6 {
+			return true
+		}
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked") {
+		return true
+	}
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "database is locked") ||
+		strings.Contains(lower, "database table is locked") ||
+		strings.Contains(lower, "sqlite_busy")
+}
+
+// withBusyRetry runs op, retrying on SQLITE_BUSY-class errors up to busyRetryAttempts.
+// Controlplane must not import internal/memory (#465 P1), so this helper is
+// replicated locally with jittered backoff following the #440 idiom.
+func withBusyRetry(op func() error) error {
+	attempts := busyRetryAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		err = op()
+		if err == nil {
+			return nil
+		}
+		if !isBusyErr(err) {
+			return err
+		}
+		if attempt < attempts-1 {
+			if busyBackoff != nil {
+				d := busyBackoff(attempt)
+				if d > 0 {
+					time.Sleep(d)
+				}
+			}
+		}
+	}
+	if isBusyErr(err) && !errors.Is(err, ErrBusy) {
+		return fmt.Errorf("%w: %w", ErrBusy, err)
+	}
+	return err
 }
 
 func (s *Store) extendLease(ctx context.Context, taskID, workerID, leaseToken string, extensionSeconds int) error {
@@ -1617,18 +1692,38 @@ func (s *Store) extendLease(ctx context.Context, taskID, workerID, leaseToken st
 	query := `
 		UPDATE tasks SET lease_expires_at = ?, updated_at = ?
 		WHERE task_id = ? AND state IN ('LEASED', 'RUNNING')
-		  AND lease_owner = ? AND cancel_requested = 0`
-	args := []any{now + float64(extensionSeconds), now, taskID, workerID}
+		  AND lease_owner = ? AND cancel_requested = 0
+		  AND (lease_expires_at IS NULL OR lease_expires_at > ?)`
+	args := []any{now + float64(extensionSeconds), now, taskID, workerID, now}
 	if leaseToken != "" {
 		query += ` AND lease_token = ?`
 		args = append(args, leaseToken)
 	}
-	res, err := s.db.ExecContext(ctx, query, args...)
+
+	var affected int64
+	err := withBusyRetry(func() error {
+		var res sql.Result
+		var execErr error
+		if s.leaseExecOverride != nil {
+			res, execErr = s.leaseExecOverride(ctx, query, args...)
+		} else {
+			res, execErr = s.db.ExecContext(ctx, query, args...)
+		}
+		if execErr != nil {
+			return execErr
+		}
+		aff, affErr := res.RowsAffected()
+		if affErr != nil {
+			return affErr
+		}
+		affected = aff
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("heartbeat: %w", err)
+		return fmt.Errorf("heartbeat (instance %s): %w", pathutil.InstanceID(), err)
 	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		return fmt.Errorf("%w: task %s", ErrLeaseLost, taskID)
+	if affected != 1 {
+		return fmt.Errorf("%w: task %s (instance %s)", ErrLeaseLost, taskID, pathutil.InstanceID())
 	}
 	return nil
 }
