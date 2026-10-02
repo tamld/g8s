@@ -37,6 +37,16 @@ installed **stop-slop** skill at `~/.agents/skills/stop-slop/` (read
   any (claims tables, receipts registries, directive rows).
 - Vietnamese prose: same rules, but punctuation follows Vietnamese
   convention (dấu hai chấm thay em dash; no English filler words).
+- **Vietnamese calque ban (operator finding 2026-10-02)**: never
+  transplant English sentence structure into Vietnamese — no literal
+  verb calques ("tháo hàng đợi" for drain, "xán lọc" for sanitize,
+  "tiêm qua môi trường" for inject are all banned; say "cho worker
+  nhận task", "che dữ liệu nhạy cảm", "cấp qua biến môi trường").
+  Product NOUNS stay English (Brain, worker, task, receipt, attempt,
+  signal — they are the product's names) and get explained once in a
+  terms table; VERBS and sentence structure must read as Vietnamese a
+  human would actually write. If a sentence survives only because it
+  mirrors the English word order, rewrite it.
 
 ## Definition of done
 
