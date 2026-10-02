@@ -4,16 +4,81 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tamld/g8s/internal/autopilot"
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
+type autopilotLockData struct {
+	PID       int       `json:"pid"`
+	StartTime time.Time `json:"start_time"`
+}
+
+func autopilotLockPath() string {
+	return filepath.Join(pathutil.DefaultStateDir(), "autopilot.lock")
+}
+
+func readAutopilotLock(path string) (*autopilotLockData, error) {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var lockData autopilotLockData
+	if err := json.Unmarshal(bytes, &lockData); err == nil && lockData.PID > 0 {
+		return &lockData, nil
+	}
+	// Fallback to simple format: "<pid>" or "<pid> <start_time>"
+	fields := strings.Fields(string(bytes))
+	if len(fields) > 0 {
+		var pid int
+		if _, err := fmt.Sscanf(fields[0], "%d", &pid); err == nil && pid > 0 {
+			lockData.PID = pid
+			if len(fields) > 1 {
+				if t, err := time.Parse(time.RFC3339, fields[1]); err == nil {
+					lockData.StartTime = t
+				}
+			}
+			return &lockData, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid lockfile format")
+}
+
+func writeAutopilotLock(path string, pid int, startTime time.Time) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(autopilotLockData{
+		PID:       pid,
+		StartTime: startTime.UTC(),
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func removeAutopilotLock(path string) {
+	err := os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "[warn] autopilot: remove lockfile %s: %v\n", path, err)
+	}
+}
+
+var isProcessAlive = defaultIsProcessAlive
+
+// runAutopilot dispatches autopilot subcommands (start/stop/status/
+// trigger/config). Honesty semantics per #485 stage 1.
 func runAutopilot(args []string) {
 	if len(args) == 0 {
 		exitUsage("autopilot", "", "", "usage: g8s autopilot <start|stop|status|trigger|config> [options]", "Run 'g8s autopilot help' for available commands", false)
@@ -44,7 +109,7 @@ func printAutopilotUsage() {
 	fmt.Println("Usage: g8s autopilot <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  start     Start the autopilot scheduler daemon")
+	fmt.Println("  start     Start the autopilot scheduler (in-process)")
 	fmt.Println("  stop      Stop the autopilot scheduler")
 	fmt.Println("  status    Show autopilot scheduler status")
 	fmt.Println("  trigger   Manually trigger a scan cycle")
@@ -61,9 +126,21 @@ func runAutopilotStart(args []string) {
 	fs := flag.NewFlagSet("autopilot start", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	configFile := fs.String("config", "", "path to autopilot config YAML file")
-	daemon := fs.Bool("daemon", false, "run as daemon (block until stopped)")
+	daemon := fs.Bool("daemon", true, "run until stopped (default true)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("autopilot", "start", *traceID, err.Error(), "", *jsonl)
+	}
+
+	lockPath := autopilotLockPath()
+	if existingLock, err := readAutopilotLock(lockPath); err == nil && existingLock != nil {
+		if isProcessAlive(existingLock.PID) {
+			exitRuntime("autopilot", "start", *traceID, cli.CodeRuntime,
+				fmt.Errorf("autopilot is already running (PID %d); refuse to start duplicate process", existingLock.PID),
+				fmt.Sprintf("To restart, stop PID %d or remove %s if stale", existingLock.PID, lockPath),
+				*jsonl)
+		}
+		// Stale lockfile -> remove and continue
+		removeAutopilotLock(lockPath)
 	}
 
 	cfg := autopilot.DefaultConfig()
@@ -74,11 +151,16 @@ func runAutopilotStart(args []string) {
 		}
 		cfg = loaded
 	}
+	if len(strings.Fields(cfg.Cron)) == 5 {
+		cfg.Cron = "0 " + cfg.Cron
+	}
 
-	// Default handler: submit to control plane queue
+	// LOUD NOTICE (#485 stages 2-3):
+	// The due-work handler remains an intentional logged no-op in stage 1.
+	// Task submission and execution are deferred to stage 2 (throttle & admission control)
+	// and stage 3 (tick handler integration with control plane and OS-native scheduling).
+	// DO NOT submit actual tasks here until stage 2 rate limiting is in place.
 	handler := func(ctx context.Context, item *autopilot.WorkItem) error {
-		// This would integrate with the control plane to submit tasks
-		// For now, just log
 		if *jsonMode || *jsonl {
 			env := cli.NewEnvelope("autopilot_item", "autopilot", "item", map[string]any{
 				"item_id": item.ID,
@@ -102,20 +184,29 @@ func runAutopilotStart(args []string) {
 		exitRuntime("autopilot", "start", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
 
+	startTime := time.Now().UTC()
+	if err := writeAutopilotLock(lockPath, os.Getpid(), startTime); err != nil {
+		_ = scheduler.Stop()
+		exitRuntime("autopilot", "start", *traceID, cli.CodeIO, err, "failed to write autopilot lockfile", *jsonl)
+	}
+	defer removeAutopilotLock(lockPath)
+
+	banner := "[EXPERIMENTAL] g8s autopilot is running in-process only (staged path #485). Cross-process daemonization and OS-native scheduling will be added in stage 3."
 	if *jsonMode || *jsonl {
 		env := cli.NewEnvelope("autopilot_start", "autopilot", "start", map[string]any{
 			"status": "started",
 			"cron":   cfg.Cron,
+			"pid":    os.Getpid(),
+			"banner": banner,
 		})
 		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-	} else if !*daemon {
-		// Just start and exit (background)
-		fmt.Println("Autopilot scheduler started in background")
+	} else {
+		fmt.Println(banner)
+		fmt.Printf("Autopilot scheduler started (PID %d, cron %s)\n", os.Getpid(), cfg.Cron)
 	}
 
 	if *daemon {
-		// Block until signal
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
@@ -131,37 +222,23 @@ func runAutopilotStart(args []string) {
 func runAutopilotStop(args []string) {
 	fs := flag.NewFlagSet("autopilot stop", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = jsonMode
 	if err := fs.Parse(args); err != nil {
 		exitUsage("autopilot", "stop", *traceID, err.Error(), "", *jsonl)
 	}
 
-	if autopilotScheduler == nil {
-		if *jsonMode || *jsonl {
-			env := cli.NewEnvelope("autopilot_stop", "autopilot", "stop", map[string]any{
-				"status": "not_running",
-			})
-			env.TraceID = *traceID
-			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-		} else {
-			fmt.Println("Autopilot scheduler is not running")
-		}
+	lockPath := autopilotLockPath()
+	lockData, err := readAutopilotLock(lockPath)
+	if err == nil && lockData != nil && isProcessAlive(lockData.PID) {
+		msg := fmt.Sprintf("cannot stop autopilot scheduler in another process: no cross-process scheduler exists in this build (staged path #485 — stage 3 will add OS-native scheduling). Autopilot is running under PID %d", lockData.PID)
+		hint := fmt.Sprintf("To stop autopilot, signal PID %d directly: kill %d (or kill -TERM %d)", lockData.PID, lockData.PID, lockData.PID)
+		exitRuntime("autopilot", "stop", *traceID, cli.CodeRuntime, fmt.Errorf("%s", msg), hint, *jsonl)
 		return
 	}
 
-	if err := autopilotScheduler.Stop(); err != nil {
-		exitRuntime("autopilot", "stop", *traceID, cli.CodeRuntime, err, "", *jsonl)
-	}
-	autopilotScheduler = nil
-
-	if *jsonMode || *jsonl {
-		env := cli.NewEnvelope("autopilot_stop", "autopilot", "stop", map[string]any{
-			"status": "stopped",
-		})
-		env.TraceID = *traceID
-		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-	} else {
-		fmt.Println("Autopilot scheduler stopped")
-	}
+	msg := "cannot stop autopilot scheduler: no cross-process scheduler exists in this build (staged path #485 — stage 3 will add OS-native scheduling)"
+	hint := "No active autopilot start process found to stop"
+	exitRuntime("autopilot", "stop", *traceID, cli.CodeRuntime, fmt.Errorf("%s", msg), hint, *jsonl)
 }
 
 func runAutopilotStatus(args []string) {
@@ -171,81 +248,61 @@ func runAutopilotStatus(args []string) {
 		exitUsage("autopilot", "status", *traceID, err.Error(), "", *jsonl)
 	}
 
-	if autopilotScheduler == nil {
-		if *jsonMode || *jsonl {
-			env := cli.NewEnvelope("autopilot_status", "autopilot", "status", map[string]any{
-				"running": false,
-			})
-			env.TraceID = *traceID
-			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-		} else {
-			fmt.Println("Autopilot scheduler: stopped")
-		}
-		return
+	lockPath := autopilotLockPath()
+	lockData, err := readAutopilotLock(lockPath)
+	lockfileExisted := err == nil && lockData != nil
+	alive := false
+	if lockfileExisted {
+		alive = isProcessAlive(lockData.PID)
 	}
 
-	queue := autopilotScheduler.GetQueue()
-	cfg := autopilotScheduler.GetConfig()
-
-	status := map[string]any{
-		"running":             autopilotScheduler.IsRunning(),
-		"cron":                cfg.Cron,
-		"queue_size":          queue.Len(),
-		"max_items_per_tick":  cfg.MaxItemsPerTick,
-		"min_score_threshold": cfg.MinScoreThreshold,
-		"scan_sources":        cfg.ScanSources,
-	}
+	msg := "autopilot runs only inside a `start` process; no cross-process scheduler exists in this build (staged path #485 — stage 3 will add OS-native scheduling)"
 
 	if *jsonMode || *jsonl {
+		status := map[string]any{
+			"running":         alive,
+			"message":         msg,
+			"lockfile_exists": lockfileExisted,
+		}
+		if lockfileExisted {
+			status["lockfile_pid"] = lockData.PID
+			status["process_alive"] = alive
+			if !lockData.StartTime.IsZero() {
+				status["lockfile_start_time"] = lockData.StartTime.Format(time.RFC3339)
+			}
+		}
 		env := cli.NewEnvelope("autopilot_status", "autopilot", "status", status)
 		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-	} else {
-		fmt.Println("Autopilot scheduler: running")
-		fmt.Printf("  Cron: %s\n", cfg.Cron)
-		fmt.Printf("  Queue size: %d\n", queue.Len())
-		fmt.Printf("  Max items per tick: %d\n", cfg.MaxItemsPerTick)
-		fmt.Printf("  Min score threshold: %.2f\n", cfg.MinScoreThreshold)
-		fmt.Printf("  Scan sources: github_issues=%v failing_ci=%v static_analysis=%v stale_todos=%v\n",
-			cfg.ScanSources.GitHubIssues, cfg.ScanSources.FailingCI,
-			cfg.ScanSources.StaticAnalysis, cfg.ScanSources.StaleTodos)
+		return
+	}
 
-		// Show top items
-		topItems := queue.TopN(5)
-		if len(topItems) > 0 {
-			fmt.Println("\nTop queued items:")
-			for i, item := range topItems {
-				fmt.Printf("  %d. %s (score=%.3f, source=%s)\n", i+1, item.Title, item.Score, item.Source)
-			}
+	fmt.Println(msg)
+	if lockfileExisted {
+		if alive {
+			fmt.Printf("Start-process lockfile exists: PID %d (running, started %s)\n",
+				lockData.PID, lockData.StartTime.Format(time.RFC3339))
+		} else {
+			fmt.Printf("Start-process lockfile exists: PID %d (not running / stale lockfile, started %s)\n",
+				lockData.PID, lockData.StartTime.Format(time.RFC3339))
 		}
+	} else {
+		fmt.Println("Start-process lockfile: none")
 	}
 }
 
 func runAutopilotTrigger(args []string) {
 	fs := flag.NewFlagSet("autopilot trigger", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = jsonMode
 	if err := fs.Parse(args); err != nil {
 		exitUsage("autopilot", "trigger", *traceID, err.Error(), "", *jsonl)
 	}
 
-	if autopilotScheduler == nil {
-		exitRuntime("autopilot", "trigger", *traceID, cli.CodeRuntime, fmt.Errorf("scheduler not running"), "", *jsonl)
-	}
-
-	ctx := context.Background()
-	if err := autopilotScheduler.TriggerScan(ctx); err != nil {
-		exitRuntime("autopilot", "trigger", *traceID, cli.CodeRuntime, err, "", *jsonl)
-	}
-
-	if *jsonMode || *jsonl {
-		env := cli.NewEnvelope("autopilot_trigger", "autopilot", "trigger", map[string]any{
-			"status": "triggered",
-		})
-		env.TraceID = *traceID
-		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-	} else {
-		fmt.Println("Scan triggered successfully")
-	}
+	exitRuntime("autopilot", "trigger", *traceID, cli.CodeRuntime,
+		fmt.Errorf("triggers are not persisted yet (staged path #485 — stage 3 will add persisted triggers and native scheduling)"),
+		"Cross-process trigger capability is scheduled for stage 3",
+		*jsonl)
 }
 
 func runAutopilotConfig(args []string) {
