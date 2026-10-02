@@ -122,6 +122,50 @@ func TestRoute_DeterministicFixtures(t *testing.T) {
 			wantProvider: "agy",
 			wantModel:    "gemini-3.8-flash-high",
 		},
+		{
+			name: "trust-boundary prompt heuristic without paths routes to test-runner",
+			req: routing.RouteRequest{
+				Prompt:   "Verify receipt issuance security checks in internal/receipt",
+				Paths:    nil,
+				Manifest: manifest,
+			},
+			wantRole:     "test-runner",
+			wantProvider: "agy",
+			wantModel:    "gemini-3.8-flash-high",
+		},
+		{
+			name: "trust-boundary prompt heuristic for internal/controlplane routes to test-runner",
+			req: routing.RouteRequest{
+				Prompt:   "Audit internal/controlplane state transitions",
+				Paths:    nil,
+				Manifest: manifest,
+			},
+			wantRole:     "test-runner",
+			wantProvider: "agy",
+			wantModel:    "gemini-3.8-flash-high",
+		},
+		{
+			name: "short timeout hint falls through to manifest default",
+			req: routing.RouteRequest{
+				Prompt:      "Quick check",
+				TimeoutHint: "10m",
+				Manifest:    manifest,
+			},
+			wantRole:     "collector",
+			wantProvider: "agy",
+			wantModel:    "gemini-3.8-flash-high",
+		},
+		{
+			name: "invalid timeout hint falls through to manifest default",
+			req: routing.RouteRequest{
+				Prompt:      "Invalid hint",
+				TimeoutHint: "not-a-valid-duration",
+				Manifest:    manifest,
+			},
+			wantRole:     "collector",
+			wantProvider: "agy",
+			wantModel:    "gemini-3.8-flash-high",
+		},
 	}
 
 	for _, tc := range tests {
@@ -465,4 +509,43 @@ func TestRoutingSuite_PassesAsUnitTests(t *testing.T) {
 		t.Errorf("CategoryScore for %s = %f, want 1.0",
 			probe.CategoryTaskRouting, pri.CategoryScores[string(probe.CategoryTaskRouting)])
 	}
+}
+
+// TestRouteDeterministic_DirectRules explicitly tests Rule 1 prompt heuristics and Rule 3 blast radius reasons.
+func TestRouteDeterministic_DirectRules(t *testing.T) {
+	manifest := sampleManifest()
+
+	t.Run("Rule 1 harness prompt heuristic", func(t *testing.T) {
+		req := routing.RouteRequest{
+			Prompt:   "Inspect internal/harness test runner framework",
+			Paths:    nil,
+			Manifest: manifest,
+		}
+		dec := routing.RouteDeterministic(req)
+		if dec.Role != "test-runner" {
+			t.Errorf("Role = %q, want test-runner", dec.Role)
+		}
+		if !strings.Contains(dec.Reason, "trust-boundary path") {
+			t.Errorf("Reason = %q, want trust-boundary path reason", dec.Reason)
+		}
+	})
+
+	t.Run("Rule 3 blast radius reason check", func(t *testing.T) {
+		t.Chdir("../..")
+		req := routing.RouteRequest{
+			Prompt:   "Modify config structs",
+			Paths:    []string{"internal/config/config.go"},
+			Manifest: manifest,
+		}
+		dec := routing.RouteDeterministic(req)
+		if dec.Role != "collector" {
+			t.Errorf("Role = %q, want collector", dec.Role)
+		}
+		if !strings.Contains(dec.Reason, "high blast radius code impact requires large-context model") {
+			t.Errorf("Reason = %q, want blast radius reason", dec.Reason)
+		}
+		if dec.Confidence != 0.9 {
+			t.Errorf("Confidence = %f, want 0.9", dec.Confidence)
+		}
+	})
 }
