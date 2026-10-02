@@ -49,9 +49,9 @@ and exits when a matching signal appears. This replaces every poll loop.
      timeout envelope when elapsed.
    - File-not-exists = zero signals yet: keep waiting (do NOT error).
    - Malformed lines: skipped with a stderr warning, never fatal.
-2. On ctx/signal interrupt (SIGINT/SIGTERM): exit 4 with a clean
-   envelope (kind: "task_signal_timeout" only for timeout; interrupt is
-   a plain exit 130 convention — document in --help text).
+2. On SIGINT/SIGTERM: plain exit 130 (convention; document in --help
+   text). The "task_signal_timeout" envelope is ONLY for the --timeout
+   exit-3 path.
 3. --help text documents: --failed, --since, --timeout, the file path,
    and the exit codes (0 = signal matched, 3 = timeout, 130 = interrupt).
 

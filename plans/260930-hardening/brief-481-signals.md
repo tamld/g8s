@@ -10,8 +10,11 @@ Your current working directory is a scratch worktree. Write your changes
 DIRECTLY to these receipt-scoped repository files (paths relative to
 $G8S_REPO_ROOT):
 
-- internal/controlplane/store.go (ONLY: signal-file plumbing + append
-  hook at terminal transition commit points)
+- internal/controlplane/store.go (signal-file plumbing + the
+  reconcileExpiredTx hook)
+- internal/controlplane/lifecycle.go (append hooks at the transition
+  commit points that live here: FinishAttempt → WORKER_COMPLETED,
+  CancelTask → CANCELLED, RequestEdit / PauseTask → NEEDS_INFO)
 - internal/controlplane/signals_file_test.go (new file)
 
 Do NOT run git commit. Do NOT modify any other file. Another worker owns
