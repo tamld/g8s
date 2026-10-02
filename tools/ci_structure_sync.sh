@@ -35,13 +35,19 @@ END_MARKER="<!-- structure:end -->"
 # when the directory does not exist on disk.
 static_entry() {
     case "$1" in
-        cmd) echo "├── cmd/                    # CLI entrypoint (stdlib flag-based, no cobra)" ;;
+        cmd) echo "├── cmd/g8s/                # CLI entrypoint (stdlib flag-based, no cobra)" ;;
+        offer_go) echo "├── offer.go                # root package: go:embed glue for the offer/ bundle + spec-sync gate scripts" ;;
+        assets) echo "├── assets/                 # Logo and release artwork" ;;
         skills) echo "├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)" ;;
         packaging) echo "├── packaging/              # Windows NSIS/WiX, Chocolatey, winget" ;;
-        docs) echo "├── docs/                   # User guide, ADRs, specs, security" ;;
+        docs) echo "├── docs/                   # User guide, ADRs, specs, security, history" ;;
+        examples) echo "├── examples/               # Contributor brief template" ;;
+        offer) echo "├── offer/                  # Pull-bundle for sibling projects (profiles, onboarding, seeds)" ;;
         plans) echo "├── plans/                  # Campaign ledgers (dated, session-type marked)" ;;
+        reference) echo "├── reference/              # JIT-only Python baseline (read, never import)" ;;
         spec) echo "├── spec/openspec/          # OpenSpec deltas (DELTA-01..22)" ;;
         schemas) echo "├── schemas/                # JSON schemas (task, receipt, result)" ;;
+        scripts) echo "├── scripts/                # Public installer (scripts/install.sh curl entrypoint)" ;;
         tools) echo "├── tools/                  # CI helper scripts (pre-push gates, release)" ;;
         workflows) echo "└── .github/workflows/      # CI/CD pipelines" ;;
         *) return 1 ;;
@@ -81,7 +87,8 @@ render() {
         echo "│   ├── $dir/ — $summary"
     done
     echo "│   └── ...                 # supporting packages"
-    for entry in skills packaging docs plans spec schemas tools workflows; do
+    static_entry offer_go
+    for entry in assets offer docs examples packaging plans reference schemas scripts skills spec tools workflows; do
         case "$entry" in
             workflows) [ -d ".github/workflows" ] && static_entry workflows ;;
             *) [ -d "$entry" ] && static_entry "$entry" ;;

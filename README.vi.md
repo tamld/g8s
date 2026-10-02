@@ -4,45 +4,51 @@
 
 # g8s (The Gatekeepers) — Bản tiếng Việt
 
-> Giống như **k8s** điều phối các container tính toán của bạn, **g8s** điều phối các AI subagent của bạn.
+> **Harness thực thi tiến trình zero-trust, siêu nhẹ, cho các AI agent worker chạy CLI.**
+> *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Go](https://img.shields.io/badge/Go-1.26.0-00ADD8)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)
 ![Release](https://img.shields.io/github/v/release/tamld/g8s)
 
 <p align="center">
   <a href="README.md">English</a> | <b>Tiếng Việt</b>
 </p>
 
-*Bản dịch tiếng Việt của [README.md](README.md) — bản tiếng Anh là văn bản gốc đầy đủ nhất.*
+*Bản tiếng Việt là bản tóm lược. Bản đầy đủ và cập nhật nhất: [README.md](README.md).*
+
+---
 
 ## g8s là gì
 
-`g8s` (đọc là **"Gates"**) là một runtime đơn-binary cho **hệ đa tác tử hai tầng**: tầng "Brain" cấp cao (Claude, GPT, DeepSeek) giao việc cơ học cho các CLI worker nhanh (Antigravity `agy`, Claude Code, Gemini CLI, Ollama) — và `g8s` đứng ra thực thi **ranh giới tin cậy** mà tầng model không thể tự đảm nhận:
+g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng cao ("Brain": Claude, GPT, Codex) giao việc cơ học cho các CLI worker nhanh (`agy`, Claude Code, Gemini CLI, Ollama) **mà không trao chìa khóa máy của bạn**. Tầng model không thể được tin bằng quyền hạn; g8s thi hành điều đó ở tầng tiến trình:
 
-- **Hàng đợi tác tử bền vững** — SQLite WAL, CAS lease nguyên tử, idempotency-key, lineage cha–con.
-- **Receipt khả năng** — worker không thể ghi đè filesystem nếu không có receipt single-use, giới hạn thời gian và đường dẫn do Brain cấp.
-- **Cô lập tiến trình** — mỗi attempt chạy trong process group kill-able và run directory riêng; các attempt đồng thời nhận worktree riêng.
-- **Bằng chứng** — mỗi lần chạy niêm phong receipt đã biên tập vào Evidence Lake; telemetry chưng cất pattern thất bại ngược lại preflight.
+- **Hàng đợi tác vụ bền vững**: SQLite WAL, CAS lease nguyên tử, idempotency key, lineage cha–con. Task sống qua cái chết của session; queue là bộ nhớ.
+- **Receipt khả năng**: worker không thể ghi filesystem nếu không có receipt single-use, giới hạn thời gian và đường dẫn do Brain cấp.
+- **Cô lập tiến trình**: mỗi attempt chạy trong process group kill-able và worktree riêng; các attempt đồng thời không đụng nhau.
+- **Bằng chứng, không phán quyết**: mỗi lần chạy niêm phong receipt đã biên tập vào Evidence Lake. Verdict của worker là tuyên bố; file trên đĩa mới là bằng chứng.
 
-## Điểm nhấn (v0.12.0)
+## Đã ship trong v0.13.0
 
-- **⚡ Thuần Go, single binary** — Zero CGO, ~15MB, khởi động <15ms.
-- **🛡️ Cổng an toàn nhiều lớp** — 6 vai trò × 3 hồ sơ quyền, chặn lệnh nguy hiểm, bảo vệ đường dẫn nhạy cảm (kể cả symlink và `..`).
-- **🚀 Dispatch đồng thời** — `g8s worker --concurrency N`: N attempt song song, mỗi attempt một worktree riêng, khôi phục crash qua sessions registry.
-- **🧠 Cổng thăng cấp tri thức** — FSM trạng thái + nhãn tin cậy + tombstone theo payload hash: vault không thể bị đầu độc bởi output chưa kiểm chứng.
-- **📡 Context Broker** — `ContextPacket` có giới hạn ký tự (vault + telemetry + SOM) làm giàu Jev triage, fail-open theo từng nguồn.
-- **⚡ Reflex gate System-1** — `g8s reflex triage`: Jev sensor + policy deterministic → `grant_receipt` / `escalate_hitl` / `instant_kill`.
-- **🧪 Eval đối kháng** — bộ 24 probe, chấm điểm semantic-class deterministic, provider thật (agy/claude), chỉ số PRI.
-- **💓 Quan sát & vệ sinh** — heartbeat, sessions registry, dọn orphan/zombie, Evidence Lake, telemetry vòng kín.
+- **Giám sát event-driven**: transition về trạng thái terminal ghi thêm một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` đánh thức supervisor bằng đúng một process ngủ. Polling chỉ là phương án dự phòng.
+- **Queue đa provider**: `providers.json` là manifest; claim affinity theo provider, `--provider` trên submit lẫn worker, không fallback thầm lặng.
+- **Retry có ngân sách (đang land)**: task FAILED tự resubmit trong giới hạn: 2 lần mỗi task, 10 lần/giờ mỗi state dir, backoff luỹ thừa, flag mặc định OFF. Tick tự động chỉ đụng task không cần receipt.
+- **Dispatch đồng thời**: `g8s worker --concurrency N` — N attempt cách ly, worktree riêng từng attempt.
+- **Eval đối kháng**: bộ probe chấm điểm semantic-class + Provider Reliability Index; mock provider giúp chạy được trong CI.
+- **Fuzz + baseline đo được**: 4 fuzz target trên các parser đầu vào ngoài; độ trễ queue ghi trong [docs/user-guide/performance.md](docs/user-guide/performance.md).
+
+Số liệu định lượng (số lớp containment, ngưỡng PRI, số gate) nằm trong [docs/claims.yml](docs/claims.yml) và [docs/ENTERPRISE_LEDGER.md](docs/ENTERPRISE_LEDGER.md), mỗi claim buộc vào một test kiểm chứng — [tools/claims_check.sh](tools/claims_check.sh) soát lại mỗi commit.
 
 ## Cài đặt
 
-**Từ release** (macOS universal / Linux amd64+arm64 / Windows amd64 — kèm `.deb`/`.rpm`/`.apk`):
-tải từ [trang Releases](https://github.com/tamld/g8s/releases) và đối chiếu `checksums.txt`.
+Một dòng (macOS / Linux):
 
-**Từ mã nguồn:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+```
+
+Từ [release](https://github.com/tamld/g8s/releases): tải archive, đối chiếu `checksums.txt`. Từ mã nguồn:
 
 ```bash
 git clone https://github.com/tamld/g8s.git && cd g8s
@@ -52,120 +58,95 @@ go build -o bin/g8s ./cmd/g8s
 ## Quickstart
 
 ```bash
-# 1. Gửi một tác vụ scout chỉ-đọc
-g8s submit --idempotency-key scout-1 --role scout --permission read_only \
-  --add-dir ./src --model gemini-3.7-flash-high --timeout 60s \
-  --prompt "Quét ./src và trả JSON danh sách entry point."
+# 1. Nạp một task scout chỉ-đọc
+g8s submit \
+  --idempotency-key scout-1 \
+  --role scout \
+  --permission read_only \
+  --add-dir ./src \
+  --model gemini-3.8-flash-high \
+  --timeout 60s \
+  --prompt "Scan ./src and return a JSON inventory of entry points."
 
-# 2. Chạy worker để nhận và thực thi
-g8s worker --once                                # một attempt
-g8s worker --once=false --concurrency 4          # drain đồng thời (cần git checkout)
+# 2. Tháo hàng đợi (worker nhận task trong worktree cách ly)
+g8s worker --once                          # một attempt
+g8s worker --once=false --concurrency 4    # tháo song song (cần git checkout)
 
-# 3. Đọc kết quả đã niêm phong
-g8s get <task-id> --json
+# 3. Đánh thức khi xong — không polling
+g8s watch --task <task-id> --milestone worker-complete
+g8s watch --failed                         # exit khi BẤT KỲ task chạm trạng thái terminal
+
+# 4. Đọc kết quả đã niêm phong
+g8s get <task-id>
 ```
 
-**Ghi có ủy quyền** cần receipt do Brain cấp:
+Ghi ghi-delegation cần receipt single-use (chú ý `--ttl`: mặc định ngắn có chủ đích — hãy cấp đủ cho thời lượng task):
 
 ```bash
-g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 600
-g8s submit --role test-runner --permission workspace_write \
+g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600
+AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --role test-runner --permission workspace_write \
   --receipt-id <receipt-id> --add-dir ./tests \
-  --prompt "Sinh pytest test. receipt_id=<receipt-id> issuer=brain-orchestrator allowed_paths=./tests/*.py"
+  --prompt "Generate pytest tests. receipt_id=<receipt-id> allowed_paths=./tests/*.py"
+```
+
+Chạy tự-audit, reflex gate và vệ sinh:
+
+```bash
+g8s eval run --provider agy      # bộ probe đối kháng
+g8s reflex triage --summary "raise test deadline" --files "internal/runtime/verify_test.go"
+g8s autopilot tick               # bảo trì stateless: doctor, retention, hygiene
+g8s cleanup --dry-run            # ghost process, session mồ côi, branch rác
 ```
 
 ## Skills
 
-g8s ship kèm **skill vận hành chính nó** — xem [`skills/`](skills/):
+g8s ship chính kỷ luật vận hành của nó dưới dạng agent skill — xem [`skills/README.md`](skills/README.md) và [`manifest.json`](skills/manifest.json):
 
 | Skill | Mục đích |
 |---|---|
-| [`g8s-supervisor`](skills/g8s-supervisor/SKILL.md) | Hiến chương supervisor/worker: dispatch qua admission gate, fan-out đa worker (1 task → N worker, đa vai trò), nghiệm thu bằng bằng chứng, báo cáo upstream không lộ dữ liệu project. Kèm security-redaction playbook. |
+| [`g8s-supervisor`](skills/g8s-supervisor/SKILL.md) | Hiến chương supervisor/worker: dispatch có admission-gate, fan-out đa worker, nghiệm thu theo bằng chứng, playbook xán lọc dữ liệu nhạy cảm khi báo cáo. |
 
-Cài đặt: copy (hoặc symlink) vào thư mục skill của platform — hướng dẫn đầy đủ
-và [`manifest.json`](skills/manifest.json) nằm ở [`skills/README.md`](skills/README.md).
-
-## Tích hợp MCP
-
-Kết nối Claude Desktop, Cursor, Codex, Windsurf qua stdio JSON-RPC (11 tools):
-
-```json
-{
-  "mcpServers": {
-    "g8s": { "command": "/usr/local/bin/g8s", "args": ["mcp"] }
-  }
-}
-```
+Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn dùng.
 
 ## Non-Goals
 
 | Lĩnh vực | Không làm | Lý do |
 |------|----------|-----------|
-| Điều phối container | Kubernetes/nomad, service mesh | g8s là *process* harness — chạy g8s worker TRÊN k8s/nomad. |
-| Quản lý secret | Vault/AWS/GCP Secret Manager | Secret không bao giờ vào sandbox worker. |
-| Đa thuê bao | RBAC, namespace, SaaS | CLI single-tenant; mỗi tenant một binary + state dir. |
-| GUI Dashboard | Web UI | CLI-first; Evidence Lake + `g8s status` là bề mặt quan sát. |
-| Worker SDK | SDK Go/Rust/Python | Worker là bất kỳ CLI nào nói AIC protocol. |
-| Host model | Inference, model registry | g8s ủy quyền cho CLI ngoài. |
+| **Điều phối container** | Kubernetes/nomad, service mesh | g8s là harness *tiến trình* — chạy g8s worker TRÊN k8s/nomad, không phải trong chúng. |
+| **Quản lý secret** | Vault/AWS/GCP Secret Manager | Credential không bao giờ vào sandbox của worker; tiêm qua môi trường trước khi g8s start. |
+| **Multi-tenancy** | RBAC, namespace, SaaS audit | CLI single-tenant; một binary + state dir mỗi tenant ([ADR-0028](docs/decisions/0028-multi-project-tenancy.md)). |
+| **Dashboard GUI** | Web UI cho task/receipt | CLI-first; Evidence Lake + `g8s status` là bề mặt quan sát. |
+| **Worker SDK** | SDK Go/Rust/Python | Worker là bất kỳ CLI nào nói giao thức AIC. |
+| **Hosting model** | Inference, model registry | g8s ủy thác cho CLI ngoài — hosting là việc của họ. |
 
-## Kiểm thử & Cổng chất lượng
+## Tài liệu
 
-Mọi commit phải qua **dual-pass CI**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race` (race detector) — **45 packages, 988 test functions**, zero race warning, zero CGO dependency. Mọi push phải qua **12 cổng pre-push** (doc-contract, layer ownership, version sync, dual-pass, dogfooding roundtrip, cross-platform build).
+| Theo nhu cầu | Ở đâu |
+|---|---|
+| Từ 0 đến task ủy quyền đầu tiên | [docs/quickstart.md](docs/quickstart.md) |
+| Ma trận lệnh đầy đủ & runbook | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
+| Cấu hình & vòng đời service | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
+| Bảo mật & kiểm chứng | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
+| Tích hợp provider | [docs/integrations/](docs/integrations/) |
+| Decision records | [docs/decisions/](docs/decisions/): ADR-0001…0030 |
+| Hiến pháp & delta kỹ thuật | [spec/constitution.md](spec/constitution.md), [spec/openspec/](spec/openspec/) |
+| Sổ cái chiến dịch & lịch sử | [plans/](plans/), [docs/history/](docs/history/) |
+| Lịch sử release | [CHANGELOG.md](CHANGELOG.md) |
+
+*Cấu trúc dự án đầy đủ (tự render từ filesystem, có gate chống drift): xem [README.md](README.md) → Project Structure.*
+
+## Chất lượng
+
+Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race`. Push phải qua hệ gate pre-push: doc-contract sync, layer ownership, version sync, coverage ratchet, dogfood roundtrip, build đa nền tảng, root hygiene.
 
 ## Lộ trình
 
 | Mốc | Nội dung chính | Trạng thái |
 |--------|-----------|:---:|
-| v0.10.0 (2026-09-24) | Jev AI reflex sensor tách rời, DiffDistiller & Verifier, 11 MCP tools | **Done** |
-| v0.11.0 (2026-09-26) | Kiến trúc reflex phân tán (L1/L3/L6), telemetry vòng kín, eval harness, dialectic FSM | **Done** |
-| v0.12.0 (2026-09-27) | **Dispatch đồng thời, cô lập sessions, cổng thăng cấp tri thức, Context Broker, DoR floor, eval live** | **Done** |
-| v1.0.0 (2026-12-15) | GA: ổn định homelab 6 tháng, security signoff doanh nghiệp, fleet mTLS | Kế hoạch |
-
-## Cấu trúc dự án
-
-```
-g8s/
-├── cmd/g8s/           # CLI entrypoint (stdlib flag, không cobra)
-├── internal/          # Toàn bộ packages (private, không import được từ ngoài)
-│   ├── controlplane/  # SQLite WAL task queue (CAS lease, lineage, sessions registry)
-│   ├── worker/        # Supervisor, spawn, concurrent drain, telemetry ingestion
-│   ├── dispatch/      # Provider CLI wrapper, argv builder, sanitizer
-│   ├── reflex/        # Jev sensor System-1 + policy deterministic (L1/L3)
-│   ├── context/       # Context Broker: lắp ContextPacket có giới hạn
-│   ├── memory/        # Memory lifecycle: FSM, promotion gate, tombstones
-│   ├── harness/       # Role/permission gates + bộ probe đối kháng
-│   ├── brief/         # Brief contract, DoR floor, skill routing
-│   ├── receipt/       # Zero-trust write receipts
-│   ├── vault/         # Knowledge vault (DELTA-11)
-│   ├── telemetry/     # Ingestion vòng kín + negative patterns
-│   ├── cleanup/       # Dọn ghost/orphan/scratch theo vòng đời
-│   ├── server/        # HTTP API daemon (loopback + bearer auth)
-│   └── ...            # orchestrator, diffintel, review, dialectic, watch
-├── skills/            # Agent skills vendored (hiến chương g8s-supervisor + manifest)
-├── packaging/         # Windows NSIS/WiX, Chocolatey, winget
-├── docs/              # Hướng dẫn, ADRs, specs, bảo mật
-├── plans/             # Sổ cái chiến dịch (đánh dấu session-type)
-├── spec/openspec/     # OpenSpec deltas (DELTA-01..22)
-├── schemas/           # JSON schemas (task, receipt, result)
-├── tools/             # Scripts hỗ trợ CI (pre-push gates, release)
-└── .github/workflows/ # CI/CD pipelines
-```
-
-## Tài liệu
-
-| Theo nhu cầu | Vị trí |
-|---|---|
-| Từ không đến task đầu tiên | [docs/quickstart.md](docs/quickstart.md) |
-| Toàn bộ lệnh & runbook | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
-| Cấu hình & vòng đời service | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
-| Bảo mật & xác minh | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
-| Tích hợp provider | [docs/integrations/](docs/integrations/) |
-| Tham chiếu MCP tools | [docs/user-guide/mcp-tools.md](docs/user-guide/mcp-tools.md) |
-| Quy tắc quản trị | [spec/constitution.md](spec/constitution.md) |
-| Đặc tả kỹ thuật | [spec/openspec/](spec/openspec/) — DELTA-01..22 |
-| Quyết định kiến trúc | [docs/decisions/](docs/decisions/) — ADR-0001…0023 |
-| Lịch sử phát hành | [CHANGELOG.md](CHANGELOG.md) |
+| v0.13.0 (2026-09-30) | Queue đa provider, sóng hardening B–E, tín hiệu event-driven (`signals/tasks.jsonl` + `watch --failed`), release gate 7–8 | **Xong** |
+| v0.14.0 (mục tiêu) | Vòng AI-factory: auto-retry có ngân sách, task router deterministic, vòng tự-đóng không người đầu tiên — [SCORECARD](plans/261002-factory/SCORECARD.md) | **Đang làm** |
+| v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép
 
-MIT — xem [LICENSE](LICENSE).
+Phân phối theo **MIT License**. Copyright (c) 2026 TamLD. Xem [LICENSE](LICENSE). Các biến thể: [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE-2.0](LICENSE-APACHE-2.0), [LICENSE-DISCLAIMER.md](LICENSE-DISCLAIMER.md).

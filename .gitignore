@@ -121,3 +121,15 @@ coverage.out
 *.rpm
 *.apk
 checksums.txt
+
+# Session-local drain logs and AI-tool scratch state (2026-10-02 root hygiene)
+.g8s-drain-*/
+.heartbeat/
+.omo/
+.sisyphus/
+.superpowers/
+.code-review-graph/
+go.work.bak
+g8s.exe
+supervisor.test
+~/
