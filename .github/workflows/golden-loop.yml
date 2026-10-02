@@ -4,10 +4,7 @@ on:
     - cron: '0 6 * * *'  # daily at 6am UTC
   workflow_dispatch:    # manual trigger
   pull_request:
-    paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - '.github/workflows/golden-loop.yml'
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -21,13 +18,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Golden-Loop E2E skipped (not applicable)"
+            exit 0
+          fi
+
       - uses: actions/setup-go@v7
+        if: env.CI_LANE != 'docs'
         with:
           go-version: '1.26'
       - name: Build g8s from this exact commit
+        if: env.CI_LANE != 'docs'
         run: go build -o /tmp/g8s ./cmd/g8s
       - name: Install latest g8s release
+        if: env.CI_LANE != 'docs'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -35,10 +60,13 @@ jobs:
           URL="https://github.com/tamld/g8s/releases/download/${VERSION}/g8s_${VERSION#v}_linux_amd64.tar.gz"
           curl -sSL "$URL" | tar xz -C /tmp || true
       - name: Submit a fixed task via latest release
+        if: env.CI_LANE != 'docs'
         run: /tmp/g8s submit --role scout --permission read_only --prompt "find ./internal/orchestrator/agy_worker.go" --idempotency-key golden-$(date +%s)
       - name: Run worker once
+        if: env.CI_LANE != 'docs'
         run: /tmp/g8s worker --once || true
       - name: Verify receipt state is FAILED if stdout is error envelope
+        if: env.CI_LANE != 'docs'
         run: |
           TASK_ID=$(/tmp/g8s tasks --state SUCCEEDED --limit 1 --json | jq -r '.[0].id // empty' 2>/dev/null || true)
           if [ -n "$TASK_ID" ]; then

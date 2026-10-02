@@ -76,7 +76,6 @@ jobs:
   quality:
     name: Quality Gate
     needs: [path-scope]
-    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -84,6 +83,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
 
       - name: Setup Go (1.25 for golangci-lint compatibility with go.mod)
         uses: actions/setup-go@v7
@@ -102,6 +116,7 @@ jobs:
           key: ${{ runner.os }}-gomod-${{ hashFiles('go.sum') }}
 
       - name: gofumpt strict
+        if: env.CI_LANE != 'docs'
         run: |
           unformatted=$(gofumpt -l . 2>/dev/null | grep -v '^reference/' || true)
           echo "gofumpt found: '$unformatted'"
@@ -112,12 +127,15 @@ jobs:
           fi
 
       - name: Layer-ownership gate (DEBT-34)
+        if: env.CI_LANE != 'docs'
         run: bash tools/ci_layer_check.sh
 
       - name: Layer-ownership self-test
+        if: env.CI_LANE != 'docs'
         run: bash tools/ci_layer_check_test.sh
 
       - name: go vet
+        if: env.CI_LANE != 'docs'
         run: go vet ./...
         env:
           CGO_ENABLED: '0'
@@ -126,6 +144,7 @@ jobs:
         run: golangci-lint run
 
       - name: Cyclomatic complexity <= 15
+        if: env.CI_LANE != 'docs'
         run: |
           high=$(gocognit -over 15 ./... 2>/dev/null || true)
           if [ -n "$high" ]; then
@@ -158,7 +177,16 @@ jobs:
         shell: bash
         run: bash tools/claims_check.sh
 
+      - name: Link integrity check
+        shell: bash
+        run: bash tools/ci_link_integrity.sh
+
+      - name: Version sync check
+        shell: bash
+        run: bash tools/ci_version_sync_check.sh
+
       - name: No debug prints in library code
+        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           debug_hits=$(grep -rn 'fmt\.Println\|console\.log' --include='*.go' . 2>/dev/null | grep -v '_test.go' | grep -v 'cmd/g8s/' | grep -v '//.*fmt\.Println' || true)
@@ -168,7 +196,16 @@ jobs:
             # warning-only, not blocking — but visible in PR
           fi
 
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: go test/race/fuzz/ratchet skipped (not applicable)"
+            exit 0
+          fi
+
       - name: Coverage threshold >= 80%
+        if: env.CI_LANE != 'docs'
         env:
           CGO_ENABLED: '1'
         shell: bash
@@ -220,6 +257,7 @@ jobs:
           }
 
       - name: Coverage Ratchet
+        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           read avg count < /tmp/cov_result.txt
@@ -249,6 +287,7 @@ jobs:
           fi
 
       - name: Dogfooding CI Gate (Brief Issue & Consume Roundtrip)
+        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           DB_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-$$.db"
@@ -317,9 +356,11 @@ jobs:
           echo "Dogfooding CI gate passed: Brief $BRIEF_ID and Dispatched $DISPATCH_ID verified consumed."
 
       - name: Vulnerability scan (govulncheck)
+        if: env.CI_LANE != 'docs'
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
 
       - name: Native fuzzing (external-input parsers)
+        if: env.CI_LANE != 'docs'
         # Note: deeper fuzzing runs are manual/quarterly.
         shell: bash
         run: |
@@ -329,7 +370,7 @@ jobs:
           go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 30s ./internal/dispatch/
 
       - name: Upload coverage artifact
-        if: always()
+        if: always() && env.CI_LANE != 'docs'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
@@ -341,19 +382,43 @@ jobs:
     # remain Linux-only by design).
     name: Quality Gate (windows-latest)
     needs: [path-scope]
-    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Windows go vet/test skipped (not applicable)"
+            exit 0
+          fi
 
       - name: Setup Go
+        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
       - name: Cache modules
+        if: env.CI_LANE != 'docs'
         uses: actions/cache@v6
         with:
           path: |
@@ -364,26 +429,52 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: go vet (Windows)
+        if: env.CI_LANE != 'docs'
         run: go vet ./...
 
       - name: go test (Windows, CGO=0)
+        if: env.CI_LANE != 'docs'
         run: go test -count=1 ./...
 
   cross-platform:
     name: Cross-Platform Build
     needs: [path-scope]
-    if: needs.path-scope.outputs.code == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Cross-Platform Build skipped (not applicable)"
+            exit 0
+          fi
 
       - name: Setup Go
+        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
       - name: Verify Cross-Platform Compilation
+        if: env.CI_LANE != 'docs'
         run: |
           GOOS=linux go build ./...
           GOOS=darwin go build ./...

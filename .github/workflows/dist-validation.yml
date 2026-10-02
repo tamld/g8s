@@ -4,14 +4,6 @@ name: Dist Validation
 on:
   pull_request:
     branches: [ main ]
-    paths:
-      - '.goreleaser.yaml'
-      - '.github/workflows/dist-validation.yml'
-      - 'tools/release_matrix_check*'
-      - 'cmd/**'
-      - 'internal/**'
-      - 'go.mod'
-      - 'go.sum'
   workflow_dispatch:
 
 permissions:
@@ -31,22 +23,47 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: GoReleaser Check & Snapshot skipped (not applicable)"
+            exit 0
+          fi
+
       - name: Setup Go
+        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
       - name: Run GoReleaser Check
+        if: env.CI_LANE != 'docs'
         uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: check
 
       - name: Run GoReleaser Snapshot Build
+        if: env.CI_LANE != 'docs'
         uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: release --snapshot --clean --skip=publish,sign,nfpm
 
       - name: Validate Release Matrix
+        if: env.CI_LANE != 'docs'
         run: bash tools/release_matrix_check.sh
