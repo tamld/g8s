@@ -1257,6 +1257,72 @@ func insertNewTask(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, reque
 	return inserted, nil
 }
 
+// ErrSubmitRateLimited is returned when an actor exceeds the hourly submission rate limit.
+type ErrSubmitRateLimited struct {
+	Actor  string
+	Limit  int
+	Window time.Duration
+}
+
+func (e ErrSubmitRateLimited) Error() string {
+	return fmt.Sprintf("submit rate limit exceeded: actor=%s limit=%d window=%s", e.Actor, e.Limit, e.Window)
+}
+
+func (e ErrSubmitRateLimited) Is(target error) bool {
+	if _, ok := target.(*ErrSubmitRateLimited); ok {
+		return true
+	}
+	if _, ok := target.(ErrSubmitRateLimited); ok {
+		return true
+	}
+	return false
+}
+
+var (
+	submitRateLimitMu      sync.RWMutex
+	submitRateLimitPerHour = 0
+)
+
+// SetSubmitRateLimitPerHour sets the default hourly submission rate limit per actor (0 = unlimited).
+func SetSubmitRateLimitPerHour(limit int) {
+	submitRateLimitMu.Lock()
+	defer submitRateLimitMu.Unlock()
+	submitRateLimitPerHour = limit
+}
+
+// GetSubmitRateLimitPerHour returns the default hourly submission rate limit per actor.
+func GetSubmitRateLimitPerHour() int {
+	submitRateLimitMu.RLock()
+	defer submitRateLimitMu.RUnlock()
+	return submitRateLimitPerHour
+}
+
+// SetSubmitRateLimitPerHour sets the hourly submission rate limit per actor for this Store (0 = unlimited).
+func (s *Store) SetSubmitRateLimitPerHour(limit int) {
+	SetSubmitRateLimitPerHour(limit)
+}
+
+func extractActorFromReq(req SubmitTaskRequest, requestJSON string) string {
+	if len(requestJSON) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(requestJSON), &m); err == nil {
+			if a, ok := m["actor"].(string); ok && strings.TrimSpace(a) != "" {
+				return strings.TrimSpace(a)
+			}
+		}
+	}
+	if req.OrchestratorID != nil && strings.TrimSpace(*req.OrchestratorID) != "" {
+		return strings.TrimSpace(*req.OrchestratorID)
+	}
+	if req.WorkerName != nil && strings.TrimSpace(*req.WorkerName) != "" {
+		return strings.TrimSpace(*req.WorkerName)
+	}
+	if req.SessionID != nil && strings.TrimSpace(*req.SessionID) != "" {
+		return strings.TrimSpace(*req.SessionID)
+	}
+	return "operator"
+}
+
 // SubmitTask validates and inserts a QUEUED task, deduplicating on
 // idempotency key plus request hash plus parent lineage.
 func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, error) {
@@ -1282,6 +1348,29 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	}
 	if task != nil {
 		return task, tx.Commit()
+	}
+
+	// Rate limit check per actor inside submit transaction (#485)
+	limit := GetSubmitRateLimitPerHour()
+	if limit > 0 {
+		actor := extractActorFromReq(req, requestJSON)
+		windowStart := now - 3600.0
+		var count int
+		err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(1) FROM tasks
+			WHERE coalesce(json_extract(request_json, '$.actor'), orchestrator_id, worker_name, session_id, 'operator') = ?
+			  AND created_at >= ?`, actor, windowStart).Scan(&count)
+		if err != nil {
+			return nil, fmt.Errorf("check submit rate limit: %w", err)
+		}
+		if count >= limit {
+			fmt.Fprintf(os.Stderr, "submit rate limit exceeded: actor=%s limit=%d window=%s\n", actor, limit, time.Hour)
+			return nil, &ErrSubmitRateLimited{
+				Actor:  actor,
+				Limit:  limit,
+				Window: time.Hour,
+			}
+		}
 	}
 
 	inserted, err := insertNewTask(ctx, tx, req, requestJSON, requestHash, now)
@@ -1759,7 +1848,20 @@ func (s *Store) CheckSessionQuota(ctx context.Context, sessionID string) (bool, 
 	if active >= quota.MaxConcurrentTasks {
 		return false, nil
 	}
-	// TODO(OWNER=tamld): Check hourly rate limit (requires task creation timestamps per session)
+	if quota.MaxTasksPerHour > 0 {
+		now := float64(s.clock().UnixNano()) / 1e9
+		windowStart := now - 3600.0
+		var count int
+		err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(1) FROM tasks
+			WHERE session_id = ? AND created_at >= ?`, sessionID, windowStart).Scan(&count)
+		if err != nil {
+			return false, fmt.Errorf("check session hourly quota: %w", err)
+		}
+		if count >= quota.MaxTasksPerHour {
+			return false, nil
+		}
+	}
 	return true, nil
 }
 
