@@ -95,8 +95,10 @@ state dir; no cross-instance resurrection).
   budget accounting, resubmit primitive) → cmd/g8s (tick job + resubmit
   command + settings keys `auto_retry_enabled`,
   `auto_retry_max_per_task`, `auto_retry_max_per_hour`).
-- directives.md gains D-08 ("a scheduled check that retries outside its
-  budget is a bug") alongside the D-07 event-driven directive from #481.
+- directives.md gains a directive row ("a scheduled check that retries
+  outside its budget is a bug") alongside the D-07 event-driven
+  directive from #481; it takes D-09 — D-08 was taken by the #480
+  mutation-cadence clock on 2026-10-02.
 - Non-goals (revisit triggers recorded): no daemon, no webhook, no
   cross-host retry, no retry of CANCELLED/NEEDS_INFO. Multi-host
   (ADR-0027 Trigger A) reopens the design.
