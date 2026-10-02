@@ -399,6 +399,252 @@ else
     fi
 fi
 
+# Case 5: Branch guard — branch != main aborts with branch-guard message, no version bump
+echo "Testing: (5) Branch guard: branch != main aborts with branch-guard message, no version bump"
+FIXTURE_5="$TEST_TMP/fixture_5"
+setup_fixture "$FIXTURE_5" "0.12.0"
+(
+    cd "$FIXTURE_5"
+    git checkout -q -b feat/my-feature
+)
+
+output_5=""
+exit_code_5=0
+output_5=$( (cd "$FIXTURE_5" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_5=$?
+
+if [ "$exit_code_5" -eq 0 ]; then
+    echo "  FAIL: expected non-zero exit code when branch != main, got 0"
+    echo "$output_5" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_5" | grep -iq "run from an up-to-date main"; then
+    echo "  FAIL: output missing expected branch guard message ('run from an up-to-date main')"
+    echo "$output_5" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_5" | grep -iq "branch"; then
+    echo "  FAIL: output missing mention of branch guard"
+    echo "$output_5" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify version.go was NOT bumped
+    actual_ver_5=$(grep 'Version' "$FIXTURE_5/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_5" != "0.12.0" ]; then
+        echo "  FAIL: version.go was bumped to '$actual_ver_5', expected unchanged '0.12.0'"
+        FAILURES=$((FAILURES + 1))
+    elif [ -f "$FIXTURE_5/CHANGELOG.md" ] && grep -q "0.13.0" "$FIXTURE_5/CHANGELOG.md"; then
+        echo "  FAIL: CHANGELOG.md was updated despite branch guard abort"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_5" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1); then
+        echo "  FAIL: tag v0.13.0 was created despite branch guard abort"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit $exit_code_5, branch guard aborted, no version bump)"
+    fi
+fi
+
+# Case 6: Branch guard — local main behind origin aborts with up-to-date message
+echo "Testing: (6) Branch guard: local main behind origin aborts with up-to-date message"
+FIXTURE_6="$TEST_TMP/fixture_6"
+setup_fixture "$FIXTURE_6" "0.12.0"
+
+# Advance origin using a second fixture repo
+FIXTURE_6_PUSHER="$TEST_TMP/fixture_6_pusher"
+git clone -q "$TEST_TMP/remotes/fixture_6.git" "$FIXTURE_6_PUSHER"
+(
+    cd "$FIXTURE_6_PUSHER"
+    git config user.email "test@example.com"
+    git config user.name "Test User"
+    echo "marker: remote ahead" > origin_marker.txt
+    git add origin_marker.txt
+    git commit -q -m "chore: origin advance commit"
+    git push -q origin main
+)
+
+output_6=""
+exit_code_6=0
+output_6=$( (cd "$FIXTURE_6" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_6=$?
+
+if [ "$exit_code_6" -eq 0 ]; then
+    echo "  FAIL: expected non-zero exit code when local main is behind origin, got 0"
+    echo "$output_6" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_6" | grep -iq "run from an up-to-date main"; then
+    echo "  FAIL: output missing expected up-to-date message ('run from an up-to-date main')"
+    echo "$output_6" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify version.go was NOT bumped
+    actual_ver_6=$(grep 'Version' "$FIXTURE_6/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_6" != "0.12.0" ]; then
+        echo "  FAIL: version.go was bumped to '$actual_ver_6', expected unchanged '0.12.0'"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_6" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1); then
+        echo "  FAIL: tag v0.13.0 was created despite up-to-date guard abort"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit $exit_code_6, up-to-date guard aborted, no version bump)"
+    fi
+fi
+
+# Case 7: Pre-tag gate — present and failing aborts before version bump
+echo "Testing: (7) Pre-tag gate: present and failing aborts before version bump"
+FIXTURE_7="$TEST_TMP/fixture_7"
+setup_fixture "$FIXTURE_7" "0.12.0"
+
+cat > "$FIXTURE_7/tools/pre_tag.sh" << 'EOF'
+#!/usr/bin/env bash
+echo "pre-tag gate failure: simulated check failure" >&2
+exit 1
+EOF
+chmod +x "$FIXTURE_7/tools/pre_tag.sh"
+
+(
+    cd "$FIXTURE_7"
+    git add tools/pre_tag.sh
+    git commit -q -m "chore: add failing pre_tag.sh"
+    git push -q origin main
+)
+
+output_7=""
+exit_code_7=0
+output_7=$( (cd "$FIXTURE_7" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_7=$?
+
+if [ "$exit_code_7" -eq 0 ]; then
+    echo "  FAIL: expected non-zero exit code when pre_tag.sh fails, got 0"
+    echo "$output_7" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_7" | grep -iq "Pre-tag gates failed"; then
+    echo "  FAIL: output missing 'Pre-tag gates failed'"
+    echo "$output_7" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify version.go was NOT bumped
+    actual_ver_7=$(grep 'Version' "$FIXTURE_7/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_7" != "0.12.0" ]; then
+        echo "  FAIL: version.go was bumped to '$actual_ver_7', expected unchanged '0.12.0'"
+        FAILURES=$((FAILURES + 1))
+    elif [ -f "$FIXTURE_7/CHANGELOG.md" ] && grep -q "0.13.0" "$FIXTURE_7/CHANGELOG.md"; then
+        echo "  FAIL: CHANGELOG.md was updated despite pre-tag gate abort"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_7" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1); then
+        echo "  FAIL: tag v0.13.0 was created despite pre-tag gate abort"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit $exit_code_7, pre-tag gate failure aborted before version bump)"
+    fi
+fi
+
+# Case 8: Pre-tag gate — missing pre_tag.sh warns and proceeds
+echo "Testing: (8) Pre-tag gate: missing pre_tag.sh emits warning and proceeds with release"
+FIXTURE_8="$TEST_TMP/fixture_8"
+setup_fixture "$FIXTURE_8" "0.12.0"
+# Notice: setup_fixture does NOT create tools/pre_tag.sh, so it is missing
+
+output_8=""
+exit_code_8=0
+output_8=$( (cd "$FIXTURE_8" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_8=$?
+
+if [ "$exit_code_8" -ne 0 ]; then
+    echo "  FAIL: expected exit code 0 when pre_tag.sh is missing, got $exit_code_8"
+    echo "$output_8" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_8" | grep -iq "warning.*pre_tag\.sh.*not found"; then
+    echo "  FAIL: output missing warning about missing pre_tag.sh"
+    echo "$output_8" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify version.go WAS bumped
+    actual_ver_8=$(grep 'Version' "$FIXTURE_8/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_8" != "0.13.0" ]; then
+        echo "  FAIL: version.go has '$actual_ver_8', expected '0.13.0'"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit 0, warning emitted, release proceeded)"
+    fi
+fi
+
+# Case 9: Pre-tag gate — present and passing succeeds
+echo "Testing: (9) Pre-tag gate: present and passing succeeds and bumps version"
+FIXTURE_9="$TEST_TMP/fixture_9"
+setup_fixture "$FIXTURE_9" "0.12.0"
+
+cat > "$FIXTURE_9/tools/pre_tag.sh" << 'EOF'
+#!/usr/bin/env bash
+echo "pre-tag gate: all checks pass"
+exit 0
+EOF
+chmod +x "$FIXTURE_9/tools/pre_tag.sh"
+
+(
+    cd "$FIXTURE_9"
+    git add tools/pre_tag.sh
+    git commit -q -m "chore: add passing pre_tag.sh"
+    git push -q origin main
+)
+
+output_9=""
+exit_code_9=0
+output_9=$( (cd "$FIXTURE_9" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_9=$?
+
+if [ "$exit_code_9" -ne 0 ]; then
+    echo "  FAIL: expected exit code 0 when pre_tag.sh succeeds, got $exit_code_9"
+    echo "$output_9" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_9" | grep -iq "Pre-tag gates passed"; then
+    echo "  FAIL: output missing 'Pre-tag gates passed'"
+    echo "$output_9" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    actual_ver_9=$(grep 'Version' "$FIXTURE_9/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_9" != "0.13.0" ]; then
+        echo "  FAIL: version.go has '$actual_ver_9', expected '0.13.0'"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit 0, pre-tag gate passed, release succeeded)"
+    fi
+fi
+
+# Case 10: Dry-run prints would-run gates when pre_tag.sh is present
+echo "Testing: (10) Dry-run prints would-run gates when pre_tag.sh is present"
+FIXTURE_10="$TEST_TMP/fixture_10"
+setup_fixture "$FIXTURE_10" "0.12.0"
+
+cat > "$FIXTURE_10/tools/pre_tag.sh" << 'EOF'
+#!/usr/bin/env bash
+echo "pre-tag gate: all checks pass"
+exit 0
+EOF
+chmod +x "$FIXTURE_10/tools/pre_tag.sh"
+
+(
+    cd "$FIXTURE_10"
+    git add tools/pre_tag.sh
+    git commit -q -m "chore: add pre_tag.sh"
+    git push -q origin main
+)
+
+output_10=""
+exit_code_10=0
+output_10=$( (cd "$FIXTURE_10" && bash tools/release.sh 0.13.0 --dry-run) 2>&1 ) || exit_code_10=$?
+
+if [ "$exit_code_10" -ne 0 ]; then
+    echo "  FAIL: expected exit code 0 in dry-run, got $exit_code_10"
+    echo "$output_10" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_10" | grep -iq "Would run pre-tag gates"; then
+    echo "  FAIL: dry-run output did not mention 'Would run pre-tag gates'"
+    echo "$output_10" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify files unchanged
+    actual_ver_10=$(grep 'Version' "$FIXTURE_10/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_10" != "0.12.0" ]; then
+        echo "  FAIL: dry-run modified version.go to '$actual_ver_10'"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit 0, dry-run printed would-run gates, files unchanged)"
+    fi
+fi
+
 # --- summary --------------------------------------------------------------
 
 if [ "$FAILURES" -gt 0 ]; then
