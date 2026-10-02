@@ -107,3 +107,33 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
   misleading "correct access rights"). Re-add manually for sync sessions.
 - Concurrent writers on main: `git pull --rebase` + retry loop; a rebase
   rewrites the release commit SHA after tagging — same tree, note it.
+
+## 11. Two supervisors, one checkout (#481 harvest, 2026-10-02)
+
+- A handoff session that "closed" may still be alive and executing its
+  queue: the #481 harvest saw a foreign checkout+commit+amend land 64s
+  after the successor's own branch creation, plus an `index.lock`
+  collision mid-command. Evidence is in `git reflog --date=iso`.
+- Deconfliction that worked: verify foreign content against your own
+  verification (worktree doubles were byte-identical), then LANE-SPLIT
+  (yield the slice the other actor already committed, stake yours by
+  pushing first), never `rm .git/index.lock` while the other actor may
+  hold it — poll up to 60s. A foreign pushed branch WITHOUT a PR: open
+  the PR from it yourself (duplicate-PR risk is benign; a blocked
+  pipeline is not).
+- Workers double-write deliverables (worktree AND main checkout,
+  byte-identical here — #448 non-determinism still live in the agy
+  transport). Treat the result-envelope worktree dir as canonical; diff
+  before trusting either copy.
+
+## 12. Keyword auto-close fires on ANY main push
+
+- Any commit reaching the default branch whose message contains
+  keyword+#N closes the issue — including docs commits ABOUT an issue
+  ("fix #481 briefs" in a plans commit closed #481 before the
+  implementation existed; the #480 "Part of, not Closes" lesson has an
+  inverse now).
+- Rule: non-fix commits reference issues without an adjacent keyword
+  ("issue #481 briefs"). After every push to main, expect exactly the
+  closes you intended. Recovery when one fires early: reopen → evidence
+  comment → `gh issue close --reason completed`.
