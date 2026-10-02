@@ -1,7 +1,9 @@
 # ADR-0029: Budgeted Auto-Retry of Failed Tasks (#485 Stage 4)
 
-- **Status**: Proposed (2026-10-02) — three decision points (D1–D3) await
-  operator ratification before any code lands.
+- **Status**: Accepted (2026-10-02) — operator ratified D1–D3 as
+  recommended via the factory-program kickoff directive ("Duyệt em triển
+  khai ... chứng minh được qua ground truth"); implementation is Wave F
+  of plans/261002-factory/.
 - **Issue**: #485 (autopilot staged path, stage 4). Prerequisites met:
   submit throttle ✓ (#488), queue perf baseline ✓ (#487), stage-3 ticks
   ✓ (#492), event-driven signal surface — in flight (#481).

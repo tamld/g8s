@@ -1,8 +1,10 @@
 # ADR-0028: Multi-Project Tenancy on One Host (#465)
 
-- **Status**: Proposed (2026-10-02) — decision points D1–D4 await
-  operator ratification. Landlogged behind the P0/P1 fixes that made
-  the interim posture safe (#468, #491).
+- **Status**: Accepted (2026-10-02) — operator ratified D1–D4 as
+  recommended via the factory-program kickoff directive ("Duyệt em triển
+  khai ... chứng minh được qua ground truth"). The normative
+  user-guide tenancy section is the follow-up slice; the containment
+  itself is already live (#468/#491).
 - **Issue**: #465 (2+ concurrent sessions on one host killed each
   other's workers and reaped each other's worktrees). RCA red-teamed in
   `plans/260929-465-multi-tenant/plan.md`.
