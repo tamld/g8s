@@ -12,7 +12,7 @@ recorded live round. **A slogan without a row here is a bug.**
 | S-4 | Routing benchmark: Jev vs deterministic | M3 delta recorded | n/a | **SEEDED** #503: eval category `task_routing`, 6+ fixtures, mocked-Jev comparison, CI-runnable | internal/harness/probe/routing_suite.go; real-Jev M3 delta = later wave |
 | S-5 | Submit-time routing integration | `--route auto` lands, default byte-identical | 0 | Wave G | (pending) |
 | S-6 | Lane router in code (ADR-0024 S6-3) | table-driven lanes + Jev-suggest telemetry | 0 | Wave G | (pending) |
-| S-10 | CI lanes: build vs docs (ADR-0031) | docs PR clears gates in ~2-3 min | ~12-15 min | Wave F6 in flight | (pending) |
+| S-10 | CI lanes: build vs docs (ADR-0031) | docs PR clears gates in ~2-3 min | ~12-15 min | **LANDED** #506 (build lane proved on itself 15/15); THIS row is the first live docs-lane probe | PR #506 + this docs-only PR timing |
 | S-7 | Verifier-class registry | classes with cited catches | 0 | Wave H | (pending) |
 | S-8 | **First unattended closed round (docs-class)** | **M1: 0→1** | **0** | Wave H | (pending) |
 | S-9 | Retrospective-as-task | lesson cites verifiable catch | 0 | Wave I | (pending) |
