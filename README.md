@@ -236,6 +236,7 @@ g8s/
 │   ├── reflex/ — implements a System 1 non-autoregressive decision gate
 │   ├── registry/ — provides a cross-platform wrapper around Windows registry operations
 │   ├── review/ — (no package doc — add one)
+│   ├── routing/ — (no package doc — add one)
 │   ├── runtime/ — provides runtime verification utilities for executable identity
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
 │   ├── service/ — manages the g8s background worker as an OS daemon
