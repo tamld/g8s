@@ -878,11 +878,18 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		}
 	}
 
-	// 8. Scratch branches (#327) — pattern-matched worker litter with
+	// 8. Scratch branches (#327, #476 P2.7) — pattern-matched worker litter with
 	// verify-tag-delete preservation of unique unmerged tips.
-	// Opt-in only: never runs unless --scratch (ScratchEnabled) was passed,
-	// because it deletes unmerged branches.
-	if targetSet[TargetScratchBranch] && cfg.ScratchEnabled {
+	// Selecting the scratch-branch target enables the sweep even if --scratch was
+	// not passed; general sweeps without explicit targets still require --scratch.
+	scratchEnabled := cfg.ScratchEnabled
+	for _, t := range cfg.Targets {
+		if t == TargetScratchBranch {
+			scratchEnabled = true
+			break
+		}
+	}
+	if targetSet[TargetScratchBranch] && scratchEnabled {
 		items, err := sweepScratchBranches(ctx, cfg)
 		if err != nil {
 			_, _ = fmt.Fprintf(cfg.Writer, "[warn] scratch-branch sweep error: %v\n", err)
