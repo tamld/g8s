@@ -131,6 +131,26 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo -e "${YELLOW}DRY RUN - no changes will be made${NC}"
 fi
 
+# Branch guard: refuse unless on main and up to date with origin
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo -e "${RED}Error: Branch guard: release must be cut from 'main' (currently on '${CURRENT_BRANCH:-detached HEAD}'). Please run from an up-to-date main.${NC}" >&2
+    exit 1
+fi
+
+if ! git fetch -q origin 2>/dev/null && ! git fetch -q origin main 2>/dev/null; then
+    echo -e "${YELLOW}Warning: git fetch failed (offline?). Continuing with local check...${NC}" >&2
+fi
+
+if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+    LOCAL_MAIN=$(git rev-parse main 2>/dev/null || true)
+    REMOTE_MAIN=$(git rev-parse origin/main 2>/dev/null || true)
+    if [ "$LOCAL_MAIN" != "$REMOTE_MAIN" ]; then
+        echo -e "${RED}Error: Local main is not up-to-date with origin/main. Please run from an up-to-date main.${NC}" >&2
+        exit 1
+    fi
+fi
+
 # Check for uncommitted changes (excluding release-managed files)
 RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1"
 UNCOMMITTED=$(git status --porcelain | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
@@ -138,6 +158,22 @@ if [ -n "$UNCOMMITTED" ] && [ "$DRY_RUN" -eq 0 ]; then
     echo -e "${RED}Error: Uncommitted changes detected. Commit or stash first.${NC}" >&2
     git status --short
     exit 1
+fi
+
+# Pre-tag validation gates
+if [ -f "tools/pre_tag.sh" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would run pre-tag gates: bash tools/pre_tag.sh${NC}"
+    else
+        echo -e "${BLUE}Running pre-tag gates (tools/pre_tag.sh)...${NC}"
+        if ! bash tools/pre_tag.sh; then
+            echo -e "${RED}Error: Pre-tag gates failed. Aborting release.${NC}" >&2
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Pre-tag gates passed${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: tools/pre_tag.sh not found, skipping pre-tag gates${NC}" >&2
 fi
 
 # Update version.go
