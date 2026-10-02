@@ -55,7 +55,7 @@ the first whose quality is BENCHMARKED against its own fallback.
 3. **Injection point**: submit-time `payloadMap` provider/model/role
    (claim affinity then does the rest — #458). Flag `--route
    auto|manual` with default `manual` = byte-identical to today
-   (integration lands in Wave G after this ADR's library wave F3).
+   (integration lands in Wave G after this ADR's library wave WF3).
 4. **Scope guards (inherited, restated)**: Jev never assigns Lane S,
    never mints receipts, never edits spec/ or directives.md, and the
    router never invents providers/models outside the manifest.

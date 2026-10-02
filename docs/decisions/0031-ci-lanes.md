@@ -3,7 +3,7 @@
 - **Status**: Accepted (2026-10-02) — operator directive ("Tách ra 2
   lane CI/CD: lane build sản phẩm vs lane docs. Nếu cùng chung 1 flow,
   nó rất quan liêu, tốn thời gian").
-- **Issue**: none (factory program Wave F6, plans/261002-factory/).
+- **Issue**: none (factory program Wave F slice WF6, plans/261002-factory/).
 - **Supersedes**: none. **Depends on**: ADR-0024's lane principle
   (route by blast radius), D-06 (coverage ratchet), the pre-push gate
   battery.
@@ -64,5 +64,5 @@ next docs-only PR after this lands runs the docs lane end to end.
 
 ## Related
 
-- plans/261002-factory/plan.md (Wave F6), ADR-0024 (lane principle),
+- plans/261002-factory/plan.md (Wave F, slice WF6), ADR-0024 (lane principle),
   D-06 (ratchet), tools/pre_push.sh, .github/workflows/quality.yml.
