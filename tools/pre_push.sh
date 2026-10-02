@@ -84,8 +84,82 @@ step() {
     printf "\n${BLUE}${BOLD}[%s] %s${NC}\n" "$1" "$2"
 }
 
+# ADR-0031: CI/CD two-lane detection (Docs Lane vs Build Lane)
+DETECTED_LANE_RAW="$(bash tools/ci_lane_detect.sh origin/main 2>/dev/null || echo "lane=build")"
+if [ "$DETECTED_LANE_RAW" = "lane=docs" ] || [ "$DETECTED_LANE_RAW" = "docs" ]; then
+    DETECTED_LANE="docs"
+else
+    DETECTED_LANE="build"
+fi
+
+if [ "$DETECTED_LANE" = "docs" ]; then
+    echo -e "${BOLD}======================================================${NC}"
+    echo -e "${BOLD}       g8s Pre-Push Verification Harness (DOCS)       ${NC}"
+    echo -e "${BOLD}======================================================${NC}"
+    echo "DOCS LANE: 6 gates"
+
+    # 1. Git Hygiene Gate
+    step "1/6" "Verifying Git Hygiene..."
+    for f in coverage.out cover.out *.cover; do
+        if git diff --cached --name-only | grep -q "^$f\$"; then
+            fail "Test artifact $f is staged for commit. Remove it and add to .gitignore."
+        fi
+    done
+    UNTRACKED=$(git status --porcelain -uall 2>&1 | grep -c '^??' || true)
+    if [ "$UNTRACKED" -gt 15 ]; then
+        fail "Too many untracked files ($UNTRACKED > 15). Clean up or gitignore."
+    fi
+    pass "Git hygiene clean"
+
+    # 2. AI & Brief Anti-Pattern Gate (DEBT-21 + DEBT-51)
+    step "2/6" "Running AI & Brief Anti-Pattern Gates..."
+    bash tools/ai_lint_test.sh >/dev/null
+    if ! bash tools/ai_lint.sh; then
+        fail "AI anti-patterns detected in source code."
+    fi
+    bash tools/brief_lint_test.sh >/dev/null
+    if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/; then
+        fail "Brief anti-patterns detected."
+    fi
+    pass "AI and brief anti-pattern checks clean"
+
+    # 3. Documentation ↔ Code Contract Gate (Issue #208)
+    step "3/6" "Running Doc ↔ Code Contract Gate (Issue #208)..."
+    if ! bash tools/ci_doc_contract_check.sh; then
+        fail "Documentation and code contracts are out of sync."
+    fi
+    pass "Doc-code contracts synchronized"
+
+    # 4. Quantitative Claims Gate (#447)
+    step "4/6" "Running Quantitative Claims Gate (#447)..."
+    if ! bash tools/claims_check.sh; then
+        fail "Quantitative claims check failed."
+    fi
+    pass "Quantitative claims verified"
+
+    # 5. Version Sync Gate
+    step "5/6" "Running Version Sync Check..."
+    if ! bash tools/ci_version_sync_check.sh; then
+        fail "Version sync check failed."
+    fi
+    pass "Version sync verified"
+
+    # 6. Link Integrity Gate
+    step "6/6" "Running Link Integrity Gate..."
+    if ! bash tools/ci_link_integrity.sh; then
+        fail "Link integrity check failed."
+    fi
+    pass "Link integrity verified"
+
+    echo ""
+    echo -e "${GREEN}${BOLD}======================================================${NC}"
+    echo -e "${GREEN}${BOLD}  ✓ ALL PRE-PUSH CHECKS PASSED (DOCS LANE)!           ${NC}"
+    echo -e "${GREEN}${BOLD}======================================================${NC}"
+    exit 0
+fi
+
 echo -e "${BOLD}======================================================${NC}"
-echo -e "${BOLD}       g8s Pre-Push Verification Harness             ${NC}"
+echo -e "${BOLD}       g8s Pre-Push Verification Harness (BUILD)      ${NC}"
 echo -e "${BOLD}======================================================${NC}"
 
 # 1. Git Hygiene Gate

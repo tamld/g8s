@@ -20,22 +20,49 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Crash-Survival E2E skipped (not applicable)"
+            exit 0
+          fi
 
       - name: Setup Go
+        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
       - name: Build g8s binary
+        if: env.CI_LANE != 'docs'
         run: |
           go build -o ./g8s ./cmd/g8s
           chmod +x ./g8s
 
       - name: Submit initial task
+        if: env.CI_LANE != 'docs'
         run: |
           ./g8s submit --idempotency-key crash-${{ github.run_id }} --role scout --prompt "noop"
 
       - name: Spawn worker and simulate SIGKILL mid-flight
+        if: env.CI_LANE != 'docs'
         run: |
           ./g8s worker --once &
           WORKER_PID=$!
@@ -46,6 +73,7 @@ jobs:
           sleep 2
 
       - name: Restart g8s, verify pending tasks still queue
+        if: env.CI_LANE != 'docs'
         run: |
           ./g8s submit --idempotency-key crash2-${{ github.run_id }} --role scout --prompt "noop2"
           ./g8s tasks --state PENDING | grep -q "crash2"
