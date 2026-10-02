@@ -31,6 +31,9 @@ var AllowedConfigKeys = map[string]string{
 	"default_provider":           "Default target provider for dispatch executions and queue submissions",
 	"log_level":                  "Verbosity level for daemon and CLI operations (debug, info, warn, error)",
 	"submit_rate_limit_per_hour": "Maximum tasks submitted per hour per actor (0 = unlimited)",
+	"auto_retry_enabled":         "Enable automatic resubmission of transiently failed tasks (default false)",
+	"auto_retry_max_per_task":    "Maximum automatic retries per original task (0-10, default 2)",
+	"auto_retry_max_per_hour":    "Maximum automatic retries per hour per state directory (0-1000, default 10)",
 }
 
 // Config represents the loaded configuration values.
@@ -45,6 +48,9 @@ type Config struct {
 	DefaultProvider        string `json:"default_provider,omitempty"`
 	LogLevel               string `json:"log_level,omitempty"`
 	SubmitRateLimitPerHour any    `json:"submit_rate_limit_per_hour,omitempty"`
+	AutoRetryEnabled       any    `json:"auto_retry_enabled,omitempty"`
+	AutoRetryMaxPerTask    any    `json:"auto_retry_max_per_task,omitempty"`
+	AutoRetryMaxPerHour    any    `json:"auto_retry_max_per_hour,omitempty"`
 }
 
 // Manager coordinates atomic reads and writes of the configuration store.
@@ -112,6 +118,12 @@ func (m *Manager) Get(key string) (any, bool) {
 		return pathutil.ScopeUser, true
 	case "evidence_dir":
 		return pathutil.DefaultEvidenceDir(), true
+	case "auto_retry_enabled":
+		return false, true
+	case "auto_retry_max_per_task":
+		return 2, true
+	case "auto_retry_max_per_hour":
+		return 10, true
 	default:
 		return nil, false
 	}
@@ -142,6 +154,21 @@ func (m *Manager) Set(key string, value any) error {
 	}
 	if key == "submit_rate_limit_per_hour" {
 		if err := validateSubmitRateLimitPerHour(value); err != nil {
+			return err
+		}
+	}
+	if key == "auto_retry_enabled" {
+		if err := validateAutoRetryEnabled(value); err != nil {
+			return err
+		}
+	}
+	if key == "auto_retry_max_per_task" {
+		if err := validateAutoRetryMaxPerTask(value); err != nil {
+			return err
+		}
+	}
+	if key == "auto_retry_max_per_hour" {
+		if err := validateAutoRetryMaxPerHour(value); err != nil {
 			return err
 		}
 	}
@@ -200,6 +227,79 @@ func validateSubmitRateLimitPerHour(value any) error {
 
 	if n < 0 {
 		return fmt.Errorf("%w: submit_rate_limit_per_hour must be >= 0, got %d", ErrInvalidVal, n)
+	}
+	return nil
+}
+
+func validateAutoRetryEnabled(value any) error {
+	switch v := value.(type) {
+	case bool:
+		return nil
+	case string:
+		s := strings.TrimSpace(strings.ToLower(v))
+		if s == "true" || s == "false" || s == "1" || s == "0" {
+			return nil
+		}
+		return fmt.Errorf("%w: %q is not a valid boolean for auto_retry_enabled", ErrInvalidVal, v)
+	default:
+		return fmt.Errorf("%w: auto_retry_enabled must be boolean or string boolean, got %T", ErrInvalidVal, value)
+	}
+}
+
+func validateAutoRetryMaxPerTask(value any) error {
+	var n int
+	switch v := value.(type) {
+	case int:
+		n = v
+	case int64:
+		n = int(v)
+	case float64:
+		if float64(int(v)) != v {
+			return fmt.Errorf("%w: auto_retry_max_per_task must be an integer, got %v", ErrInvalidVal, v)
+		}
+		n = int(v)
+	case string:
+		s := strings.TrimSpace(v)
+		var err error
+		n, err = strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("%w: %q is not a valid integer for auto_retry_max_per_task", ErrInvalidVal, s)
+		}
+	default:
+		return fmt.Errorf("%w: auto_retry_max_per_task must be integer or string integer, got %T", ErrInvalidVal, value)
+	}
+
+	if n < 0 || n > 10 {
+		return fmt.Errorf("%w: auto_retry_max_per_task must be between 0 and 10, got %d", ErrInvalidVal, n)
+	}
+	return nil
+}
+
+func validateAutoRetryMaxPerHour(value any) error {
+	var n int
+	switch v := value.(type) {
+	case int:
+		n = v
+	case int64:
+		n = int(v)
+	case float64:
+		if float64(int(v)) != v {
+			return fmt.Errorf("%w: auto_retry_max_per_hour must be an integer, got %v", ErrInvalidVal, v)
+		}
+		n = int(v)
+	case string:
+		s := strings.TrimSpace(v)
+		var err error
+		n, err = strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("%w: %q is not a valid integer for auto_retry_max_per_hour", ErrInvalidVal, s)
+		}
+	default:
+		return fmt.Errorf("%w: auto_retry_max_per_hour must be integer or string integer, got %T", ErrInvalidVal, value)
+	}
+
+	if n < 0 || n > 1000 {
+		return fmt.Errorf("%w: auto_retry_max_per_hour must be between 0 and 1000, got %d", ErrInvalidVal, n)
 	}
 	return nil
 }
