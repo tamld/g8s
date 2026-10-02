@@ -21,6 +21,7 @@ import (
 	"github.com/tamld/g8s/internal/autopilot"
 	"github.com/tamld/g8s/internal/cleanup"
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/settings"
@@ -411,10 +412,10 @@ func runAutopilotTick(args []string) {
 				continue
 			}
 			switch j {
-			case "doctor", "retention", "hygiene":
+			case "doctor", "retention", "hygiene", "retry":
 				jobs = append(jobs, j)
 			default:
-				exitUsage("autopilot", "tick", *traceID, fmt.Sprintf("invalid job %q: allowed jobs are doctor, retention, hygiene", j), "Choose from: doctor, retention, hygiene", *jsonl)
+				exitUsage("autopilot", "tick", *traceID, fmt.Sprintf("invalid job %q: allowed jobs are doctor, retention, hygiene, retry", j), "Choose from: doctor, retention, hygiene, retry", *jsonl)
 			}
 		}
 	} else {
@@ -435,6 +436,8 @@ func runAutopilotTick(args []string) {
 			status, detail = runTickRetention(ctx)
 		case "hygiene":
 			status, detail = runTickHygiene(ctx)
+		case "retry":
+			status, detail = runTickRetry(ctx)
 		}
 
 		data := map[string]any{
@@ -555,6 +558,109 @@ func runTickHygiene(ctx context.Context) (string, any) {
 	detail := map[string]any{
 		"items":   report.Items,
 		"summary": report.Summary,
+	}
+	return "ok", detail
+}
+
+// runTickRetry executes the stateless retry background maintenance job per ADR-0029.
+// Auto-resubmits only failed transient tasks whose permission profile requires no
+// receipt (read_only / automation_read). The tick NEVER touches receipt-required work (workspace_write).
+func runTickRetry(ctx context.Context) (string, any) {
+	mgr, _ := settings.NewManager("")
+	opts := loadRetryOpts(mgr)
+	if !opts.Enabled {
+		return "disabled", map[string]any{
+			"enabled": false,
+			"status":  "disabled",
+			"message": "auto_retry is disabled in settings",
+		}
+	}
+
+	dbPath, err := databasePath()
+	if err != nil {
+		return "error", map[string]any{"error": err.Error()}
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		return "error", map[string]any{"error": err.Error()}
+	}
+	defer store.Close()
+
+	failedState := controlplane.StateFailed
+	tasks, err := store.ListTasks(ctx, controlplane.TaskFilter{
+		State: &failedState,
+		Limit: 100,
+	})
+	if err != nil {
+		return "error", map[string]any{"error": err.Error()}
+	}
+
+	type taskResultItem struct {
+		TaskID    string `json:"task_id"`
+		Status    string `json:"status"` // "resubmitted" or "skipped"
+		NewTaskID string `json:"new_task_id,omitempty"`
+		Reason    string `json:"reason,omitempty"`
+		Class     string `json:"class,omitempty"`
+	}
+
+	var items []taskResultItem
+	resubmittedCount := 0
+	skippedCount := 0
+
+	for _, t := range tasks {
+		perm := extractTaskPermission(t)
+		if perm == "workspace_write" {
+			skippedCount++
+			items = append(items, taskResultItem{
+				TaskID: t.TaskID,
+				Status: "skipped",
+				Reason: "permission workspace_write requires supervisor receipt (D3 boundary)",
+			})
+			continue
+		}
+
+		lastErr := ""
+		if t.LastError != nil {
+			lastErr = *t.LastError
+		}
+		class := controlplane.ClassifyRetryable(string(t.Result), lastErr)
+		if class != controlplane.RetryClassRetryable {
+			skippedCount++
+			items = append(items, taskResultItem{
+				TaskID: t.TaskID,
+				Status: "skipped",
+				Class:  string(class),
+				Reason: fmt.Sprintf("non-retryable class: %s", class),
+			})
+			continue
+		}
+
+		newTaskID, err := store.ResubmitTask(ctx, t.TaskID, opts)
+		if err != nil {
+			skippedCount++
+			items = append(items, taskResultItem{
+				TaskID: t.TaskID,
+				Status: "skipped",
+				Class:  string(class),
+				Reason: err.Error(),
+			})
+			continue
+		}
+
+		resubmittedCount++
+		items = append(items, taskResultItem{
+			TaskID:    t.TaskID,
+			Status:    "resubmitted",
+			NewTaskID: newTaskID,
+			Class:     string(class),
+		})
+	}
+
+	detail := map[string]any{
+		"scanned":     len(tasks),
+		"resubmitted": resubmittedCount,
+		"skipped":     skippedCount,
+		"results":     items,
 	}
 	return "ok", detail
 }

@@ -12,8 +12,8 @@ Autopilot development follows a strict 4-stage hardening roadmap to prevent rogu
   Protects downstream workers from burst floods using rate limits and admission control (`submit_rate_limit_per_hour`).
 - **Stage 3 — Stateless Tick & Native Schedulers (Current)**:
   Decouples periodic execution from long-running in-process daemons. Introduces `g8s autopilot tick` alongside native OS scheduler installers (`install-schedule` and `uninstall-schedule`).
-- **Stage 4 — Budgeted Retry & Task Resubmission (NOT Implemented Yet)**:
-  Automated retry of transient task failures under explicit attempt budgets. This stage is intentionally deferred and is not active in this release.
+- **Stage 4 — Budgeted Retry & Task Resubmission (Active)**:
+  Automated retry of transient task failures under explicit attempt budgets (ADR-0029). Implements a 2-tier architecture: the stateless tick `retry` job for unattended receipt-free tasks, and the supervisor-driven `g8s resubmit` command for receipt-scoped work.
 
 ---
 
@@ -55,6 +55,14 @@ g8s autopilot tick --jobs doctor,hygiene
    - Prunes unregistered or abandoned worktree directories under `<state_dir>/worktrees`.
    - Reaps zombie or dead supervisor sessions from the SQLite database.
    - Tolerates empty registries and fresh states cleanly.
+4. **`retry`**:
+   - Evaluates terminal `FAILED` tasks against classification rules (transient vs deterministic).
+   - Only retries transient infrastructure failures (timeout, interrupted, worker spawn failure, provider transport errors). Deterministic errors (sanitizer/receipt violations, refusals, `E_USAGE`, delivered tasks) are never retried.
+   - Enforces attempt budgets: max 2 auto-resubmits per original task (`auto_retry_max_per_task`), max 10 auto-resubmits per hour per store (`auto_retry_max_per_hour`).
+   - Enforces exponential backoff from terminal completion time (5m → 20m → 60m).
+   - **Trust & Receipt Boundary (ADR-0029 D3)**: The tick job NEVER touches receipt-required work (`workspace_write`). It only auto-resubmits tasks whose permission profile requires no receipt (`read_only` / `automation_read`).
+   - Governed by feature flag `auto_retry_enabled` (default `false`). When disabled, the tick job reports `disabled` and takes no action.
+   - **Directive D-09**: *"a scheduled check that retries outside its budget is a bug"*.
 
 ### Envelope Output
 
@@ -80,7 +88,7 @@ Each executed job emits a structured JSON envelope to standard output:
 ```
 
 > [!NOTE]
-> `g8s autopilot tick` is strictly a maintenance mechanism. It **never** automatically creates, submits, or resubmits tasks into the queue.
+> Under Stage 4 (ADR-0029), `g8s autopilot tick --jobs retry` can resubmit eligible transient failed tasks without receipts. The tick job **never** mints receipts or touches `workspace_write` tasks. All retries adhere strictly to Directive D-09: *"a scheduled check that retries outside its budget is a bug"*.
 
 ---
 
@@ -162,3 +170,30 @@ g8s autopilot uninstall-schedule
 - **macOS**: Unloads the job via `launchctl unload` and deletes `~/Library/LaunchAgents/g8s.autopilot.plist`.
 - **Windows**: Deletes the scheduled task via `schtasks /Delete /F /TN g8s-autopilot`.
 - Idempotent: Can be run safely even if no schedule was installed.
+
+---
+
+## The `g8s resubmit` Command
+
+`g8s resubmit` is the supervisor-driven task resubmission path per ADR-0029 D3. It handles human or supervisor-directed retries when the durable queue holds failed work:
+
+```sh
+# Resubmit a failed read-only task
+g8s resubmit --task task-123 --reason "transient provider 500"
+
+# Resubmit a failed workspace_write task with a fresh write receipt
+g8s receipt issue --path "src/**"
+g8s resubmit --task task-456 --receipt-id rcpt-abc-789
+```
+
+### Semantics & Trust Boundary
+
+- **Covers All Permission Classes**: Unlike the stateless tick job (which skips receipt-required work), `g8s resubmit` can resubmit tasks across every permission class, including `workspace_write`.
+- **Receipt Boundary (Zero Self-Delegation)**: The command **never** mints receipts automatically. If the original task required `workspace_write`, the operator or supervisor must issue a fresh receipt and supply `--receipt-id <id>`. If `--receipt-id` is omitted for a `workspace_write` task, the command refuses execution with a clean `E_DENIED` envelope instructing the operator to issue a receipt.
+- **Classification Check**: The failed task's outcome is evaluated with `ClassifyRetryable`. Only transient failure classes (timeout, interrupted, worker spawn failure, provider transport errors) are eligible. Deterministic or refusal classes are rejected.
+- **Budget & Feature Flag**: Governed by the `auto_retry_enabled` feature flag and respects per-task retry caps (`auto_retry_max_per_task`) and store-wide hourly limits (`auto_retry_max_per_hour`).
+- **Idempotency**: Derived keys (`<orig-task-id>#r<N>`) ensure double-fire safety. Racing supervisor invocations produce a single unique retry task without duplicating executions.
+- **Error Envelopes**:
+  - `E_NOTFOUND`: The specified task ID does not exist in the queue.
+  - `E_INVALID`: The task is not in the terminal `FAILED` state (e.g. still `RUNNING` or already `SUCCEEDED`).
+  - `E_DENIED`: The task failure is non-retryable, auto-retry is disabled, or a `workspace_write` task is missing a fresh receipt.

@@ -105,6 +105,8 @@ func main() {
 		runTasks(os.Args[2:])
 	case "cancel":
 		runCancel(os.Args[2:])
+	case "resubmit":
+		runResubmit(os.Args[2:])
 	case "lineage":
 		runLineage(os.Args[2:])
 	case "children":
@@ -1417,6 +1419,7 @@ func printUsage() {
 	fmt.Println("  resume       Resume a NEEDS_INFO/BLOCKED task (g8s resume <task-id> [--prompt <text>])")
 	fmt.Println("  tasks        List durable tasks optionally filtered by state (--state, --limit)")
 	fmt.Println("  cancel       Cancel an active or queued task (g8s cancel <task-id> [--reason <text>])")
+	fmt.Println("  resubmit     Resubmit a FAILED task with supervisor receipt boundary (g8s resubmit --task <id>)")
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
