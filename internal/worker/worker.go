@@ -291,6 +291,12 @@ func NewProviderCommandResolver(opts ProviderResolverOptions) func(prompt, provi
 			return SubstituteTemplate(tmpl, prompt, model, timeout), nil
 		}
 
+		for _, name := range opts.PlatformDispatchNames {
+			if name == provider {
+				return nil, nil // miss -> fallback to default agy argv
+			}
+		}
+
 		// Not found among platform_dispatch entries
 		names := make([]string, len(opts.PlatformDispatchNames))
 		copy(names, opts.PlatformDispatchNames)
