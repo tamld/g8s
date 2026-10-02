@@ -46,6 +46,11 @@ type Store struct {
 	receiptsOnce sync.Once
 	receiptsMgr  *receipt.Manager
 	receiptsErr  error
+
+	// signalMu protects signalFile and lazy creation of the tasks signal file (#481).
+	signalMu   sync.Mutex
+	signalPath string
+	signalFile *os.File
 }
 
 // receiptsManager opens the receipt ledger lazily.
@@ -73,7 +78,8 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open control-plane database: %w", err)
 	}
-	s := &Store{db: db, clock: clock, dbPath: dbPath}
+	signalPath := filepath.Join(filepath.Dir(dbPath), "signals", "tasks.jsonl")
+	s := &Store{db: db, clock: clock, dbPath: dbPath, signalPath: signalPath}
 	// #380: cap the connection pool — SQLite WAL allows concurrent readers
 	// but a single writer; unlimited connections cause fd exhaustion and
 	// "database is locked" under concurrent workers.
@@ -102,6 +108,14 @@ func (s *Store) Close() error {
 		ledgerErr = s.receiptsMgr.Close()
 		s.receiptsMgr = nil
 	}
+	s.signalMu.Lock()
+	if s.signalFile != nil {
+		if err := s.signalFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] controlplane: close signals file: %v\n", err)
+		}
+		s.signalFile = nil
+	}
+	s.signalMu.Unlock()
 	dbErr := s.db.Close()
 	if ledgerErr != nil {
 		return fmt.Errorf("close receipt ledger: %w (db close: %v)", ledgerErr, dbErr)
@@ -1433,15 +1447,25 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 	}
 	defer tx.Rollback()
 
-	if _, err := reconcileExpiredTx(ctx, tx, now); err != nil {
+	var reconcileSignals []pendingSignal
+	if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
 		return nil, err
+	}
+	commitAndSignal := func() error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		for _, sig := range reconcileSignals {
+			s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
+		}
+		return nil
 	}
 	var expiresAt float64
 	err = tx.QueryRowContext(ctx,
 		"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
 	switch {
 	case err == nil && expiresAt > now:
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	case err == nil:
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
@@ -1471,7 +1495,7 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
 	}
 	if candidate == nil {
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	}
 
 	leaseToken := uuid.NewString()
@@ -1485,7 +1509,7 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 		return nil, fmt.Errorf("claim task: %w", err)
 	}
 	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	}
 	if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
 		"lease_token":   leaseToken,
@@ -1493,7 +1517,7 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 	}, now); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitAndSignal(); err != nil {
 		return nil, err
 	}
 	return s.GetTask(ctx, candidate.TaskID)
@@ -1519,15 +1543,25 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 	}
 	defer tx.Rollback()
 
-	if _, err := reconcileExpiredTx(ctx, tx, now); err != nil {
+	var reconcileSignals []pendingSignal
+	if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
 		return nil, err
+	}
+	commitAndSignal := func() error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		for _, sig := range reconcileSignals {
+			s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
+		}
+		return nil
 	}
 	var expiresAt float64
 	err = tx.QueryRowContext(ctx,
 		"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
 	switch {
 	case err == nil && expiresAt > now:
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	case err == nil:
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
@@ -1548,7 +1582,7 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
 	}
 	if candidate == nil {
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	}
 
 	leaseToken := uuid.NewString()
@@ -1562,7 +1596,7 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 		return nil, fmt.Errorf("claim task: %w", err)
 	}
 	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, tx.Commit()
+		return nil, commitAndSignal()
 	}
 	if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
 		"lease_token":   leaseToken,
@@ -1570,7 +1604,7 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 	}, now); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitAndSignal(); err != nil {
 		return nil, err
 	}
 	return s.GetTask(ctx, candidate.TaskID)
@@ -1751,6 +1785,13 @@ func (s *Store) ExecutionSignal(taskID, workerID, leaseToken string) string {
 	return "active"
 }
 
+// pendingSignal captures a committed terminal transition waiting to be appended to tasks.jsonl.
+type pendingSignal struct {
+	taskID string
+	from   string
+	to     string
+}
+
 // ReconcileExpired requeues expired leases (or finalizes them once their
 // retry budget is exhausted) and returns how many tasks were reconciled.
 func (s *Store) ReconcileExpired(ctx context.Context) (int, error) {
@@ -1760,40 +1801,47 @@ func (s *Store) ReconcileExpired(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("begin reconcile: %w", err)
 	}
 	defer tx.Rollback()
-	count, err := reconcileExpiredTx(ctx, tx, now)
+	count, signals, err := reconcileExpiredTx(ctx, tx, now)
 	if err != nil {
 		return 0, err
 	}
-	return count, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for _, sig := range signals {
+		s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
+	}
+	return count, nil
 }
 
 // reconcileExpiredTx applies lease-expiry transitions inside an open
 // transaction: CANCELLED for cancel-requested tasks, FAILED at retry-budget
 // exhaustion, otherwise requeue.
-func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, error) {
+func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, []pendingSignal, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state IN ('LEASED', 'RUNNING')
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at <= ?`, now)
 	if err != nil {
-		return 0, fmt.Errorf("select expired leases: %w", err)
+		return 0, nil, fmt.Errorf("select expired leases: %w", err)
 	}
 	var expired []*Task
 	for rows.Next() {
 		t, scanErr := scanTask(rows)
 		if scanErr != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan expired lease: %w", scanErr)
+			return 0, nil, fmt.Errorf("scan expired lease: %w", scanErr)
 		}
 		expired = append(expired, t)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return 0, fmt.Errorf("iterate expired leases: %w", err)
+		return 0, nil, fmt.Errorf("iterate expired leases: %w", err)
 	}
 	rows.Close()
 
+	var signals []pendingSignal
 	reconciled := 0
 	for _, t := range expired {
 		nextState := StateQueued
@@ -1809,6 +1857,11 @@ func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, erro
 		completedAt := any(nil)
 		if nextState == StateFailed || nextState == StateCancelled {
 			completedAt = now
+			signals = append(signals, pendingSignal{
+				taskID: t.TaskID,
+				from:   t.State,
+				to:     nextState,
+			})
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE tasks
@@ -1818,7 +1871,7 @@ func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, erro
 			    last_error = ?
 			WHERE task_id = ? AND lease_token = ?`,
 			nextState, now, nextState, completedAt, lastError, t.TaskID, deref(t.LeaseToken)); err != nil {
-			return reconciled, fmt.Errorf("reconcile task %s: %w", t.TaskID, err)
+			return reconciled, signals, fmt.Errorf("reconcile task %s: %w", t.TaskID, err)
 		}
 		owner := ""
 		if t.LeaseOwner != nil {
@@ -1826,33 +1879,115 @@ func reconcileExpiredTx(ctx context.Context, tx *sql.Tx, now float64) (int, erro
 		}
 		if err := insertTaskEvent(tx, t.TaskID, "lease_expired", "reconciler",
 			map[string]any{"next_state": nextState, "previous_owner": owner}, now); err != nil {
-			return reconciled, err
+			return reconciled, signals, err
 		}
 
 		if nextState == StateCancelled || nextState == StateFailed {
 			requestJSON := string(t.Request)
 			if err := redactPayload(&requestJSON); err != nil {
-				return reconciled, fmt.Errorf("redact task %s: %w", t.TaskID, err)
+				return reconciled, signals, fmt.Errorf("redact task %s: %w", t.TaskID, err)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET request_json = ? WHERE task_id = ?`,
 				requestJSON, t.TaskID); err != nil {
-				return reconciled, fmt.Errorf("store redacted request %s: %w", t.TaskID, err)
+				return reconciled, signals, fmt.Errorf("store redacted request %s: %w", t.TaskID, err)
 			}
 			fresh := *t
 			fresh.State = nextState
 			fresh.CompletedAt = &now
 			_, receiptHash, err := buildReceiptTx(tx, &fresh)
 			if err != nil {
-				return reconciled, fmt.Errorf("receipt for task %s: %w", t.TaskID, err)
+				return reconciled, signals, fmt.Errorf("receipt for task %s: %w", t.TaskID, err)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET receipt_hash = ? WHERE task_id = ?`,
 				receiptHash, t.TaskID); err != nil {
-				return reconciled, fmt.Errorf("seal receipt %s: %w", t.TaskID, err)
+				return reconciled, signals, fmt.Errorf("seal receipt %s: %w", t.TaskID, err)
 			}
 		}
 		reconciled++
 	}
-	return reconciled, nil
+	return reconciled, signals, nil
+}
+
+// taskSignalEvent models one record in <db-dir>/signals/tasks.jsonl (#481).
+type taskSignalEvent struct {
+	TS     string `json:"ts"`
+	TaskID string `json:"task_id"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+}
+
+// isTerminalSignalState returns true for the five terminal states monitored by
+// the signal file: FAILED, WORKER_COMPLETED, SUCCEEDED, CANCELLED, NEEDS_INFO (#481).
+func isTerminalSignalState(to string) bool {
+	switch to {
+	case StateFailed, StateWorkerCompleted, StateSucceeded, StateCancelled, StateNeedsInfo:
+		return true
+	default:
+		return false
+	}
+}
+
+// appendTaskSignal appends a single terminal-transition signal JSON line to
+// <db-dir>/signals/tasks.jsonl.
+//
+// Crash window design note:
+// The signal line is written AFTER the transition's DB transaction COMMITS
+// (a file append cannot join a SQL tx). The crash window (committed transition
+// without signal line) is acceptable BY DESIGN: the DB is the truth and the
+// supervisor's fallback deadline-check re-derives from state_event_log.
+func (s *Store) appendTaskSignal(taskID, from, to string, ts time.Time) {
+	if !isTerminalSignalState(to) {
+		return
+	}
+	if ts.IsZero() {
+		ts = s.clock()
+	}
+
+	sig := taskSignalEvent{
+		TS:     ts.UTC().Format(time.RFC3339),
+		TaskID: taskID,
+		From:   from,
+		To:     to,
+	}
+	data, err := json.Marshal(sig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] controlplane: marshal task signal: %v\n", err)
+		return
+	}
+	line := append(data, '\n')
+
+	s.signalMu.Lock()
+	defer s.signalMu.Unlock()
+
+	if s.signalPath == "" && s.dbPath != "" {
+		s.signalPath = filepath.Join(filepath.Dir(s.dbPath), "signals", "tasks.jsonl")
+	}
+	if s.signalPath == "" {
+		return
+	}
+
+	if s.signalFile == nil {
+		dir := filepath.Dir(s.signalPath)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] controlplane: mkdir signals dir %s: %v\n", dir, err)
+			return
+		}
+		f, err := os.OpenFile(s.signalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] controlplane: open signals file %s: %v\n", s.signalPath, err)
+			return
+		}
+		s.signalFile = f
+	}
+
+	if _, err := s.signalFile.Write(line); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] controlplane: write signals file: %v\n", err)
+		if closeErr := s.signalFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] controlplane: close signals file: %v\n", closeErr)
+		}
+		s.signalFile = nil
+		return
+	}
 }
 
 func deref(p *string) string {

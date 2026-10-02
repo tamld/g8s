@@ -507,6 +507,7 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.appendTaskSignal(taskID, task.State, nextState, s.clock())
 	return s.GetTask(context.Background(), taskID)
 }
 
@@ -630,7 +631,13 @@ func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if nextState == StateCancelled {
+		s.appendTaskSignal(taskID, task.State, nextState, s.clock())
+	}
+	return nil
 }
 
 // PauseTask moves a RUNNING lease into NEEDS_INFO, BLOCKED, or CHECKPOINTED, always redacting
@@ -707,6 +714,9 @@ func (s *Store) PauseTask(taskID, workerID, leaseToken, pauseState string, resul
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	if pauseState == StateNeedsInfo {
+		s.appendTaskSignal(taskID, task.State, pauseState, s.clock())
 	}
 	return s.GetTask(context.Background(), taskID)
 }
@@ -1096,7 +1106,11 @@ func (s *Store) RequestEdit(ctx context.Context, taskID string, supervisorID str
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.appendTaskSignal(taskID, state, StateNeedsInfo, s.clock())
+	return nil
 }
 
 // RequeueResult transitions a WORKER_COMPLETED task back to QUEUED for retry.
