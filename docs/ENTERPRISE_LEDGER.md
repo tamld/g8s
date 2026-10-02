@@ -7,7 +7,7 @@ issue). The registry of quantitative claims lives in `docs/claims.yml`
 (verified by `tools/claims_check.sh`); this ledger is the enterprise-facing
 view over the same evidence.
 
-Last updated: 2026-09-30 (issue #441).
+Last updated: 2026-10-02 (issue #480 closure: QA Hardening rows + #448 delivery flip).
 
 ## Zero-Trust Delegation
 
@@ -15,7 +15,7 @@ Last updated: 2026-09-30 (issue #441).
 | :--- | :--- | :--- | :--- |
 | Write capability is delegated via single-use, path-scoped, TTL-bound receipts | PROVEN | `internal/receipt` + `TestReuseOfConsumedReceiptRejected` (docs/claims.yml `claim-containment-receipt-single-use`) | Receipts mandatory for workspace_write regardless of env opt-in (#334) |
 | Task payloads never originate invocation templates | PROVEN | `internal/config` (`args` templates are operator-declared only) | DELTA-10 R6; worker-side substitution |
-| Delivery is supervisor-owned provenance, not agent choice | UNPROVEN | #448 (slice A merged #467: `deliverable` pointer; slice B `g8s deliver` pending) | Applies to worktree-isolated attempts today |
+| Delivery is supervisor-owned provenance, not agent choice | PROVEN | #448 closed: slice A `deliverable` pointer (#467) + slice B `g8s deliver` receipt-validated apply (#472), delivery atomicity hardened (#482) | Applies to worktree-isolated attempts; `g8s deliver` verified live |
 
 ## Containment & Process Isolation
 
@@ -51,6 +51,16 @@ Last updated: 2026-09-30 (issue #441).
 | :--- | :--- | :--- | :--- |
 | Actor identity is the `--actor` string (no auth provider integration) | PROVEN (documented limitation) | spec/constitution.md; access-audit design non-goals | Trust model: single-operator host |
 | Per-provider auth via env vars (`auth_env`) | PROVEN | `internal/provider` + `internal/config` | Degrades to UNAVAILABLE without env |
+
+## QA Hardening (#480)
+
+| Claim | Status | Evidence artifact | Notes |
+| :--- | :--- | :--- | :--- |
+| External-input parsers are fuzz-seeded from the incident corpus | PROVEN | #486: 4 native `Fuzz` targets (`config.Load`, receipt envelope, worker result, `SanitizeOutput`) + 30s CI seed runs | Seeds include the #434 escape-pair and #443 echo-poisoning classes |
+| Dependency CVEs affecting code break CI | PROVEN | #486: real `govulncheck ./...` step in the Quality workflow | Replaces the comment-only claim; #480 item 1 |
+| Queue operation latencies are measured (sub-ms baseline) | PROVEN | #487: `TestPerfSmokeQueueOps` + docs/user-guide/performance.md (submit/claim/heartbeat/finish p50<0.2ms, p95<0.3ms) | Baseline, not SLA; sized the #488 throttle |
+| Old-schema DB → new binary migration is E2E-verified | PROVEN | #487: migration E2E (schema v(n-1) fixture → current binary → read/write round-trip) | #480 item 4 |
+| Mutation testing runs quarterly with a recorded score | PROVEN (fallback method) | #480: hand-mutation study #1, 5/5 caught (M1–M5, dispatch/receipt/harness/worker); go-mutesting panics on Go 1.26 — runner gap on the tooling backlog | Quarterly cadence clocked as D-08 |
 
 ## How to read this ledger
 
