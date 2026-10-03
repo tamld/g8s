@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,9 @@ func TestCatalogAndRecommend(t *testing.T) {
 }
 
 func TestClaudeProvider_Extended(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock worker is a POSIX shell script — exec semantics differ on Windows")
+	}
 	tmpDir := t.TempDir()
 	mockBin := writeMockWorkerScript(t, tmpDir, "claude")
 
@@ -112,6 +116,9 @@ func TestClaudeProvider_Extended(t *testing.T) {
 }
 
 func TestAgyProvider_Extended(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock worker is a POSIX shell script — exec semantics differ on Windows")
+	}
 	tmpDir := t.TempDir()
 	mockBin := writeMockWorkerScript(t, tmpDir, "agy")
 
@@ -152,6 +159,9 @@ func TestAgyProvider_Extended(t *testing.T) {
 }
 
 func TestCodexProvider_Extended(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock worker is a POSIX shell script — exec semantics differ on Windows")
+	}
 	tmpDir := t.TempDir()
 	mockBin := writeMockWorkerScript(t, tmpDir, "codex")
 
