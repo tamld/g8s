@@ -249,8 +249,6 @@ func TestRedtest_Fresh_DirectoryNamedReadmeMdWithChildren(t *testing.T) {
 // 2. On branch: git mv internal/x.go docs/renamed.md && git commit
 // 3. tools/ci_lane_detect.sh origin/main -> outputs lane=docs (escapes code build gates!)
 func TestRedtest_Fresh_InternalGoRenamedMidDiff(t *testing.T) {
-	t.Skip("BUG(REDTEST): ci_lane_detect suppresses D path on code-to-docs rename due to default git rename tracking")
-
 	script := freshFindDetectScript(t)
 	repo := freshInitFixtureRepo(t)
 

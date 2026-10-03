@@ -370,8 +370,6 @@ func (s *mergerSandbox) hasIllegalD3Calls() bool {
 // 3. Observed: GATE autonomy: pass — autonomy_level=1 (operator flip recorded)
 // 4. Expected per Brief Guarantee 5: refuse on autonomy_level read returning "1 " (trailing space).
 func TestRedtest_Guarantee5_AutonomyLevel_TrailingSpace(t *testing.T) {
-	t.Skip("BUG(REDTEST): merger accepts autonomy_level with trailing space instead of refusing")
-
 	s := setupMergerSandbox(t)
 	if err := os.WriteFile(filepath.Join(s.mockDir, "autonomy_level"), []byte("1 "), 0o644); err != nil {
 		t.Fatal(err)

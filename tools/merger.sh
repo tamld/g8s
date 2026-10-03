@@ -116,7 +116,7 @@ autonomy_val=""
 autonomy_err=0
 autonomy_val=$("$G8S_CMD" config get autonomy_level 2>/dev/null) || autonomy_err=$?
 
-autonomy_val=$(echo "$autonomy_val" | tr -d '[:space:]')
+autonomy_val="${autonomy_val%$'\r'}"
 
 if [ "$autonomy_err" -ne 0 ] || [ "$autonomy_val" != "1" ]; then
     if [ "$autonomy_val" = "0" ] || [ -z "$autonomy_val" ]; then

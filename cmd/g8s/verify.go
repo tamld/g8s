@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -84,6 +85,14 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	caller := verifier.TaskRef{}
 	if *asTaskFlag != "" {
 		caller.ID = *asTaskFlag
+	}
+
+	// Self-grade guard normalization (issue #517 D-01)
+	normCaller := strings.TrimSpace(caller.ID)
+	normTarget := strings.TrimSpace(target.ID)
+	if normCaller != "" && normTarget != "" && strings.EqualFold(normCaller, normTarget) {
+		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeInvalid, verifier.ErrSelfGrade, "", *jsonl)
+		return 1
 	}
 
 	// Extract receipt_id and allowed_paths from task payload/request

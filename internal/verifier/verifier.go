@@ -136,20 +136,57 @@ func (e *SelfGradeError) Is(target error) bool {
 	return target == ErrSelfGrade
 }
 
-// Citation regex patterns: #<digits> or incident:<slug>
+// Citation regex patterns: exactly #<digits> or incident:<slug>
 var (
-	citationIssueRegex    = regexp.MustCompile(`^#\d+`)
-	citationIncidentRegex = regexp.MustCompile(`^incident:[a-zA-Z0-9_-]+`)
+	citationIssueTokenRegex    = regexp.MustCompile(`^#\d+$`)
+	citationIncidentTokenRegex = regexp.MustCompile(`^incident:[a-z0-9][a-z0-9_-]*$`)
 )
 
-// isValidCitation reports whether a founding_catch citation string begins with
-// a recognized citation pattern (#<digits> or incident:<slug>).
+// isValidCitationToken reports whether a single token is a valid citation.
+func isValidCitationToken(tok string) bool {
+	return citationIssueTokenRegex.MatchString(tok) || citationIncidentTokenRegex.MatchString(tok)
+}
+
+// isValidCitation reports whether a founding_catch citation string is valid.
+// After trimming, the string must be exactly one citation token (^#\d+$ or
+// ^incident:[a-z0-9][a-z0-9_-]*$), optionally followed by ONE space and
+// free-text rationale. Two citation tokens, leading/trailing junk, or "#"
+// alone are refused.
 func isValidCitation(s string) bool {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
 		return false
 	}
-	return citationIssueRegex.MatchString(trimmed) || citationIncidentRegex.MatchString(trimmed)
+
+	idx := strings.IndexByte(trimmed, ' ')
+	if idx == -1 {
+		return isValidCitationToken(trimmed)
+	}
+
+	citation := trimmed[:idx]
+	if !isValidCitationToken(citation) {
+		return false
+	}
+
+	// Must be followed by ONE space and non-empty free-text rationale
+	rest := trimmed[idx+1:]
+	if len(rest) == 0 || rest[0] == ' ' {
+		return false
+	}
+
+	// Rationale cannot start with another citation or citation prefix
+	if strings.HasPrefix(rest, "#") || strings.HasPrefix(strings.ToLower(rest), "incident:") {
+		return false
+	}
+
+	// Two citation tokens: rationale cannot contain any bare citation token
+	for _, word := range strings.Fields(rest) {
+		if isValidCitationToken(word) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Registry stores registered verifier classes and handles fail-closed loading and matching.
@@ -363,8 +400,10 @@ func (v *Verifier) Verify(target TaskRef, caller TaskRef) (Verdict, error) {
 
 // VerifyContext evaluates acceptance checks with context cancellation.
 func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller TaskRef) (Verdict, error) {
-	// Self-grade guard: caller set and equal to target
-	if caller.ID != "" && caller.ID == target.ID {
+	// Self-grade guard: caller set and equal to target (normalized for whitespace and case)
+	callerID := strings.TrimSpace(caller.ID)
+	targetID := strings.TrimSpace(target.ID)
+	if callerID != "" && targetID != "" && strings.EqualFold(callerID, targetID) {
 		return Verdict{}, &SelfGradeError{
 			TargetID: target.ID,
 			CallerID: caller.ID,

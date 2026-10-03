@@ -95,17 +95,17 @@ detect_lane() {
     # 1. Main-push detection: if base_sha is given, not all-zeros, and is a valid commit
     if [ -n "$base_sha" ] && ! [[ "$base_sha" =~ ^0+$ ]] && git rev-parse --verify "$base_sha^{commit}" >/dev/null 2>&1; then
         used_base_sha=1
-        files=$(git diff --name-only "$base_sha"...HEAD 2>/dev/null || git diff --name-only "$base_sha" HEAD 2>/dev/null || true)
+        files=$(git diff --no-renames --name-only "$base_sha"...HEAD 2>/dev/null || git diff --no-renames --name-only "$base_sha" HEAD 2>/dev/null || true)
     elif git rev-parse --verify "$base" >/dev/null 2>&1; then
-        files=$(git diff --name-only "$base"...HEAD 2>/dev/null || git diff --name-only "$base" HEAD 2>/dev/null || true)
+        files=$(git diff --no-renames --name-only "$base"...HEAD 2>/dev/null || git diff --no-renames --name-only "$base" HEAD 2>/dev/null || true)
     fi
 
     # 2. Fallback when the branch has no upstream diff: staged + unstaged files.
     # Note: if a valid base_sha was specified and produced an empty diff, preserve deny-by-default (do not fall back).
     if [ -z "$files" ] && [ "$used_base_sha" -eq 0 ]; then
         local staged unstaged
-        staged=$(git diff --name-only --cached 2>/dev/null || true)
-        unstaged=$(git diff --name-only 2>/dev/null || true)
+        staged=$(git diff --no-renames --name-only --cached 2>/dev/null || true)
+        unstaged=$(git diff --no-renames --name-only 2>/dev/null || true)
         files=$(printf "%s\n%s\n" "$staged" "$unstaged" | sed '/^[[:space:]]*$/d' | sort -u)
     fi
 
