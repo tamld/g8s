@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Event-driven supervision surface (#481): terminal task transitions append one JSONL line to `<state_dir>/signals/tasks.jsonl` and `g8s watch --failed [--since] [--timeout]` wakes the supervisor from a single sleeping process — polling is demoted to the fallback (directive D-07).
+- Budgeted auto-retry of failed tasks (ADR-0029, #501/#502): deny-by-default failure classification, caps (2 per task, 10/hour per state dir), 5→20→60m backoff, derived idempotency keys (double-fire safe), `g8s resubmit` + an `autopilot tick` retry job for receipt-free tasks; `auto_retry_enabled` ships default OFF (directive D-09).
+- Context-based task router (ADR-0030, #503/#520): `g8s submit --route auto` routes provider/model/role through a deterministic layer that works for every installation (zero network), with an OPTIONAL Jev-assisted layer (manifest-validated suggestions, benchmark-gated — never mandatory); decisions recorded as `route_source`/`route_reason`.
+- Gate-lane router, ALDC Layer 1 (ADR-0024 S6-3, #521): lanes 0/D/R/F/S from paths + bundles + the P0 trust registry; deterministic hot path; Jev may suggest (never Lane S).
+- CI/CD lanes (ADR-0031, #506/#512): docs-only PRs clear a prose gate battery in minutes; build PRs run the full dual-pass battery; lane self-detected by changed paths (deny-by-default, symlink/extension-hardened).
+- Red-team adversarial suites (#509): hostile-input tests for the retry budget, signal file, router suggestions, lane detector, receipt TTL and worktree containment.
+- Normative multi-project tenancy guide (ADR-0028, #511) and package doc comments for all previously undocumented packages (#511).
+
+### Fixed
+- Provider resolution false negative (#505/#507): `--provider agy` against a providers.json entry registered without an argv template fell into the unknown-provider error; registered-without-template now falls back to the default agy argv.
+- Lane detector hardening (#512, red-team findings): symlinked docs directories, non-prose extensions under docs/, and `.github/**` paths can no longer classify as the docs lane.
+- Coverage fixtures platform-guards (#522/#529): newline filenames and POSIX-exec/chmd assumptions no longer fail the Windows matrix.
+- Repo root hygiene enforced by gate (#504): build artifacts and session scratch can no longer be tracked at the repository root.
+
+### Changed
+- Governance: ADR-0028 (multi-project tenancy), ADR-0029 (budgeted auto-retry), ADR-0030 (context router), ADR-0031 (CI lanes), ADR-0032 (containment levels F0/F1/F2 — canonical vocabulary, wave ordinals prefixed WF) all Accepted; directives D-07/D-08/D-09 added.
+- README restructured under the stop-slop writing contract; Vietnamese README de-calqued with a terms table; coverage of all sub-80% packages lifted (CI Linux aggregate 79.7% → 85.4%).
+
 ## [0.13.0] - 2026-09-30
 
 ### Added
