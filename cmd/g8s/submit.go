@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/settings"
 )
 
@@ -39,8 +42,13 @@ func runSubmit(args []string) {
 	var addDirs pathFlags
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd; must stay inside scope roots)")
 	scopeRootFlag := fs.String("scope-root", "", "comma-separated scope roots extending the jail beyond the working directory (#348)")
+	routeFlag := fs.String("route", "manual", "task routing mode (manual|auto, defaults to manual)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
+	}
+
+	if *routeFlag != "auto" && *routeFlag != "manual" {
+		exitUsage("submit", "route", *traceID, fmt.Sprintf("invalid --route %q: must be 'auto' or 'manual'", *routeFlag), "Specify --route=auto or --route=manual", *jsonl)
 	}
 
 	var providerPassed bool
@@ -112,8 +120,57 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("scope jail: %w", err), "Add --scope-root for legitimate directories outside the working directory", *jsonl)
 	}
 
+	effectiveModel := *model
+	if effectiveModel == "" {
+		effectiveModel = "gemini-3.8-flash-high"
+	}
+	effectiveRole := *role
+
+	var routeDecision *routing.Decision
+	if *routeFlag == "auto" {
+		providersPath := os.Getenv("G8S_PROVIDERS")
+		if providersPath == "" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+			}
+		}
+		var manifest *config.File
+		if providersPath != "" {
+			if _, statErr := os.Stat(providersPath); statErr == nil {
+				cfgFile, loadErr := config.Load(providersPath)
+				if loadErr != nil {
+					exitRuntime("submit", "", *traceID, cli.CodeRuntime, loadErr, "Failed to load providers config", *jsonl)
+				}
+				manifest = cfgFile
+			}
+		}
+
+		var routePaths []string
+		if len(addDirs) > 0 {
+			routePaths = append(routePaths, addDirs...)
+		}
+
+		dec, routeErr := routing.Route(context.Background(), routing.RouteRequest{
+			Prompt:      prompt,
+			Paths:       routePaths,
+			TimeoutHint: *timeout,
+			Manifest:    manifest,
+		})
+		if routeErr != nil {
+			exitUsage("submit", "route", *traceID, fmt.Sprintf("auto-routing failed: %v", routeErr), "Verify provider manifest and task parameters or use --route=manual", *jsonl)
+		}
+		if dec.Provider == "" || dec.Model == "" || dec.Role == "" {
+			exitUsage("submit", "route", *traceID, "auto-routing could not determine provider, model, or role", "Check providers manifest or specify --route=manual", *jsonl)
+		}
+		routeDecision = &dec
+		effectiveProvider = dec.Provider
+		effectiveModel = dec.Model
+		effectiveRole = dec.Role
+	}
+
 	// Validate request against security harness gatekeeper
-	if err := harness.ValidateRequest(prompt, *role, *permission, dirs, *skipPermissions, *receiptID); err != nil {
+	if err := harness.ValidateRequest(prompt, effectiveRole, *permission, dirs, *skipPermissions, *receiptID); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
 	}
 
@@ -127,15 +184,10 @@ func runSubmit(args []string) {
 	}
 	defer store.Close()
 
-	effectiveModel := *model
-	if effectiveModel == "" {
-		effectiveModel = "gemini-3.8-flash-high"
-	}
-
 	payloadMap := map[string]any{
 		"prompt":     prompt,
 		"model":      effectiveModel,
-		"role":       *role,
+		"role":       effectiveRole,
 		"permission": *permission,
 		"timeout":    *timeout,
 		"add_dirs":   dirs,
@@ -149,6 +201,13 @@ func runSubmit(args []string) {
 	}
 	if *skipPermissions {
 		payloadMap["skip_permissions"] = true
+	}
+	if routeDecision != nil {
+		payloadMap["provider"] = routeDecision.Provider
+		payloadMap["model"] = routeDecision.Model
+		payloadMap["role"] = routeDecision.Role
+		payloadMap["route_source"] = routeDecision.Source
+		payloadMap["route_reason"] = routeDecision.Reason
 	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {
@@ -167,7 +226,7 @@ func runSubmit(args []string) {
 		MaxAttempts:    *maxAttempts,
 		Model:          effectiveModel,
 		Payload:        payload,
-		Role:           *role,
+		Role:           effectiveRole,
 		Permission:     *permission,
 		Timeout:        *timeout,
 		AddDirs:        dirs,
