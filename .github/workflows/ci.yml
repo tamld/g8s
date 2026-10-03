@@ -31,13 +31,39 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          BEFORE_SHA="${{ github.event.before }}"
+          lane=$(bash tools/ci_lane_detect.sh origin/main "$BEFORE_SHA" || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Test ${{ matrix.os }} skipped (not applicable)"
+            exit 0
+          fi
 
       - name: Setup Go
+        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
           go-version: '1.26'
 
       - name: Check formatting (gofmt)
+        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           unformatted=$(gofmt -l . | grep -v '^reference/' || true)
@@ -48,24 +74,29 @@ jobs:
           fi
 
       - name: Vet (Zero-CGO)
+        if: env.CI_LANE != 'docs'
         run: go vet ./...
         env:
           CGO_ENABLED: '0'
 
       - name: Test plain build (Zero-CGO)
+        if: env.CI_LANE != 'docs'
         run: go test -count=1 ./...
         env:
           CGO_ENABLED: '0'
 
       - name: Test race detector
+        if: env.CI_LANE != 'docs'
         run: go test -race -count=1 ./internal/...
         env:
           CGO_ENABLED: '1'
 
       - name: Build smoke (all packages, including cmd/g8s which has no tests)
+        if: env.CI_LANE != 'docs'
         run: go build ./...
 
       - name: Dogfood self-test (g8s exercises itself)
+        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           set -euo pipefail
@@ -80,7 +111,7 @@ jobs:
           "$BIN" --help >/dev/null
 
       - name: Build Windows Installers (NSIS & WiX MSI)
-        if: matrix.os == 'windows-latest'
+        if: env.CI_LANE != 'docs' && matrix.os == 'windows-latest'
         shell: bash
         run: |
           export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/NSIS:/c/Program Files (x86)/WiX Toolset v3.11/bin:/c/Program Files/WiX Toolset v3.11/bin:$PATH"

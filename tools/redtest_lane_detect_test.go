@@ -92,8 +92,6 @@ func initFixtureRepo(t *testing.T) string {
 // 2. ln -s codelib docs && git add docs && git commit -m "symlink docs -> codelib"
 // 3. tools/ci_lane_detect.sh origin/main -> outputs lane=docs (escapes code gates!)
 func TestRedtest_Guarantee4_SymlinkDocsToCodeDirectory(t *testing.T) {
-	t.Skip("BUG(REDTEST): ci_lane_detect classifies symlink `docs` pointing to directory with .go files as lane=docs instead of lane=build")
-
 	script := findDetectScript(t)
 	repo := initFixtureRepo(t)
 
@@ -132,8 +130,6 @@ func TestRedtest_Guarantee4_SymlinkDocsToCodeDirectory(t *testing.T) {
 // 1. mkdir docs && echo "package evil" > docs/evil.go && git add docs/evil.go && git commit
 // 2. tools/ci_lane_detect.sh origin/main -> outputs lane=docs (escapes code gates!)
 func TestRedtest_Guarantee4_CodeFileInsideDocsDirectory(t *testing.T) {
-	t.Skip("BUG(REDTEST): ci_lane_detect classifies docs/evil.go as lane=docs instead of lane=build")
-
 	script := findDetectScript(t)
 	repo := initFixtureRepo(t)
 
@@ -163,8 +159,6 @@ func TestRedtest_Guarantee4_CodeFileInsideDocsDirectory(t *testing.T) {
 // 1. mkdir -p .github/workflows && echo "# workflow note" > .github/workflows/README.md && git add . && git commit
 // 2. tools/ci_lane_detect.sh origin/main -> outputs lane=docs (infrastructure changes skip build gates!)
 func TestRedtest_Guarantee4_MarkdownInsideGithubWorkflows(t *testing.T) {
-	t.Skip("BUG(REDTEST): ci_lane_detect classifies .md inside .github/workflows/ as lane=docs instead of lane=build")
-
 	script := findDetectScript(t)
 	repo := initFixtureRepo(t)
 
@@ -425,6 +419,98 @@ func TestRedtest_Guarantee5_PrePushFallbackPathsWithoutUpstreamDiff(t *testing.T
 		}
 		if out != "lane=docs" {
 			t.Errorf("got %q, want lane=docs for staged notes.md", out)
+		}
+	})
+}
+
+// -----------------------------------------------------------------------------
+// Guarantee 6: Main-push detection with base-SHA (ADR-0031 §1 & S-10)
+// When pushing directly to main, origin/main...HEAD is empty; the push event
+// passes github.event.before as base-SHA. Verify:
+//   - docs commit between before-SHA and HEAD => lane=docs
+//   - code commit between before-SHA and HEAD => lane=build
+//   - empty before-range (before-SHA == HEAD) => lane=build (deny-by-default)
+//   - all-zeros before-SHA (new branch) => falls back to base ref
+// -----------------------------------------------------------------------------
+
+func TestRedtest_Guarantee6_MainPushDetection(t *testing.T) {
+	script := findDetectScript(t)
+
+	t.Run("DocsCommit_ResolvesDocs", func(t *testing.T) {
+		repo := initFixtureRepo(t)
+		beforeSHA := runGit(t, repo, "rev-parse", "HEAD")
+
+		docsDir := filepath.Join(repo, "docs")
+		if err := os.MkdirAll(docsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(docsDir, "guide.md"), []byte("# Guide\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "docs/guide.md")
+		runGit(t, repo, "commit", "-q", "-m", "push docs to main")
+
+		out, exitCode := runLaneDetect(t, script, repo, "origin/main", beforeSHA)
+		if exitCode != 0 {
+			t.Errorf("expected exit 0, got %d", exitCode)
+		}
+		if out != "lane=docs" {
+			t.Errorf("got %q, want lane=docs for docs commit with before-SHA", out)
+		}
+	})
+
+	t.Run("CodeCommit_ResolvesBuild", func(t *testing.T) {
+		repo := initFixtureRepo(t)
+		beforeSHA := runGit(t, repo, "rev-parse", "HEAD")
+
+		if err := os.WriteFile(filepath.Join(repo, "app.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "app.go")
+		runGit(t, repo, "commit", "-q", "-m", "push code to main")
+
+		out, exitCode := runLaneDetect(t, script, repo, "origin/main", beforeSHA)
+		if exitCode != 0 {
+			t.Errorf("expected exit 0, got %d", exitCode)
+		}
+		if out != "lane=build" {
+			t.Errorf("got %q, want lane=build for code commit with before-SHA", out)
+		}
+	})
+
+	t.Run("EmptyBeforeRange_ResolvesBuild", func(t *testing.T) {
+		repo := initFixtureRepo(t)
+		headSHA := runGit(t, repo, "rev-parse", "HEAD")
+
+		out, exitCode := runLaneDetect(t, script, repo, "origin/main", headSHA)
+		if exitCode != 0 {
+			t.Errorf("expected exit 0, got %d", exitCode)
+		}
+		if out != "lane=build" {
+			t.Errorf("got %q, want lane=build for empty before-range (deny-by-default)", out)
+		}
+	})
+
+	t.Run("AllZerosBeforeSHA_FallsBackToBaseRef", func(t *testing.T) {
+		repo := initFixtureRepo(t)
+		runGit(t, repo, "checkout", "-q", "-b", "branch-zeros")
+		docsDir := filepath.Join(repo, "docs")
+		if err := os.MkdirAll(docsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(docsDir, "zeros.md"), []byte("# Zeros\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "docs/zeros.md")
+		runGit(t, repo, "commit", "-q", "-m", "add zeros doc")
+
+		zeros := "0000000000000000000000000000000000000000"
+		out, exitCode := runLaneDetect(t, script, repo, "origin/main", zeros)
+		if exitCode != 0 {
+			t.Errorf("expected exit 0, got %d", exitCode)
+		}
+		if out != "lane=docs" {
+			t.Errorf("got %q, want lane=docs when all-zeros falls back to origin/main", out)
 		}
 	})
 }
