@@ -246,6 +246,7 @@ g8s/
 │   ├── supervisor/ — coordinates the fix loop across planning, role enforcement, worker execution, review, and RCA
 │   ├── telemetry/ — ingests execution trace events, distills failure patterns, and provides preflight context injection
 │   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s
+│   ├── verifier/ — implements verifier-class registry and acceptance verification (issue #515, SCORECARD S-7)
 │   ├── watch/ — implements the blocking watch primitive (#371): poll a
 │   ├── worker/ — provides worker lifecycle supervision, execution containment,
 │   └── ...                 # supporting packages

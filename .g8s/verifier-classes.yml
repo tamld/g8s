@@ -1,0 +1,33 @@
+# Verifier Classes Configuration (issue #515 / Wave H1, SCORECARD S-7)
+# Maps task write-scope paths to machine verification check bundles.
+
+classes:
+  - name: docs
+    status: advisory
+    founding_catch: "#208 (docs drifted from code until the doc-contract gate existed)"
+    priority: 10
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "plans/**"
+      - "skills/**"
+      - "assets/**"
+      - "offer/**"
+    checks:
+      - type: script
+        run: tools/ci_doc_contract_check.sh
+      - type: script
+        run: tools/ci_link_integrity.sh
+
+  - name: test
+    status: advisory
+    founding_catch: "#510 (the red-team suite's own vacuous seeds F1-F3, fixed by #512)"
+    priority: 20
+    paths:
+      - "*_test.go"
+      - "**/*_test.go"
+      - "tools/**"
+      - "plans/**"
+    checks:
+      - type: go-test
+        packages: [] # Rule: empty packages list derives packages from touched Go files (preferring non-test files when present, or test files if test-only)
