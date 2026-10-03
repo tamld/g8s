@@ -1115,3 +1115,93 @@ func TestSanitizeJSONTransportFidelity434(t *testing.T) {
 		})
 	}
 }
+
+// #537: public type annotations must survive sanitization byte-identical —
+// redacting them as credential assignments corrupts generated Python AST.
+func TestSanitizePythonTypeAnnotations537(t *testing.T) {
+	fixtures := []struct {
+		name      string
+		input     string
+		isSecret  bool
+		wantMatch string
+	}{
+		{
+			name:     "issue 537 repro: def build with token: str",
+			input:    "def build(endpoint: str, token: str) -> dict:",
+			isSecret: false,
+		},
+		{
+			name:     "multiple secret-looking param annotations",
+			input:    "def connect(endpoint: str, api_key: str, password: str, token: str) -> dict:",
+			isSecret: false,
+		},
+		{
+			name:     "annotations with defaults",
+			input:    "def setup(token: str, password: str = \"default\") -> dict:",
+			isSecret: false,
+		},
+		{
+			name:     "common public type allowlist names",
+			input:    "def types(token: str, password: int, api_key: float, secret: bool, credential: bytes, token_obj: object, token_any: Any, token_none: None, token_dict: dict, token_list: list, token_tuple: tuple, token_set: set, token_opt: Optional, token_union: Union) -> dict:",
+			isSecret: false,
+		},
+		{
+			name:     "generic shapes: list[str], dict[str, Any], Optional[str]",
+			input:    "def generic(token: list[str], password: Optional[str], api_key: dict[str, Any]) -> dict:",
+			isSecret: false,
+		},
+		{
+			name:      "real credential token in assignment must redact",
+			input:     "token: sk-live-abc123",
+			isSecret:  true,
+			wantMatch: "token=<REDACTED>",
+		},
+		{
+			name:      "real credential api_key with quotes must redact",
+			input:     `api_key = "hunter2"`,
+			isSecret:  true,
+			wantMatch: "api_key=<REDACTED>",
+		},
+		{
+			name:      "real credential password in YAML context must redact",
+			input:     "password: hunter2",
+			isSecret:  true,
+			wantMatch: "password=<REDACTED>",
+		},
+	}
+
+	pythonBin, _ := exec.LookPath("python3")
+	if pythonBin == "" {
+		pythonBin, _ = exec.LookPath("python")
+	}
+
+	for _, tt := range fixtures {
+		t.Run(tt.name, func(t *testing.T) {
+			out := SanitizeOutput(tt.input)
+			if tt.isSecret {
+				if !strings.Contains(out, tt.wantMatch) {
+					t.Fatalf("expected redaction %q in %q", tt.wantMatch, out)
+				}
+				return
+			}
+
+			// Public annotations must pass through byte-identical
+			if out != tt.input {
+				t.Fatalf("byte-identity broken:\nwant: %q\ngot:  %q", tt.input, out)
+			}
+
+			// If python def signature, assert ast.parse success
+			if strings.HasPrefix(tt.input, "def ") {
+				if pythonBin == "" {
+					t.Fatal("python interpreter not found for ast.parse verification")
+				}
+				pyCode := out + "\n    pass\n"
+				cmd := exec.Command(pythonBin, "-c", "import ast, sys; ast.parse(sys.stdin.read())")
+				cmd.Stdin = strings.NewReader(pyCode)
+				if combined, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("ast.parse failed on sanitized code %q: %v: %s", out, err, string(combined))
+				}
+			}
+		})
+	}
+}

@@ -56,18 +56,28 @@ var sensitivePatterns = []struct {
 }
 
 // credentialAssignmentPattern captures the keyword and value separately so
-// the replacement can keep public literals intact while normalizing the
-// separator (password: x -> password=<REDACTED>, matching the historical
-// sanitizer output format).
-var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)((?:\\.|[^"'\s,}\]\\]){3,})`)
+// the replacement can keep public literals and public type annotations intact
+// while normalizing the separator (password: x -> password=<REDACTED>,
+// matching the historical sanitizer output format).
+//
+// Value capture groups atomic escapes (\.), bracketed generic arguments
+// ([...]), and terminates before quotes, whitespace, commas, braces, brackets,
+// and closing parentheses (#537).
+var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)((?:\\.|\[(?:[^\[\]\r\n]|\[[^\]\r\n]*\])*\]|[^"'\s,})\]\\]){3,})`)
 
 // publicLiteralPattern matches values that are public API arguments, not
 // secrets (token=False, retries=0, timeout=None).
 var publicLiteralPattern = regexp.MustCompile(`(?i)^(?:true|false|none|null|nil|[-+]?\d+)$`)
 
+// publicTypePattern matches bare public type annotations and generic type
+// shapes (#537) that must not be redacted as credentials. Common type names
+// include str, int, float, bool, bytes, object, Any, None, dict, list, tuple,
+// set, Optional, Union, and generic forms like list[str] or dict[str, Any].
+var publicTypePattern = regexp.MustCompile(`(?i)^(?:str|int|float|bool|bytes|object|any|none|dict|list|tuple|set|optional|union)(?:\[[\w\s,.[\]"']*\])?$`)
+
 // redactCredentialAssignments redacts key=value credentials while leaving
-// public literal values intact (#373): redacting token=False corrupts
-// otherwise-valid generated Python.
+// public literal values intact (#373) and public type annotations intact (#537):
+// redacting token=False or token: str corrupts otherwise-valid generated Python.
 func redactCredentialAssignments(value string) string {
 	return credentialAssignmentPattern.ReplaceAllStringFunc(value, func(m string) string {
 		subs := credentialAssignmentPattern.FindStringSubmatch(m)
@@ -78,8 +88,8 @@ func redactCredentialAssignments(value string) string {
 		if i := strings.IndexByte(subs[3], '\\'); i >= 0 {
 			core = subs[3][:i]
 		}
-		if publicLiteralPattern.MatchString(core) {
-			return m // public literal (possibly followed by transport escapes) — keep
+		if publicLiteralPattern.MatchString(core) || publicTypePattern.MatchString(core) {
+			return m // public literal or public type annotation (possibly followed by transport escapes) — keep
 		}
 		return subs[1] + "=<REDACTED>"
 	})
@@ -400,12 +410,18 @@ func matchSnippet(text string, start, end int) string {
 }
 
 // SanitizeOutput redacts credentials and secret-bearing fragments.
+// Public literals (token=False, retries=0, timeout=None) and public type
+// annotations (str, int, float, bool, bytes, object, Any, None, dict, list,
+// tuple, set, Optional, Union, plus generic shapes like list[str] or
+// dict[str, Any]) pass through byte-identical to avoid corrupting generated
+// Python signatures and AST (#373, #537).
 func SanitizeOutput(value string) string {
 	sanitized := value
 	for _, sp := range sensitivePatterns {
 		sanitized = sp.pattern.ReplaceAllString(sanitized, sp.replacement)
 	}
-	// #373: credential assignments go last, with public-literal awareness.
+	// #373, #537: credential assignments go last, preserving public literals
+	// and public type annotations.
 	return redactCredentialAssignments(sanitized)
 }
 
