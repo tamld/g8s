@@ -1,3 +1,4 @@
+// Package routing — routes tasks to providers, models, and roles using deterministic rules and optional LLM assistance.
 package routing
 
 import (

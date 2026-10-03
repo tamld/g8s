@@ -1,3 +1,4 @@
+// Package sleep — manages operator away cycles, tracks background execution events, and generates wake-up briefings.
 package sleep
 
 import (

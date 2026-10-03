@@ -1,5 +1,7 @@
-// Package supervisor — enforcer.go enforces the role/permission/allowed-paths
-// contract on every RunRequest before the supervisor touches a worker.
+// Package supervisor — coordinates the fix loop across planning, role enforcement, worker execution, review, and RCA.
+//
+// enforcer.go enforces the role/permission/allowed-paths contract on every RunRequest
+// before the supervisor touches a worker.
 package supervisor
 
 import (

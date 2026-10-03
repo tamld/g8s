@@ -1,3 +1,4 @@
+// Package telemetry — ingests execution trace events, distills failure patterns, and provides preflight context injection.
 package telemetry
 
 import (

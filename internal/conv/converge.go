@@ -1,3 +1,4 @@
+// Package conv — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications.
 package conv
 
 import (
