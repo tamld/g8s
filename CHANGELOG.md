@@ -26,6 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repo root hygiene enforced by gate (#504): build artifacts and session scratch can no longer be tracked at the repository root.
 - `g8s verify` resolved receipt paths from the wrong database (#535, caught by round R1's own verifier gate): `write_receipts` lives in the sibling `receipts.db` (the canonical ledger), not `g8s.db` — every receipted task previously resolved to unregistered. Red-first regression now fixtures the real ledger layout; the deny-by-default unregistered floor is unchanged.
 
+### Fixed (continued)
+- `g8s verify` resolved receipt paths from the wrong database (#535, caught by round R1's own verifier gate): `write_receipts` lives in the sibling `receipts.db` (the canonical ledger), not `g8s.db` — every receipted task previously resolved to unregistered. Red-first regression now fixtures the real ledger layout; the deny-by-default unregistered floor is unchanged.
+- Retry budget integrity, closed from the release red cell (#539): the per-task retry cap is now ROOT-LINEAGE-anchored (chained resubmits can no longer mint retry #3+); lineage cycles and self-referential parents are refused (ErrLineageCycle); backoff bases on `completed_at` when present and NOW otherwise (a NULL `completed_at` collapsed the 5→20→60m ladder); derived idempotency keys are canonicalized and budget counts by lineage; permission comparisons normalize casing; `g8s resubmit` propagates `--receipt-id` and refuses consumed receipts.
+- Sanitizer no longer corrupts public type annotations (#537/#540, operator-filed live repro on v0.13.0): `def f(token: str)` passes through byte-identically (an allowlist of common type tokens guards the credential-value pattern); every real credential shape still redacts — red-first regression landed with the fix.
+- Red-cell strictness hardening (#538): verifier founding-catch citations must be exactly one citation token (multi-citation strings degrade the class to unregistered); the self-grade guard normalizes IDs (trim + case-insensitive); the merger trims the autonomy value before its exact-match refusal; the CI lane detector disables git rename tracking so a code-to-docs rename cannot hide deleted code from the docs-lane decision.
+
+### Release notes (v0.14.0 gates, per docs/RELEASE_SOP)
+- **Gate 7 Red Cell (D-01 HARD): RAN — no waiver.** Three fresh-construction adversarial slices (RC1 verifier+merger, RC2 retry/resubmit+router, RC3 lane-detector+public surface; suites permanent via #536): 55 guarantees, 24 findings — all P0/P1-class findings fixed before the tag (#538, #539), strictness items hardened, residual low items recorded on #517. The public-surface pass found no unbacked quantitative claims.
+- **Gate 8 Self-audit (D-02): 4/4 probes passed** (sa-001 refusal-echo, sa-002 worktree-discard, sa-003 sanitizer-fidelity, sa-004 receipt-bypass) via `g8s eval run --category self-audit`, 2026-10-03.
+- **Gate 4 gitleaks: 0 leaks** (794 commits scanned), 2026-10-03.
+- **Gate 5 spec parity:** `06-os-daemon-service-spec` remains PROPOSED — waived by design per ADR-0025 (no-daemon posture); all other OpenSpec deltas APPLIED.
+- **S-10 rationale (ADR-0031 tail):** four lane-aware workflows other than ci.yml lack `github.event.before` wiring; the effect is conservative (empty diff ⇒ build lane ⇒ full battery on main pushes — verified), and ci.yml (the exploitable edge) is armed by #512. Recorded, not deferred.
+- **Gate 2** full race battery (`CGO_ENABLED=0 go test -race ./...`): 100% green, 2026-10-03.
+
 ### Changed
 - Governance: ADR-0028 (multi-project tenancy), ADR-0029 (budgeted auto-retry), ADR-0030 (context router), ADR-0031 (CI lanes), ADR-0032 (containment levels F0/F1/F2 — canonical vocabulary, wave ordinals prefixed WF) all Accepted; directives D-07/D-08/D-09 added.
 - README restructured under the stop-slop writing contract; Vietnamese README de-calqued with a terms table; coverage of all sub-80% packages lifted (CI Linux aggregate 79.7% → 85.4%).
