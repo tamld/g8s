@@ -47,8 +47,9 @@ g8s submit \
 | `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
+| `--route` | `string` | `"manual"` | Routing mode (`manual` or `auto`). When `auto`, selects provider, model, and role using context-based rules and manifest configuration with optional Jev assistance. See [routing.md](routing.md). |
 
-> See [providers.md](providers.md) for multi-provider setup.
+> See [providers.md](providers.md) for multi-provider setup, and [routing.md](routing.md) for task routing.
 
 ---
 
