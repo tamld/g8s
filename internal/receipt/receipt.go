@@ -657,6 +657,11 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 
 	now := m.clock()
 	expiry := unixToTime(expiresAt)
+	// Expiry semantics (pinned by the 20261002 red-team wave, #510 F5):
+	// a receipt is valid THROUGH its expiry instant — inclusive-until.
+	// now.After(expiry) fails only STRICTLY after; consuming at exactly
+	// expires_at succeeds. Callers needing a strict deadline must issue
+	// with a margin subtracted from the TTL.
 	if now.After(expiry) {
 		return nil, &ExpiredError{ReceiptID: receiptID, Elapsed: now.Sub(expiry)}
 	}

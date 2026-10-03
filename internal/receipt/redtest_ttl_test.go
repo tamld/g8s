@@ -40,11 +40,13 @@ func TestRedtest_TTL_BoundariesClockManipulation(t *testing.T) {
 		}
 	})
 
-	t.Run("Consume_At_Exact_ExpiresAt_MustFail", func(t *testing.T) {
-		// BUG(REDTEST): ValidateAndConsume uses `now.After(expiry)` which evaluates `now > expiry`.
-		// At exactly `now == expiry`, `now.After(expiry)` evaluates to false, allowing consumption
-		// at the expiration timestamp instead of failing. To fail at boundary, the check requires
-		// `!now.Before(expiry)` (i.e. `now >= expiry`).
+	t.Run("Consume_At_Exact_ExpiresAt_Succeeds_InclusiveUntil", func(t *testing.T) {
+		// F5 resolution (supervisor spec call, 2026-10-03): the boundary is
+		// INCLUSIVE-UNTIL and now PINNED — a receipt is valid through its
+		// expiry instant (now.After(expiry) fails only strictly after).
+		// The original red seed assumed strict-expiry; the pinned semantics
+		// are documented on ValidateAndConsume. Callers wanting a strict
+		// deadline subtract a margin from the TTL at issue time.
 		fc := newFakeClock(base)
 		m := newTestManagerWithClock(t, fc.Now)
 
@@ -52,15 +54,11 @@ func TestRedtest_TTL_BoundariesClockManipulation(t *testing.T) {
 		fc.Advance(10 * time.Second) // exactly at expires_at
 
 		consumed, err := m.ValidateAndConsume(r.ReceiptID, "worker-2")
-		if err == nil {
-			t.Skipf("// BUG(REDTEST): receipt was consumed at exactly expires_at (id=%s, consumed=%v); "+
-				"comparison operator `now.After(expiry)` evaluates false when now == expiry, allowing consumption at the exact boundary (must fail)",
-				consumed.ReceiptID, consumed.Consumed)
+		if err != nil {
+			t.Fatalf("consuming at exactly expires_at must succeed (inclusive-until semantics): %v", err)
 		}
-
-		var expired *ExpiredError
-		if !errors.As(err, &expired) {
-			t.Fatalf("expected ExpiredError at exact expires_at, got: %v", err)
+		if !consumed.Consumed {
+			t.Fatal("expected the receipt to be marked consumed")
 		}
 	})
 
