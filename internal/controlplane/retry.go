@@ -21,6 +21,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/receipt"
+)
+
+var (
+	// ErrLineageCycle is returned when a task lineage contains a cycle.
+	ErrLineageCycle = errors.New("lineage cycle detected")
+	// ErrRetryBudgetExceeded is returned when the retry budget is exhausted.
+	ErrRetryBudgetExceeded = errors.New("retry budget exceeded")
 )
 
 // RetryClass classifies whether a task failure is eligible for auto-resubmission.
@@ -394,29 +403,83 @@ func (s *Store) ResubmitTask(ctx context.Context, origTaskID string, opts Resubm
 	}
 
 	perm := "read_only"
-	if p, ok := payloadMap["permission"].(string); ok && p != "" {
-		perm = p
+	if p, ok := payloadMap["permission"].(string); ok && strings.TrimSpace(p) != "" {
+		perm = strings.ToLower(strings.TrimSpace(p))
 	}
 	payloadMap["permission"] = perm
 
 	// Trust boundary: drop receipt_id unconditionally from original request.
 	// If the task requires workspace_write, a fresh receipt must be provided in opts.ReceiptID.
 	delete(payloadMap, "receipt_id")
-	if perm == "workspace_write" {
+	if strings.EqualFold(perm, "workspace_write") {
 		if opts.ReceiptID == "" {
 			return "", errors.New("workspace_write tasks require a fresh receipt_id; auto-retry dropped original receipt")
+		}
+		// Verify receipt is not already consumed or expired
+		if mgr, merr := s.receiptsManager(); merr == nil {
+			if rc, verr := mgr.VerifyReceipt(opts.ReceiptID); verr == nil {
+				if rc.Consumed {
+					return "", fmt.Errorf("workspace_write receipt %s is already consumed", opts.ReceiptID)
+				}
+			} else {
+				var consumedErr *receipt.AlreadyConsumedError
+				var expiredErr *receipt.ExpiredError
+				if errors.As(verr, &consumedErr) {
+					return "", fmt.Errorf("workspace_write receipt %s is already consumed", opts.ReceiptID)
+				}
+				if errors.As(verr, &expiredErr) {
+					return "", fmt.Errorf("workspace_write receipt %s is expired", opts.ReceiptID)
+				}
+			}
+		}
+		var consumed int
+		err := s.db.QueryRowContext(ctx, "SELECT consumed FROM write_receipts WHERE receipt_id = ?", opts.ReceiptID).Scan(&consumed)
+		if err == nil && consumed == 1 {
+			return "", fmt.Errorf("workspace_write receipt %s is already consumed", opts.ReceiptID)
 		}
 		payloadMap["receipt_id"] = opts.ReceiptID
 	}
 
-	// Query existing children of origTaskID to count retries and ensure double-fire idempotency.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT task_id, idempotency_key, state, request_json, created_at
-		FROM tasks
-		WHERE parent_task_id = ?
-		ORDER BY created_at ASC`, origTaskID)
+	// 1. Resolve ROOT of lineage (walk parent_task_id to origin) and refuse cycles.
+	visited := map[string]bool{orig.TaskID: true}
+	curr := orig
+	for curr.ParentTaskID != nil && strings.TrimSpace(*curr.ParentTaskID) != "" {
+		parentID := strings.TrimSpace(*curr.ParentTaskID)
+		if visited[parentID] {
+			return "", fmt.Errorf("%w: cycle detected at task %s", ErrLineageCycle, parentID)
+		}
+		visited[parentID] = true
+		parentTask, err := s.GetTask(ctx, parentID)
+		if err != nil {
+			return "", fmt.Errorf("load parent task %s: %w", parentID, err)
+		}
+		if parentTask == nil {
+			break
+		}
+		curr = parentTask
+	}
+	rootTask := curr
+	rootTaskID := rootTask.TaskID
+
+	// Query ALL retry descendants of rootTaskID using recursive CTE.
+	query := `
+WITH RECURSIVE descendants(task_id, parent_task_id, idempotency_key, state, request_json, created_at, depth) AS (
+    SELECT task_id, parent_task_id, idempotency_key, state, request_json, created_at, 0
+    FROM tasks
+    WHERE parent_task_id = ?
+    UNION ALL
+    SELECT t.task_id, t.parent_task_id, t.idempotency_key, t.state, t.request_json, t.created_at, d.depth + 1
+    FROM tasks t
+    JOIN descendants d ON t.parent_task_id = d.task_id
+    WHERE d.depth < 1000
+)
+SELECT task_id, idempotency_key, state, request_json, created_at
+FROM descendants
+ORDER BY created_at ASC;`
+
+	rows, err := s.db.QueryContext(ctx, query, rootTaskID)
 	if err != nil {
-		return "", fmt.Errorf("query task children: %w", err)
+		return "", fmt.Errorf("query lineage descendants: %w", err)
 	}
 	defer rows.Close()
 
@@ -426,48 +489,48 @@ func (s *Store) ResubmitTask(ctx context.Context, origTaskID string, opts Resubm
 		state          string
 	}
 	var retryChildren []childInfo
+	seenTasks := make(map[string]bool)
 	for rows.Next() {
 		var c childInfo
 		var reqJSON string
 		var createdAt float64
 		if err := rows.Scan(&c.taskID, &c.idempotencyKey, &c.state, &reqJSON, &createdAt); err != nil {
-			return "", fmt.Errorf("scan child task: %w", err)
+			return "", fmt.Errorf("scan descendant task: %w", err)
 		}
-		if strings.HasPrefix(c.idempotencyKey, origTaskID+"#r") {
-			retryChildren = append(retryChildren, c)
+		if seenTasks[c.taskID] {
+			continue
 		}
+		seenTasks[c.taskID] = true
+		retryChildren = append(retryChildren, c)
 	}
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("iterate child tasks: %w", err)
+		return "", fmt.Errorf("iterate descendant tasks: %w", err)
 	}
 
-	// Check for idempotent double-fire: if latest retry child is not FAILED, return it.
-	if len(retryChildren) > 0 {
-		latest := retryChildren[len(retryChildren)-1]
-		if latest.state != StateFailed {
-			return latest.taskID, nil
+	// Check for idempotent double-fire: if latest retry descendant is not FAILED, return it.
+	for i := len(retryChildren) - 1; i >= 0; i-- {
+		if retryChildren[i].state != StateFailed {
+			return retryChildren[i].taskID, nil
 		}
 	}
 
-	attemptCount := len(retryChildren) + 1
-	if attemptCount > maxPerTask {
-		return "", fmt.Errorf("retry budget exceeded: task %s has already been retried %d times (max %d)",
-			origTaskID, len(retryChildren), maxPerTask)
+	if len(retryChildren) >= maxPerTask {
+		return "", fmt.Errorf("%w: task %s lineage has already used %d retries (max %d)",
+			ErrRetryBudgetExceeded, rootTaskID, len(retryChildren), maxPerTask)
 	}
 
 	if err := s.checkHourlyRetryLimit(maxPerHour); err != nil {
 		return "", err
 	}
 
-	// Calculate backoff: completed_at + backoff (5m -> 20m -> 60m)
+	// Calculate backoff: completed_at + backoff (5m -> 20m -> 60m).
+	// Base is completed_at when present and positive; otherwise NOW (never stale updated_at).
+	attemptCount := len(retryChildren) + 1
 	backoff := RetryBackoff(attemptCount)
-	baseTime := float64(s.clock().UnixNano()) / 1e9
-	if orig.CompletedAt != nil {
+	now := float64(s.clock().UnixNano()) / 1e9
+	baseTime := now
+	if orig.CompletedAt != nil && *orig.CompletedAt > 0 {
 		baseTime = *orig.CompletedAt
-	} else if orig.UpdatedAt > 0 {
-		baseTime = orig.UpdatedAt
-	} else if orig.CreatedAt > 0 {
-		baseTime = orig.CreatedAt
 	}
 	notBefore := baseTime + backoff.Seconds()
 

@@ -207,7 +207,7 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	if req.AgyBin != nil {
 		return errors.New("custom agy_bin is disabled in control-plane v0.1")
 	}
-	if permission == "workspace_write" && os.Getenv("AGY_MCP_ALLOW_WORKSPACE_WRITE") != "1" {
+	if strings.EqualFold(strings.TrimSpace(permission), "workspace_write") && os.Getenv("AGY_MCP_ALLOW_WORKSPACE_WRITE") != "1" {
 		// #334: the delegated-write path is opt-in; the rejection must name
 		// the escape hatch so supervisors do not have to read source to
 		// discover it. Receipts remain mandatory for workspace_write
