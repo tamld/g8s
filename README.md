@@ -213,18 +213,18 @@ g8s/
 │   ├── config/ — loads the operator-declared provider registry that feeds
 │   ├── context/ — is the Context Broker (ADR-0021 §8
 │   ├── controlplane/ — implements the DELTA-03 SQLite-backed task queue with
-│   ├── conv/ — (no package doc — add one)
+│   ├── conv/ — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications
 │   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A):
 │   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning,
 │   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported
 │   ├── doctor/ — implements diagnostic sanity checks for g8s environment,
-│   ├── harness/ — (no package doc — add one)
+│   ├── harness/ — enforces worker execution boundaries, permission profiles, role constraints, and prompt safety scanning
 │   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness
 │   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers
 │   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s,
 │   ├── lockfile/ — provides non-blocking exclusive advisory file locks used
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over
-│   ├── memory/ — (no package doc — add one)
+│   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
 │   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data,
 │   ├── process/ — provides cross-platform process discovery, inspection, and
@@ -232,17 +232,17 @@ g8s/
 │   ├── receipt/ — implements zero-trust write receipts for delegated
 │   ├── reflex/ — implements a System 1 non-autoregressive decision gate
 │   ├── registry/ — provides a cross-platform wrapper around Windows registry operations
-│   ├── review/ — (no package doc — add one)
-│   ├── routing/ — (no package doc — add one)
+│   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
+│   ├── routing/ — routes tasks to providers, models, and roles using deterministic rules and optional LLM assistance
 │   ├── runtime/ — provides runtime verification utilities for executable identity
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
 │   ├── service/ — manages the g8s background worker as an OS daemon
 │   ├── settings/ — manages persistent, atomic user and system configurations for g8s
 │   ├── signing/ — provides code signing and signature verification primitives
-│   ├── sleep/ — (no package doc — add one)
+│   ├── sleep/ — manages operator away cycles, tracks background execution events, and generates wake-up briefings
 │   ├── state/ — implements pure FSM transition validation and append-only event logging
-│   ├── supervisor/ — enforcer
-│   ├── telemetry/ — (no package doc — add one)
+│   ├── supervisor/ — coordinates the fix loop across planning, role enforcement, worker execution, review, and RCA
+│   ├── telemetry/ — ingests execution trace events, distills failure patterns, and provides preflight context injection
 │   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s
 │   ├── watch/ — implements the blocking watch primitive (#371): poll a
 │   ├── worker/ — provides worker lifecycle supervision, execution containment,

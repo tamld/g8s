@@ -1,3 +1,4 @@
+// Package review — parses, validates, and aggregates code review findings from verifier workers into structured summaries.
 package review
 
 // Severity categorizes the impact of a code review finding.

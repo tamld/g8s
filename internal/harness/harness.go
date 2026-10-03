@@ -1,3 +1,4 @@
+// Package harness — enforces worker execution boundaries, permission profiles, role constraints, and prompt safety scanning.
 package harness
 
 import (

@@ -1,3 +1,4 @@
+// Package memory — provides a unified memory facade across working, episodic, semantic, and capability storage tiers.
 package memory
 
 import (
