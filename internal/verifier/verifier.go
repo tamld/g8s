@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/tamld/g8s/internal/telemetry"
 )
@@ -1051,6 +1052,17 @@ func pathMatches(file, pattern string) bool {
 	cleanFile = strings.TrimPrefix(cleanFile, "./")
 	cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
 	cleanPattern = strings.TrimPrefix(cleanPattern, "./")
+
+	// Confusable-character guard: a path containing non-ASCII characters never
+	// matches a registry pattern (deny-by-default direction — an unregistered
+	// verdict means human acceptance, never over-matching). Windows filesystem
+	// normalization can fold look-alike Unicode (e.g. Greek omicron in "dοcs")
+	// onto ASCII names, which would silently widen the docs class on one
+	// platform only; this guard keeps class resolution identical everywhere
+	// (release red cell, issue #517).
+	if strings.ContainsFunc(cleanFile, func(r rune) bool { return r > unicode.MaxASCII }) {
+		return false
+	}
 
 	// 1. Exact path match
 	if cleanFile == cleanPattern {
