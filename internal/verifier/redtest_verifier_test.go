@@ -629,8 +629,6 @@ classes:
 // 2. ParseRegistry([]byte(yamlData)) -> succeeds and loads Class with status: hard!
 // 3. Expected per Brief Guarantee 3: degrade to unregistered (fail-closed).
 func TestRedtest_Guarantee3_TwoCitationsMalformed(t *testing.T) {
-	t.Skip("BUG(REDTEST): status: hard accepts multiple citations (#123 #456) instead of degrading to unregistered")
-
 	yamlData := `
 classes:
   - name: test-hard
@@ -726,8 +724,6 @@ func TestRedtest_Guarantee4_EmptyCaller_SupervisorContext(t *testing.T) {
 // 2. caller = TaskRef{ID: "TASK-42"} (or "task-42 ")
 // 3. v.Verify(target, caller) -> succeeds without returning ErrSelfGrade!
 func TestRedtest_Guarantee4_SelfGradeBypass_CaseAndWhitespace(t *testing.T) {
-	t.Skip("BUG(REDTEST): self-grade guard bypassed when caller differs from target only by case or whitespace")
-
 	v := NewVerifier()
 	target := TaskRef{
 		ID:           "task-42",
