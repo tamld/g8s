@@ -493,3 +493,126 @@ func TestWatchFailed_CLIIntegration(t *testing.T) {
 		}
 	})
 }
+
+// TestWatchFailed_MidTailRotation verifies:
+// Mid-tail rotation: write enough lines to trigger rotation WHILE a watch is tailing
+// (in-process test of the watchFailed tail function), and verify the watch still
+// reports a matching line written after the rotation (#510).
+func TestWatchFailed_MidTailRotation(t *testing.T) {
+	tempDir := t.TempDir()
+	signalsDir := filepath.Join(tempDir, "signals")
+	if err := os.MkdirAll(signalsDir, 0o755); err != nil {
+		t.Fatalf("mkdir signals dir: %v", err)
+	}
+	signalsPath := filepath.Join(signalsDir, "tasks.jsonl")
+
+	now := time.Now().UTC()
+	sinceTime := now.Add(-1 * time.Minute)
+
+	// Startup state: pre-fill tasks.jsonl with lines whose ts <= sinceTime,
+	// so startup read finds no matches and watchFailed enters the tail loop.
+	const preFillCount = 20
+	var preBuf bytes.Buffer
+	for i := 1; i <= preFillCount; i++ {
+		ts := now.Add(-5 * time.Minute).Format(time.RFC3339)
+		fmt.Fprintf(&preBuf, `{"ts":%q,"task_id":"task-pre-%03d","from":"RUNNING","to":"WORKER_COMPLETED"}`+"\n", ts, i)
+	}
+	if err := os.WriteFile(signalsPath, preBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write pre-fill signals file: %v", err)
+	}
+
+	var outBuf bytes.Buffer
+	var errBuf bytes.Buffer
+	cfg := WatchFailedConfig{
+		SignalsPath:  signalsPath,
+		Since:        sinceTime,
+		Timeout:      3 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+		Out:          &outBuf,
+		ErrOut:       &errBuf,
+	}
+
+	// While watchFailed is tailing:
+	// Goroutine simulates the writer: appends lines exceeding a rotation threshold,
+	// triggers rotation (rename tasks.jsonl -> tasks.jsonl.1), and appends a matching
+	// line to the fresh tasks.jsonl.
+	const rotationCapBytes int64 = 2500
+	appendWithRotation := func(line string) {
+		fi, err := os.Stat(signalsPath)
+		if err == nil && fi.Size() > rotationCapBytes {
+			_ = os.Rename(signalsPath, signalsPath+".1")
+		}
+		f, err := os.OpenFile(signalsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			t.Errorf("open signals file in test writer: %v", err)
+			return
+		}
+		defer f.Close()
+		_, _ = f.WriteString(line)
+	}
+
+	go func() {
+		// Wait for watchFailed to finish startup and enter the tail loop.
+		time.Sleep(50 * time.Millisecond)
+
+		// 1. Write lines before rotation (all with ts before sinceTime so they don't match)
+		for i := preFillCount + 1; ; i++ {
+			ts := now.Add(-5 * time.Minute).Format(time.RFC3339)
+			line := fmt.Sprintf(`{"ts":%q,"task_id":"task-mid-%03d","from":"RUNNING","to":"WORKER_COMPLETED"}`+"\n", ts, i)
+			appendWithRotation(line)
+			fi, err := os.Stat(signalsPath)
+			if err == nil && fi.Size() > rotationCapBytes {
+				break
+			}
+		}
+
+		// Brief pause so the consumer tracks the growing offset in the pre-rotation file
+		time.Sleep(30 * time.Millisecond)
+
+		// 2. Next append triggers rotation and creates fresh tasks.jsonl!
+		ts := now.Add(-5 * time.Minute).Format(time.RFC3339)
+		line := fmt.Sprintf(`{"ts":%q,"task_id":"task-rot-first","from":"RUNNING","to":"WORKER_COMPLETED"}`+"\n", ts)
+		appendWithRotation(line)
+
+		// 3. Write matching line into the fresh tasks.jsonl (ts > sinceTime, to = FAILED)
+		matchTS := now.Add(2 * time.Second).Format(time.RFC3339)
+		matchingLine := fmt.Sprintf(`{"ts":%q,"task_id":"task-match-post-rotate","from":"RUNNING","to":"FAILED"}`+"\n", matchTS)
+		appendWithRotation(matchingLine)
+	}()
+
+	start := time.Now()
+	exitCode, err := watchFailed(context.Background(), cfg)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("watchFailed unexpected error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("watchFailed exitCode = %d, want 0", exitCode)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("watchFailed exited too fast (%v), expected it to wait for mid-tail rotation", elapsed)
+	}
+
+	var env struct {
+		Kind string         `json:"kind"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v; raw: %s", err, outBuf.String())
+	}
+	if env.Kind != "task_signal" {
+		t.Errorf("env.Kind = %q, want task_signal", env.Kind)
+	}
+	if env.Data["task_id"] != "task-match-post-rotate" {
+		t.Errorf("env.Data[task_id] = %v, want task-match-post-rotate", env.Data["task_id"])
+	}
+	if env.Data["to"] != "FAILED" {
+		t.Errorf("env.Data[to] = %v, want FAILED", env.Data["to"])
+	}
+
+	// Verify rotated file .1 exists
+	if _, err := os.Stat(signalsPath + ".1"); err != nil {
+		t.Errorf("expected rotated file tasks.jsonl.1 to exist: %v", err)
+	}
+}

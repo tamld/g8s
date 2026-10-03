@@ -460,12 +460,209 @@ func TestRed_Guarantee5_GrowthRateAndLinePerTransition(t *testing.T) {
 
 // TestRed_Guarantee5_CannotFillDiskUnboundedly_Audit verifies:
 // Stated Guarantee: "Signal file cannot fill the disk unboundedly."
-// Evaluates whether the control plane provides any rotation, retention, or size cap
-// mechanism to prevent unbounded disk exhaustion.
+// Evaluates whether the control plane provides rotation, retention, and size cap
+// mechanism to prevent unbounded disk exhaustion (#510).
 func TestRed_Guarantee5_CannotFillDiskUnboundedly_Audit(t *testing.T) {
 	// Guarantee 5: Signal file cannot fill the disk unboundedly.
-	// BUG(REDTEST): controlplane/signals: signal file lacks rotation and size cap mechanism; grows unboundedly at ~103 bytes/terminal transition without retention policy.
-	t.Skip("BUG(REDTEST): signal file lacks rotation and cap mechanism; grows unboundedly with terminal transitions")
+	// Size-capped rotation: tasks.jsonl rotates to tasks.jsonl.1 when size exceeds maxSignalFileBytes.
+	origMax := maxSignalFileBytes
+	maxSignalFileBytes = 2048 // 2 KiB for fast testing
+	defer func() {
+		maxSignalFileBytes = origMax
+	}()
+
+	clock := newFakeClock()
+	s, dbPath := newTestStoreWithClock(t, clock)
+	defer s.Close()
+	signalsPath := filepath.Join(filepath.Dir(dbPath), "signals", "tasks.jsonl")
+	rotatedPath := signalsPath + ".1"
+
+	// 1. Drive transitions programmatically until cumulative size exceeds maxSignalFileBytes.
+	var firstBatchCount int
+	for {
+		firstBatchCount++
+		taskID := fmt.Sprintf("task-audit-%04d", firstBatchCount)
+		s.appendTaskSignal(taskID, StateRunning, StateWorkerCompleted, clock.Now())
+		fi, err := os.Stat(signalsPath)
+		if err != nil {
+			t.Fatalf("stat signals file: %v", err)
+		}
+		if fi.Size() > maxSignalFileBytes {
+			break
+		}
+	}
+
+	// tasks.jsonl exists and exceeds maxSignalFileBytes; rotation happens before next append.
+	fiPre, err := os.Stat(signalsPath)
+	if err != nil {
+		t.Fatalf("stat signals file after first batch: %v", err)
+	}
+	if fiPre.Size() <= maxSignalFileBytes {
+		t.Fatalf("signals file size (%d) should exceed maxSignalFileBytes (%d)", fiPre.Size(), maxSignalFileBytes)
+	}
+	if _, err := os.Stat(rotatedPath); !os.IsNotExist(err) {
+		t.Fatalf("rotated file %s should not exist before next append, err=%v", rotatedPath, err)
+	}
+
+	// 2. Next transition triggers rotation.
+	triggerID := fmt.Sprintf("task-audit-%04d", firstBatchCount+1)
+	s.appendTaskSignal(triggerID, StateRunning, StateWorkerCompleted, clock.Now())
+
+	// 3. Write a few more transitions into the fresh file.
+	const secondBatchCount = 4
+	for i := 1; i <= secondBatchCount; i++ {
+		taskID := fmt.Sprintf("task-audit-%04d", firstBatchCount+1+i)
+		s.appendTaskSignal(taskID, StateRunning, StateWorkerCompleted, clock.Now())
+	}
+
+	// 4. Verify: rotation happened (.1 exists, current file fresh).
+	rotFi, err := os.Stat(rotatedPath)
+	if err != nil {
+		t.Fatalf("expected rotated file %s to exist: %v", rotatedPath, err)
+	}
+	if rotFi.Size() <= maxSignalFileBytes {
+		t.Errorf("expected rotated file size > %d, got %d", maxSignalFileBytes, rotFi.Size())
+	}
+
+	curFi, err := os.Stat(signalsPath)
+	if err != nil {
+		t.Fatalf("expected current signals file %s to exist: %v", signalsPath, err)
+	}
+	if curFi.Size() >= maxSignalFileBytes {
+		t.Errorf("expected fresh current file size < %d, got %d", maxSignalFileBytes, curFi.Size())
+	}
+
+	// 5. Verify: no line lost WITHIN the current file.
+	curLines := readSignalLines(t, signalsPath)
+	expectedCurCount := 1 + secondBatchCount // trigger line + second batch
+	if len(curLines) != expectedCurCount {
+		t.Fatalf("expected %d lines in current file, got %d", expectedCurCount, len(curLines))
+	}
+	for idx, line := range curLines {
+		expectedID := fmt.Sprintf("task-audit-%04d", firstBatchCount+1+idx)
+		if line.TaskID != expectedID {
+			t.Errorf("current file line %d: got TaskID %s, want %s", idx, line.TaskID, expectedID)
+		}
+	}
+
+	// 6. Verify: total content = current + .1.
+	rotLines := readSignalLines(t, rotatedPath)
+	if len(rotLines) != firstBatchCount {
+		t.Fatalf("expected %d lines in rotated file, got %d", firstBatchCount, len(rotLines))
+	}
+	totalLines := append(rotLines, curLines...)
+	if len(totalLines) != firstBatchCount+expectedCurCount {
+		t.Fatalf("expected total %d lines, got %d", firstBatchCount+expectedCurCount, len(totalLines))
+	}
+	for idx, line := range totalLines {
+		expectedID := fmt.Sprintf("task-audit-%04d", 1+idx)
+		if line.TaskID != expectedID {
+			t.Errorf("total content line %d: got TaskID %s, want %s", idx, line.TaskID, expectedID)
+		}
+	}
+}
+
+// TestRed_Guarantee5_TwoRotationsQuickSuccession verifies that two rotations in quick succession
+// overwrite tasks.jsonl.1 such that exactly ONE generation is kept, and the signal directory
+// contains only tasks.jsonl and tasks.jsonl.1 (#510).
+func TestRed_Guarantee5_TwoRotationsQuickSuccession(t *testing.T) {
+	origMax := maxSignalFileBytes
+	maxSignalFileBytes = 500 // 500 bytes for fast rotation
+	defer func() {
+		maxSignalFileBytes = origMax
+	}()
+
+	clock := newFakeClock()
+	s, dbPath := newTestStoreWithClock(t, clock)
+	defer s.Close()
+	signalsPath := filepath.Join(filepath.Dir(dbPath), "signals", "tasks.jsonl")
+	rotatedPath := signalsPath + ".1"
+
+	// Generation 1: write 6 transitions (~600 bytes > 500)
+	for i := 1; i <= 6; i++ {
+		s.appendTaskSignal(fmt.Sprintf("task-gen1-%02d", i), StateRunning, StateWorkerCompleted, clock.Now())
+	}
+	// Next transition triggers rotation 1: Gen 1 moves to .1, task-gen2-01 in fresh file
+	s.appendTaskSignal("task-gen2-01", StateRunning, StateWorkerCompleted, clock.Now())
+
+	// Generation 2: write 5 more transitions (~600 bytes total in fresh file > 500)
+	for i := 2; i <= 6; i++ {
+		s.appendTaskSignal(fmt.Sprintf("task-gen2-%02d", i), StateRunning, StateWorkerCompleted, clock.Now())
+	}
+	// Next transition triggers rotation 2: Gen 2 moves to .1 (overwriting Gen 1), task-gen3-01 in fresh file
+	s.appendTaskSignal("task-gen3-01", StateRunning, StateWorkerCompleted, clock.Now())
+
+	// Verify .1 contains Gen 2 (6 lines of task-gen2-*)
+	rotLines := readSignalLines(t, rotatedPath)
+	if len(rotLines) != 6 {
+		t.Fatalf("expected 6 lines in rotated file (Gen 2), got %d", len(rotLines))
+	}
+	if rotLines[0].TaskID != "task-gen2-01" {
+		t.Errorf("rotated line 0 TaskID = %s, want task-gen2-01", rotLines[0].TaskID)
+	}
+
+	// Verify current file contains Gen 3 (1 line of task-gen3-01)
+	curLines := readSignalLines(t, signalsPath)
+	if len(curLines) != 1 {
+		t.Fatalf("expected 1 line in current file (Gen 3), got %d", len(curLines))
+	}
+	if curLines[0].TaskID != "task-gen3-01" {
+		t.Errorf("current line 0 TaskID = %s, want task-gen3-01", curLines[0].TaskID)
+	}
+
+	// Verify signal directory contains ONLY tasks.jsonl and tasks.jsonl.1
+	entries, err := os.ReadDir(filepath.Dir(signalsPath))
+	if err != nil {
+		t.Fatalf("read signals dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 2 {
+		t.Fatalf("expected exactly 2 files in signals dir, got %v", names)
+	}
+}
+
+// TestRed_Guarantee5_RotationFailureFallback verifies that when rotation fails (e.g. destination
+// is an un-overwritable directory), a [warn] controlplane: warning is logged to stderr and
+// appendTaskSignal continues appending to the unrotated tasks.jsonl without error (#510).
+func TestRed_Guarantee5_RotationFailureFallback(t *testing.T) {
+	origMax := maxSignalFileBytes
+	maxSignalFileBytes = 500
+	defer func() {
+		maxSignalFileBytes = origMax
+	}()
+
+	clock := newFakeClock()
+	s, dbPath := newTestStoreWithClock(t, clock)
+	defer s.Close()
+	signalsPath := filepath.Join(filepath.Dir(dbPath), "signals", "tasks.jsonl")
+	rotatedPath := signalsPath + ".1"
+
+	// Create signals dir and fill tasks.jsonl to exceed maxSignalFileBytes
+	for i := 1; i <= 6; i++ {
+		s.appendTaskSignal(fmt.Sprintf("task-fail-%02d", i), StateRunning, StateWorkerCompleted, clock.Now())
+	}
+
+	// Create tasks.jsonl.1 as a directory so os.Rename fails cross-platform
+	if err := os.Mkdir(rotatedPath, 0o755); err != nil {
+		t.Fatalf("mkdir rotated path as dir: %v", err)
+	}
+	defer os.Remove(rotatedPath)
+
+	// Appending next transition should attempt rotation, fail rename, log warning,
+	// and continue appending without panic or error.
+	s.appendTaskSignal("task-fail-07", StateRunning, StateWorkerCompleted, clock.Now())
+
+	// Verify tasks.jsonl still exists and contains all 7 lines
+	lines := readSignalLines(t, signalsPath)
+	if len(lines) != 7 {
+		t.Fatalf("expected 7 lines in unrotated file, got %d", len(lines))
+	}
+	if lines[6].TaskID != "task-fail-07" {
+		t.Errorf("last line TaskID = %s, want task-fail-07", lines[6].TaskID)
+	}
 }
 
 // =============================================================================

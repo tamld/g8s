@@ -1930,6 +1930,12 @@ func isTerminalSignalState(to string) bool {
 	}
 }
 
+const defaultMaxSignalFileBytes int64 = 1 << 20 // 1 MiB (#510)
+
+// maxSignalFileBytes is the size cap for signals/tasks.jsonl before rotating to tasks.jsonl.1.
+// Package-level var overridable by tests to test rotation with small byte limits (#510).
+var maxSignalFileBytes = defaultMaxSignalFileBytes
+
 // appendTaskSignal appends a single terminal-transition signal JSON line to
 // <db-dir>/signals/tasks.jsonl.
 //
@@ -1967,6 +1973,32 @@ func (s *Store) appendTaskSignal(taskID, from, to string, ts time.Time) {
 	}
 	if s.signalPath == "" {
 		return
+	}
+
+	// Rotate before appending if current signals file exceeds maxSignalFileBytes (#510).
+	if maxSignalFileBytes > 0 {
+		var size int64
+		if s.signalFile != nil {
+			if fi, err := s.signalFile.Stat(); err == nil {
+				size = fi.Size()
+			} else if fi2, err2 := os.Stat(s.signalPath); err2 == nil {
+				size = fi2.Size()
+			}
+		} else if fi, err := os.Stat(s.signalPath); err == nil {
+			size = fi.Size()
+		}
+		if size > maxSignalFileBytes {
+			if s.signalFile != nil {
+				if closeErr := s.signalFile.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "[warn] controlplane: close signals file: %v\n", closeErr)
+				}
+				s.signalFile = nil
+			}
+			rotatedPath := s.signalPath + ".1"
+			if err := os.Rename(s.signalPath, rotatedPath); err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] controlplane: rotate signals file: %v\n", err)
+			}
+		}
 	}
 
 	if s.signalFile == nil {
