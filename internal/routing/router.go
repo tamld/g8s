@@ -23,6 +23,10 @@ type Decision struct {
 	IsFallback bool    `json:"is_fallback"`
 	Reason     string  `json:"reason"` // human-readable rule/suggestion basis
 	Confidence float64 `json:"confidence"`
+	// Jev token accounting from the real TypeSafe API (jev-sourced decisions
+	// only; zero otherwise) — feeds the M3 cost-per-route metric (issue #518).
+	JevInputTokens  int64 `json:"jev_input_tokens,omitempty"`
+	JevOutputTokens int64 `json:"jev_output_tokens,omitempty"`
 }
 
 // RouteRequest carries task context for provider/model/role assignment.

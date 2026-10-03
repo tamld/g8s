@@ -148,10 +148,18 @@ type Answer struct {
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
 }
 
+// JevUsage carries the token accounting returned by the real TypeSafe API
+// (absent from mock responses; zero-valued for deterministic decisions).
+type JevUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+}
+
 // JevResponse represents the typed response payload from Jev System 1.
 type JevResponse struct {
 	Model   string            `json:"model"`
 	Answers map[string]Answer `json:"answers"`
+	Usage   *JevUsage         `json:"usage,omitempty"`
 }
 
 func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidates []candidateModel) (Decision, error) {
@@ -166,22 +174,42 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	activeKey := getActiveKey(keys)
 	endpoint := getJevEndpoint(ctx)
 
-	// Build choice sets
+	// Build choice sets. The real TypeSafe SystemOne API (openapi.json) requires
+	// each choice question's `criteria` as a MAP of choice name -> description
+	// of when it applies; a bare list (or a question with no `type`) is rejected
+	// with 422. Role descriptions come from the harness role registry so the
+	// catalog Jev sees stays in sync with `g8s roles`.
 	providerSet := make(map[string]struct{})
 	modelSet := make(map[string]struct{})
 	for _, c := range candidates {
 		providerSet[c.provider] = struct{}{}
 		modelSet[c.model] = struct{}{}
 	}
-	var providerChoices []string
+	providerCriteria := make(map[string]string, len(providerSet))
 	for p := range providerSet {
-		providerChoices = append(providerChoices, p)
+		providerCriteria[p] = "Registered provider available for delegated task dispatch in the active manifest."
 	}
-	var modelChoices []string
+	modelCriteria := make(map[string]string, len(modelSet))
 	for m := range modelSet {
-		modelChoices = append(modelChoices, m)
+		// State the provider↔model binding explicitly: the deterministic
+		// validator enforces the PAIR, so the suggestion catalog must carry it
+		// (a Jev suggestion of an unbound pair is rejected as unknown).
+		bindings := make([]string, 0, 2)
+		for _, c := range candidates {
+			if c.model == m {
+				bindings = append(bindings, c.provider)
+			}
+		}
+		modelCriteria[m] = fmt.Sprintf("Model served by provider %s.", strings.Join(bindings, " or "))
 	}
-	roleChoices := harness.RoleNames()
+	roleCriteria := make(map[string]string)
+	for _, r := range harness.RoleNames() {
+		if role, err := harness.GetRole(r); err == nil && strings.TrimSpace(role.Purpose) != "" {
+			roleCriteria[r] = role.Purpose
+		} else {
+			roleCriteria[r] = "Registered worker role profile."
+		}
+	}
 
 	payload := map[string]any{
 		"model": "jev-latest",
@@ -195,21 +223,17 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 			"provider": map[string]any{
 				"type":         "choice",
 				"instructions": "Suggest the best provider for this task.",
-				"choices":      providerChoices,
+				"criteria":     providerCriteria,
 			},
 			"model": map[string]any{
 				"type":         "choice",
 				"instructions": "Suggest the best model for this task.",
-				"choices":      modelChoices,
+				"criteria":     modelCriteria,
 			},
 			"role": map[string]any{
 				"type":         "choice",
 				"instructions": "Suggest the worker role profile.",
-				"choices":      roleChoices,
-			},
-			"reason": map[string]any{
-				"type":         "choice",
-				"instructions": "Reason for the suggestion.",
+				"criteria":     roleCriteria,
 			},
 		},
 	}
@@ -267,6 +291,12 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		return layer1, nil
 	}
 
+	var usageIn, usageOut int64
+	if jevResp.Usage != nil {
+		usageIn = jevResp.Usage.InputTokens
+		usageOut = jevResp.Usage.OutputTokens
+	}
+
 	sugProvider := strings.TrimSpace(jevResp.Answers["provider"].Choice)
 	sugModel := strings.TrimSpace(jevResp.Answers["model"].Choice)
 	sugRole := strings.TrimSpace(jevResp.Answers["role"].Choice)
@@ -322,12 +352,14 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	}
 
 	return Decision{
-		Provider:   sugProvider,
-		Model:      sugModel,
-		Role:       sugRole,
-		Source:     "jev",
-		IsFallback: false,
-		Reason:     sugReason,
-		Confidence: conf,
+		Provider:        sugProvider,
+		Model:           sugModel,
+		Role:            sugRole,
+		Source:          "jev",
+		IsFallback:      false,
+		Reason:          sugReason,
+		Confidence:      conf,
+		JevInputTokens:  usageIn,
+		JevOutputTokens: usageOut,
 	}, nil
 }
