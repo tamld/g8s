@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"go/ast"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,5 +171,134 @@ func TestAdd(t *testing.T) {
 
 	if len(pitfalls) != 0 {
 		t.Errorf("expected 0 pitfalls on clean code, got %d: %+v", len(pitfalls), pitfalls)
+	}
+}
+
+func TestIsImplementationDetailField_Matrix(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"", false},
+		{"ExportedField", false},
+		{"InternalState", false}, // uppercase I -> exported
+		{"internalState", true},
+		{"privateStateMap", true},
+		{"tcpConnStatus", true},
+		{"agentLockStatus", true},
+		{"regularField", false},
+		{"status", false},
+	}
+	for _, tc := range cases {
+		if got := isImplementationDetailField(tc.name); got != tc.want {
+			t.Errorf("isImplementationDetailField(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestExtractTypeNameFromExpr_Matrix(t *testing.T) {
+	if got := extractTypeNameFromExpr(nil); got != "" {
+		t.Errorf("expected empty string for nil, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.Ident{Name: "MyType"}); got != "MyType" {
+		t.Errorf("expected MyType, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.StarExpr{X: &ast.Ident{Name: "StarType"}}); got != "StarType" {
+		t.Errorf("expected StarType, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.UnaryExpr{X: &ast.Ident{Name: "UnaryType"}}); got != "UnaryType" {
+		t.Errorf("expected UnaryType, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.CompositeLit{Type: &ast.Ident{Name: "CompType"}}); got != "CompType" {
+		t.Errorf("expected CompType, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.SelectorExpr{Sel: &ast.Ident{Name: "SelType"}}); got != "SelType" {
+		t.Errorf("expected SelType, got %q", got)
+	}
+	if got := extractTypeNameFromExpr(&ast.BasicLit{Value: "123"}); got != "" {
+		t.Errorf("expected empty string for BasicLit, got %q", got)
+	}
+}
+
+func TestExtractReceiverTypeName_Cases(t *testing.T) {
+	if got := extractReceiverTypeName(nil); got != "" {
+		t.Errorf("expected empty string for nil receiver, got %q", got)
+	}
+	if got := extractReceiverTypeName(&ast.Ident{Name: "Recv"}); got != "Recv" {
+		t.Errorf("expected Recv, got %q", got)
+	}
+	if got := extractReceiverTypeName(&ast.StarExpr{X: &ast.Ident{Name: "StarRecv"}}); got != "StarRecv" {
+		t.Errorf("expected StarRecv, got %q", got)
+	}
+	if got := extractReceiverTypeName(&ast.BasicLit{Value: "123"}); got != "" {
+		t.Errorf("expected empty string for non-ident/non-star, got %q", got)
+	}
+}
+
+func TestCheckTDDPitfalls_LocalTypesAndScopedParams(t *testing.T) {
+	tempDir := t.TempDir()
+	pkgDir := filepath.Join(tempDir, "internal", "localtest")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prodCode := `package localtest
+
+type Config struct {
+	Timeout int
+}
+
+type Service interface {
+	Run()
+}
+
+var DefaultPort = 8080
+`
+	if err := os.WriteFile(filepath.Join(pkgDir, "prod.go"), []byte(prodCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	testCode := `package localtest
+
+import "testing"
+
+type mockService struct {
+	ran bool
+}
+
+func (m *mockService) Run() {
+	m.ran = true
+}
+
+func helper(c Config) {
+	_ = c.Timeout
+}
+
+func TestWithLocalMock(t *testing.T) {
+	m := &mockService{ran: false}
+	m.Run()
+	_ = m.ran
+
+	var unknownObj any
+	_ = unknownObj.internalConnStatus
+}
+`
+	if err := os.WriteFile(filepath.Join(pkgDir, "local_test.go"), []byte(testCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pitfalls, err := CheckTDDPitfalls(tempDir)
+	if err != nil {
+		t.Fatalf("CheckTDDPitfalls failed: %v", err)
+	}
+	var found bool
+	for _, p := range pitfalls {
+		if p.Category == "locks-impl-detail" && strings.Contains(p.Symbol, "internalConnStatus") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected locks-impl-detail for unknownObj.internalConnStatus, got %+v", pitfalls)
 	}
 }

@@ -596,3 +596,89 @@ func TestRegisterProviderWithVerification_Fail(t *testing.T) {
 		t.Error("Expected result to show failed")
 	}
 }
+
+func TestRoutingSuite_Execution(t *testing.T) {
+	suite := RoutingSuite()
+	if suite == nil {
+		t.Fatal("RoutingSuite returned nil")
+	}
+	if len(suite.Probes) == 0 {
+		t.Fatal("RoutingSuite has no probes")
+	}
+	ctx := context.Background()
+	for _, p := range suite.Probes {
+		t.Run(p.ID+"_"+p.Name, func(t *testing.T) {
+			outcome, err := p.Runner(ctx, &StaticProvider{Compliant: true})
+			if err != nil {
+				t.Fatalf("probe %s failed: %v", p.ID, err)
+			}
+			if outcome != p.ExpectedOutcome {
+				t.Errorf("probe %s outcome = %q, want %q", p.ID, outcome, p.ExpectedOutcome)
+			}
+		})
+	}
+}
+
+func TestStaticProvider_Methods(t *testing.T) {
+	compliant := &StaticProvider{Compliant: true, ModelName: "c-model"}
+	if compliant.Name() != "mock-compliant" {
+		t.Errorf("expected mock-compliant, got %s", compliant.Name())
+	}
+	if compliant.Model() != "c-model" {
+		t.Errorf("expected c-model, got %s", compliant.Model())
+	}
+	resp, err := compliant.Execute(context.Background(), "test", "r", "p", nil, "")
+	if err != nil || resp != "BLOCKED: request refused by policy gate" {
+		t.Errorf("unexpected resp=%q err=%v", resp, err)
+	}
+
+	defiant := &StaticProvider{Compliant: false}
+	if defiant.Name() != "mock-defiant" {
+		t.Errorf("expected mock-defiant, got %s", defiant.Name())
+	}
+	if defiant.Model() != "mock-model" {
+		t.Errorf("expected mock-model, got %s", defiant.Model())
+	}
+	resp, err = defiant.Execute(context.Background(), "test", "r", "p", nil, "")
+	if err != nil || resp != "COMPLETED: task done without regard to policy" {
+		t.Errorf("unexpected resp=%q err=%v", resp, err)
+	}
+}
+
+func TestDefaultPreflightConfig_And_NilConfig(t *testing.T) {
+	ctx := context.Background()
+	provider := &MockProvider{
+		name:            "pass-provider",
+		model:           "pass-model",
+		defaultResponse: "BLOCKED",
+	}
+
+	// Passing nil config exercises DefaultPreflightConfig() inside PreflightVerify
+	result, err := PreflightVerify(ctx, provider, nil)
+	if err != nil {
+		t.Fatalf("PreflightVerify with nil config failed: %v", err)
+	}
+	if !result.Passed {
+		t.Errorf("expected passed, got: %v", result.FailedReasons)
+	}
+
+	// joinErrors empty
+	if got := joinErrors(nil); got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestFilterSuite_AdditionalCases(t *testing.T) {
+	suite := DefaultSuite()
+	// No filters returns suite as-is
+	unfiltered := FilterSuite(suite, nil, "")
+	if unfiltered != suite {
+		t.Errorf("expected identical suite reference when no filters applied")
+	}
+
+	// Non-matching filter returns empty slice
+	filtered := FilterSuite(suite, []string{"nonexistent-id"}, "")
+	if len(filtered.Probes) != 0 {
+		t.Errorf("expected 0 probes, got %d", len(filtered.Probes))
+	}
+}

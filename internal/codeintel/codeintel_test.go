@@ -208,3 +208,115 @@ func BenchmarkASTAdapter_Diagnostics(b *testing.B) {
 		_, _ = adapter.Diagnostics(ctx, filePath)
 	}
 }
+
+func TestASTAdapter_Name_Capabilities_CallHierarchy(t *testing.T) {
+	adapter, err := NewASTAdapter("")
+	if err != nil {
+		t.Fatalf("NewASTAdapter failed: %v", err)
+	}
+	if name := adapter.Name(); name != "ast-tier0" {
+		t.Errorf("expected ast-tier0, got %s", name)
+	}
+	caps := adapter.Capabilities()
+	if !caps.CanReferences || caps.CanCallHierarchy || !caps.CanDiagnostics || caps.IsSemantic {
+		t.Errorf("unexpected capabilities: %+v", caps)
+	}
+	tree, err := adapter.CallHierarchy(context.Background(), "main.go", "Foo")
+	if err == nil || tree != nil {
+		t.Errorf("expected error from CallHierarchy, got tree=%v, err=%v", tree, err)
+	}
+}
+
+func TestASTAdapter_References_EdgeCases(t *testing.T) {
+	tmp := t.TempDir()
+	adapter, err := NewASTAdapter(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty symbol error
+	_, err = adapter.References(context.Background(), "a.go", "")
+	if err == nil {
+		t.Error("expected error for empty symbol")
+	}
+
+	// Subdirectories to skip: .git, vendor, node_modules
+	for _, dir := range []string{".git", "vendor", "node_modules", "sub"} {
+		p := filepath.Join(tmp, dir)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "test.go"), []byte("package p\nfunc Secret() {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Secret in .git, vendor, node_modules should be ignored, only sub/test.go found
+	locs, err := adapter.References(context.Background(), "sub/test.go", "Secret")
+	if err != nil {
+		t.Fatalf("References failed: %v", err)
+	}
+	if len(locs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(locs), locs)
+	}
+	if locs[0].File != filepath.Join("sub", "test.go") {
+		t.Errorf("expected sub/test.go, got %s", locs[0].File)
+	}
+}
+
+func TestASTAdapter_Diagnostics_NonGoFile(t *testing.T) {
+	tmp := t.TempDir()
+	txtFile := filepath.Join(tmp, "note.txt")
+	if err := os.WriteFile(txtFile, []byte("plain text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewASTAdapter(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diags, err := adapter.Diagnostics(context.Background(), "note.txt")
+	if err != nil || len(diags) != 0 {
+		t.Errorf("expected nil diagnostics for non-go file, got diags=%v, err=%v", diags, err)
+	}
+}
+
+func TestMultiTierRouter_Diagnostics(t *testing.T) {
+	// Adapter with error
+	errAdapter := &mockAdapter{
+		name: "err-mock",
+		capabilities: Capabilities{
+			CanDiagnostics: true,
+		},
+		diagErr: os.ErrPermission,
+	}
+
+	// Adapter with valid diagnostics
+	okAdapter := &mockAdapter{
+		name: "ok-mock",
+		capabilities: Capabilities{
+			CanDiagnostics: true,
+		},
+		diagnostics: []Diagnostic{{File: "f.go", Message: "err", Severity: "ERROR"}},
+	}
+
+	// Fallback should hit okAdapter
+	router := NewMultiTierRouter(errAdapter, okAdapter)
+	diags, err := router.Diagnostics(context.Background(), "f.go")
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if len(diags) != 1 || diags[0].Message != "err" {
+		t.Fatalf("unexpected diags: %+v", diags)
+	}
+
+	// Router without CanDiagnostics adapter
+	noDiagMock := &mockAdapter{
+		name:         "no-diag",
+		capabilities: Capabilities{},
+	}
+	emptyRouter := NewMultiTierRouter(noDiagMock)
+	diags, err = emptyRouter.Diagnostics(context.Background(), "f.go")
+	if err != nil || diags != nil {
+		t.Fatalf("expected nil, nil, got diags=%v, err=%v", diags, err)
+	}
+}
