@@ -242,6 +242,9 @@ func TestCheckGhostProcesses_Coverage(t *testing.T) {
 }
 
 func TestWindowsDiskFreeSpace_Simulated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-simulated fixture (shell-script/ chmod semantics) — not meaningful on real Windows")
+	}
 	// 1. Without powershell/fsutil on Linux -> errors cleanly
 	_, err := windowsDiskFreeSpace("C:\\")
 	if err == nil {
@@ -287,6 +290,9 @@ func TestFormatBytes(t *testing.T) {
 }
 
 func TestCheckWorkspace_DeniedPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-simulated fixture (shell-script/ chmod semantics) — not meaningful on real Windows")
+	}
 	tmpDir := t.TempDir()
 	deniedDir := filepath.Join(tmpDir, ".env")
 	if err := os.MkdirAll(deniedDir, 0o755); err != nil {
