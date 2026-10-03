@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1089,8 +1090,12 @@ func pathMatches(file, pattern string) bool {
 			return true
 		}
 	}
-	// 3. Glob matching (e.g. *.md, *_test.go)
-	m, _ := filepath.Match(cleanPattern, cleanFile)
+	// 3. Glob matching (e.g. *.md, *_test.go). path.Match (not filepath.Match)
+	// is required here: paths are already slash-normalized, and filepath.Match
+	// is case-insensitive on Windows, which would let "DOCS/x.md" match the
+	// lowercase "docs/**" registry patterns and silently widen the class
+	// (release red cell, issue #517 — Windows-oracle catch).
+	m, _ := path.Match(cleanPattern, cleanFile)
 	return m
 }
 
@@ -1109,7 +1114,7 @@ func globstarMatch(fileSegs, patSegs []string) bool {
 	if len(fileSegs) == 0 {
 		return false
 	}
-	m, _ := filepath.Match(patSegs[0], fileSegs[0])
+	m, _ := path.Match(patSegs[0], fileSegs[0])
 	if !m {
 		return false
 	}
