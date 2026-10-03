@@ -62,12 +62,12 @@ human-ratified.
 ## 4. Waves
 
 - **Wave F (this session)** — the safety floor + the distributor seed:
-  - F1: ADR-0029 implementation, controlplane layer (retry
+  - WF1: ADR-0029 implementation, controlplane layer (retry
     classification, budget accounting, resubmit primitive) + settings
     keys. [ADR-0029 Accepted]
-  - F2: ADR-0029 implementation, cmd layer (`autopilot tick` retry job,
-    `g8s resubmit`, docs). Contract frozen by F1's brief.
-  - F3: `internal/routing` — deterministic router (always available) +
+  - WF2: ADR-0029 implementation, cmd layer (`autopilot tick` retry job,
+    `g8s resubmit`, docs). Contract frozen by WF1's brief.
+  - WF3: `internal/routing` — deterministic router (always available) +
     optional Jev enhancement following the ReflexGate pattern
     (Source/IsFallback telemetry, fail-open, deny-invalid) + benchmark
     probes as eval category `task_routing`. No cmd changes (integration

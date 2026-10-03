@@ -10,6 +10,12 @@ For programmatic inspection without parsing prose, read [`manifest.json`](manife
 
 ---
 
+## 0.1. Vocabulary Reservation: F0/F1/F2 (containment levels)
+
+Bare tokens **F0/F1/F2 are RESERVED** for the containment tiers — F0 = Brain/supervisor, F1 = g8s-harness worker spawned by F0, **F2 = subagent spawned recursively BY a worker** (platform-native by default; `F2 ⊆ F1 ⊆ F0`). They are exponentials of the supervisor→worker structure, not sequence numbers. Wave/slice ordinals MUST carry a prefix (`WF1`, never bare `F1`). Canonical definitions, routing rules (default platform-native; recursive-g8s is ADR-gated), the cardinality law, and the implementation audit: [`docs/decisions/0032-containment-levels.md`](docs/decisions/0032-containment-levels.md).
+
+---
+
 ## 1. Zero-Context Lazy Loading Protocol (Mandatory Reading Order)
 
 Do NOT randomly scan the entire repository or the `reference/` directory. Follow this 4-step progressive disclosure reading order:
