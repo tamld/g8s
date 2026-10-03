@@ -477,3 +477,154 @@ func TestUnsupportedPlatformRejectedFailClosed(t *testing.T) {
 		t.Fatalf("want macOS-only platform guard, got %v", err)
 	}
 }
+
+func TestPlatformServiceManager_Factory(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "g8s")
+	_ = os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755)
+
+	// darwin
+	darwinCfg := Config{
+		Platform:   "darwin",
+		BinaryPath: bin,
+		Label:      "test.darwin",
+		Home:       root,
+	}
+	runner := &fakeRunner{}
+	mDarwin, err := NewPlatformServiceManager(darwinCfg, nil, runner)
+	if err != nil {
+		t.Fatalf("darwin factory failed: %v", err)
+	}
+	if mDarwin == nil {
+		t.Fatal("expected non-nil darwin manager")
+	}
+
+	// linux
+	linuxCfg := Config{
+		Platform:   "linux",
+		BinaryPath: bin,
+		Label:      "test.linux",
+		Home:       root,
+	}
+	mLinux, err := NewPlatformServiceManager(linuxCfg, nil, runner)
+	if err != nil {
+		t.Fatalf("linux factory failed: %v", err)
+	}
+	if mLinux == nil {
+		t.Fatal("expected non-nil linux manager")
+	}
+
+	// windows (on linux/darwin returns unsupported OS error from NewWindowsServiceManager)
+	winCfg := Config{
+		Platform:   "windows",
+		BinaryPath: bin,
+		Label:      "test.win",
+		Home:       root,
+	}
+	_, err = NewPlatformServiceManager(winCfg, nil, runner)
+	if runtime.GOOS != "windows" && err == nil {
+		t.Fatal("expected error for windows backend on non-windows")
+	}
+
+	// unsupported
+	badCfg := Config{Platform: "plan9"}
+	_, err = NewPlatformServiceManager(badCfg, nil, runner)
+	if err == nil || !strings.Contains(err.Error(), "unsupported platform") {
+		t.Fatalf("expected unsupported platform error, got %v", err)
+	}
+
+	// default (empty platform)
+	defCfg := Config{
+		BinaryPath: bin,
+		Home:       root,
+		Platform:   "",
+	}
+	_, _ = NewPlatformServiceManager(defCfg, nil, runner)
+}
+
+func TestManager_Start_Stop_Restart_Scenarios(t *testing.T) {
+	env := newServiceEnv(t)
+
+	// Case 1: When not loaded, Start, Stop, Restart fail immediately
+	env.runner.errs = map[string]error{"print": errors.New("not loaded")}
+	if err := env.manager.Start(); err == nil || !strings.Contains(err.Error(), "not installed and loaded") {
+		t.Fatalf("expected not loaded error on Start, got %v", err)
+	}
+	if err := env.manager.Stop(); err == nil || !strings.Contains(err.Error(), "not installed and loaded") {
+		t.Fatalf("expected not loaded error on Stop, got %v", err)
+	}
+	if err := env.manager.Restart(); err == nil || !strings.Contains(err.Error(), "not installed and loaded") {
+		t.Fatalf("expected not loaded error on Restart, got %v", err)
+	}
+
+	// Case 2: When loaded, Start succeeds
+	env.runner.errs = nil
+	if err := env.manager.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	// Start with kickstart error
+	env.runner.errs = map[string]error{"kickstart": errors.New("kick error")}
+	if err := env.manager.Start(); err == nil || !strings.Contains(err.Error(), "kickstart failed") {
+		t.Fatalf("expected kickstart error, got %v", err)
+	}
+
+	// Case 3: When loaded, Stop succeeds
+	env.runner.errs = nil
+	if err := env.manager.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	// Stop with bootout error
+	env.runner.errs = map[string]error{"bootout": errors.New("bootout error")}
+	if err := env.manager.Stop(); err == nil || !strings.Contains(err.Error(), "bootout failed") {
+		t.Fatalf("expected bootout error, got %v", err)
+	}
+
+	// Case 4: When loaded, Restart succeeds
+	env.runner.errs = nil
+	if err := env.manager.Restart(); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+	// Restart with bootstrap error
+	env.runner.errs = map[string]error{"bootstrap": errors.New("bootstrap error")}
+	if err := env.manager.Restart(); err == nil || !strings.Contains(err.Error(), "bootstrap failed") {
+		t.Fatalf("expected bootstrap error, got %v", err)
+	}
+}
+
+func TestExecRunner_EdgeCases(t *testing.T) {
+	runner := execRunner{}
+	// Empty argv
+	_, err := runner.Run(nil, time.Second)
+	if err == nil {
+		t.Error("expected error on empty argv")
+	}
+
+	// Command failure
+	_, err = runner.Run([]string{"false"}, time.Second)
+	if err == nil {
+		t.Error("expected error on false command")
+	}
+
+	// Successful execution
+	out, err := runner.Run([]string{"echo", "hello"}, time.Second)
+	if err != nil || !strings.Contains(string(out), "hello") {
+		t.Fatalf("expected hello, got out=%s err=%v", string(out), err)
+	}
+}
+
+func TestStatus_ValidDatabase(t *testing.T) {
+	env := newServiceEnv(t)
+	if err := os.MkdirAll(filepath.Dir(env.manager.cfg.DatabasePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env.manager.cfg.DatabasePath, []byte(sqliteHeader+"extra-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := env.manager.Status()
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if !st.DatabaseExists {
+		t.Error("expected DatabaseExists=true")
+	}
+}

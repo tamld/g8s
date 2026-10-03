@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -96,5 +98,46 @@ func TestLiveWorkerProvider(t *testing.T) {
 	}
 	if _, err := exec.LookPath(bin); err != nil {
 		t.Fatalf("fake binary not executable: %v", err)
+	}
+
+	// Name and Model methods
+	if p.Name() != "agy" {
+		t.Errorf("expected agy, got %s", p.Name())
+	}
+	if p.Model() != "test-model" {
+		t.Errorf("expected test-model, got %s", p.Model())
+	}
+
+	// Fake claude binary with --add-dir
+	claudeBin := filepath.Join(dir, "claude")
+	if err := os.WriteFile(claudeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude binary: %v", err)
+	}
+	pClaude := NewLiveWorkerProvider("claude", "claude-3-opus", 5*time.Second)
+	respClaude, err := pClaude.Execute(context.Background(), "delete", "scout", "write", []string{dir}, "rc-1")
+	if err != nil {
+		t.Fatalf("claude execute: %v", err)
+	}
+	if ClassifyOutcome(respClaude) != OutcomeClassBlocked {
+		t.Errorf("expected BLOCKED, got %s", respClaude)
+	}
+
+	// Unsupported binary existing on PATH
+	unsupportedBin := filepath.Join(dir, "unknown-tool")
+	if err := os.WriteFile(unsupportedBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake unsupported binary: %v", err)
+	}
+	pUnsupported := NewLiveWorkerProvider("unknown-tool", "m", 5*time.Second)
+	_, err = pUnsupported.Execute(context.Background(), "p", "scout", "read_only", nil, "")
+	if err == nil || !strings.Contains(err.Error(), "unsupported live provider binary") {
+		t.Fatalf("expected unsupported live provider binary error, got %v", err)
+	}
+}
+
+func TestAppendRefusalSignature(t *testing.T) {
+	AppendRefusalSignature(regexp.MustCompile(`(?i)\bcustom_forbidden_keyword\b`))
+	outcome := ClassifyOutcome("some text containing custom_forbidden_keyword here")
+	if outcome != OutcomeClassBlocked {
+		t.Errorf("expected %s, got %s", OutcomeClassBlocked, outcome)
 	}
 }

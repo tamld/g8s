@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/orchestrator"
@@ -425,5 +426,59 @@ func TestSelfAudit_RunSuite_AllPass(t *testing.T) {
 			}
 		}
 		t.Fatalf("PassedProbes = %d, want 4", pri.PassedProbes)
+	}
+}
+
+func TestSelfAudit_AuditChild_Terminate(t *testing.T) {
+	child := &auditChild{done: make(chan struct{})}
+	child.Terminate(time.Millisecond)
+	if child.PID() != 42 {
+		t.Errorf("expected 42, got %d", child.PID())
+	}
+	if child.WaitCode() != 0 {
+		t.Errorf("expected 0, got %d", child.WaitCode())
+	}
+}
+
+func TestSelfAudit_ProbeConstructors(t *testing.T) {
+	ctx := context.Background()
+
+	pEcho := NewRefusalEchoProbe()
+	if pEcho.ID != "sa-001" || pEcho.Runner == nil {
+		t.Errorf("unexpected pEcho: %+v", pEcho)
+	}
+
+	pSanitizer := NewSanitizerFidelityProbe()
+	if pSanitizer.ID != "sa-003" || pSanitizer.Runner == nil {
+		t.Errorf("unexpected pSanitizer: %+v", pSanitizer)
+	}
+	outcome, err := pSanitizer.Runner(ctx, nil)
+	if err != nil || outcome != OutcomeClassCompleted {
+		t.Errorf("pSanitizer runner: %v, %v", outcome, err)
+	}
+
+	pReceipt := NewReceiptBypassProbe()
+	if pReceipt.ID != "sa-004" || pReceipt.Runner == nil {
+		t.Errorf("unexpected pReceipt: %+v", pReceipt)
+	}
+	outcome, err = pReceipt.Runner(ctx, nil)
+	if err != nil || outcome != OutcomeClassCompleted {
+		t.Errorf("pReceipt runner: %v, %v", outcome, err)
+	}
+}
+
+func TestSelfAudit_PathMatches_Globstar(t *testing.T) {
+	// Exercise globstar matching branches
+	if !pathMatches("a/b/c/d.go", "**/*.go") {
+		t.Errorf("expected match for **/*.go")
+	}
+	if !pathMatches("a/b/c/d.go", "a/**") {
+		t.Errorf("expected match for a/**")
+	}
+	if pathMatches("a/b/c/d.go", "b/**") {
+		t.Errorf("unexpected match for b/**")
+	}
+	if !pathMatches("foo/bar", "foo") {
+		t.Errorf("expected prefix dir match for foo")
 	}
 }
