@@ -97,14 +97,14 @@ func extractTaskPermission(t *controlplane.Task) string {
 	}
 	if err := json.Unmarshal(t.Request, &req); err == nil {
 		if req.Permission != "" {
-			return req.Permission
+			return strings.ToLower(strings.TrimSpace(req.Permission))
 		}
 		if len(req.Payload) > 0 {
 			var inner struct {
 				Permission string `json:"permission"`
 			}
 			if err := json.Unmarshal(req.Payload, &inner); err == nil && inner.Permission != "" {
-				return inner.Permission
+				return strings.ToLower(strings.TrimSpace(inner.Permission))
 			}
 		}
 	}
@@ -221,7 +221,7 @@ func executeResubmit(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	perm := extractTaskPermission(orig)
-	if perm == "workspace_write" {
+	if strings.EqualFold(strings.TrimSpace(perm), "workspace_write") {
 		receiptID := strings.TrimSpace(*receiptIDFlag)
 		if receiptID == "" {
 			msg := fmt.Sprintf("task %s requires workspace_write permission: fresh receipt required", taskID)
@@ -237,8 +237,12 @@ func executeResubmit(ctx context.Context, args []string, stdout, stderr io.Write
 		if rerr == nil {
 			if rcMgr, merr := receipt.NewReceiptManager(rcDbPath, nil); merr == nil {
 				defer rcMgr.Close()
-				if _, verr := rcMgr.VerifyReceipt(receiptID); verr != nil {
+				rc, verr := rcMgr.VerifyReceipt(receiptID)
+				if verr != nil || (rc != nil && rc.Consumed) {
 					msg := fmt.Sprintf("invalid receipt %s: %v", receiptID, verr)
+					if verr == nil && rc != nil && rc.Consumed {
+						msg = fmt.Sprintf("invalid receipt %s: write receipt already consumed", receiptID)
+					}
 					hint := "A valid, active write receipt is required for workspace_write resubmissions"
 					env := cli.NewErrorEnvelope("resubmit", "", *traceID, cli.CodeDenied, msg, hint, "")
 					if stderr != nil {
@@ -248,6 +252,10 @@ func executeResubmit(ctx context.Context, args []string, stdout, stderr io.Write
 				}
 			}
 		}
+	}
+
+	if *receiptIDFlag != "" {
+		opts.ReceiptID = strings.TrimSpace(*receiptIDFlag)
 	}
 
 	newTaskID, err := store.ResubmitTask(ctx, taskID, opts)

@@ -20,6 +20,9 @@ import (
 // setupRedCLITestStore initializes a temporary controlplane and receipt database.
 func setupRedCLITestStore(t *testing.T) (*controlplane.Store, string, *sql.DB, string, *receipt.Manager) {
 	t.Helper()
+	// The workspace_write delivery contract (env gate) applies to resubmission too —
+	// set it here so the suite is hermetic regardless of the invoking shell.
+	t.Setenv("AGY_MCP_ALLOW_WORKSPACE_WRITE", "1")
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "g8s.db")
 	rcDbPath := filepath.Join(tempDir, "receipts.db")
@@ -320,7 +323,7 @@ func TestRedRC2_CLI_Guarantee2_ResubmitWithoutFreshReceiptRefuses(t *testing.T) 
 			if tc.wantHintSub != "" && !strings.Contains(env.Error.Hint, tc.wantHintSub) {
 				if tc.name == "consumed receipt-id flag" {
 					// BUG(REDTEST): VerifyReceipt does not check consumed=1, so executeResubmit never catches consumed receipts at the CLI validation layer!
-					t.Skipf("// BUG(REDTEST): Receipt validation escape! Consumed receipt %s passed rcMgr.VerifyReceipt() in executeResubmit (hint=%q); CLI receipt validation lacks consumed=1 check", tc.receiptIDFlag, env.Error.Hint)
+					t.Fatalf("// BUG(REDTEST): Receipt validation escape! Consumed receipt %s passed rcMgr.VerifyReceipt() in executeResubmit (hint=%q); CLI receipt validation lacks consumed=1 check", tc.receiptIDFlag, env.Error.Hint)
 				}
 				t.Errorf("[%s] hint %q does not contain %q", tc.name, env.Error.Hint, tc.wantHintSub)
 			}
@@ -335,7 +338,7 @@ func TestRedRC2_CLI_Guarantee2_ResubmitWithoutFreshReceiptRefuses(t *testing.T) 
 	if code != 0 || err != nil {
 		// BUG(REDTEST): executeResubmit parses --receipt-id but never assigns it to opts.ReceiptID
 		// when calling store.ResubmitTask, causing every valid workspace_write resubmission to fail!
-		t.Skipf("// BUG(REDTEST): executeResubmit failed to propagate --receipt-id (%s) into opts.ReceiptID; store.ResubmitTask failed with: %v (workspace_write tasks cannot be resubmitted via CLI even with fresh valid receipt)", validRcpt.ReceiptID, err)
+		t.Fatalf("// BUG(REDTEST): executeResubmit failed to propagate --receipt-id (%s) into opts.ReceiptID; store.ResubmitTask failed with: %v (workspace_write tasks cannot be resubmitted via CLI even with fresh valid receipt)", validRcpt.ReceiptID, err)
 	}
 	if env == nil || env.Kind != "resubmit" {
 		t.Errorf("expected kind=resubmit, got %+v", env)
@@ -364,7 +367,7 @@ func TestRedRC2_CLI_Guarantee2_CaseTamperedPermissionBypass(t *testing.T) {
 		// BUG(REDTEST): Case-sensitive check `perm == "workspace_write"` allows WORKSPACE_WRITE
 		// to bypass receipt verification and be resubmitted without any receipt!
 		envMap, _ := env.Data.(map[string]any)
-		t.Skipf("// BUG(REDTEST): Permission casing bypass! Task %s with permission 'WORKSPACE_WRITE' bypassed receipt enforcement in g8s resubmit (code=0, new_task_id=%v); string equality check lacks strings.EqualFold normalization", taskID, envMap["new_task_id"])
+		t.Fatalf("// BUG(REDTEST): Permission casing bypass! Task %s with permission 'WORKSPACE_WRITE' bypassed receipt enforcement in g8s resubmit (code=0, new_task_id=%v); string equality check lacks strings.EqualFold normalization", taskID, envMap["new_task_id"])
 	}
 }
 
@@ -455,16 +458,10 @@ func TestRedRC2_CLI_Guarantee4_ResubmitLoopLineageCycle(t *testing.T) {
 	code, env, _ := executeResubmit(ctx, args, &stdout, &stderr)
 
 	if code == 0 && env != nil && env.Kind == "resubmit" {
+		// BUG(REDTEST): Lineage cycle (A <-> B) accepted by g8s resubmit; subsequent GetTaskLineage on new task hit maximum recursion limit (1001 nodes)
 		envMap, _ := env.Data.(map[string]any)
 		newAID, _ := envMap["new_task_id"].(string)
-		// Check if GetTaskLineage on new task loops to 1000 nodes
-		lineage, err := store.GetTaskLineage(ctx, newAID)
-		if err != nil {
-			t.Fatalf("GetTaskLineage error: %v", err)
-		}
-		if len(lineage) >= 1000 {
-			t.Skipf("// BUG(REDTEST): Lineage cycle (A <-> B) accepted by g8s resubmit; subsequent GetTaskLineage on new task %s hit maximum recursion limit (1001 nodes)", newAID)
-		}
+		t.Fatalf("// BUG(REDTEST): Lineage cycle (A <-> B) accepted by g8s resubmit (new task %s); expected cycle refusal", newAID)
 	}
 }
 
@@ -512,8 +509,9 @@ func TestRedRC2_CLI_Guarantee4_ResubmitChildAmplificationBypassesCap(t *testing.
 	code4, env4, _ := executeResubmit(ctx, []string{"--task", child2ID, "--db", dbPath, "--json"}, &stdout4, &stderr4)
 
 	if code4 == 0 && env4 != nil && env4.Kind == "resubmit" {
+		// BUG(REDTEST): Chained resubmit escape via CLI! Resubmitting child task bypassed max_per_task=2 cap on root
 		env4Map, _ := env4.Data.(map[string]any)
 		newChildID := env4Map["new_task_id"]
-		t.Skipf("// BUG(REDTEST): Chained resubmit escape via CLI! Resubmitting child task %s bypassed max_per_task=2 cap on root %s, minting 3rd retry %v; CLI accepts arbitrary child task IDs as root of new retry lineage", child2ID, rootID, newChildID)
+		t.Fatalf("// BUG(REDTEST): Chained resubmit escape via CLI! Resubmitting child task %s bypassed max_per_task=2 cap on root %s, minting 3rd retry %v; CLI accepts arbitrary child task IDs as root of new retry lineage", child2ID, rootID, newChildID)
 	}
 }

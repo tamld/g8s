@@ -179,7 +179,10 @@ func TestRedRC2_Guarantee1_IdentityGames_CasingAndSpacingBypass(t *testing.T) {
 	if err == nil {
 		// BUG(REDTEST): Case-sensitive prefix match `strings.HasPrefix(c.idempotencyKey, origTaskID+"#r")`
 		// ignores `#R1`, allowing 3 retries when MaxPerTask=2!
-		t.Skipf("// BUG(REDTEST): Idempotency-key variant with uppercase '#R1' (%s) was ignored by budget counter; allowed 3rd retry child %s (budget 2 escaped via identity casing game)", upperKey, r2ID)
+		t.Fatalf("// BUG(REDTEST): Idempotency-key variant with uppercase '#R1' (%s) was ignored by budget counter; allowed 3rd retry child %s (budget 2 escaped via identity casing game)", upperKey, r2ID)
+	}
+	if !strings.Contains(err.Error(), "retry budget exceeded") {
+		t.Fatalf("expected error mentioning 'retry budget exceeded', got: %v", err)
 	}
 }
 
@@ -221,8 +224,8 @@ func TestRedRC2_Guarantee1_ParallelRetryEscapeViaKeyVariants(t *testing.T) {
 		Payload:        json.RawMessage(`{"prompt":"parallel retry 2"}`),
 	}
 	t2, err := store.SubmitTask(ctx, child2Req)
-	if err != nil {
-		t.Fatalf("submit child 2: %v", err)
+	if err == nil {
+		t.Fatalf("expected non-canonical child 2 to be refused, got task %s", t2.TaskID)
 	}
 
 	// Submit child 3 with canonical key: "<origID>#r1"
@@ -238,8 +241,8 @@ func TestRedRC2_Guarantee1_ParallelRetryEscapeViaKeyVariants(t *testing.T) {
 		Payload:        json.RawMessage(`{"prompt":"parallel retry 3"}`),
 	}
 	t3, err := store.SubmitTask(ctx, child3Req)
-	if err != nil {
-		t.Fatalf("submit child 3: %v", err)
+	if err == nil {
+		t.Fatalf("expected colliding child 3 to be refused, got task %s", t3.TaskID)
 	}
 
 	// Count active QUEUED children of origID
@@ -251,7 +254,10 @@ func TestRedRC2_Guarantee1_ParallelRetryEscapeViaKeyVariants(t *testing.T) {
 
 	if queuedCount > 1 {
 		// BUG(REDTEST): Idempotency key variants allow N parallel active retries of one task
-		t.Skipf("// BUG(REDTEST): %d parallel retry tasks (%s, %s, %s) are simultaneously QUEUED for task %s via identity key variations (<id>#r1 vs <id>#r1  vs <id>#r01); FSM failed to restrict to single in-flight retry", queuedCount, t1.TaskID, t2.TaskID, t3.TaskID, origID)
+		t.Fatalf("// BUG(REDTEST): %d parallel retry tasks (%s) are simultaneously QUEUED for task %s via identity key variations (<id>#r1 vs <id>#r1  vs <id>#r01); FSM failed to restrict to single in-flight retry", queuedCount, t1.TaskID, origID)
+	}
+	if queuedCount != 1 || t1.TaskID == "" {
+		t.Fatalf("expected exactly 1 queued child (%s), got %d", t1.TaskID, queuedCount)
 	}
 }
 
@@ -331,7 +337,7 @@ func TestRedRC2_Guarantee2_WorkspaceWrite_ReceiptOmissionAndTamper(t *testing.T)
 	if err == nil {
 		// BUG(REDTEST): controlplane.ResubmitTask only verifies `opts.ReceiptID != ""` and does not validate against receipt manager!
 		// The CLI layer validates, but the controlplane layer accepts consumed/expired receipt strings.
-		t.Skipf("// BUG(REDTEST): controlplane.ResubmitTask accepted CONSUMED receipt %s for task %s (returned task %s); controlplane lacks receipt manager verification", consumedRcpt.ReceiptID, taskNoRcptID, newID)
+		t.Fatalf("// BUG(REDTEST): controlplane.ResubmitTask accepted CONSUMED receipt %s for task %s (returned task %s); controlplane lacks receipt manager verification", consumedRcpt.ReceiptID, taskNoRcptID, newID)
 	}
 	_ = validRcpt
 	_ = expiredRcpt
@@ -434,7 +440,7 @@ func TestRedRC2_Guarantee3_NilCompletedAt_BackoffCollapse(t *testing.T) {
 	// If not_before was calculated from updated_at (t0 - 3600), notBefore = t0 - 3600 + 300 = t0 - 3300 (in the past!)
 	if notBefore < t0 {
 		// BUG(REDTEST): Backoff collapsed when completed_at is NULL by falling back to stale updated_at
-		t.Skipf("// BUG(REDTEST): Backoff was collapsed: when completed_at is NULL, ResubmitTask used stale updated_at (1h ago), placing not_before (%.2f) 55m in the past (now=%.2f); task can be claimed immediately without backoff delay", notBefore, t0)
+		t.Fatalf("// BUG(REDTEST): Backoff was collapsed: when completed_at is NULL, ResubmitTask used stale updated_at (1h ago), placing not_before (%.2f) 55m in the past (now=%.2f); task can be claimed immediately without backoff delay", notBefore, t0)
 	}
 }
 
@@ -464,18 +470,9 @@ func TestRedRC2_Guarantee4_ResubmitLineage_SelfLoop(t *testing.T) {
 
 	// Resubmit the self-referencing task
 	newID, err := store.ResubmitTask(ctx, taskID, opts)
-	if err != nil {
-		// Desired behavior: refused
-		return
-	}
-
-	// If it succeeded, check if GetTaskLineage on the lineage returns 1000 duplicated nodes due to cycle
-	lineage, err := store.GetTaskLineage(ctx, newID)
-	if err != nil {
-		t.Fatalf("GetTaskLineage error: %v", err)
-	}
-	if len(lineage) >= 1000 {
-		t.Skipf("// BUG(REDTEST): Self-referential parent_task_id (%s -> %s) was accepted by ResubmitTask; GetTaskLineage looped to max CTE depth (%d nodes returned)", taskID, taskID, len(lineage))
+	if err == nil {
+		// BUG(REDTEST): Self-referential parent_task_id (%s -> %s) was accepted by ResubmitTask; GetTaskLineage looped to max CTE depth
+		t.Fatalf("// BUG(REDTEST): Self-referential parent_task_id (%s -> %s) was accepted by ResubmitTask; expected cycle refusal error, got new task %s", taskID, taskID, newID)
 	}
 }
 
@@ -531,6 +528,9 @@ func TestRedRC2_Guarantee4_ChainedResubmitInfiniteAmplification(t *testing.T) {
 	if err == nil {
 		// BUG(REDTEST): ResubmitTask only counts direct children (WHERE parent_task_id = ?),
 		// allowing infinite retry amplification by chaining resubmissions (A -> B -> C -> D -> ...).
-		t.Skipf("// BUG(REDTEST): Infinite retry amplification! Resubmitted child task %s (retry #2 of %s) created new task %s; per-task retry cap (max 2) was completely bypassed by chaining retries along the lineage tree", childCID, rootID, childDID)
+		t.Fatalf("// BUG(REDTEST): Infinite retry amplification! Resubmitted child task %s (retry #2 of %s) created new task %s; per-task retry cap (max 2) was completely bypassed by chaining retries along the lineage tree", childCID, rootID, childDID)
+	}
+	if !strings.Contains(err.Error(), "retry budget exceeded") {
+		t.Fatalf("expected error mentioning 'retry budget exceeded', got: %v", err)
 	}
 }

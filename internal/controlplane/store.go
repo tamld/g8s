@@ -1113,10 +1113,57 @@ var ErrLeaseLost = errors.New("lease lost")
 // ErrBusy indicates that a database operation timed out due to transient locking or SQLite busy state (#465).
 var ErrBusy = errors.New("database busy")
 
+// ErrNonCanonicalDerivedKey is returned when a derived idempotency key does not match the canonical shape.
+var ErrNonCanonicalDerivedKey = errors.New("non-canonical derived idempotency key")
+
+// canonicalizeIdempotencyKey trims whitespace and canonicalizes derived retry keys.
+// If the key is a derived retry key (contains #r or #R suffix), it enforces the strict pattern:
+// ^<task-id>#r[1-9][0-9]*$
+// Trailing spaces are trimmed, uppercase #RN suffix is lowercased to #rN, and non-canonical shapes
+// (leading zeros like #r01, non-digits, #r0, missing attempt number) are refused.
+func canonicalizeIdempotencyKey(key string) (string, error) {
+	trimmed := strings.TrimSpace(key)
+	hashIdx := strings.LastIndex(trimmed, "#")
+	if hashIdx == -1 {
+		return trimmed, nil
+	}
+	prefix := trimmed[:hashIdx]
+	suffix := trimmed[hashIdx:] // e.g. "#r1", "#R1", "#r01"
+	if len(suffix) < 2 {
+		return trimmed, nil
+	}
+	if suffix[1] != 'r' && suffix[1] != 'R' {
+		return trimmed, nil
+	}
+	// It has #[rR]... suffix
+	if prefix == "" {
+		return "", fmt.Errorf("%w: missing task-id prefix in %q", ErrNonCanonicalDerivedKey, key)
+	}
+	digits := suffix[2:]
+	if digits == "" {
+		return "", fmt.Errorf("%w: missing attempt number in %q", ErrNonCanonicalDerivedKey, key)
+	}
+	// Must match strict pattern [1-9][0-9]*
+	if digits[0] < '1' || digits[0] > '9' {
+		return "", fmt.Errorf("%w: attempt number must start with 1-9 in %q", ErrNonCanonicalDerivedKey, key)
+	}
+	for i := 1; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return "", fmt.Errorf("%w: attempt number must contain only digits in %q", ErrNonCanonicalDerivedKey, key)
+		}
+	}
+	return prefix + "#r" + digits, nil
+}
+
 func prepareSubmitRequest(req SubmitTaskRequest) (SubmitTaskRequest, string, string, error) {
 	if req.IdempotencyKey == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return req, "", "", errors.New("idempotency_key is required")
 	}
+	canonicalKey, err := canonicalizeIdempotencyKey(req.IdempotencyKey)
+	if err != nil {
+		return req, "", "", err
+	}
+	req.IdempotencyKey = canonicalKey
 	if len(req.IdempotencyKey) > 200 {
 		return req, "", "", errors.New("idempotency_key must be at most 200 characters")
 	}
