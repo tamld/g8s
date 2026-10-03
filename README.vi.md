@@ -155,7 +155,8 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 | Mốc | Nội dung chính | Trạng thái |
 |--------|-----------|:---:|
 | v0.13.0 (2026-09-30) | Queue đa provider, sóng hardening B–E, tín hiệu event-driven (`signals/tasks.jsonl` + `watch --failed`), release gate 7–8 | **Xong** |
-| v0.14.0 (mục tiêu) | Vòng AI-factory: auto-retry có ngân sách, task router deterministic, vòng tự-đóng không người đầu tiên — [SCORECARD](plans/261002-factory/SCORECARD.md) | **Đang làm** |
+| v0.14.0 (mục tiêu) | Vòng AI-factory: auto-retry ✅ (#501/#502), router tới tay người dùng — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), vòng tự-đóng đầu tiên — [#516](https://github.com/tamld/g8s/issues/516); cắt bản = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Đang làm** |
+| v0.15.0 (mục tiêu) | Retrospective-as-task — cơ quan tự trưởng thành — [#519](https://github.com/tamld/g8s/issues/519) | Kế hoạch |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép

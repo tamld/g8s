@@ -72,17 +72,19 @@ Then:
    resolution.md, receipt TTL 3600. Verify, PR with `Closes #505`,
    merge after green.
 2. **Wave G** (next code): submit-time routing integration
-   (`--route auto|manual`, default byte-identical) + ADR-0024 S6-3
-   lane router consuming internal/routing. Brief pattern:
-   brief-F3-router.md.
-3. **Wave H (the M1 milestone)**: verifier-class registry + FIRST
-   unattended closed round (docs-class): goal → brief → dispatch →
-   drain → verify → merge with ZERO foreground actions. SCORECARD S-7/
-   S-8. The autonomy ladder gates: docs-class first, N clean rounds
-   before any level flip.
+   (#513) + ADR-0024 S6-3 lane router (#514) consuming
+   internal/routing. Brief pattern: brief-WF3-router.md.
+3. **Wave H (the M1 milestone)**: verifier-class registry (#515) +
+   FIRST unattended closed round (#516): goal → brief → dispatch →
+   drain → verify → merge with ZERO foreground actions. SCORECARD
+   S-7/S-8. The autonomy ladder gates: docs-class first, N clean
+   rounds before any level flip (the level-1 flip = operator decision
+   recorded on the round).
 4. **M3 real-Jev benchmark**: run task_routing against real (not
    mocked) Jev when the operator's TYPESAFE keys are present; record
-   the delta on S-4.
+   the delta on S-4 — tracked as #518 (BLOCKED, non-release-blocking).
+5. **Release v0.14.0**: tracked as #517 (Red Cell on new surface +
+   8 gates + #510 F4/F5 fold-ins). Wave I = #519 (v0.15).
 5. **ADR-0031 follow-up (small)**: main-push docs detection via
    `github.event.before` (see S-10 probe finding).
 

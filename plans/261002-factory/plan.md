@@ -72,11 +72,11 @@ human-ratified.
     (Source/IsFallback telemetry, fail-open, deny-invalid) + benchmark
     probes as eval category `task_routing`. No cmd changes (integration
     wave G). [ADR-0030]
-- **Wave G** — submit-time routing integration + lane router (ADR-0024
-  S6-3, greenfield) consuming internal/routing.
-- **Wave H** — verifier-class registry + first docs-class closed round
-  (M1: 0→1).
-- **Wave I** — retrospective-as-task + lessons pipeline.
+- **Wave G** — submit-time routing integration (#513) + lane router
+  (ADR-0024 S6-3, #514) consuming internal/routing.
+- **Wave H** — verifier-class registry (#515) + first docs-class
+  closed round (M1: 0→1, #516).
+- **Wave I** — retrospective-as-task + lessons pipeline (#519, v0.15).
 
 ## 5. Red tests (milestone gates, written BEFORE the code)
 
