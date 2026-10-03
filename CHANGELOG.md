@@ -5,13 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.0] - 2026-10-03
 
 ### Added
 - Event-driven supervision surface (#481): terminal task transitions append one JSONL line to `<state_dir>/signals/tasks.jsonl` and `g8s watch --failed [--since] [--timeout]` wakes the supervisor from a single sleeping process — polling is demoted to the fallback (directive D-07).
 - Budgeted auto-retry of failed tasks (ADR-0029, #501/#502): deny-by-default failure classification, caps (2 per task, 10/hour per state dir), 5→20→60m backoff, derived idempotency keys (double-fire safe), `g8s resubmit` + an `autopilot tick` retry job for receipt-free tasks; `auto_retry_enabled` ships default OFF (directive D-09).
 - Context-based task router (ADR-0030, #503/#520): `g8s submit --route auto` routes provider/model/role through a deterministic layer that works for every installation (zero network), with an OPTIONAL Jev-assisted layer (manifest-validated suggestions, benchmark-gated — never mandatory); decisions recorded as `route_source`/`route_reason`.
 - Gate-lane router, ALDC Layer 1 (ADR-0024 S6-3, #521): lanes 0/D/R/F/S from paths + bundles + the P0 trust registry; deterministic hot path; Jev may suggest (never Lane S).
+- Verifier-class registry (SCORECARD S-7, #532): `g8s verify --task <id>` resolves a task's write scope from its receipt and runs the class's machine checks; classes are declarative (`.g8s/verifier-classes.yml`), seeded docs and test — both advisory, each citing a real founding catch (#208, #510); an unregistered class means human acceptance (exit 0, never an error); the loader refuses `status: hard` without a valid citation (trust earned per class, never assumed); a task never grades itself; every verdict emits `verifier_verdict` telemetry.
+- Gated auto-merge + the autonomy ladder (SCORECARD S-8, #533): `tools/merger.sh --pr <num> --task <id>` runs four fail-closed gates (autonomy → docs lane on the PR diff → verifier verdict → CI pending=0 ∧ failure=0) and squash-merges only when all pass; `autonomy_level` ({0,1}, default 0) means the merger refuses to act until the operator's recorded per-round flip — the 0→1 flip is a human decision, never a default, and resets after the round.
+- First unattended closed round (SCORECARD S-8, M1 0→1, #534): a real docs-class round ran brief → dispatch → drain → harvest → CI → verify → auto-merge with zero human actions after the goal; the round's own verifier gate refused its first merge attempt (fail-closed, see Fixed) before the corrected second attempt passed all four gates — the round log with per-stage timestamps is a SCORECARD contract row.
 - CI/CD lanes (ADR-0031, #506/#512): docs-only PRs clear a prose gate battery in minutes; build PRs run the full dual-pass battery; lane self-detected by changed paths (deny-by-default, symlink/extension-hardened).
 - Red-team adversarial suites (#509): hostile-input tests for the retry budget, signal file, router suggestions, lane detector, receipt TTL and worktree containment.
 - Normative multi-project tenancy guide (ADR-0028, #511) and package doc comments for all previously undocumented packages (#511).
@@ -21,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lane detector hardening (#512, red-team findings): symlinked docs directories, non-prose extensions under docs/, and `.github/**` paths can no longer classify as the docs lane.
 - Coverage fixtures platform-guards (#522/#529): newline filenames and POSIX-exec/chmd assumptions no longer fail the Windows matrix.
 - Repo root hygiene enforced by gate (#504): build artifacts and session scratch can no longer be tracked at the repository root.
+- `g8s verify` resolved receipt paths from the wrong database (#535, caught by round R1's own verifier gate): `write_receipts` lives in the sibling `receipts.db` (the canonical ledger), not `g8s.db` — every receipted task previously resolved to unregistered. Red-first regression now fixtures the real ledger layout; the deny-by-default unregistered floor is unchanged.
 
 ### Changed
 - Governance: ADR-0028 (multi-project tenancy), ADR-0029 (budgeted auto-retry), ADR-0030 (context router), ADR-0031 (CI lanes), ADR-0032 (containment levels F0/F1/F2 — canonical vocabulary, wave ordinals prefixed WF) all Accepted; directives D-07/D-08/D-09 added.
