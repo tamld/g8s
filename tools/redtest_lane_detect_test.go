@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -255,6 +256,11 @@ func TestRedtest_Guarantee4_PathsWithSpaces(t *testing.T) {
 }
 
 func TestRedtest_Guarantee4_PathsWithNewlines(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Filenames with literal newlines are illegal on Windows (NTFS);
+		// the newline-handling guarantee is POSIX-only by platform law.
+		t.Skip("POSIX-only: newline filenames are invalid on Windows")
+	}
 	script := findDetectScript(t)
 	repo := initFixtureRepo(t)
 
