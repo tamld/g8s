@@ -34,6 +34,7 @@ var AllowedConfigKeys = map[string]string{
 	"auto_retry_enabled":         "Enable automatic resubmission of transiently failed tasks (default false)",
 	"auto_retry_max_per_task":    "Maximum automatic retries per original task (0-10, default 2)",
 	"auto_retry_max_per_hour":    "Maximum automatic retries per hour per state directory (0-1000, default 10)",
+	"autonomy_level":             "Autonomy posture level (0 = manual/no auto-merge, 1 = docs-lane auto-merge, higher levels reserved and unratified)",
 }
 
 // Config represents the loaded configuration values.
@@ -51,6 +52,7 @@ type Config struct {
 	AutoRetryEnabled       any    `json:"auto_retry_enabled,omitempty"`
 	AutoRetryMaxPerTask    any    `json:"auto_retry_max_per_task,omitempty"`
 	AutoRetryMaxPerHour    any    `json:"auto_retry_max_per_hour,omitempty"`
+	AutonomyLevel          any    `json:"autonomy_level,omitempty"`
 }
 
 // Manager coordinates atomic reads and writes of the configuration store.
@@ -124,6 +126,8 @@ func (m *Manager) Get(key string) (any, bool) {
 		return 2, true
 	case "auto_retry_max_per_hour":
 		return 10, true
+	case "autonomy_level":
+		return 0, true
 	default:
 		return nil, false
 	}
@@ -169,6 +173,11 @@ func (m *Manager) Set(key string, value any) error {
 	}
 	if key == "auto_retry_max_per_hour" {
 		if err := validateAutoRetryMaxPerHour(value); err != nil {
+			return err
+		}
+	}
+	if key == "autonomy_level" {
+		if err := validateAutonomyLevel(value); err != nil {
 			return err
 		}
 	}
@@ -300,6 +309,42 @@ func validateAutoRetryMaxPerHour(value any) error {
 
 	if n < 0 || n > 1000 {
 		return fmt.Errorf("%w: auto_retry_max_per_hour must be between 0 and 1000, got %d", ErrInvalidVal, n)
+	}
+	return nil
+}
+
+// validateAutonomyLevel validates the autonomy posture level.
+// Allowed values are exactly {0, 1}.
+// Level 0 = today (no auto-merge anywhere).
+// Level 1 = the merger tool may squash-merge a docs-lane PR whose full gate set passes;
+// the flip 0→1 is an operator decision recorded on the round, never a default.
+// Higher levels (2+) are reserved and unratified.
+func validateAutonomyLevel(value any) error {
+	var n int
+	var parsed bool
+	switch v := value.(type) {
+	case int:
+		n = v
+		parsed = true
+	case int64:
+		n = int(v)
+		parsed = true
+	case float64:
+		if float64(int(v)) == v {
+			n = int(v)
+			parsed = true
+		}
+	case string:
+		s := strings.TrimSpace(v)
+		var err error
+		n, err = strconv.Atoi(s)
+		if err == nil {
+			parsed = true
+		}
+	}
+
+	if !parsed || (n != 0 && n != 1) {
+		return fmt.Errorf("%w: autonomy_level must be 0 or 1 (higher levels are reserved and unratified), got %v", ErrInvalidVal, value)
 	}
 	return nil
 }
