@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -97,9 +98,13 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	target.ReceiptID = reqPayload.ReceiptID
 	target.AllowedPaths = reqPayload.AllowedPaths
 
-	// If receipt_id is present and allowed_paths not embedded in request, resolve from write_receipts
+	// If receipt_id is present and allowed_paths not embedded in request, resolve from
+	// the sibling receipts.db — the canonical receipt ledger (the receipt CLI and the
+	// controlplane both write receipts.db next to g8s.db; round-1 of issue #516 caught
+	// verify reading g8s.db, where the table does not exist, and landing unregistered).
 	if target.ReceiptID != "" && len(target.AllowedPaths) == 0 {
-		db, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=ro"))
+		rcDbPath := filepath.Join(filepath.Dir(dbPath), "receipts.db")
+		db, err := sql.Open("sqlite", pathutil.SQLiteURI(rcDbPath, "mode=ro"))
 		if err == nil {
 			defer db.Close()
 			var pathsJSON string
