@@ -41,6 +41,7 @@ const (
 	TraceEventPolicyViolation TraceEventType = "policy_violation"
 	TraceEventBlockedCommand  TraceEventType = "blocked_command"
 	TraceEventAnomalyDetected TraceEventType = "anomaly_detected"
+	TraceEventVerifierVerdict TraceEventType = "verifier_verdict"
 )
 
 // FailureMode classifies the type of failure for negative knowledge distillation.
