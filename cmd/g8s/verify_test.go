@@ -28,12 +28,22 @@ func setupTestDB(t *testing.T) (string, *controlplane.Store) {
 		t.Fatalf("failed to create controlplane: %v", err)
 	}
 
-	// Ensure write_receipts table exists
-	rawDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "_pragma=foreign_keys(ON)"))
+	return dbPath, store
+}
+
+// openReceiptsDB opens the sibling receipts.db — the canonical receipt ledger
+// the receipt CLI and controlplane write to (real state-dir layout) — and
+// ensures the write_receipts table exists. Verify must resolve receipt paths
+// from THIS database, never from the controlplane g8s.db (the receipts
+// split-brain, issue #516 round 1 finding).
+func openReceiptsDB(t *testing.T, dbPath string) *sql.DB {
+	t.Helper()
+	receiptsPath := filepath.Join(filepath.Dir(dbPath), "receipts.db")
+	rawDB, err := sql.Open("sqlite", pathutil.SQLiteURI(receiptsPath, "_pragma=foreign_keys(ON)"))
 	if err != nil {
-		t.Fatalf("failed to open raw db: %v", err)
+		t.Fatalf("failed to open receipts db: %v", err)
 	}
-	defer rawDB.Close()
+	t.Cleanup(func() { rawDB.Close() })
 
 	_, err = rawDB.Exec(`
 		CREATE TABLE IF NOT EXISTS write_receipts (
@@ -48,8 +58,7 @@ func setupTestDB(t *testing.T) (string, *controlplane.Store) {
 	if err != nil {
 		t.Fatalf("failed to create write_receipts table: %v", err)
 	}
-
-	return dbPath, store
+	return rawDB
 }
 
 // TestVerifyCLI_Usage verifies that missing --task flag prints usage error envelope and returns code 2.
@@ -179,15 +188,11 @@ func TestVerifyCLI_DocsTaskResolution(t *testing.T) {
 	dbPath, store := setupTestDB(t)
 	defer store.Close()
 
-	// Insert receipt into write_receipts
-	rawDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "_pragma=foreign_keys(ON)"))
-	if err != nil {
-		t.Fatalf("open raw db: %v", err)
-	}
-	defer rawDB.Close()
+	// Insert receipt into the sibling receipts.db (canonical receipt ledger)
+	rawDB := openReceiptsDB(t, dbPath)
 
 	pathsJSON := `["README.md", "docs/architecture.md", "plans/261002-factory/plan.md"]`
-	_, err = rawDB.Exec(`
+	_, err := rawDB.Exec(`
 		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
 		VALUES ('rcpt-docs-1', 'brain', ?, 9999999999, 100)
 	`, pathsJSON)
@@ -246,14 +251,10 @@ func TestVerifyCLI_TestTaskResolution(t *testing.T) {
 	dbPath, store := setupTestDB(t)
 	defer store.Close()
 
-	rawDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "_pragma=foreign_keys(ON)"))
-	if err != nil {
-		t.Fatalf("open raw db: %v", err)
-	}
-	defer rawDB.Close()
+	rawDB := openReceiptsDB(t, dbPath)
 
 	pathsJSON := `["plans/261002-factory/brief-H1-verifier-registry.md", "cmd/g8s/verify_test.go"]`
-	_, err = rawDB.Exec(`
+	_, err := rawDB.Exec(`
 		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
 		VALUES ('rcpt-test-1', 'brain', ?, 9999999999, 100)
 	`, pathsJSON)
@@ -309,14 +310,10 @@ func TestVerifyCLI_MixedCodePathUnregistered(t *testing.T) {
 	dbPath, store := setupTestDB(t)
 	defer store.Close()
 
-	rawDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "_pragma=foreign_keys(ON)"))
-	if err != nil {
-		t.Fatalf("open raw db: %v", err)
-	}
-	defer rawDB.Close()
+	rawDB := openReceiptsDB(t, dbPath)
 
 	pathsJSON := `["internal/verifier/verifier.go", "internal/verifier/verifier_test.go"]`
-	_, err = rawDB.Exec(`
+	_, err := rawDB.Exec(`
 		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
 		VALUES ('rcpt-mixed-1', 'brain', ?, 9999999999, 100)
 	`, pathsJSON)
