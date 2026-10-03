@@ -3,7 +3,7 @@
   "name": "g8s",
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "go_version": "1.26.0",
   "latest_release": {
     "tag": "v0.13.0",
@@ -33,7 +33,10 @@
     "module": "github.com/tamld/g8s",
     "entrypoint": "cmd/g8s/main.go",
     "sqlite_driver": "modernc.org/sqlite",
-    "protocols": ["MCP JSON-RPC 2.0 (Stdio)", "LSP Client (Stdio)"]
+    "protocols": [
+      "MCP JSON-RPC 2.0 (Stdio)",
+      "LSP Client (Stdio)"
+    ]
   },
   "roles": [
     {
