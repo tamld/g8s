@@ -502,7 +502,8 @@ func watchFailed(ctx context.Context, cfg WatchFailedConfig) (int, error) {
 			}
 			size := fi.Size()
 			if size < currentOffset {
-				// File truncated or replaced.
+				// File truncated or rotated/replaced (#510): reset offset to 0 and re-scan
+				// from start of the fresh file (the rotated-away .1 is history).
 				currentOffset = 0
 			}
 			if size > currentOffset {
