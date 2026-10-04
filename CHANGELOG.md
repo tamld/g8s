@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Lessons pipeline — the self-maturity organ (SCORECARD S-9, #519/#545/#546): `g8s lesson create|verify|list` runs fail-closed machine checks against the live telemetry DB (citation resolution with payload snapshot matching, no-self-review class separation, dedup by cited-ID-set hash, per-round budget, smuggled-recommendation-verb rejection) and appends to the append-only ledger `docs/lessons/ledger.jsonl` only on pass — a fabricated citation is refused and writes nothing (proven live in the RT-I round: the hostile case left the ledger empty; the real round-R1 lesson cites the verifier_verdict event). Recommendations are always tagged LLM opinions and never auto-apply — ratification stays with the operator (the ratified one-way-gate design, plans/261004-wave-i-lessons-rails/brainstorm.md).
+- Agent-models catalog v1 (`.g8s/agent-models.yml`, #550/#552): 8 providers / 29 current models with per-model effort_style (named/budget/baked-name/toggle), supported_efforts on the 7-level ladder, default_effort and mandatory flags — research-verified against official docs 2026-10-04; the versioned seed for the provider manifest.
+- Real-Jev measurement (SCORECARD S-4, #543/#518): the first M3 benchmark against the live TypeSafe API (jev-1.13.0, 14 fixtures, 0 transport errors) — acceptance 100% with a provider-bound catalog, +263–298ms/route, ~600–700 tokens/route, placement_differs 85.7%, provider bias recorded; Jev stays optional (deterministic default-on).
+
+### Fixed
+- The Jev-assist client now speaks the real TypeSafe SystemOne protocol (#543): choice questions require `criteria` as a name→description map and a typed discriminator (the typeless reason question was unrepresentable — no free-text answer type exists); the client had never once succeeded against the live endpoint before this fix. Token usage surfaced on routing decisions.
+- Claims-integrity for the release surface (#547/#548/#549): the claims registry grew 10 → 44 with every claim carrying either a test binding or an exact demo command; `claims_check.sh` now FAILS any claim that cannot point at its proof; 33 stale doc statements corrected (user-guide flags matched to source, offer bundle and vendored skill refreshed to the v0.14 surface) and 10 ambiguous headlines sharpened to measurable rewrites.
+- Worktree delivery contract: receipt-scoped writes survive worktree release even when they land on gitignored paths (#551 — a completion path that only checked `git status` silently reaped worktrees whose deliverables lived under `.g8s/`).
+
 ## [0.14.0] - 2026-10-03
 
 ### Added
