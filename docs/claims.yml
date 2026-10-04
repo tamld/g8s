@@ -52,23 +52,298 @@
     source: docs/designs/gate-lane-routing.md
 
 unbound:
-  - id: claim-g1-g6-gate-count
-    claim: "Six machine-enforced quality gates (G1-G6) govern code, spec, doc, link, coverage, and lane routing"
+  - id: claim-worker-single-attempt
+    claim: "Single attempt worker execution"
     evidence:
       test: ""
       eval: ""
-      source: docs/designs/gate-lane-routing.md
+      demo: "bin/g8s worker --help"
+      source: README.md
 
-  - id: claim-coverage-ratchet-baseline
-    claim: "Coverage ratchet enforces aggregate test coverage against committed baseline"
+  - id: claim-worker-concurrent-drain
+    claim: "Concurrent worker drain with isolated attempts"
     evidence:
       test: ""
       eval: ""
-      source: tools/ci_coverage_ratchet.sh
+      demo: "bin/g8s worker --help"
+      source: README.md
 
-  - id: claim-single-node-cp
-    claim: "Single-node control plane prioritizes containment consistency over high availability (ADR-0025)"
+  - id: claim-watch-signal-driven
+    claim: "Signal-driven watch on failed/terminal tasks"
     evidence:
       test: ""
       eval: ""
-      source: docs/security/threat-model-stride.md
+      demo: "bin/g8s watch --help"
+      source: README.md
+
+  - id: claim-receipt-issue-ttl-path
+    claim: "Path-scoped write receipt issuance with bounded TTL"
+    evidence:
+      test: ""
+      eval: ""
+      demo: 'bin/g8s receipt issue --issuer brain --path "./tests/*.py" --ttl 3600'
+      source: README.md
+
+  - id: claim-reflex-triage-gate
+    claim: "System-1 reflex triage gate evaluating mutation risk"
+    evidence:
+      test: ""
+      eval: ""
+      demo: 'bin/g8s reflex triage --summary "raise test deadline" --files "internal/runtime/verify_test.go"'
+      source: README.md
+
+  - id: claim-autopilot-tick-maintenance
+    claim: "Autopilot periodic maintenance tick execution"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s autopilot tick"
+      source: README.md
+
+  - id: claim-cleanup-dry-run-sweep
+    claim: "Idempotent dry-run lifecycle cleanup sweep"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s cleanup --dry-run"
+      source: README.md
+
+  - id: claim-retry-disabled-default
+    claim: "Budgeted retry disabled by default"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config get auto_retry_enabled"
+      source: CHANGELOG.md
+
+  - id: claim-retry-per-task-cap
+    claim: "Budgeted retry per-task retry cap default of 2"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config get auto_retry_max_per_task"
+      source: CHANGELOG.md
+
+  - id: claim-retry-per-hour-cap
+    claim: "Budgeted retry per-hour store cap default of 10"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config get auto_retry_max_per_hour"
+      source: CHANGELOG.md
+
+  - id: claim-submit-routing-modes
+    claim: "Submit command supports context routing modes"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s submit --help"
+      source: CHANGELOG.md
+
+  - id: claim-verify-acceptance-scope
+    claim: "Verifier acceptance checks on completed task write scopes"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s verify --help"
+      source: CHANGELOG.md
+
+  - id: claim-autonomy-level-manual-default
+    claim: "Autonomy level posture defaults to manual (0)"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config get autonomy_level"
+      source: CHANGELOG.md
+
+  - id: claim-eval-self-audit-probes
+    claim: "Adversarial probe self-audit category passes 4/4 probes"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s eval run --category self-audit --provider mock-compliant"
+      source: CHANGELOG.md
+
+  - id: claim-receipt-ttl-bounds
+    claim: "Receipt TTL minimum bound is 1s, maximum bound is 3600s"
+    evidence:
+      test: ""
+      eval: ""
+      demo: 'bin/g8s receipt issue --path "src/**" --ttl 0'
+      source: docs/user-guide/configuration.md
+
+  - id: claim-permissions-three-profiles
+    claim: "Three built-in permission profiles active: read_only, automation_read, workspace_write"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s permissions"
+      source: docs/user-guide/configuration.md
+
+  - id: claim-roles-six-builtins
+    claim: "Six built-in roles active: collector, mcp-mapper, scout, summarizer, test-runner, verifier"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s roles"
+      source: docs/user-guide/configuration.md
+
+  - id: claim-mcp-server-eleven-tools
+    claim: "Stdio MCP JSON-RPC server registers eleven tools"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s mcp --help"
+      source: docs/user-guide/mcp-tools.md
+
+  - id: claim-autopilot-install-schedule
+    claim: "OS-native scheduler installation with periodic interval"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s autopilot install-schedule --dry-run --every 10m"
+      source: docs/user-guide/autopilot.md
+
+  - id: claim-autonomy-level-upper-bound
+    claim: "Autonomy level rejects values above 1"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config set autonomy_level 2"
+      source: docs/user-guide/verifier-and-autonomy.md
+
+  - id: claim-ci-gate-scripts
+    claim: "Generic CI gate scripts enforce spec-code sync, structure truth, and link integrity"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bash tools/ci_spec_code_sync.sh && bash tools/ci_structure_sync.sh && bash tools/ci_link_integrity.sh"
+      source: offer/README.md
+
+  - id: claim-brief-issue-structure
+    claim: "Brief issuance enforces DoR and generates structured brief with TTL and permission"
+    evidence:
+      test: ""
+      eval: ""
+      demo: 'bin/g8s brief-issue --title "Smoke Test" --payload "Payload referencing internal/worker" --dod "DoD" --permission read_only'
+      source: offer/ONBOARDING.md
+
+  - id: claim-worker-concurrency-isolation
+    claim: "Worker concurrency supports multi-attempt processing gated on worktree isolation"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s worker --concurrency 2 --once=false"
+      source: offer/ONBOARDING.md
+
+  - id: claim-offer-scaffold-check
+    claim: "Offer subcommand deterministically scaffolds repository profiles and embedded gate scripts"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s offer check"
+      source: cmd/g8s/offer.go
+
+  - id: claim-watch-terminal-milestone
+    claim: "Supervisor watch monitors task states until terminal milestone"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s watch --task non-existent-id --milestone worker-complete --timeout 1s"
+      source: skills/g8s-supervisor/SKILL.md
+
+  - id: claim-watch-failed-signal
+    claim: "Terminal task failure events wake supervisor via signal file watching"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s watch --failed --timeout 1s"
+      source: skills/g8s-supervisor/SKILL.md
+
+  - id: claim-version-json-envelope
+    claim: "Application version and build metadata emitted as JSON envelope"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s version --json"
+      source: manifest.json
+
+  - id: claim-status-worker-json
+    claim: "Worker status report provides JSON observability of active, stale, and dead workers"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s status --worker --json"
+      source: skills/g8s-supervisor/SKILL.md
+
+  - id: claim-cleanup-ghost-orphan
+    claim: "Cleanup sweep detects and removes ghost processes and orphan resources"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s cleanup --force --dry-run"
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-doctor-diagnostics-json
+    claim: "Doctor diagnostics report system environment, database, workspace, and CLI health"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s doctor --json"
+      source: skills/g8s-supervisor/SKILL.md
+
+  - id: claim-workspace-write-disabled-default
+    claim: "Delegated workspace_write is disabled by default unless explicitly enabled via environment variable"
+    evidence:
+      test: ""
+      eval: ""
+      demo: 'bin/g8s submit --idempotency-key k1 --prompt "p" --permission workspace_write --receipt-id r1'
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-deliver-supervisor-provenance
+    claim: "Delivery is supervisor-owned provenance via receipt-validated apply"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s deliver --help"
+      source: skills/g8s-supervisor/SKILL.md
+
+  - id: claim-providers-registry-two-class
+    claim: "Provider registry enforces two-class providers manifest"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s providers"
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-verifier-declared-classes
+    claim: "Verifier CLI evaluates task deliverables against declared verifier classes"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s verify --help"
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-autonomy-binary-posture
+    claim: "Autonomy level configuration enforces binary {0,1} posture"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s config get autonomy_level"
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-lesson-subcommand-lifecycle
+    claim: "Lesson subcommand creates, verifies, and lists retrospective lessons against telemetry database"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s lesson list"
+      source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-resubmit-failed-tasks
+    claim: "Failed tasks can be resubmitted with supervisor receipt boundary"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s resubmit --help"
+      source: docs/ENTERPRISE_LEDGER.md
