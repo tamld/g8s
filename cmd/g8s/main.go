@@ -174,6 +174,8 @@ func main() {
 		runServe(os.Args[2:])
 	case "verify":
 		runVerify(os.Args[2:])
+	case "lesson":
+		runLesson(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
