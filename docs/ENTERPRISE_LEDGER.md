@@ -7,7 +7,7 @@ issue). The registry of quantitative claims lives in `docs/claims.yml`
 (verified by `tools/claims_check.sh`); this ledger is the enterprise-facing
 view over the same evidence.
 
-Last updated: 2026-10-02 (issue #480 closure: QA Hardening rows + #448 delivery flip).
+Last updated: 2026-10-04 (v0.14.0 release + Wave I pipeline live: verifier, merger, autonomy, retry, lessons, multi-project containment).
 
 ## Zero-Trust Delegation
 
@@ -25,7 +25,7 @@ Last updated: 2026-10-02 (issue #480 closure: QA Hardening rows + #448 delivery 
 | Per-attempt worktree isolation for workspace_write | PROVEN | `TestWorkspaceWriteAttemptGetsWorktreeIsolation` (#427) | Concurrent attempts clobbering each other fixed |
 | Dirty worktrees survive `Release(keep=true)` | PROVEN | `TestReleasePreservesDirtyWorktree` (#443-f2, fix #450) | Preserved-until-reaped contract |
 | Worker sessions tracked in SQLite registry with exclusive locking | PROVEN | `TestSessionsRegistryLifecycle` (#393) | |
-| Cross-session containment on one host (multi-project) | PARTIAL | #465 + hot fix #468 | Host-wide sweeps de-fanged (identity-scoped ghost kill; state-dir worktree root); instance identity + lease resilience are P1 |
+| Cross-session containment on one host (multi-project) | PROVEN | ADR-0028 accepted; PR #468 (identity-scoped ghost kill, state-dir worktree root) and PR #491 (instance identity, lease resilience) shipped and verified | Multi-project isolation on single host |
 
 ## Multi-Provider Dispatch
 
@@ -41,9 +41,19 @@ Last updated: 2026-10-02 (issue #480 closure: QA Hardening rows + #448 delivery 
 | :--- | :--- | :--- | :--- |
 | Unbuffered stdout/stderr streaming per attempt | PROVEN | `internal/worker` UnbufferedPipeStreamer | Feeds Evidence Lake export |
 | Evidence Lake export per attempt | PROVEN | `worker.ExportReceipt` + `G8S_EVIDENCE_DIR` | |
-| Harness self-audit probes registered in the eval suite | PROVEN | #451: 4 probes in `internal/harness/probe` DefaultSuite (incidents #443, #443-f2/#450, #434/#445, receipt-bypass) | Runner wired to release checklist pending (ADR-0026 §1) |
+| Harness self-audit probes registered in the eval suite | PROVEN | #451: 4 probes in `internal/harness/probe` DefaultSuite; RELEASE_SOP Gate 8 (D-02) wired | 4/4 probes passed in v0.14.0 release gate via `g8s eval run --category self-audit` |
 | Enterprise access-audit log | UNPROVEN | docs/designs/access-audit-design.md (#441) | Design only; no code |
 | Downtime/availability measurement | UNPROVEN (by design) | docs/decisions/0027-availability-measurement.md | Single-node CP; revisit condition recorded |
+
+## Autonomous Operations & Verification (v0.14.0)
+
+| Claim | Status | Evidence artifact | Notes |
+| :--- | :--- | :--- | :--- |
+| Verifier-class registry | PROVEN | SCORECARD S-7, PR #532 (`g8s verify --task <id>`, `.g8s/verifier-classes.yml`, RC1 red-cell suite passing) | Resolves task write scope from receipt; fail-closed unregistered floor |
+| Gated auto-merge | PROVEN | SCORECARD S-8, PR #533 (`tools/merger.sh --pr <num> --task <id>`, four fail-closed gates, RC1 red-cell suite passing) | Four fail-closed gates (autonomy, docs lane, verifier, CI) |
+| Autonomy ladder configuration | PROVEN | SCORECARD S-8, PR #533 (`g8s config get/set autonomy_level {0,1}`, RC1 red-cell suite passing) | Level 0 manual default; level 1 docs-lane auto-merge; human flip per round |
+| Budgeted auto-retry of failed tasks | PROVEN | ADR-0029, PR #501, #502, #539 (root-lineage budget, 5→20→60m backoff, `g8s resubmit`, RC2 red-cell suite passing) | Max 2 per task, 10/hr per store; receipt-free tasks only for unattended ticks |
+| Retrospective lessons pipeline | PROVEN | SCORECARD S-9, PR #545, #546 (`g8s lesson create\|verify\|list`, `docs/lessons/ledger.jsonl`, RT-I red-cell tests passing) | Telemetry-backed structured lessons pipeline; enforces verification before append |
 
 ## Auth & Secrets
 
@@ -66,5 +76,5 @@ Last updated: 2026-10-02 (issue #480 closure: QA Hardening rows + #448 delivery 
 
 - PROVEN rows bind to a named test in this repo (search `grep -rn "<TestName>" *_test.go`) or to an
   APPLIED decision/spec. If the binding breaks, `tools/claims_check.sh` fails for claims.yml-backed rows.
-- UNPROVEN rows are aspirations with owners; they must not appear in sales/marketing material as facts.
+- UNPROVEN ledger rows describe designed capabilities lacking CI test proofs; they must not appear in sales/marketing material as facts.
 - PARTIAL rows ship with documented boundaries (read the Notes column before citing).

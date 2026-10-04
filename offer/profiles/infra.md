@@ -1,8 +1,7 @@
 # Profile: infra (infrastructure / IaC / platform tooling)
 
 **Nature**: repositories that provision or operate systems (IaC, infra
-tooling, daemons). Changes have physical blast radius — a bad apply takes
-down real machines.
+tooling, daemons). Host mutation commands execute without container/virtualization boundaries.
 
 ## Trust boundaries (seed)
 

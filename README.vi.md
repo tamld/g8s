@@ -4,7 +4,7 @@
 
 # g8s (The Gatekeepers) — Bản tiếng Việt
 
-> **Harness thực thi tiến trình zero-trust, siêu nhẹ, cho các AI agent worker chạy CLI.**
+> **Harness thực thi tiến trình zero-trust bằng binary tĩnh thuần Go (<25MB, không CGO) cho các AI agent worker chạy CLI.**
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -22,7 +22,7 @@
 
 ## g8s là gì
 
-g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng cao ("Brain": Claude, GPT, Codex) giao việc cơ học cho các CLI worker nhanh (`agy`, Claude Code, Gemini CLI, Ollama) **mà không trao chìa khóa máy của bạn**. Tầng model không thể được tin bằng quyền hạn; g8s thi hành điều đó ở tầng tiến trình:
+g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng cao ("Brain": Claude, GPT, Codex) giao việc cơ học cho các tiến trình CLI worker (agy, Claude Code, Gemini CLI, Ollama) **mà không trao chìa khóa máy của bạn**. Tầng model không thể được tin bằng quyền hạn; g8s thi hành điều đó ở tầng tiến trình:
 
 - **Hàng đợi bền vững**: hàng đợi lưu trong SQLite (chế độ WAL), có khóa lease nguyên tử, idempotency key chống nạp trùng, và dòng dõi cha–con. Session chết thì task vẫn còn; hàng đợi chính là bộ nhớ.
 - **Receipt (biên nhận quyền ghi)**: worker không thể ghi file nếu không có receipt — mỗi receipt chỉ dùng một lần, có thời hạn và giới hạn đường dẫn, do Brain cấp.
@@ -40,11 +40,11 @@ g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng c
 | **attempt** | một lần chạy cụ thể của task |
 | **signal** | dòng sự kiện báo "task đã kết thúc" trong `signals/tasks.jsonl` |
 
-## Đã ship trong v0.13.0
+## Đã ship trong v0.14.0
 
 - **Giám sát theo sự kiện**: khi task kết thúc (thành công hay thất bại), g8s ghi một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` giữ đúng một process chờ và đánh thức supervisor khi có tín hiệu. Vòng lặp hỏi-đáp (polling) chỉ là phương án dự phòng.
 - **Queue đa provider**: `providers.json` là manifest; claim affinity theo provider, `--provider` trên submit lẫn worker, không fallback thầm lặng.
-- **Retry có ngân sách (đang land)**: task FAILED tự resubmit trong giới hạn: 2 lần mỗi task, 10 lần/giờ mỗi state dir, backoff luỹ thừa, flag mặc định OFF. Tick tự động chỉ đụng task không cần receipt.
+- **Retry có ngân sách**: task FAILED tự resubmit trong giới hạn: 2 lần mỗi task, 10 lần/giờ mỗi state dir, backoff luỹ thừa, flag mặc định OFF. Tick tự động chỉ đụng task không cần receipt.
 - **Dispatch đồng thời**: `g8s worker --concurrency N` — N attempt cách ly, worktree riêng từng attempt.
 - **Eval đối kháng**: bộ probe chấm điểm semantic-class + Provider Reliability Index; mock provider giúp chạy được trong CI.
 - **Fuzz + baseline đo được**: 4 fuzz target trên các parser đầu vào ngoài; độ trễ queue ghi trong [docs/user-guide/performance.md](docs/user-guide/performance.md).
@@ -139,7 +139,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 | Cấu hình & vòng đời service | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
 | Bảo mật & kiểm chứng | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
 | Tích hợp provider | [docs/integrations/](docs/integrations/) |
-| Decision records | [docs/decisions/](docs/decisions/): ADR-0001…0030 |
+| Decision records | [docs/decisions/](docs/decisions/): ADR-0001…0032 |
 | Hiến pháp & delta kỹ thuật | [spec/constitution.md](spec/constitution.md), [spec/openspec/](spec/openspec/) |
 | Sổ cái chiến dịch & lịch sử | [plans/](plans/), [docs/history/](docs/history/) |
 | Lịch sử release | [CHANGELOG.md](CHANGELOG.md) |
@@ -155,7 +155,7 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 | Mốc | Nội dung chính | Trạng thái |
 |--------|-----------|:---:|
 | v0.13.0 (2026-09-30) | Queue đa provider, sóng hardening B–E, tín hiệu event-driven (`signals/tasks.jsonl` + `watch --failed`), release gate 7–8 | **Xong** |
-| v0.14.0 (mục tiêu) | Vòng AI-factory: auto-retry ✅ (#501/#502), router tới tay người dùng — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), vòng tự-đóng đầu tiên — [#516](https://github.com/tamld/g8s/issues/516); cắt bản = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Đang làm** |
+| v0.14.0 (2026-10-03) | Vòng AI-factory: auto-retry ✅ (#501/#502), router tới tay người dùng — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), vòng tự-đóng đầu tiên — [#516](https://github.com/tamld/g8s/issues/516); cắt bản = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Xong** |
 | v0.15.0 (mục tiêu) | Retrospective-as-task — cơ quan tự trưởng thành — [#519](https://github.com/tamld/g8s/issues/519) | Kế hoạch |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 

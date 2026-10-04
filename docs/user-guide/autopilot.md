@@ -54,7 +54,7 @@ g8s autopilot tick --jobs doctor,hygiene
    - Cleans ghost worker processes matching project identity.
    - Prunes unregistered or abandoned worktree directories under `<state_dir>/worktrees`.
    - Reaps zombie or dead supervisor sessions from the SQLite database.
-   - Tolerates empty registries and fresh states cleanly.
+   - Returns status ok with zero reaped items on empty registries or fresh states
 4. **`retry`**:
    - Evaluates terminal `FAILED` tasks against classification rules (transient vs deterministic).
    - Only retries transient infrastructure failures (timeout, interrupted, worker spawn failure, provider transport errors). Deterministic errors (sanitizer/receipt violations, refusals, `E_USAGE`, delivered tasks) are never retried.

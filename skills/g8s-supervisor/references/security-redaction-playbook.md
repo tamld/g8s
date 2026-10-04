@@ -64,7 +64,7 @@ Never place in any packet, draft, log, or issue — internal or external:
 
 Default to the LOWEST level that still proves the finding. Upstream g8s issues
 take L1/L2 — the upstream reviewer needs the contract failure, not your
-workspace. Synthetic reproductions (L2) are the gold standard: build a minimal
+workspace. Level-2 issue packets provide a minimal isolated tempdir reproduction: build a minimal
 fixture in a temp dir that reproduces the defect; then nothing real is exposed
 at all.
 

@@ -36,8 +36,8 @@
 | C1 | Supervisor doing worker tasks (scanning, test gen) | Quota waste; Brain tier should strategize | Delegate bounded tasks via g8s roles |
 | C2 | Worker using skills (ck:plan, ck:cook, etc.) | Skills = cognitive patterns for Brain only | Workers = CLI execution only (no skills) |
 | C3 | Mixing Mode 1 + 2 + 3 in one pilot | State machine confusion; evidence contamination | One mode per pilot/task |
-| C4 | Using `workspace_write` without receipt | Gatekeeper rejects; security violation | `receipt-issue` → `submit` with receipt |
-| C5 | Long-running task without heartbeat monitoring | Ghost processes; orphan worktrees | `g8s status --worker --json` every 30s |
+| C4 | Using `workspace_write` without receipt | Gatekeeper rejects; security violation | `g8s receipt issue` → `submit` with receipt |
+| C5 | Polling queue repeatedly during execution | Burns supervisor quota; busy-waiting anti-pattern | Event-driven: `g8s watch` (`--task` or `--failed`); polling is fallback only |
 | C6 | Skipping `g8s cleanup --force` at session end | Resource leaks; state pollution | Mandatory hygiene step |
 
 ---
@@ -64,7 +64,7 @@ Before any g8s operation, verify **NONE** of these are true:
 - [ ] Supervisor executing bounded tasks directly
 - [ ] Worker invoking any skill
 - [ ] `workspace_write` without valid receipt
-- [ ] No heartbeat monitoring for >60s tasks
+- [ ] Polling queue repeatedly instead of event-driven watch
 - [ ] Filing upstream issue without binary admission block
 - [ ] Writing code before OpenSpec delta exists
 

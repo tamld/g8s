@@ -41,7 +41,7 @@ Dispatch the first real task through g8s (this is the dogfood):
 
 ```bash
 g8s brief-issue --title "..." --payload-file ... --dod-file ... --permission read_only
-g8s submit --role verifier --receipt-id <id> ...
+g8s submit --idempotency-key <key> --prompt "..." --role verifier ...
 g8s worker --once=false --concurrency 2
 ```
 
@@ -68,6 +68,6 @@ curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/profiles/secur
 curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/tools/ci_link_integrity.sh
 ```
 
-Total: 5 fetches, zero git state in the target repo, ~30 seconds. The
+5 HTTP GET requests retrieve all bundle files with zero git clones. The
 profile text is self-sufficient for the agent to scaffold `.g8s/` itself —
 the offer's value is the knowledge, not the files.

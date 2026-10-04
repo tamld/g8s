@@ -8,7 +8,7 @@ The `g8s` binary is the self-describing, single entry point for task submission,
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
-| `G8S_DB` | Path to shared SQLite control-plane & receipt database | `~/.local/state/g8s/g8s.db` |
+| `G8S_DB` | Path to SQLite control-plane database (receipts live in sibling receipts.db) | `~/.local/state/g8s/g8s.db` |
 | `AGY_BIN` | Explicit worker binary path (overrides PATH lookup) | Resolved from `PATH` |
 | `G8S_PROVIDERS` | Path to custom provider configuration JSON file | `~/.config/g8s/providers.json` |
 
@@ -211,7 +211,7 @@ Lists all active, consumed, or expired receipts with status filtering.
 Runs the supervisor self-test loop against the worker engine with automated Root Cause Analysis (RCA) and bounded fix cycles.
 
 ```sh
-g8s orchestrate "Run security benchmark suite" \
+g8s orchestrate --from-intent "Run security benchmark suite" \
   --max-attempts 5 \
   --model "gemini-3.8-flash-high"
 ```
@@ -304,7 +304,7 @@ Decoupled contract-driven brief dispatch system with Definition of Done (DoD) an
 ```sh
 # Issue a structured task brief
 g8s brief-issue \
-  --file ./BRIEF.md \
+  --payload-file ./BRIEF.md \
   --title "Security audit" \
   --dod "All tests pass, no scope violations" \
   --ttl 2h
@@ -320,10 +320,10 @@ Manages the background cron-based scheduler daemon for autonomous health sweeps,
 
 ```sh
 # Start autopilot scheduler
-g8s autopilot start --cron "*/15 * * * *" --repo .
+g8s autopilot start --config autopilot.yaml
 
 # Trigger immediate scan cycle
-g8s autopilot trigger --type issues
+g8s autopilot trigger
 
 # Inspect status
 g8s autopilot status
@@ -366,14 +366,14 @@ Pure-Go Decoupled Tri-Anchor Knowledge Vault with SQLite FTS5 full-text indexing
 # Store a distillation record
 g8s vault store \
   --id "DELTA-02-A" \
-  --delta-id "DELTA-02" \
-  --spec-anchor "spec/openspec/02-receipt-delegation-spec.md" \
-  --plan-anchor "plans/receipt-sprint.md" \
-  --confidence 0.95 \
-  --summary "Receipt delegation engine implementation patterns"
+  --title "Receipt delegation engine" \
+  --package "receipt" \
+  --file "internal/receipt/receipt.go" \
+  --problem "Unrestricted write mutation" \
+  --root-cause "Missing capability checks"
 
 # Query vault using BM25 full-text search
-g8s vault query --q "write receipts CAS" --limit 10
+g8s vault query "write receipts CAS" --limit 10
 
 # List stored vault records
 g8s vault list --limit 25
@@ -613,20 +613,26 @@ g8s config unset default_provider
 g8s completion zsh > ~/.zsh/completions/_g8s
 
 # OS service management
-g8s service install --user
+g8s service install
 ```
 
 #### Persistent Configuration Keys (`g8s config`):
 | Key | Description |
 | :--- | :--- |
-| `default_provider` | Default provider name used during `g8s submit` when `--provider` is omitted. |
+| `default_provider` | Default target provider for dispatch executions and queue submissions. |
 | `default_model` | Default target model identifier for dispatch executions. |
 | `default_role` | Default worker role profile for submitted tasks. |
 | `default_timeout` | Default maximum execution duration for tasks (e.g. `60s`, `5m`). |
 | `data_dir` | Directory for g8s database and persistent storage. |
 | `scope` | Installation and execution scope (`user` or `system`). |
 | `evidence_dir` | Centralized directory for exported task execution receipts and logs. |
+| `evidence_retention_days` | Evidence directory retention period in days (empty = unlimited). |
 | `log_level` | Verbosity level for daemon and CLI operations (`debug`, `info`, `warn`, `error`). |
+| `submit_rate_limit_per_hour` | Maximum tasks submitted per hour per actor (0 = unlimited). |
+| `auto_retry_enabled` | Enable automatic resubmission of transiently failed tasks (default false). |
+| `auto_retry_max_per_task` | Maximum automatic retries per original task (0-10, default 2). |
+| `auto_retry_max_per_hour` | Maximum automatic retries per hour per state directory (0-1000, default 10). |
+| `autonomy_level` | Autonomy posture level (0 = manual/no auto-merge, 1 = docs-lane auto-merge). |
 
 ---
 

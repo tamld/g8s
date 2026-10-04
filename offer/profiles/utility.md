@@ -1,7 +1,7 @@
 # Profile: utility (libraries / small tools)
 
 **Nature**: small deterministic repositories (libs, CLI utilities,
-hash-checkers). Low ceremony, high test determinism.
+hash-checkers). Package has zero third-party dependencies and passes go test ./... at 100%.
 
 ## Trust boundaries (seed)
 

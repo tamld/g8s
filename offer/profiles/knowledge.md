@@ -1,8 +1,7 @@
 # Profile: knowledge (wiki / vault / content projects)
 
 **Nature**: content-heavy vaults (Obsidian, markdown corpora) where the
-deliverable is knowledge itself. Writes are often human-led; agents audit,
-link-check, and distill — they rarely bulk-write content.
+deliverable is knowledge itself. Markdown edits default to read_only role; workspace_write requires receipts — they rarely bulk-write content.
 
 ## Trust boundaries (seed — tune to the project)
 
