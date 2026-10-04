@@ -5,8 +5,9 @@
 #   (a) registry with valid bindings -> exit 0
 #   (b) registry with a broken test name -> exit 1 + offending id printed
 #   (c) registry with a broken source path -> exit 1 + offending id printed
-#   (d) unbound aspirations are counted without failing
-#   (e) committed docs/claims.yml registry passes cleanly
+#   (d) operational unbound claims with demo commands are counted without failing -> exit 0
+#   (e) claims with neither test nor demo fail (no-ambiguity standard) -> exit 1 + offending id printed
+#   (f) committed docs/claims.yml registry passes cleanly
 #
 
 set -euo pipefail
@@ -98,7 +99,7 @@ cat > "$FIXTURE_ROOT/broken_source.yml" <<'EOF'
     source: docs/non_existent_doc_file.md
 EOF
 
-# Fixture (d): mixed bound and unbound aspirations
+# Fixture (d): mixed bound and operational unbound with demo
 cat > "$FIXTURE_ROOT/with_unbound.yml" <<'EOF'
 - id: claim-bound-item
   claim: "Bound claim"
@@ -108,8 +109,30 @@ cat > "$FIXTURE_ROOT/with_unbound.yml" <<'EOF'
     source: docs/OPERATIONS.md
 
 unbound:
-  - id: claim-aspiration-item
-    claim: "Aspirational unbound claim"
+  - id: claim-operational-demo-item
+    claim: "Operational unbound claim with demo command"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s worker --help"
+      source: docs/OPERATIONS.md
+EOF
+
+# Fixture (e): claim lacking both test and demo (fails no-ambiguity standard)
+cat > "$FIXTURE_ROOT/no_evidence.yml" <<'EOF'
+- id: claim-no-evidence-item
+  claim: "Claim lacking both test and demo"
+  evidence:
+    test: ""
+    eval: ""
+    source: docs/OPERATIONS.md
+EOF
+
+# Fixture (f): unbound claim lacking demo command (fails no-ambiguity standard)
+cat > "$FIXTURE_ROOT/unbound_no_demo.yml" <<'EOF'
+unbound:
+  - id: claim-unbound-without-demo
+    claim: "Unbound claim lacking demo"
     evidence:
       test: ""
       eval: ""
@@ -136,16 +159,28 @@ run_test_with_output \
     "claim-broken-source-id" \
     bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/broken_source.yml" --root "$REPO_ROOT"
 
-# (d) registry with unbound aspirations -> exit 0 and counts unbound correctly
+# (d) registry with operational unbound claims -> exit 0 and counts unbound correctly
 run_test_with_output \
-    "(d) registry with unbound aspirations passes with correct counts" 0 \
+    "(d) registry with operational unbound claims passes with correct counts" 0 \
     "SCORECARD: 1 bound, 1 unbound, 0 broken (total 2 claims)" \
     bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/with_unbound.yml" --root "$REPO_ROOT"
 
-# (e) committed docs/claims.yml registry passes cleanly
+# (e) claim with neither test nor demo -> exit 1 and prints offending id
 run_test_with_output \
-    "(e) committed docs/claims.yml passes cleanly" 0 \
-    "SCORECARD: 7 bound, 3 unbound, 0 broken (total 10 claims)" \
+    "(e) claim with neither test nor demo exits 1 and prints offending id" 1 \
+    "claim-no-evidence-item" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/no_evidence.yml" --root "$REPO_ROOT"
+
+# (f) unbound claim with neither test nor demo -> exit 1 and prints offending id
+run_test_with_output \
+    "(f) unbound claim without demo exits 1 and prints offending id" 1 \
+    "claim-unbound-without-demo" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/unbound_no_demo.yml" --root "$REPO_ROOT"
+
+# (g) committed docs/claims.yml registry passes cleanly
+run_test_with_output \
+    "(g) committed docs/claims.yml passes cleanly" 0 \
+    "SCORECARD: 7 bound, 37 unbound, 0 broken (total 44 claims)" \
     bash "$CHECK_SCRIPT"
 
 if [ "$FAILURES" -gt 0 ]; then
