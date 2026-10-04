@@ -11,7 +11,7 @@ In unattended closed rounds, delegated tasks progress through planning, executio
 
 ## 1. Why: Trust Earned per Class, Never Assumed
 
-In autonomous coding systems, assuming correctness across arbitrary write scopes creates unacceptable operational risk. Bounded autonomy requires that trust is earned incrementally on a per-class basis rather than assumed repository-wide (#515).
+In autonomous coding systems, unregistered write scopes fall back to human acceptance (exit 0) rather than auto-merging. Bounded autonomy requires that trust is earned incrementally on a per-class basis rather than assumed repository-wide (#515).
 
 ### The Advisory→Hard Model
 

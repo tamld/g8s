@@ -10,7 +10,7 @@ consumes it exactly once during execution.
    patterns with a TTL (1..3600 seconds):
 
    ```sh
-   g8s receipt-issue -issuer brain -path './src/**' -ttl 300
+   g8s receipt issue --issuer brain --path './src/**' --ttl 300
    ```
 
 2. **Inject** — when a task runs under `workspace_write`, the worker embeds a

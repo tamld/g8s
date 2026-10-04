@@ -8,7 +8,7 @@ This guide covers configuring multi-provider execution in `g8s`, managing provid
 
 `g8s` allows operators to run workers powered by different agent backends (such as `agy`, `codex`, or custom platform binaries) against a single, shared SQLite WAL control-plane queue.
 
-Under **DELTA-10**, `providers.json` serves as the Single Source of Truth (SSoT) provider manifest. No secondary manifest or format is required. Both the task submission pipeline (`g8s submit`) and the worker daemon (`g8s worker`) use this manifest alongside task payload routing to ensure predictable, reproducible execution across heterogeneous AI agent CLIs.
+Under **DELTA-10**, `providers.json` serves as the Single Source of Truth (SSoT) provider manifest. No secondary manifest or format is required. Both the task submission pipeline (`g8s submit`) and the worker daemon (`g8s worker`) use this manifest alongside task payload routing to execute provider-affinity matching and command-template argument substitution.
 
 ---
 

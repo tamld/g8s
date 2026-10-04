@@ -20,7 +20,7 @@ The state directory serves as the authoritative ownership boundary. All runtime 
 
 ### Configuration
 
-By default, `g8s` places its state in `~/.local/state/g8s` (or `%LOCALAPPDATA%\g8s` on Windows). For single-session hosts, this default operates without additional configuration.
+By default, `g8s` places its state in `~/.local/state/g8s` (or `%LOCALAPPDATA%\Programs\g8s` on Windows). For single-session hosts, this default operates without additional configuration.
 
 When running multiple concurrent sessions, set `G8S_STATE_DIR` to a distinct directory for each session:
 

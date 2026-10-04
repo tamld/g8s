@@ -43,7 +43,7 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
 
 ## 3. Verdict ≠ delivery
 
-- Worker verdicts (`ok=true`) lied repeatedly while the disk was empty.
+- Worker result ok=true does not assert file existence; verify diff on disk.
   After every drain: **harvest worktrees immediately** (they are the
   delivery surface), then never-trust-verify the diff yourself.
 - Worktrees live under `$G8S_STATE_DIR/worktrees` since #468 — harvest from
@@ -94,8 +94,9 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
 
 - One-shot automation for deferred retry windows: it dispatches, drains,
   verifies, and opens PRs — **merging stays with the interactive
-  supervisor** (the boundary kept the automation honest and the review
-  human).
+  supervisor** by default (`autonomy_level=0`), or executes through
+  fail-closed gated auto-merge (`tools/merger.sh`) only when explicitly
+  enabled under `autonomy_level=1` (see `docs/user-guide/verifier-and-autonomy.md`).
 - Brief = complete contract (pinned semantics + red tests + receipt-scoped
   file list with `$G8S_REPO_ROOT`-style placeholders, never absolute home
   paths); submit prompt stays tiny and neutral.

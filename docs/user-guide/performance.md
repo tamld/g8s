@@ -2,7 +2,7 @@
 
 This document records the empirical queue operation latency baseline for the g8s SQLite control plane.
 
-> **Disclaimer**: This is not a SLA — baseline for the throttle design, see `store.go:1762` TODO (`Check hourly rate limit`).
+> **Disclaimer**: This is not a SLA — baseline for the throttle design, see `internal/controlplane/store.go:1329` (`ErrSubmitRateLimited`).
 
 ---
 

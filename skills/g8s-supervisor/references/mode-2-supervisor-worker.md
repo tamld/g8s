@@ -39,7 +39,7 @@ writable campaign, enforceable path scope, receipt proof, isolation, diff/test/r
 
 ## Useful parallelism
 
-Parallelize only independent mechanical slices with disjoint roots. For the
+Concurrent workers must execute against mutually disjoint path subtrees. For the
 full decomposition playbook — role matrix, canonical fan-out shapes
 (inventory / hunt-verify / digest-join / concurrent drain), budgets, and the
 join protocol — see `multi-worker-fanout.md`. Minimal example:

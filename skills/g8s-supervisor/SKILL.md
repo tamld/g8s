@@ -14,8 +14,8 @@ args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objecti
 `g8s` is the canonical worker supervisor: a Zero-CGO binary that queues tasks,
 dispatches CLI workers (primary: `agy`), isolates them in process groups and
 worktrees, and seals every run in a durable receipt. Its MCP server is the
-Claude-facing transport; an `agy-dispatch` plugin is a compatibility bridge
-only. **Claude remains the supervisor**: selects the slice, authorizes
+Claude-facing transport; the agy-dispatch plugin translates g8s JSON-RPC
+requests to AGY CLI args. **Claude remains the supervisor**: selects the slice, authorizes
 mutation, verifies evidence, accepts output, and owns integration.
 
 ## Invocation & args
@@ -45,8 +45,8 @@ compensate for a missing arg.
 
 The worker role is ALSO how you dogfood g8s itself: real dispatches produce
 real receipts, telemetry, and failure modes — the raw material for honest
-optimization. A session that never dispatches has no artifacts to optimize
-from (operator mandate 2026-09-27).
+optimization. Optimization issue drafting requires at least one completed
+task receipt (operator mandate 2026-09-27).
 
 ## Choose one mode
 

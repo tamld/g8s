@@ -53,7 +53,7 @@
 - [ ] `g8s get {{TASK_ID}} --json` output
 - [ ] `g8s status --worker --json` (heartbeat snapshot)
 - [ ] Run directory: `{{RUN_ROOT}}/{{TASK_ID}}/attempt-{{ATTEMPT}}/receipt.json`
-- [ ] Control plane query: `sqlite3 control.db "SELECT * FROM tasks WHERE id='{{TASK_ID}}'"`
+- [ ] Control plane query: `sqlite3 g8s.db "SELECT * FROM tasks WHERE task_id='{{TASK_ID}}'"`
 
 ---
 

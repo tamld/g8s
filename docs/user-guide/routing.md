@@ -6,7 +6,7 @@ This guide covers submit-time task routing in `g8s`, configuring `--route auto|m
 
 ## Overview
 
-Under **ADR-0030**, the router acts as the factory's distributor: orchestrators plan, workers execute, and the router assigns tasks to the best-fit provider, model, and role based on task context (file paths, prompt, blast radius, and provider availability).
+Under **ADR-0030**, the router acts as the factory's distributor: orchestrators plan, workers execute, and the router assigns provider, model, and role using deterministic rule evaluation over touched paths (file paths, prompt, blast radius, and provider availability).
 
 By default, task submission operates in `manual` mode for strict backward compatibility. Specifying `--route auto` enables the context-aware routing pipeline at task submission time.
 
