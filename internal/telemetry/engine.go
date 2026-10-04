@@ -710,6 +710,60 @@ func (e *TelemetryEngine) GetEvent(ctx context.Context, id string) (*TraceEvent,
 	return nil, ErrEventNotFound
 }
 
+// EventsByTask returns all telemetry events recorded for a given task ID,
+// ordered chronologically by timestamp ascending.
+func (e *TelemetryEngine) EventsByTask(ctx context.Context, taskID string) ([]TraceEvent, error) {
+	query := `
+		SELECT id, task_id, supervisor_task_id, event_type, timestamp,
+		       payload, exit_code, error, duration, tags
+		FROM telemetry_events
+		WHERE task_id = ?
+		ORDER BY timestamp ASC
+	`
+	rows, err := e.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []TraceEvent
+	for rows.Next() {
+		var ev TraceEvent
+		var ts, dur int64
+		var payload, tags, supTaskID sql.NullString
+		var exitCode sql.NullInt64
+		var errStr sql.NullString
+
+		err := rows.Scan(&ev.ID, &ev.TaskID, &supTaskID, &ev.EventType, &ts,
+			&payload, &exitCode, &errStr, &dur, &tags)
+		if err != nil {
+			return nil, err
+		}
+
+		ev.Timestamp = time.Unix(0, ts)
+		ev.Duration = time.Duration(dur)
+		if supTaskID.Valid {
+			ev.SupervisorTaskID = &supTaskID.String
+		}
+		if exitCode.Valid {
+			val := int(exitCode.Int64)
+			ev.ExitCode = &val
+		}
+		if errStr.Valid {
+			ev.Error = errStr.String
+		}
+		if tags.Valid && tags.String != "" {
+			ev.Tags = strings.Split(tags.String, ",")
+		}
+		if payload.Valid && payload.String != "" {
+			_ = json.Unmarshal([]byte(payload.String), &ev.Payload)
+		}
+
+		events = append(events, ev)
+	}
+	return events, rows.Err()
+}
+
 func (e *TelemetryEngine) DistillFailure(ctx context.Context, event TraceEvent) (*NegativePattern, error) {
 	return e.extractPattern(ctx, nil, event)
 }
