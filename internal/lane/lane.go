@@ -406,7 +406,9 @@ func isDocsPath(p string) bool {
 	if strings.HasPrefix(clean, "docs/") || clean == "docs" {
 		return true
 	}
-	if strings.HasSuffix(strings.ToLower(clean), ".md") {
+	// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive suffix checking
+	// instead of strings.HasSuffix(strings.ToLower()) which allocates a new string on the heap.
+	if len(clean) >= 3 && strings.EqualFold(clean[len(clean)-3:], ".md") {
 		return true
 	}
 	return false
