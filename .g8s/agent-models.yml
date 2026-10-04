@@ -1,0 +1,174 @@
+# agent-models.v1 — the supported-models effort catalog (issue #550)
+# Transcribed EXCLUSIVELY from the 2026-10-04 research-verified data
+# (3 agents against official docs; tables in
+# plans/261004-effort-optimization/brief-AM1-catalog.md).
+# Consumed later by the config.File loader (#550 DoD).
+
+schema_version: agent-models.v1
+catalog_version: 1
+verified_at: "2026-10-04"
+sources:
+  - https://developers.openai.com/api/docs/models
+  - https://developers.openai.com/api/docs/guides/reasoning
+  - https://platform.claude.com/docs/en/docs/build-with-claude/effort
+  - https://ai.google.dev/gemini-api/docs/thinking
+  - https://docs.x.ai/developers/model-capabilities/text/reasoning
+  - https://api-docs.deepseek.com/guides/reasoning_model
+  - https://docs.mistral.ai/capabilities/reasoning/
+  - https://openrouter.ai/docs/use-cases/reasoning-tokens
+
+providers:
+  openai:
+    effort_style: named
+    field: reasoning_effort        # reasoning.effort on the Responses API
+    default_effort: adaptive
+    mandatory: false
+    notes: "o-series and gpt-5.1 deprecated (o-series shutdown 2026-10-23); adaptive reasoning is the default posture"
+    models:
+      - id: gpt-6-astra
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: adaptive
+        notes: "no none; Chat Completions lacks function calling for this model — use Responses"
+      - id: gpt-6.1-sol
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-6-luna
+        supported_efforts: [none, low, medium, high, xhigh, max]
+        default_effort: adaptive
+        notes: "only current model supporting none"
+      - id: gpt-5.5
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-5.5-pro
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-5.6-sol
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-5.6-terra
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-5.6-luna
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+      - id: gpt-5.6-cyber
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+
+  anthropic:
+    effort_style: named
+    field: output_config.effort
+    default_effort: high
+    mandatory: false
+    notes: "budget_tokens deprecated (rejected 400 on 4.7+ models); adaptive thinking mode on Opus 5.5 (cannot disable); per-message effort variant available"
+    models:
+      - id: claude-opus-5-5
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: medium
+        notes: "adaptive always on; thinking cannot be disabled"
+      - id: claude-sonnet-5-5
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+        notes: "thinking between_tools 400s at xhigh/max combos"
+      - id: claude-fable-5-1
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: high
+      - id: claude-haiku-4-5
+        supported_efforts: []
+        notes: "no effort support"
+
+  google:
+    effort_style: named
+    field: thinking_level
+    default_effort: dynamic
+    mandatory: false
+    notes: "dynamic = model-decided when omitted; thinkingBudget integer is legacy (do not set both)"
+    models:
+      - id: gemini-3.1-pro-preview
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: dynamic
+      - id: gemini-3.8-flash
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: gemini-3.5-flash
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: dynamic
+      - id: gemini-3.6-flash
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: dynamic
+      - id: gemini-3.7-flash
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: dynamic
+      - id: gemini-3.5-flash-lite
+        supported_efforts: [minimal, high]
+        default_effort: minimal
+      - id: gemini-3.1-flash-lite
+        supported_efforts: [minimal, high]
+        default_effort: minimal
+
+  xai:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: high
+    mandatory: true
+    notes: "reasoning cannot be disabled on current models"
+    models:
+      - id: grok-4.7
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+      - id: grok-4.6
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+      - id: grok-4.5
+        supported_efforts: [low, medium, high]
+        default_effort: high
+        notes: "xhigh silently treated as high on this model"
+
+  deepseek:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: medium
+    mandatory: false
+    notes: "V4 parameter-based: thinking:{type:'enabled'} + reasoning_effort; thinking default ON; omitting thinking = non-thinking (low-equivalent, recorded in notes not as a level)"
+    models:
+      - id: deepseek-flash
+        supported_efforts: [medium, high]
+        default_effort: medium
+      - id: deepseek-v4-pro
+        supported_efforts: [medium, high]
+        default_effort: medium
+
+  mistral:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: high
+    mandatory: false
+    notes: "magistral-* deprecated"
+    models:
+      - id: mistral-medium-3.5
+        supported_efforts: [high, none]
+        default_effort: high
+      - id: mistral-small-latest
+        supported_efforts: [high, none]
+        default_effort: high
+      - id: zai-glm-5-3
+        supported_efforts: [low, high, max]
+        notes: "hosted; output always chunk-list; none unsupported"
+
+  ollama:
+    effort_style: toggle
+    field: think
+    mandatory: false
+    notes: "think is bool OR model-defined strings (gpt-oss: low/medium/high; qwen3/deepseek-r1: boolean); discovery via /api/show is mandatory per model; hard 400 on non-thinking models"
+    models: []
+
+  agy:
+    effort_style: baked-name
+    field: model-name-suffix
+    default_effort: high
+    mandatory: false
+    notes: "local wrapper; template substitution gemini-3.8-flash-{effort}; medium tier verified dispatchable 2026-10-04 (issue #550 data point)"
+    models:
+      - id: gemini-3.8-flash
+        supported_efforts: [low, medium, high]
+        default_effort: high
