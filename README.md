@@ -224,6 +224,7 @@ g8s/
 │   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers
 │   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s,
 │   ├── lane/ — implements ALDC Layer 1 gate-lane routing and Layer 2 Jev-assisted
+│   ├── lessons/ — implements schema, append-only ledger, and fail-closed machine checks for retrospective lessons
 │   ├── lockfile/ — provides non-blocking exclusive advisory file locks used
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
