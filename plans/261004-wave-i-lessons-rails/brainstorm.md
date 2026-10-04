@@ -1,7 +1,8 @@
 # Brainstorm: lessons-pipeline rails against LLM self-dealing (Wave I #519)
 
-**Status**: PROPOSED — awaits operator ratification (factory law 5: factory
-proposes, operator ratifies). Nothing below is implemented.
+**Status**: RATIFIED by the operator 2026-10-04 ("Duyệt") — Approach A
+(one-way gate) is the binding design for #519; B/C remain earned-by-catch.
+Implementation tracked on #519 (Wave I, SCORECARD S-9).
 
 **Session type**: T1 (strategy)
 
