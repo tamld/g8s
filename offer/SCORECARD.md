@@ -6,7 +6,7 @@ Source: issue #442.
 
 | Wave | Project | Profile | Onboarded | First-audit (M2) | Status |
 |------|---------|---------|-----------|------------------|--------|
-| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **9 real findings total**: gate-audit 2 (structure markers + links) + worker-audit 7 (2 stale version refs, 2 date-rot >4mo, 2 link-rot, 1 orphan) — first worker dispatch at LOW tier, 218s, 91 files | M1 ✓ · M2 ✓ — pilot live, Phase 3 machinery next |
+| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **9 real findings total**: gate-audit 2 (structure markers + links) + worker-audit 7 (2 stale version refs, 2 date-rot >4mo, 2 link-rot, 1 orphan) — first worker dispatch at LOW tier, 218s, 91 files | M1 ✓ · M2 ✓ — pilot live; Phase 3.1 effort loader LANDED (#556) |
 | 2 | defense-in-depth | security | — | — | pending |
 | 3 | aegis | infra | — | — | pending |
 | 3 | homelab-proxmox | infra/utility | — | — | pending |
