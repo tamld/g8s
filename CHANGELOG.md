@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-05
+
 ### Added
 - Lessons pipeline — the self-maturity organ (SCORECARD S-9, #519/#545/#546): `g8s lesson create|verify|list` runs fail-closed machine checks against the live telemetry DB (citation resolution with payload snapshot matching, no-self-review class separation, dedup by cited-ID-set hash, per-round budget, smuggled-recommendation-verb rejection) and appends to the append-only ledger `docs/lessons/ledger.jsonl` only on pass — a fabricated citation is refused and writes nothing (proven live in the RT-I round: the hostile case left the ledger empty; the real round-R1 lesson cites the verifier_verdict event). Recommendations are always tagged LLM opinions and never auto-apply — ratification stays with the operator (the ratified one-way-gate design, plans/261004-wave-i-lessons-rails/brainstorm.md).
 - Agent-models catalog v1 (`.g8s/agent-models.yml`, #550/#552): 8 providers / 29 current models with per-model effort_style (named/budget/baked-name/toggle), supported_efforts on the 7-level ladder, default_effort and mandatory flags — research-verified against official docs 2026-10-04; the versioned seed for the provider manifest.
