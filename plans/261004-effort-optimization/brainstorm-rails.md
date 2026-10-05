@@ -1,7 +1,8 @@
 # Brainstorm: effort-optimization design decisions (issue #550, v0.16)
 
-**Status**: RATIFIED by the operator 2026-10-05 (3/3 decisions via the
-brainstorm session). **Session type**: T1 (strategy)
+**Status**: RATIFIED — pass 1 (3/3 decisions) + pass 2 Socratic-recursion
+(6/6 amendments, operator "Ratify cả 6" 2026-10-05). **Session type**: T1
+(strategy)
 
 Companion to design.md (the verified cross-platform survey + manifest
 schema). This document fixes the four OPEN design questions.
@@ -111,3 +112,48 @@ Price-per-token comparison: YAGNI until telemetry is dense enough.
 6. Staleness sensor (400-rejection → catalog signal)
 7. A/B transcription-class recorded (done 2026-10-05); per-class pass-rate
    gauge live
+
+## Pass-2 Socratic amendments (RATIFIED 2026-10-05 — supersede where conflicting)
+
+The operator's recursive challenge ("chưa cân nhắc đủ") turned the pass-1
+design on itself. Five holes + one meta-conclusion:
+
+1. **Goodhart below the check floor (P1)**: passing checks ≠ good work;
+   optimizing effort down to the gauge silently degrades below it.
+   → **Audit sampling**: every N rounds, one high-effort re-do of a sampled
+   low-effort output; the diff size gauges the check floor (small = trusted,
+   large = raise the floor).
+2. **The ladder was blind and mis-budgeted (P2)**: no evidence that effort
+   escalation fixes check-failures (the A/B showed effort didn't change
+   quality); rung-count caps conflate cheap and expensive rungs.
+   → **Diagnosis rung at the base**: a cheap read_only rung classifies the
+   failure shape (effort-shaped / brief-shaped / env-shaped) and ROUTES the
+   ladder; the ladder budget is TOKEN-denominated per class (6 rungs becomes
+   the hard ceiling, not the target).
+3. **Local truth has no external oracle (P3)**: OpenRouter metadata covers
+   cloud providers; agy/ollama local reality has none — local catalog drifts
+   silently until a failure.
+   → **Local canary probe**: a periodic echo-class task TRIES each
+   registered local model/effort and verifies the catalog against reality.
+4. **Earned defaults are confounded by difficulty drift (P4)**: pass-rate
+   measures the past task distribution; harder future tasks pay the ladder
+   tax (escalation re-does the whole task — costlier than starting right).
+   → **Escalation-rate as the second gauge**: a low earned default with a
+   high escalation-rate = the default is wrong; both gauges together
+   propose the adjustment, operator ratifies (earlier than the clock).
+5. **Meta: optimization needs a workload (P5)**: effort machinery riding
+   no real work measures nothing — v0.15's A/B only meant something because
+   it ran a real task.
+   → **Sequencing change (binding)**: the #442 pilot (one sibling project)
+   starts FIRST or in parallel; the effort machinery measures itself ON
+   that workload. No workload, no wave.
+6. **HITL-rate is a first-class metric (P6)**: evidence packets per case
+   don't cover system-level frequency.
+   → **HITL-rate target ≤1 per N rounds** (N recorded when rounds
+   accumulate); breaching = upstream automation mis-shaped → review-wave
+   trigger, not per-task blame.
+
+**Wave sequence (amended, binding)**: #442 pilot starts first/parallel →
+effort machinery (loader → adapter → classes+knob → ladder machinery →
+telemetry) measures itself on the pilot's real dispatches → v0.16 cut when
+the cost-per-class row carries real workload numbers.
