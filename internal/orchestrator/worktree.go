@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/receipt"
 )
 
 // Pool allocates per-worker git worktrees so N workers can edit the same
@@ -141,21 +142,35 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 
 // Release removes the worktree and prunes its branch. If keep is true,
 // the branch is retained and a dirty worktree (uncommitted deliverables)
-// is preserved instead of being removed.
-func (p *Pool) Release(_ context.Context, wt Worktree, keep bool) error {
+// or one containing receipt-scoped deliverables is preserved instead of being removed (issue #551).
+func (p *Pool) Release(_ context.Context, wt Worktree, keep bool, protected ...string) error {
 	p.mu.Lock()
-	for taskID, allocated := range p.allocated {
+	var taskID string
+	for tid, allocated := range p.allocated {
 		if allocated.ID == wt.ID {
-			delete(p.allocated, taskID)
+			taskID = tid
+			delete(p.allocated, tid)
 			break
 		}
 	}
 	p.mu.Unlock()
 
+	effectiveProtected := protected
+	if len(effectiveProtected) == 0 && taskID != "" {
+		if rcPaths := resolveReceiptPaths(taskID); len(rcPaths) > 0 {
+			effectiveProtected = rcPaths
+		}
+	}
+
 	if keep {
 		if dirty, derr := worktreeDirty(wt.Path); derr == nil && dirty {
 			// preserve: skip removal, keep branch implicitly (it exists)
 			fmt.Fprintf(os.Stderr, "[info] orchestrator: worktree %s preserved (uncommitted deliverables)\n", wt.Path)
+			return nil
+		}
+		if hasProtectedPath(wt.Path, effectiveProtected) {
+			// preserve: skip removal, keep branch implicitly (receipt-scoped deliverables)
+			fmt.Fprintf(os.Stderr, "[info] orchestrator: worktree %s preserved (receipt-scoped deliverables)\n", wt.Path)
 			return nil
 		}
 	}
@@ -165,6 +180,99 @@ func (p *Pool) Release(_ context.Context, wt Worktree, keep bool) error {
 	}
 	if !keep {
 		_ = gitDeleteBranch(p.repo, wt.Branch)
+	}
+	return nil
+}
+
+// hasProtectedPath reports whether any path in protected exists on disk under wtPath (issue #551).
+//
+// Rule:
+//  1. Whitespace is trimmed; empty entries are ignored.
+//  2. Leading "./" prefixes are stripped to normalize relative paths.
+//  3. Literal paths (containing no glob characters "*?[") are checked via os.Stat.
+//     If the file or directory exists on disk, the worktree is preserved.
+//  4. Glob patterns (e.g. "./internal/verifier/*", "./.g8s/*") extract the literal directory prefix
+//     prior to the first glob character.
+//     - If the prefix names a non-root directory (e.g. "internal/verifier"), os.Stat is performed on
+//     filepath.Join(wtPath, prefixDir). If that directory exists on disk, the worktree is preserved.
+//     - If the prefix is empty or root (e.g. "*", "*.go"), filepath.Glob is evaluated against
+//     filepath.Join(wtPath, rel) and the worktree is preserved if one or more matching files exist.
+func hasProtectedPath(wtPath string, protected []string) bool {
+	for _, p := range protected {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		rel := strings.TrimPrefix(p, "./")
+		var target string
+		if filepath.IsAbs(rel) {
+			target = rel
+		} else {
+			target = filepath.Join(wtPath, rel)
+		}
+
+		if !strings.ContainsAny(rel, "*?[") {
+			if _, err := os.Stat(target); err == nil {
+				return true
+			}
+			continue
+		}
+
+		// Glob entry: extract literal prefix directory before first glob character
+		idx := strings.IndexAny(rel, "*?[")
+		literalPart := rel[:idx]
+		prefixDir := literalPart
+		if !strings.HasSuffix(prefixDir, "/") && !strings.HasSuffix(prefixDir, string(filepath.Separator)) {
+			prefixDir = filepath.Dir(prefixDir)
+		}
+		prefixDir = filepath.Clean(prefixDir)
+
+		if prefixDir != "." && prefixDir != "" {
+			targetDir := filepath.Join(wtPath, prefixDir)
+			if fi, err := os.Stat(targetDir); err == nil && fi.IsDir() {
+				return true
+			}
+		} else {
+			// Empty or root prefix (e.g. "*", "*.go"): evaluate glob directly
+			matches, err := filepath.Glob(filepath.Join(wtPath, rel))
+			if err == nil && len(matches) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveReceiptPaths reads allowed paths for a receipt ID from the canonical receipt ledger (receipts.db).
+func resolveReceiptPaths(receiptID string) []string {
+	if receiptID == "" {
+		return nil
+	}
+	dbPath := filepath.Join(pathutil.DefaultStateDir(), "receipts.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil
+	}
+	mgr, err := receipt.NewReceiptManager(dbPath, nil)
+	if err != nil {
+		return nil
+	}
+	defer mgr.Close()
+	rc, err := mgr.VerifyReceipt(receiptID)
+	if err != nil {
+		return nil
+	}
+	return rc.AllowedPaths
+}
+
+// resolveTaskProtectedPaths returns the declared protected paths for a task,
+// falling back to looking up the receipt's AllowedPaths in the canonical receipt
+// ledger (receipts.db) when task.AllowedFiles is empty and task.ReceiptID is set.
+func resolveTaskProtectedPaths(task Task) []string {
+	if len(task.AllowedFiles) > 0 {
+		return task.AllowedFiles
+	}
+	if task.ReceiptID != "" {
+		return resolveReceiptPaths(task.ReceiptID)
 	}
 	return nil
 }
