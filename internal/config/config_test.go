@@ -159,3 +159,134 @@ func TestInitwizFixturePassesValidator(t *testing.T) {
 		t.Errorf("unexpected claude provider: %+v", claude)
 	}
 }
+
+func TestLoadRejectsUnknownEffortStyle(t *testing.T) {
+	path := writeTemp(t, `{
+  "providers": [{
+    "class": "platform_dispatch",
+    "name": "agy",
+    "models": [{
+      "id": "m1",
+      "effort_style": "custom_unknown"
+    }]
+  }]
+}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for unknown effort_style")
+	}
+	if !strings.Contains(err.Error(), "m1") || !strings.Contains(err.Error(), "effort_style") {
+		t.Fatalf("error must name model and field: %v", err)
+	}
+}
+
+func TestLoadRejectsLevelOutsideLadder(t *testing.T) {
+	path := writeTemp(t, `{
+  "providers": [{
+    "class": "platform_dispatch",
+    "name": "agy",
+    "models": [{
+      "id": "m2",
+      "supported_efforts": ["low", "turbo"]
+    }]
+  }]
+}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for level outside ladder")
+	}
+	if !strings.Contains(err.Error(), "m2") || !strings.Contains(err.Error(), "supported_efforts") {
+		t.Fatalf("error must name model and field: %v", err)
+	}
+}
+
+func TestLoadRejectsDefaultEffortNotInSupportedSet(t *testing.T) {
+	path := writeTemp(t, `{
+  "providers": [{
+    "class": "platform_dispatch",
+    "name": "agy",
+    "models": [{
+      "id": "m3",
+      "supported_efforts": ["low", "medium"],
+      "default_effort": "high"
+    }]
+  }]
+}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for default not in supported set")
+	}
+	if !strings.Contains(err.Error(), "m3") || !strings.Contains(err.Error(), "default_effort") {
+		t.Fatalf("error must name model and field: %v", err)
+	}
+}
+
+func TestLoadRejectsBudgetMapOnNonBudgetStyle(t *testing.T) {
+	path := writeTemp(t, `{
+  "providers": [{
+    "class": "platform_dispatch",
+    "name": "agy",
+    "models": [{
+      "id": "m4",
+      "effort_style": "named",
+      "supported_efforts": ["low", "high"],
+      "effort_budget_map": {"low": 1000}
+    }]
+  }]
+}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for budget map on non-budget style")
+	}
+	if !strings.Contains(err.Error(), "m4") || !strings.Contains(err.Error(), "effort_budget_map") {
+		t.Fatalf("error must name model and field: %v", err)
+	}
+}
+
+func TestLoadAcceptsValidEffortMetadata(t *testing.T) {
+	path := writeTemp(t, `{
+  "providers": [{
+    "class": "platform_dispatch",
+    "name": "agy",
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "effort_style": "baked-name",
+        "supported_efforts": ["low", "medium", "high"],
+        "default_effort": "medium",
+        "mandatory": false
+      },
+      {
+        "id": "custom-budget",
+        "effort_style": "budget",
+        "supported_efforts": ["low", "high"],
+        "default_effort": "low",
+        "effort_budget_map": {"low": 2048, "high": 8192}
+      },
+      {
+        "id": "adaptive-model",
+        "effort_style": "named",
+        "supported_efforts": ["low", "high"],
+        "default_effort": "adaptive"
+      }
+    ]
+  }]
+}`)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed on valid effort metadata: %v", err)
+	}
+	models := f.Providers[0].Models
+	if len(models) != 3 {
+		t.Fatalf("got %d models, want 3", len(models))
+	}
+	if models[0].EffortStyle != EffortStyleBakedName || models[0].DefaultEffort != EffortMedium {
+		t.Errorf("model 0 mismatch: %+v", models[0])
+	}
+	if models[1].EffortStyle != EffortStyleBudget || models[1].EffortBudgetMap["low"] != 2048 {
+		t.Errorf("model 1 mismatch: %+v", models[1])
+	}
+	if models[2].DefaultEffort != EffortAdaptive {
+		t.Errorf("model 2 mismatch: %+v", models[2])
+	}
+}
