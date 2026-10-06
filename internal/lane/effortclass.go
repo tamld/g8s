@@ -475,6 +475,18 @@ func ResolveClassForRoots(classPaths []string, roots []string) (className, defau
 				cls, eff := ec.ResolveClass(chosen.relPaths)
 				return cls, eff, nil
 			}
+			// Chosen root has NO registry: sibling paths must never be
+			// classified by the g8s repo registry — matching repo-relative
+			// globs against absolute sibling paths can only ever match by
+			// accident (Windows-runner incident on PR #562, where a temp
+			// ...\docs\arch.md path matched the repo's docs class). The
+			// g8s repo root itself is the exception: its registry IS the
+			// repo registry, so the fallback below resolves it correctly.
+			if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+				if absRoot, aerr := filepath.Abs(chosen.root); aerr == nil && filepath.Clean(absRoot) != filepath.Clean(cwd) {
+					return UnregisteredClassName, config.EffortMedium, nil
+				}
+			}
 		}
 	}
 

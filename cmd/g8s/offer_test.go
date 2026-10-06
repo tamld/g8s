@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -159,8 +160,12 @@ func TestOfferInitKnowledgeProfile_ScaffoldsEffortClasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected .g8s/effort-classes.yml to be created: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf(".g8s/effort-classes.yml permissions = %#o, want 0600", perm)
+	// POSIX file modes are not honored on Windows (os.Stat reports 0666 for
+	// any created file) — the 0600 assertion is darwin/linux semantics only.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf(".g8s/effort-classes.yml permissions = %#o, want 0600", perm)
+		}
 	}
 
 	data, err := os.ReadFile(targetFile)
