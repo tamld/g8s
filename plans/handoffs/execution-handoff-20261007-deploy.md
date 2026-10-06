@@ -10,9 +10,10 @@ head: 5b378e0
 
 # DEPLOYMENT HANDOFF: stress test — two projects, one factory
 
-**Session type**: this is a ROUTING doc. Do NOT execute the whole test
-from the session that reads it — pick YOUR session (A or B), read only
-your entry doc, close a handoff before touching the other project.
+**Session type**: T2 (execution — ROUTING doc; pick YOUR session A or
+B). Do NOT execute the whole test from the session that reads it —
+read only your entry doc, close a handoff before touching the other
+project.
 
 ## Mission (the one line)
 
