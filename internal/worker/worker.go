@@ -32,14 +32,25 @@ import (
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
+// agyUsage carries token usage metrics reported by the agy tool wrapper.
+type agyUsage struct {
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	ThinkingTokens  int `json:"thinking_tokens"`
+	CacheReadTokens int `json:"cache_read_tokens"`
+	TotalTokens     int `json:"total_tokens"`
+}
+
 // agyResult represents the AGY tool's JSONL result format.
 // The AGY tool outputs a stream of JSON objects, with the final one containing
 // the result status. We parse the last valid JSON object with a "result" field.
 type agyResult struct {
 	Result struct {
-		Status   string `json:"status"`
-		Error    string `json:"error,omitempty"`
-		Response string `json:"response,omitempty"`
+		Status          string    `json:"status"`
+		Error           string    `json:"error,omitempty"`
+		Response        string    `json:"response,omitempty"`
+		DurationSeconds float64   `json:"duration_seconds,omitempty"`
+		Usage           *agyUsage `json:"usage,omitempty"`
 	} `json:"result"`
 }
 
@@ -93,6 +104,37 @@ func parseAGYResult(stdoutText string) *agyResult {
 	return lastResult
 }
 
+// extractAGYUsage scans captured stdout for token usage reported by AGY in result or step_update events.
+func extractAGYUsage(stdoutText string) *agyUsage {
+	lines := strings.Split(stdoutText, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ar agyResult
+		if json.Unmarshal([]byte(line), &ar) == nil && ar.Result.Usage != nil {
+			return ar.Result.Usage
+		}
+		var probe struct {
+			Event string `json:"event"`
+			Step  *struct {
+				Usage *agyUsage `json:"usage"`
+			} `json:"step_update"`
+			Usage *agyUsage `json:"usage"`
+		}
+		if json.Unmarshal([]byte(line), &probe) == nil {
+			if probe.Usage != nil {
+				return probe.Usage
+			}
+			if probe.Step != nil && probe.Step.Usage != nil {
+				return probe.Step.Usage
+			}
+		}
+	}
+	return nil
+}
+
 // WorkerControlPlane is the narrow control-plane surface the supervisor needs.
 // *controlplane.Store satisfies it directly.
 type WorkerControlPlane interface {
@@ -129,6 +171,12 @@ type taskRequest struct {
 	SkipPermiss bool     `json:"skip_permissions"`
 	// Effort is the reasoning-effort level passed to the worker CLI via --effort.
 	Effort string `json:"effort,omitempty"`
+
+	EffortClass        string `json:"effort_class,omitempty"`
+	EffortRequested    string `json:"effort_requested,omitempty"`
+	EffortApplied      string `json:"effort_applied,omitempty"`
+	EffortMismatch     bool   `json:"effort_mismatch,omitempty"`
+	EffortBudgetTokens int    `json:"effort_budget_tokens,omitempty"`
 
 	// ResultMode selects the result-envelope contract per DELTA-10 R4:
 	// "" (default) wraps the child in g8s internal wrap-exec which writes
@@ -506,6 +554,7 @@ type workerResult struct {
 	Summary           string          `json:"summary,omitempty"`
 	Response          string          `json:"response,omitempty"`
 	ContractViolation json.RawMessage `json:"contract_violation,omitempty"`
+	Usage             *agyUsage       `json:"usage,omitempty"`
 }
 
 // maxResultFileBytes caps the worker-written result file — a cheap worker-side
@@ -748,7 +797,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock(), isolatedWorktreeDir)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock(), isolatedWorktreeDir, req)
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -1183,6 +1232,7 @@ func (s *Supervisor) collect(
 	permission, receiptID string,
 	startTime time.Time,
 	deliverableDir string,
+	req taskRequest,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -1321,10 +1371,31 @@ func (s *Supervisor) collect(
 		// #253 closed-loop ingestion: the terminal outcome of every attempt
 		// becomes a trace event (exit code + failure signature).
 		exitCode := code
+		durationSec := s.clock().Sub(startTime).Seconds()
+		if durationSec < 0 {
+			durationSec = 0
+		}
+		var inTokens, outTokens int
+		if wr.Usage != nil {
+			inTokens = wr.Usage.InputTokens
+			outTokens = wr.Usage.OutputTokens
+		}
+		telemetryPayload := map[string]any{
+			"class":            firstNonEmpty(req.EffortClass, "unregistered"),
+			"effort_class":     firstNonEmpty(req.EffortClass, "unregistered"),
+			"effort_requested": req.EffortRequested,
+			"effort_applied":   req.EffortApplied,
+			"input_tokens":     inTokens,
+			"output_tokens":    outTokens,
+			"duration_seconds": durationSec,
+		}
+		if req.EffortMismatch {
+			telemetryPayload["effort_mismatch"] = true
+		}
 		if success {
-			s.ingestTrace(telemetry.TraceEventTaskCompleted, taskID, &exitCode, "")
+			s.ingestTrace(telemetry.TraceEventTaskCompleted, taskID, &exitCode, "", telemetryPayload)
 		} else {
-			s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &exitCode, firstNonEmpty(wr.Reason, wr.Status, "failed"))
+			s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &exitCode, firstNonEmpty(wr.Reason, wr.Status, "failed"), telemetryPayload)
 		}
 		finishErr := ""
 		if !success {
@@ -1415,15 +1486,38 @@ func (s *Supervisor) collect(
 
 		// Determine retryable: not retryable if contract violation or validation failed
 		hasContractViolation := len(wr.ContractViolation) > 0 || !contractValidation.Valid
-		if success && deliverableDir != "" {
-			var m map[string]any
-			if err := json.Unmarshal(resultJSON, &m); err == nil {
+		var m map[string]any
+		if err := json.Unmarshal(resultJSON, &m); err == nil {
+			if req.EffortClass != "" {
+				m["effort_class"] = req.EffortClass
+			}
+			if req.Effort != "" {
+				m["effort"] = req.Effort
+			}
+			if req.EffortRequested != "" {
+				m["effort_requested"] = req.EffortRequested
+			}
+			if req.EffortApplied != "" {
+				m["effort_applied"] = req.EffortApplied
+			}
+			if req.EffortMismatch {
+				m["effort_mismatch"] = true
+			}
+			if req.EffortBudgetTokens > 0 {
+				m["effort_budget_tokens"] = req.EffortBudgetTokens
+			}
+			m["duration"] = durationSec
+			m["duration_seconds"] = durationSec
+			if wr.Usage != nil && m["usage"] == nil {
+				m["usage"] = wr.Usage
+			}
+			if success && deliverableDir != "" {
 				m["deliverable"] = map[string]any{
 					"mode": "worktree",
 					"dir":  deliverableDir,
 				}
-				resultJSON = mustJSON(m)
 			}
+			resultJSON = mustJSON(m)
 		}
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    resultJSON,
@@ -1522,12 +1616,17 @@ func (s *Supervisor) closeTelemetryLocked() {
 
 // ingestTrace emits one best-effort trace event; telemetry failures must
 // never break task flow.
-func (s *Supervisor) ingestTrace(eventType telemetry.TraceEventType, taskID string, exitCode *int, errMsg string) {
+func (s *Supervisor) ingestTrace(eventType telemetry.TraceEventType, taskID string, exitCode *int, errMsg string, extra ...map[string]any) {
 	eng := s.telemetry()
 	if eng == nil {
 		return
 	}
 	payload := map[string]any{}
+	for _, m := range extra {
+		for k, v := range m {
+			payload[k] = v
+		}
+	}
 	if errMsg != "" {
 		payload["error"] = errMsg
 	}
@@ -1537,6 +1636,30 @@ func (s *Supervisor) ingestTrace(eventType telemetry.TraceEventType, taskID stri
 		Timestamp: time.Now(),
 		ExitCode:  exitCode,
 		Payload:   payload,
+	}
+	if v, ok := payload["class"].(string); ok {
+		ev.Class = v
+	}
+	if v, ok := payload["effort_class"].(string); ok {
+		ev.EffortClass = v
+	}
+	if v, ok := payload["effort_requested"].(string); ok {
+		ev.EffortRequested = v
+	}
+	if v, ok := payload["effort_applied"].(string); ok {
+		ev.EffortApplied = v
+	}
+	if v, ok := payload["effort_mismatch"].(bool); ok {
+		ev.EffortMismatch = v
+	}
+	if v, ok := payload["input_tokens"].(int); ok {
+		ev.InputTokens = v
+	}
+	if v, ok := payload["output_tokens"].(int); ok {
+		ev.OutputTokens = v
+	}
+	if v, ok := payload["duration_seconds"].(float64); ok {
+		ev.DurationSeconds = v
 	}
 	if err := eng.IngestEvent(context.Background(), ev); err != nil {
 		fmt.Fprintf(os.Stderr, "[warn] telemetry ingest: %v\n", err)
@@ -1650,11 +1773,16 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 					Summary: "no task evidence produced by the worker response",
 				}
 			}
+			usage := agyRes.Result.Usage
+			if usage == nil {
+				usage = extractAGYUsage(stdoutText)
+			}
 			return workerResult{
 				OK:       true,
 				Status:   "succeeded",
 				Response: agyRes.Result.Response,
 				Summary:  "AGY completed successfully",
+				Usage:    usage,
 			}
 		}
 	}
@@ -1674,6 +1802,9 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 	if len(rawResult) > 0 {
 		var wr workerResult
 		if json.Unmarshal(rawResult, &wr) == nil && wr.Status != "" {
+			if wr.Usage == nil {
+				wr.Usage = extractAGYUsage(stdoutText)
+			}
 			return wr
 		}
 	}
@@ -1681,6 +1812,9 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 	for _, raw := range fencedJSONPattern.FindAllStringSubmatch(stdoutText, -1) {
 		var fenced workerResult
 		if json.Unmarshal([]byte(raw[1]), &fenced) == nil && fenced.Status != "" {
+			if fenced.Usage == nil {
+				fenced.Usage = extractAGYUsage(stdoutText)
+			}
 			return fenced
 		}
 	}
@@ -1702,6 +1836,7 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			OK:      true,
 			Status:  "succeeded",
 			Summary: "worker completed execution successfully",
+			Usage:   extractAGYUsage(stdoutText),
 		}
 	}
 	// Non-zero exit with an error tail: classify precisely for retry policy.
@@ -1773,7 +1908,7 @@ func (s *Supervisor) validateResult(
 		} else {
 			allowed := map[string]bool{
 				"ok": true, "status": true, "reason": true, "summary": true,
-				"response": true, "contract_violation": true,
+				"response": true, "contract_violation": true, "usage": true,
 			}
 			for k := range rawMap {
 				if !allowed[k] {
@@ -2336,6 +2471,9 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 	}
 	if len(wr.ContractViolation) > 0 {
 		envelope["contract_violation"] = wr.ContractViolation
+	}
+	if wr.Usage != nil {
+		envelope["usage"] = wr.Usage
 	}
 	if stdout != "" {
 		envelope["stdout"] = sanitizeTrack(stdout, "stdout", &altered)
