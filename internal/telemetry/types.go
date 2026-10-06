@@ -21,6 +21,16 @@ type TraceEvent struct {
 	Error            string         `json:"error,omitempty"`
 	Duration         time.Duration  `json:"duration,omitempty"`
 	Tags             []string       `json:"tags,omitempty"`
+
+	// Effort and token telemetry fields (W2, issue #550 DoD 3)
+	Class           string  `json:"class,omitempty"`
+	EffortClass     string  `json:"effort_class,omitempty"`
+	EffortRequested string  `json:"effort_requested,omitempty"`
+	EffortApplied   string  `json:"effort_applied,omitempty"`
+	EffortMismatch  bool    `json:"effort_mismatch,omitempty"`
+	InputTokens     int     `json:"input_tokens,omitempty"`
+	OutputTokens    int     `json:"output_tokens,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 }
 
 type TraceEventType string

@@ -1,0 +1,49 @@
+# Effort Classes Configuration (issue #550 / Wave W2, SCORECARD S-7 mirror)
+# Maps task write-scope paths to reasoning effort defaults.
+# Schema: schema_version "effort-classes.v1", first match by priority wins.
+# Unregistered tasks implicitly default to medium (fail-open floor).
+
+schema_version: "effort-classes.v1"
+
+classes:
+  - name: red-cell
+    default_effort: high
+    priority: 10
+    paths:
+      - "plans/*redteam*/**"
+      - "plans/*red-cell*/**"
+      - "plans/261002-redteam/**"
+      - "plans/**/*red-cell*/**"
+      - "plans/**/*redteam*/**"
+      - "plans/**/brief-RC*"
+      - "plans/**/brief-R[0-9]*"
+
+  - name: discovery
+    default_effort: high
+    priority: 12
+    paths:
+      - "plans/*discovery*/**"
+      - "plans/discovery/**"
+
+  - name: feature
+    default_effort: high
+    priority: 15
+    paths:
+      - "tools/**"
+
+  - name: test
+    default_effort: medium
+    priority: 20
+    paths:
+      - "*_test.go"
+      - "**/*_test.go"
+
+  - name: docs
+    default_effort: low
+    priority: 30
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "skills/**"
+      - "assets/**"
+      - "offer/**"
