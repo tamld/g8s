@@ -328,6 +328,121 @@ func TestAdaptEffort_Table(t *testing.T) {
 			wantTokens:   0,
 			wantErr:      false,
 		},
+		// 13. baked suffix coercion
+		{
+			name: "baked suffix high coerces requested low to high with mismatch",
+			view: &ModelEffortView{
+				Provider: "agy",
+				Model:    "gemini-3.8-flash-high",
+			},
+			requested:    "low",
+			wantApplied:  "high",
+			wantMismatch: true,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked suffix high matches requested high with no mismatch",
+			view: &ModelEffortView{
+				Provider: "agy",
+				Model:    "gemini-3.8-flash-high",
+			},
+			requested:    "high",
+			wantApplied:  "high",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked suffix high with empty requested applies high with no mismatch",
+			view: &ModelEffortView{
+				Provider: "agy",
+				Model:    "gemini-3.8-flash-high",
+			},
+			requested:    "",
+			wantApplied:  "high",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked suffix medium coerces requested low to medium with mismatch",
+			view: &ModelEffortView{
+				Provider: "agy",
+				Model:    "gemini-3.8-flash-medium",
+			},
+			requested:    "low",
+			wantApplied:  "medium",
+			wantMismatch: true,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked suffix xhigh on unknown model matches requested xhigh with no mismatch",
+			view: &ModelEffortView{
+				Model: "some-model-xhigh",
+			},
+			requested:    "xhigh",
+			wantApplied:  "xhigh",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "non-baked unknown id passes through requested unchanged",
+			view: &ModelEffortView{
+				Model: "unknown-custom-model",
+			},
+			requested:    "low",
+			wantApplied:  "low",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked id with mandatory reasoning refusing none returns typed error",
+			view: &ModelEffortView{
+				Provider:  "agy",
+				Model:     "gemini-3.8-flash-high",
+				Mandatory: true,
+			},
+			requested: "none",
+			wantErr:   true,
+		},
+		{
+			name: "suffix lookalike model-maxv2 is not baked suffix and passes through",
+			view: &ModelEffortView{
+				Model: "model-maxv2",
+			},
+			requested:    "low",
+			wantApplied:  "low",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "suffix lookalike flow-highx is not baked suffix and passes through",
+			view: &ModelEffortView{
+				Model: "flow-highx",
+			},
+			requested:    "low",
+			wantApplied:  "low",
+			wantMismatch: false,
+			wantTokens:   0,
+			wantErr:      false,
+		},
+		{
+			name: "baked suffix high with non-mandatory requested none coerces to high with mismatch",
+			view: &ModelEffortView{
+				Provider: "agy",
+				Model:    "gemini-3.8-flash-high",
+			},
+			requested:    "none",
+			wantApplied:  "high",
+			wantMismatch: true,
+			wantTokens:   0,
+			wantErr:      false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -400,7 +515,7 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 		},
 	}
 
-	// 1. Direct lookup with suffix match on baked-name model
+	// 1. Direct lookup with suffix match on baked-name model coerces low to high with mismatch
 	res, err := ResolveEffortWithCatalog(nil, cat, "agy", "gemini-3.8-flash-high", "low")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -408,11 +523,11 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 	if !res.HasResolvedEntry {
 		t.Errorf("expected HasResolvedEntry to be true")
 	}
-	if res.Applied != "low" {
-		t.Errorf("applied = %q, want low", res.Applied)
+	if res.Applied != "high" {
+		t.Errorf("applied = %q, want high", res.Applied)
 	}
-	if res.Mismatch {
-		t.Errorf("expected mismatch=false for baked-name")
+	if !res.Mismatch {
+		t.Errorf("expected mismatch=true for baked-name with different requested level")
 	}
 
 	// 2. Direct lookup of mandatory reasoning model requested none -> hard refuse
@@ -441,7 +556,7 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 func TestRoute_DecisionEffortFields(t *testing.T) {
 	manifest := DefaultManifest()
 
-	// 1. Requested "low" on auto route
+	// 1. Requested "low" on auto route coerces gemini-3.8-flash-high to high with mismatch
 	dec, err := Route(context.Background(), RouteRequest{
 		Prompt:   "General inventory collection task",
 		Paths:    []string{},
@@ -454,8 +569,11 @@ func TestRoute_DecisionEffortFields(t *testing.T) {
 	if dec.EffortRequested != config.EffortLow {
 		t.Errorf("EffortRequested = %q, want %q", dec.EffortRequested, config.EffortLow)
 	}
-	if dec.EffortApplied != config.EffortLow {
-		t.Errorf("EffortApplied = %q, want %q", dec.EffortApplied, config.EffortLow)
+	if dec.EffortApplied != config.EffortHigh {
+		t.Errorf("EffortApplied = %q, want %q", dec.EffortApplied, config.EffortHigh)
+	}
+	if !dec.EffortMismatch {
+		t.Errorf("EffortMismatch = false, want true")
 	}
 
 	// 2. Requested "" on auto route should apply model's default effort
@@ -474,5 +592,133 @@ func TestRoute_DecisionEffortFields(t *testing.T) {
 	}
 	if decDefault.EffortApplied != config.EffortHigh {
 		t.Errorf("EffortApplied = %q, want %q", decDefault.EffortApplied, config.EffortHigh)
+	}
+}
+
+func TestDetectBakedEffort(t *testing.T) {
+	tests := []struct {
+		modelID   string
+		wantLevel string
+		wantOk    bool
+	}{
+		{"gemini-3.8-flash-low", "low", true},
+		{"gemini-3.8-flash-medium", "medium", true},
+		{"gemini-3.8-flash-high", "high", true},
+		{"some-model-xhigh", "xhigh", true},
+		{"model-max", "max", true},
+		{"model-maxv2", "", false},
+		{"flow-highx", "", false},
+		{"gemini-3.8-flash-HIGH", "", false}, // case-sensitive
+		{"gemini-3.8-flash-High", "", false},
+		{"gemini-3.8-flash", "", false},
+		{"gemini-3.8-flash-{effort}", "", false},
+		{"high", "", false}, // no hyphen prefix
+		{"-high", "high", true},
+		{"", "", false},
+	}
+	for _, tc := range tests {
+		name := tc.modelID
+		if name == "" {
+			name = "<empty>"
+		}
+		t.Run(name, func(t *testing.T) {
+			gotLevel, gotOk := DetectBakedEffort(tc.modelID)
+			if gotLevel != tc.wantLevel || gotOk != tc.wantOk {
+				t.Errorf("DetectBakedEffort(%q) = (%q, %v), want (%q, %v)",
+					tc.modelID, gotLevel, gotOk, tc.wantLevel, tc.wantOk)
+			}
+		})
+	}
+}
+
+func TestResolveEffort_BakedSuffixCases(t *testing.T) {
+	manifest := DefaultManifest()
+
+	// 1. (gemini-3.8-flash-high, low) -> applied high, mismatch true
+	res, err := ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "low")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "high" || !res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want high true", res.Applied, res.Mismatch)
+	}
+
+	// 2. (gemini-3.8-flash-high, high) -> applied high, no mismatch
+	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "high")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "high" || res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want high false", res.Applied, res.Mismatch)
+	}
+
+	// 3. (gemini-3.8-flash-high, "") -> applied high, no mismatch
+	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "high" || res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want high false", res.Applied, res.Mismatch)
+	}
+
+	// 4. (gemini-3.8-flash-medium, low) -> applied medium, mismatch true
+	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-medium", "low")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "medium" || !res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want medium true", res.Applied, res.Mismatch)
+	}
+
+	// 5. (some-model-xhigh, xhigh) -> applied xhigh, no mismatch
+	res, err = ResolveEffort(manifest, "", "some-model-xhigh", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "xhigh" || res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want xhigh false", res.Applied, res.Mismatch)
+	}
+
+	// 6. non-baked unknown id (no suffix) -> unchanged pass-through
+	res, err = ResolveEffort(manifest, "", "unknown-custom-model", "low")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Applied != "low" || res.Mismatch {
+		t.Errorf("got applied=%q mismatch=%v, want low false", res.Applied, res.Mismatch)
+	}
+
+	// 7. baked id + mandatory + none -> typed hard-refuse error
+	mandatoryManifest := &config.File{
+		Providers: []config.ProviderEntry{
+			{
+				Name: "agy",
+				Models: []config.ModelEntry{
+					{
+						ID:        "gemini-3.8-flash-high",
+						Mandatory: true,
+					},
+				},
+			},
+		},
+	}
+	_, err = ResolveEffort(mandatoryManifest, "agy", "gemini-3.8-flash-high", "none")
+	if err == nil {
+		t.Fatalf("expected error on mandatory none, got nil")
+	}
+	var mandErr *MandatoryEffortError
+	if !errors.As(err, &mandErr) {
+		t.Fatalf("expected MandatoryEffortError, got %T: %v", err, err)
+	}
+
+	// 8. suffix-lookalike that is NOT a ladder suffix (e.g. model-maxv2, flow-highx) -> NOT baked, pass-through
+	for _, lookalike := range []string{"model-maxv2", "flow-highx"} {
+		res, err = ResolveEffort(manifest, "", lookalike, "low")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Applied != "low" || res.Mismatch {
+			t.Errorf("lookalike %q: got applied=%q mismatch=%v, want low false", lookalike, res.Applied, res.Mismatch)
+		}
 	}
 }
