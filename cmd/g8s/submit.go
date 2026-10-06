@@ -451,8 +451,13 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 }
 
 // manifestBakedNameVerdict reports whether the user manifest itself decides the
-// baked-name question for (provider, modelID). decided=false means the matched
-// model entry declares no effort style and the catalog must be consulted.
+// baked-name question for (provider, modelID). decided=false means the catalog
+// must be consulted: either the matched model entry declares no effort style, or
+// the manifest knows the provider but not this model id — platform manifests list
+// one variant of a family while the catalog is the id+style SSoT for the rest
+// (issue #568: gemini-3.7-flash-high in the manifest shadowed the catalog verdict
+// for gemini-3.8-flash-high, so mismatched (model, effort) combos reached the
+// worker CLI and died).
 func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (baked bool, decided bool) {
 	for _, p := range manifest.Providers {
 		if !strings.EqualFold(p.Name, provider) {
@@ -466,7 +471,7 @@ func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (
 				return m.EffortStyle == config.EffortStyleBakedName, true
 			}
 		}
-		return false, true
+		return false, false
 	}
 	return false, false
 }
