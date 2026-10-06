@@ -36,14 +36,18 @@ The adapter rule matrix (verify EACH row independently, then the
 interactions):
 
 1. Unknown model entry (nil) → pass-through: applied = requested,
-   no mismatch, "" stays "".
+   no mismatch, "" stays "" — EXCEPT baked-suffix model ids (row 4).
 2. Requested "" → applied = DefaultEffort when it is a ladder
    level; adaptive/dynamic/empty default → "".
 3. Named style: pass-through when requested is in SupportedEfforts;
    otherwise nearest-supported applied AND recorded — minimal index
    distance on the ladder, tie → LOWER level, mismatch = true,
    never an error.
-4. Baked-name style: always pass-through, mismatch never set.
+4. Baked-name model ids (suffix -low/-medium/-high/-xhigh/-max —
+   amended 2026-10-07 after live finding, issue #568): applied =
+   the baked level ALWAYS; requested "" or == baked → no mismatch;
+   requested != baked → mismatch = true, recorded, never an error;
+   mandatory+none still hard-refuses; budget fields zero.
 5. Toggle style: nearest-supported; mismatch exactly when requested
    is outside SupportedEfforts.
 6. Budget style: exact key → tokens from EffortBudgetMap; requested
