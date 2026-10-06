@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ func runSubmit(args []string) {
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
 	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to gemini-3.8-flash-high)")
 	providerFlag := fs.String("provider", "", "target worker provider (e.g. codex, agy)")
+	effortFlag := fs.String("effort", config.EffortMedium, "target worker effort level (none|minimal|low|medium|high|xhigh|max, defaults to medium)")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
@@ -49,6 +51,10 @@ func runSubmit(args []string) {
 
 	if *routeFlag != "auto" && *routeFlag != "manual" {
 		exitUsage("submit", "route", *traceID, fmt.Sprintf("invalid --route %q: must be 'auto' or 'manual'", *routeFlag), "Specify --route=auto or --route=manual", *jsonl)
+	}
+
+	if !config.IsValidEffortLevel(*effortFlag) {
+		exitUsage("submit", "effort", *traceID, fmt.Sprintf("invalid --effort %q: allowed ladder is [%s]", *effortFlag, strings.Join(config.EffortLadder, ", ")), fmt.Sprintf("Specify an effort level from [%s]", strings.Join(config.EffortLadder, ", ")), *jsonl)
 	}
 
 	var providerPassed bool
@@ -127,25 +133,28 @@ func runSubmit(args []string) {
 	effectiveRole := *role
 
 	var routeDecision *routing.Decision
-	if *routeFlag == "auto" {
-		providersPath := os.Getenv("G8S_PROVIDERS")
-		if providersPath == "" {
-			home, _ := os.UserHomeDir()
-			if home != "" {
-				providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
-			}
+	var manifest *config.File
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
 		}
-		var manifest *config.File
-		if providersPath != "" {
-			if _, statErr := os.Stat(providersPath); statErr == nil {
-				cfgFile, loadErr := config.Load(providersPath)
-				if loadErr != nil {
+	}
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			cfgFile, loadErr := config.Load(providersPath)
+			if loadErr != nil {
+				if *routeFlag == "auto" {
 					exitRuntime("submit", "", *traceID, cli.CodeRuntime, loadErr, "Failed to load providers config", *jsonl)
 				}
+			} else {
 				manifest = cfgFile
 			}
 		}
+	}
 
+	if *routeFlag == "auto" {
 		var routePaths []string
 		if len(addDirs) > 0 {
 			routePaths = append(routePaths, addDirs...)
@@ -156,8 +165,13 @@ func runSubmit(args []string) {
 			Paths:       routePaths,
 			TimeoutHint: *timeout,
 			Manifest:    manifest,
+			Effort:      *effortFlag,
 		})
 		if routeErr != nil {
+			var mandErr *routing.MandatoryEffortError
+			if errors.As(routeErr, &mandErr) {
+				exitUsage("submit", "effort", *traceID, routeErr.Error(), "Reasoning cannot be disabled for this model", *jsonl)
+			}
 			exitUsage("submit", "route", *traceID, fmt.Sprintf("auto-routing failed: %v", routeErr), "Verify provider manifest and task parameters or use --route=manual", *jsonl)
 		}
 		if dec.Provider == "" || dec.Model == "" || dec.Role == "" {
@@ -167,6 +181,16 @@ func runSubmit(args []string) {
 		effectiveProvider = dec.Provider
 		effectiveModel = dec.Model
 		effectiveRole = dec.Role
+	}
+
+	// Resolve effort for the effective provider and model across both manual and auto routes
+	effortRes, effortErr := routing.ResolveEffort(manifest, effectiveProvider, effectiveModel, *effortFlag)
+	if effortErr != nil {
+		var mandErr *routing.MandatoryEffortError
+		if errors.As(effortErr, &mandErr) {
+			exitUsage("submit", "effort", *traceID, effortErr.Error(), "Reasoning cannot be disabled for this model", *jsonl)
+		}
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, effortErr, "Failed to resolve effort", *jsonl)
 	}
 
 	// Validate request against security harness gatekeeper
@@ -208,6 +232,17 @@ func runSubmit(args []string) {
 		payloadMap["role"] = routeDecision.Role
 		payloadMap["route_source"] = routeDecision.Source
 		payloadMap["route_reason"] = routeDecision.Reason
+	}
+	if effortRes.Applied != "" {
+		payloadMap["effort"] = effortRes.Applied
+	}
+	payloadMap["effort_requested"] = effortRes.Requested
+	payloadMap["effort_applied"] = effortRes.Applied
+	if effortRes.Mismatch {
+		payloadMap["effort_mismatch"] = true
+	}
+	if effortRes.BudgetTokens > 0 {
+		payloadMap["effort_budget_tokens"] = effortRes.BudgetTokens
 	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {
