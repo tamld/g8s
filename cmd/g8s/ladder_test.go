@@ -150,12 +150,33 @@ func TestLadderCLIStatusAndAdvance(t *testing.T) {
 	// 4. Fail Rung 0 task with effort-shaped failure
 	updateTaskState(t, cpPath, rung0TaskID, controlplane.StateFailed, `{"ok":false}`, lastErr)
 
-	// 5. Test ladder advance (Rung 1: effort escalated to medium)
+	// 5a. Test ladder advance without prompt on Rung 1 (must fail with E_USAGE)
+	stdout.Reset()
+	stderr.Reset()
+	code, env, _ = executeLadder(ctx, []string{
+		"advance",
+		rootTask.TaskID,
+		"--db", cpPath,
+		"--telemetry-db", telemPath,
+		"--json",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected exit code 2 for Rung 1 advance without prompt, got %d", code)
+	}
+	if env == nil || env.Error == nil || env.Error.Code != "E_USAGE" {
+		t.Fatalf("expected E_USAGE envelope, got: %+v", env)
+	}
+	if !strings.Contains(env.Error.Message, "--prompt") {
+		t.Errorf("error message missing --prompt flag mention: %s", env.Error.Message)
+	}
+
+	// 5b. Test ladder advance with --prompt on Rung 1 (succeeds)
 	stdout.Reset()
 	stderr.Reset()
 	code, env, err = executeLadder(ctx, []string{
 		"advance",
 		rootTask.TaskID,
+		"--prompt", "fix issue with docs test redo",
 		"--db", cpPath,
 		"--telemetry-db", telemPath,
 		"--json",
@@ -477,5 +498,306 @@ func TestLadderHumanReadableTextOutput(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Quality Ladder Gauges") {
 		t.Errorf("stdout missing gauges header: %s", stdout.String())
+	}
+}
+
+func TestGenerateDiagnosisPrompt_Table(t *testing.T) {
+	tests := []struct {
+		name          string
+		taskID        string
+		class         string
+		lastError     string
+		resultSummary string
+		wantSub       []string
+	}{
+		{
+			name:          "all fields present",
+			taskID:        "task-1234",
+			class:         "core",
+			lastError:     "test failed in core/fsm: expected 1 got 2",
+			resultSummary: `{"status":"FAILED","exit_code":1}`,
+			wantSub: []string{
+				"Quality ladder diagnosis dispatch for failed task task-1234",
+				"- Task ID: task-1234",
+				"- Class: core",
+				"- Last Error: test failed in core/fsm: expected 1 got 2",
+				`- Result Summary: {"status":"FAILED","exit_code":1}`,
+				"read-only mode with low effort",
+				"Classify the failure shape",
+			},
+		},
+		{
+			name:          "empty error and summary fallback to none",
+			taskID:        "task-5678",
+			class:         "docs",
+			lastError:     "",
+			resultSummary: "",
+			wantSub: []string{
+				"- Task ID: task-5678",
+				"- Class: docs",
+				"- Last Error: none",
+				"- Result Summary: none",
+			},
+		},
+		{
+			name:          "empty task and class fallback to unknown and unregistered",
+			taskID:        "",
+			class:         "",
+			lastError:     "crash",
+			resultSummary: "failed",
+			wantSub: []string{
+				"- Task ID: unknown",
+				"- Class: unregistered",
+				"- Last Error: crash",
+				"- Result Summary: failed",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got1 := GenerateDiagnosisPrompt(tt.taskID, tt.class, tt.lastError, tt.resultSummary)
+			got2 := GenerateDiagnosisPrompt(tt.taskID, tt.class, tt.lastError, tt.resultSummary)
+			if got1 != got2 {
+				t.Fatalf("GenerateDiagnosisPrompt is not deterministic: %q != %q", got1, got2)
+			}
+			for _, sub := range tt.wantSub {
+				if !strings.Contains(got1, sub) {
+					t.Errorf("prompt missing substring %q; got:\n%s", sub, got1)
+				}
+			}
+		})
+	}
+}
+
+func TestLadderAdvance_Rung0DiagnosisPromptAndTimeout(t *testing.T) {
+	store, cpPath, telemPath := setupLadderTestDB(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	// Create a root task where prompt was redacted upon failure (ground truth scenario)
+	customTimeout := "45s"
+	lastErr := "class checks failed: tests exited with code 1"
+	reqBytes, _ := json.Marshal(map[string]any{
+		"prompt":          "initial prompt to be redacted",
+		"role":            "scout",
+		"permission":      "read_only",
+		"model":           "gemini-3.8-flash-high",
+		"effort":          "low",
+		"class":           "docs",
+		"timeout":         customTimeout,
+		"prompt_redacted": true,
+		"prompt_hash":     "abc123hash",
+	})
+
+	rootReq := controlplane.SubmitTaskRequest{
+		IdempotencyKey: "root-redacted-test",
+		Payload:        reqBytes,
+		Role:           "scout",
+		Permission:     "read_only",
+		Model:          "gemini-3.8-flash-high",
+		Timeout:        customTimeout,
+		AddDirs:        []string{"."},
+	}
+	rootTask, err := store.SubmitTask(ctx, rootReq)
+	if err != nil {
+		t.Fatalf("submit root task: %v", err)
+	}
+
+	// Now redact the stored request JSON in SQLite as happens on task completion
+	db, err := sql.Open("sqlite", cpPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	redactedPayload, _ := json.Marshal(map[string]any{
+		"role":            "scout",
+		"permission":      "read_only",
+		"model":           "gemini-3.8-flash-high",
+		"effort":          "low",
+		"class":           "docs",
+		"timeout":         customTimeout,
+		"prompt_redacted": true,
+		"prompt_hash":     "abc123hash",
+	})
+	_, err = db.Exec("UPDATE tasks SET state = ?, request_json = ?, result_json = ?, last_error = ? WHERE task_id = ?",
+		controlplane.StateFailed, string(redactedPayload), `{"ok":false,"summary":"checks exited 1"}`, lastErr, rootTask.TaskID)
+	if err != nil {
+		t.Fatalf("update task state: %v", err)
+	}
+
+	// Advance root task to Rung 0 (diagnosis dispatch)
+	var stdout, stderr bytes.Buffer
+	code, env, err := executeLadder(ctx, []string{
+		"advance",
+		rootTask.TaskID,
+		"--db", cpPath,
+		"--telemetry-db", telemPath,
+		"--json",
+	}, &stdout, &stderr)
+
+	if code != 0 || err != nil {
+		t.Fatalf("advance to Rung 0 failed (code %d): %v, stderr: %s", code, err, stderr.String())
+	}
+	if env == nil || env.Error != nil {
+		t.Fatalf("advance envelope error: %+v", env)
+	}
+
+	advMap, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("advance data is not map: %T", env.Data)
+	}
+	newID := fmt.Sprint(advMap["new_task_id"])
+
+	// Verify the newly created Rung 0 task
+	newTask, err := store.GetTask(ctx, newID)
+	if err != nil || newTask == nil {
+		t.Fatalf("failed to retrieve new task %s: %v", newID, err)
+	}
+
+	var newPayload map[string]any
+	if err := json.Unmarshal(newTask.Request, &newPayload); err != nil {
+		t.Fatalf("unmarshal new payload: %v", err)
+	}
+
+	// 1. Prompt must NOT be redacted and must contain diagnosis template with evidence embedded
+	promptStr, ok := newPayload["prompt"].(string)
+	if !ok || strings.TrimSpace(promptStr) == "" {
+		t.Fatalf("new task prompt missing or empty: %v", newPayload["prompt"])
+	}
+	if !strings.Contains(promptStr, "Quality ladder diagnosis dispatch") {
+		t.Errorf("prompt missing diagnosis header: %s", promptStr)
+	}
+	if !strings.Contains(promptStr, rootTask.TaskID) {
+		t.Errorf("prompt missing task ID %s: %s", rootTask.TaskID, promptStr)
+	}
+	if !strings.Contains(promptStr, lastErr) {
+		t.Errorf("prompt missing last error %q: %s", lastErr, promptStr)
+	}
+	if !strings.Contains(promptStr, "checks exited 1") {
+		t.Errorf("prompt missing result summary: %s", promptStr)
+	}
+
+	// 2. Timeout must carry the original task's timeout ("45s"), NOT RequestHash!
+	var newReqDoc map[string]any
+	_ = json.Unmarshal(newTask.Request, &newReqDoc)
+	if newPayload["timeout"] != customTimeout {
+		t.Errorf("payload timeout = %v, want %s", newPayload["timeout"], customTimeout)
+	}
+	// Verify RequestHash was NOT used as timeout
+	if newTask.RequestHash == customTimeout {
+		t.Fatalf("RequestHash unexpectedly equal to timeout")
+	}
+}
+
+func TestLadderAdvance_EscalationRedoRequiresPrompt(t *testing.T) {
+	store, cpPath, telemPath := setupLadderTestDB(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	// Create root task
+	reqBytes, _ := json.Marshal(map[string]any{
+		"prompt":     "original prompt",
+		"role":       "scout",
+		"permission": "read_only",
+		"model":      "gemini-3.8-flash-high",
+		"effort":     "low",
+		"class":      "docs",
+		"timeout":    "20s",
+	})
+	rootTask, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey: "root-prompt-req-test",
+		Payload:        reqBytes,
+		Role:           "scout",
+		Permission:     "read_only",
+		Model:          "gemini-3.8-flash-high",
+		Timeout:        "20s",
+		AddDirs:        []string{"."},
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	updateTaskState(t, cpPath, rootTask.TaskID, controlplane.StateFailed, `{"ok":false}`, "test failure")
+
+	// Advance to Rung 0 (diagnosis - doesn't need prompt)
+	var stdout, stderr bytes.Buffer
+	code, env, err := executeLadder(ctx, []string{
+		"advance",
+		rootTask.TaskID,
+		"--db", cpPath,
+		"--telemetry-db", telemPath,
+		"--json",
+	}, &stdout, &stderr)
+	if code != 0 || err != nil {
+		t.Fatalf("advance to Rung 0 failed: code=%d err=%v stderr=%s", code, err, stderr.String())
+	}
+	advMap0, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("advance data is not map: %T", env.Data)
+	}
+	r0ID, ok := advMap0["new_task_id"].(string)
+	if !ok {
+		t.Fatalf("new_task_id is not string: %T", advMap0["new_task_id"])
+	}
+	updateTaskState(t, cpPath, r0ID, controlplane.StateFailed, `{"ok":false}`, "test failure")
+
+	// Attempt to advance to Rung 1 WITHOUT --prompt or --prompt-file -> must fail with E_USAGE (code 2)
+	stdout.Reset()
+	stderr.Reset()
+	code, env, _ = executeLadder(ctx, []string{
+		"advance",
+		rootTask.TaskID,
+		"--db", cpPath,
+		"--telemetry-db", telemPath,
+		"--json",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("expected exit code 2 when advancing to Rung 1 without prompt, got %d", code)
+	}
+	if env == nil || env.Error == nil || env.Error.Code != "E_USAGE" {
+		t.Fatalf("expected E_USAGE envelope, got: %+v", env)
+	}
+	if !strings.Contains(env.Error.Message, "--prompt") || !strings.Contains(env.Error.Message, "--prompt-file") {
+		t.Errorf("error message does not name required flags: %s", env.Error.Message)
+	}
+
+	// Advance to Rung 1 with --prompt-file -> must succeed
+	promptFile := filepath.Join(t.TempDir(), "redo_prompt.txt")
+	promptContent := "escalated prompt for rung 1 re-do"
+	if err := os.WriteFile(promptFile, []byte(promptContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code, env, err = executeLadder(ctx, []string{
+		"advance",
+		rootTask.TaskID,
+		"--prompt-file", promptFile,
+		"--db", cpPath,
+		"--telemetry-db", telemPath,
+		"--json",
+	}, &stdout, &stderr)
+	if code != 0 || err != nil {
+		t.Fatalf("advance to Rung 1 with --prompt-file failed (code %d): %v, stderr: %s", code, err, stderr.String())
+	}
+
+	advMap1, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("advance data is not map: %T", env.Data)
+	}
+	r1ID, ok := advMap1["new_task_id"].(string)
+	if !ok {
+		t.Fatalf("new_task_id is not string: %T", advMap1["new_task_id"])
+	}
+	r1Task, err := store.GetTask(ctx, r1ID)
+	if err != nil {
+		t.Fatalf("get r1 task: %v", err)
+	}
+	var r1Payload map[string]any
+	_ = json.Unmarshal(r1Task.Request, &r1Payload)
+	if r1Payload["prompt"] != promptContent {
+		t.Errorf("r1 prompt = %v, want %q", r1Payload["prompt"], promptContent)
 	}
 }

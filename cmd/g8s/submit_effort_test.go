@@ -457,3 +457,217 @@ func TestSubmitEffort_SiblingWithoutRegistry_FallsBackToRepoRegistry(t *testing.
 		t.Errorf("effort = %v, want medium", payload["effort"])
 	}
 }
+
+// TestSubmitEffort_BakedNameAlignmentMatrix tests the 3 matrix branches:
+// 1. Agree / Pass-Through (baked-name model matching effort)
+// 2. Disagree / Rewrite + Record (baked-name model differing from effort)
+// 3. Non-Baked Pass-Through (provider is not baked-name)
+func TestSubmitEffort_BakedNameAlignmentMatrix(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "baked_alignment.db")
+
+	manifestPath := filepath.Join(tempDir, "providers.json")
+	manifestJSON := `{
+		"providers": [
+			{
+				"name": "agy",
+				"class": "platform_dispatch",
+				"effort_style": "baked-name",
+				"models": [
+					{
+						"id": "gemini-3.8-flash",
+						"effort_style": "baked-name",
+						"supported_efforts": ["low", "medium", "high"],
+						"default_effort": "high"
+					}
+				]
+			},
+			{
+				"name": "named-prov",
+				"class": "platform_dispatch",
+				"effort_style": "named",
+				"models": [
+					{
+						"id": "named-model-low",
+						"effort_style": "named",
+						"supported_efforts": ["low", "medium", "high"],
+						"default_effort": "low"
+					}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(manifestPath, []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write test providers.json: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + manifestPath,
+	}
+
+	// 1. Agree / Pass-Through: gemini-3.8-flash-medium with --effort medium
+	t.Run("agree_pass_through", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "baked-agree-task",
+			"--prompt", "Test agree pass through",
+			"--provider", "agy",
+			"--model", "gemini-3.8-flash-medium",
+			"--effort", "medium",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "baked-agree-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+
+		if payload["model"] != "gemini-3.8-flash-medium" {
+			t.Errorf("model = %v, want gemini-3.8-flash-medium", payload["model"])
+		}
+		if payload["effort_applied"] != "medium" {
+			t.Errorf("effort_applied = %v, want medium", payload["effort_applied"])
+		}
+		if _, exists := payload["model_requested"]; exists {
+			t.Errorf("model_requested should not exist on agree, got %v", payload["model_requested"])
+		}
+		if payload["model_realigned"] == true {
+			t.Errorf("model_realigned should not be true on agree")
+		}
+	})
+
+	// 2. Disagree / Rewrite + Record: gemini-3.8-flash-low with --effort medium (dogfood Ground Truth)
+	t.Run("disagree_rewrite_and_record", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "baked-disagree-task",
+			"--prompt", "Test disagree rewrite and record",
+			"--provider", "agy",
+			"--model", "gemini-3.8-flash-low",
+			"--effort", "medium",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "baked-disagree-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+
+		if payload["model"] != "gemini-3.8-flash-medium" {
+			t.Errorf("rewritten model = %v, want gemini-3.8-flash-medium", payload["model"])
+		}
+		if payload["model_requested"] != "gemini-3.8-flash-low" {
+			t.Errorf("model_requested = %v, want gemini-3.8-flash-low", payload["model_requested"])
+		}
+		if payload["model_realigned"] != true {
+			t.Errorf("model_realigned = %v, want true", payload["model_realigned"])
+		}
+		if payload["effort_applied"] != "medium" {
+			t.Errorf("effort_applied = %v, want medium", payload["effort_applied"])
+		}
+
+		// Verify that payload stored in SQLite request_json has rewritten model and requested model
+		if payload["model"] != "gemini-3.8-flash-medium" {
+			t.Errorf("task payload model = %v, want gemini-3.8-flash-medium", payload["model"])
+		}
+	})
+
+	// 2b. Default model (gemini-3.8-flash-high) with default effort (medium) realigns to medium
+	t.Run("default_model_and_effort_realigns", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "default-realign-task",
+			"--prompt", "Test default model and effort realigns",
+			"--provider", "agy",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "default-realign-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+
+		if payload["model"] != "gemini-3.8-flash-medium" {
+			t.Errorf("rewritten model = %v, want gemini-3.8-flash-medium", payload["model"])
+		}
+		if payload["model_requested"] != "gemini-3.8-flash-high" {
+			t.Errorf("model_requested = %v, want gemini-3.8-flash-high", payload["model_requested"])
+		}
+		if payload["model_realigned"] != true {
+			t.Errorf("model_realigned = %v, want true", payload["model_realigned"])
+		}
+	})
+
+	// 3. Non-Baked Pass-Through: named provider model with -low suffix does NOT rewrite
+	t.Run("non_baked_pass_through", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "non-baked-task",
+			"--prompt", "Test non-baked pass through",
+			"--provider", "named-prov",
+			"--model", "named-model-low",
+			"--effort", "high",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "non-baked-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+
+		if payload["model"] != "named-model-low" {
+			t.Errorf("model = %v, want named-model-low", payload["model"])
+		}
+		if _, exists := payload["model_requested"]; exists {
+			t.Errorf("model_requested should not exist on non-baked provider, got %v", payload["model_requested"])
+		}
+		if payload["model_realigned"] == true {
+			t.Errorf("model_realigned should not be true on non-baked provider")
+		}
+		if payload["effort_applied"] != "high" {
+			t.Errorf("effort_applied = %v, want high", payload["effort_applied"])
+		}
+	})
+}
+
+func TestBakedNameAlignmentHelpers(t *testing.T) {
+	// 1. parseBakedModelSuffix
+	tests := []struct {
+		model    string
+		wantBase string
+		wantLvl  string
+		wantOk   bool
+	}{
+		{"gemini-3.8-flash-low", "gemini-3.8-flash", "low", true},
+		{"gemini-3.8-flash-medium", "gemini-3.8-flash", "medium", true},
+		{"gemini-3.8-flash-high", "gemini-3.8-flash", "high", true},
+		{"gemini-3.8-flash-xhigh", "gemini-3.8-flash", "xhigh", true},
+		{"gemini-3.8-flash", "", "", false},
+		{"gpt-5.5", "", "", false},
+		{"claude-3-opus", "", "", false},
+	}
+	for _, tt := range tests {
+		base, lvl, ok := parseBakedModelSuffix(tt.model)
+		if ok != tt.wantOk || base != tt.wantBase || lvl != tt.wantLvl {
+			t.Errorf("parseBakedModelSuffix(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tt.model, base, lvl, ok, tt.wantBase, tt.wantLvl, tt.wantOk)
+		}
+	}
+
+	// 2. isBakedNameProvider
+	if !isBakedNameProvider(nil, "agy", "gemini-3.8-flash-low") {
+		t.Errorf("expected isBakedNameProvider for agy to be true")
+	}
+	if isBakedNameProvider(nil, "", "gemini-3.8-flash-low") {
+		t.Errorf("expected isBakedNameProvider for empty provider to be false")
+	}
+	if isBakedNameProvider(nil, "openai", "gpt-5.5-low") {
+		t.Errorf("expected isBakedNameProvider for openai to be false")
+	}
+}

@@ -92,6 +92,8 @@ func printLadderUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --json                 Output envelope in JSON format")
 	fmt.Fprintln(w, "  --jsonl                Output envelope in JSON Lines format")
 	fmt.Fprintln(w, "  --out <path>           Write HITL evidence packet to file (advance only)")
+	fmt.Fprintln(w, "  --prompt <text>        Task prompt for escalation re-dos (advance only)")
+	fmt.Fprintln(w, "  --prompt-file <path>   File containing task prompt for escalation re-dos (advance only)")
 	fmt.Fprintln(w, "  --receipt-id <id>      Fresh write receipt ID for workspace_write tasks")
 	fmt.Fprintln(w, "  --db <path>            Control-plane database path")
 	fmt.Fprintln(w, "  --telemetry-db <path>  Telemetry database path")
@@ -475,6 +477,64 @@ func executeLadderStatus(ctx context.Context, args []string, stdout, stderr io.W
 	return 0, &env, nil
 }
 
+// GenerateDiagnosisPrompt constructs a deterministic prompt for Rung 0 diagnosis dispatch
+// containing the task failure evidence.
+func GenerateDiagnosisPrompt(taskID, class, lastError, resultSummary string) string {
+	if strings.TrimSpace(taskID) == "" {
+		taskID = "unknown"
+	}
+	if strings.TrimSpace(class) == "" {
+		class = "unregistered"
+	}
+	if strings.TrimSpace(lastError) == "" {
+		lastError = "none"
+	}
+	if strings.TrimSpace(resultSummary) == "" {
+		resultSummary = "none"
+	}
+	return fmt.Sprintf(`Quality ladder diagnosis dispatch for failed task %s.
+
+Task Evidence:
+- Task ID: %s
+- Class: %s
+- Last Error: %s
+- Result Summary: %s
+
+Objective:
+You are a diagnosis worker operating in read-only mode with low effort.
+Your job is to:
+1. Inspect the workspace and task failure evidence.
+2. Classify the failure shape (effort-shaped, brief-shaped, or env-shaped).
+3. Verify class checks and identify the minimal corrective action required.`,
+		taskID, taskID, class, lastError, resultSummary)
+}
+
+func extractResultSummary(resultBytes []byte) string {
+	if len(resultBytes) == 0 {
+		return "none"
+	}
+	var resMap map[string]any
+	if err := json.Unmarshal(resultBytes, &resMap); err == nil {
+		if s, ok := resMap["summary"].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+		if s, ok := resMap["status"].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+		if compact, err := json.Marshal(resMap); err == nil && len(compact) < 200 {
+			return string(compact)
+		}
+	}
+	s := strings.TrimSpace(string(resultBytes))
+	if len(s) > 200 {
+		s = s[:200] + "..."
+	}
+	if s == "" || s == "null" {
+		return "none"
+	}
+	return s
+}
+
 func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.Writer) (int, *cli.Envelope, error) {
 	fs := flag.NewFlagSet("advance", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -483,6 +543,8 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 	taskIDFlag := fs.String("task-id", "", "task ID to advance (alias)")
 	receiptIDFlag := fs.String("receipt-id", "", "fresh write receipt ID for workspace_write tasks")
 	outFlag := fs.String("out", "", "optional file path to write HITL evidence packet")
+	promptFlag := fs.String("prompt", "", "task prompt for escalation re-dos")
+	promptFileFlag := fs.String("prompt-file", "", "path to file containing task prompt for escalation re-dos")
 	dbFlag := fs.String("db", "", "path to controlplane database")
 	telemFlag := fs.String("telemetry-db", "", "path to telemetry database")
 
@@ -490,6 +552,22 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 	if err != nil {
 		env := cli.NewErrorEnvelope("ladder", "advance", *traceID, cli.CodeUsage, err.Error(), "", "")
 		return 2, &env, err
+	}
+
+	var advancePrompt string
+	if *promptFileFlag != "" {
+		content, err := os.ReadFile(*promptFileFlag)
+		if err != nil {
+			msg := fmt.Sprintf("read --prompt-file %s: %v", *promptFileFlag, err)
+			env := cli.NewErrorEnvelope("ladder", "advance", *traceID, cli.CodeIO, msg, "Ensure prompt file exists and is readable", "")
+			if stderr != nil {
+				_ = cli.WriteResponse(stderr, env, *jsonl)
+			}
+			return 1, &env, err
+		}
+		advancePrompt = string(content)
+	} else if *promptFlag != "" {
+		advancePrompt = *promptFlag
 	}
 
 	taskID := *taskFlag
@@ -617,6 +695,16 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 		return 1, &env, plan.RefusalError
 	}
 
+	// Escalation re-dos (rungs 1..5) require an explicit prompt (--prompt or --prompt-file)
+	if plan.RungIndex > 0 && strings.TrimSpace(advancePrompt) == "" {
+		msg := fmt.Sprintf("advancing task %s to rung %d requires --prompt or --prompt-file: original prompt was redacted", taskID, plan.RungIndex)
+		env := cli.NewErrorEnvelope("ladder", "advance", *traceID, cli.CodeUsage, msg, "Pass --prompt-file <path> or --prompt <text>", "")
+		if stderr != nil {
+			_ = cli.WriteResponse(stderr, env, *jsonl)
+		}
+		return 2, &env, errors.New(msg)
+	}
+
 	// Execute rung
 	var origPayload map[string]any
 	if len(lin.latestTask.Request) > 0 {
@@ -635,6 +723,38 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 	origPayload["effort"] = plan.Effort
 	origPayload["effort_requested"] = plan.Effort
 	origPayload["ladder_rung"] = plan.RungIndex
+
+	// Prompt resolution: Rung 0 generates a diagnosis prompt; Rungs 1..5 use the provided prompt
+	var promptToUse string
+	if plan.RungIndex == 0 {
+		lastErr := ""
+		if lin.latestTask.LastError != nil {
+			lastErr = *lin.latestTask.LastError
+		}
+		promptToUse = GenerateDiagnosisPrompt(lin.latestTask.TaskID, lin.class, lastErr, extractResultSummary(lin.latestTask.Result))
+	} else {
+		promptToUse = advancePrompt
+	}
+	origPayload["prompt"] = promptToUse
+	delete(origPayload, "prompt_redacted")
+	delete(origPayload, "prompt_hash")
+
+	// Timeout resolution: carry original task's timeout from payload with record/default fallback
+	timeout := ""
+	if t, ok := origPayload["timeout"].(string); ok && strings.TrimSpace(t) != "" {
+		timeout = strings.TrimSpace(t)
+	} else if len(lin.rootTask.Request) > 0 {
+		var rp map[string]any
+		if json.Unmarshal(lin.rootTask.Request, &rp) == nil {
+			if t, ok := rp["timeout"].(string); ok && strings.TrimSpace(t) != "" {
+				timeout = strings.TrimSpace(t)
+			}
+		}
+	}
+	if timeout == "" {
+		timeout = "30s"
+	}
+	origPayload["timeout"] = timeout
 
 	// Verify write receipt if advancing a workspace_write rung
 	if strings.EqualFold(plan.Permission, "workspace_write") {
@@ -689,7 +809,7 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 		Role:           plan.Role,
 		Permission:     plan.Permission,
 		Model:          plan.Model,
-		Timeout:        lin.latestTask.RequestHash,
+		Timeout:        timeout,
 		AddDirs:        addDirs,
 		OrchestratorID: lin.rootTask.OrchestratorID,
 		WorktreeID:     lin.rootTask.WorktreeID,

@@ -175,6 +175,28 @@ func TestClassifierMatrix(t *testing.T) {
 			wantStaleTag:  "catalog-stale(claude-3-opus, low)",
 			wantReasonSub: "brief-shaped defect",
 		},
+		{
+			name: "stale: agy conflicts with --effort refusal",
+			evidence: FailureEvidence{
+				ErrorText: "agy error: --model gemini-3.8-flash-low conflicts with --effort=medium",
+				Model:     "gemini-3.8-flash-low",
+				Effort:    "medium",
+			},
+			wantShape:     ShapeBrief,
+			wantStaleTag:  "catalog-stale(gemini-3.8-flash-low, medium)",
+			wantReasonSub: "brief-shaped defect",
+		},
+		{
+			name: "stale: agy invalid model selection refusal",
+			evidence: FailureEvidence{
+				ErrorText: "error: invalid model selection: gemini-3.8-flash-low does not match configured backend",
+				Model:     "gemini-3.8-flash-low",
+				Effort:    "low",
+			},
+			wantShape:     ShapeBrief,
+			wantStaleTag:  "catalog-stale(gemini-3.8-flash-low, low)",
+			wantReasonSub: "brief-shaped defect",
+		},
 	}
 
 	for _, tt := range tests {
