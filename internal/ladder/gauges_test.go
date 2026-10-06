@@ -1,6 +1,8 @@
 package ladder
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -192,5 +194,50 @@ func TestComputeGaugesSynthetic(t *testing.T) {
 		if g.Class != "docs" {
 			t.Errorf("filtered EscalationRate contains non-docs class %s", g.Class)
 		}
+	}
+}
+
+func TestLoadTelemetryEventsFromDB(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "telemetry.db")
+
+	// missing DB: fail-open empty slice, no error
+	events, err := LoadTelemetryEvents(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("missing db must fail open, got error: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("missing db events = %d, want 0", len(events))
+	}
+
+	cfg := telemetry.DefaultTelemetryConfig()
+	cfg.DBPath = dbPath
+	eng, err := telemetry.NewTelemetryEngine(cfg)
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+	exit0 := 0
+	exit1 := 1
+	_ = eng.IngestEvent(ctx, telemetry.TraceEvent{
+		ID: "ev-load-1", TaskID: "t-load-1", EventType: telemetry.TraceEventTaskCompleted,
+		Class: "docs", EffortApplied: "low", ExitCode: &exit0, Timestamp: time.Now(),
+	})
+	_ = eng.IngestEvent(ctx, telemetry.TraceEvent{
+		ID: "ev-load-2", TaskID: "t-load-2", EventType: telemetry.TraceEventTaskFailed,
+		Class: "docs", EffortApplied: "medium", ExitCode: &exit1, Timestamp: time.Now(),
+	})
+	_ = eng.Close()
+
+	loaded, err := LoadTelemetryEvents(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("loaded events = %d, want 2", len(loaded))
+	}
+	// ascending timestamp order as written
+	if loaded[0].ID == "" || loaded[0].TaskID == "" {
+		t.Errorf("loaded event missing identity fields: %+v", loaded[0])
 	}
 }

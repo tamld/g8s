@@ -265,7 +265,10 @@ func TestLadderRefusalNonEffortShape(t *testing.T) {
 }
 
 func TestLadderGaugesCLI(t *testing.T) {
-	_, cpPath, telemPath := setupLadderTestDB(t)
+	store, cpPath, telemPath := setupLadderTestDB(t)
+	// Windows: the TempDir cleanup unlinks open sqlite files with
+	// "file in use" — every handle must be closed before the test ends.
+	defer store.Close()
 	ctx := context.Background()
 
 	// Ingest sample telemetry

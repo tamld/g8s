@@ -2,6 +2,7 @@ package ladder
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/tamld/g8s/internal/config"
@@ -327,5 +328,42 @@ classes:
 	}
 	if val, ok := budgets["test"]; ok && val != 0 {
 		t.Errorf("test budget = %d, want 0/absent (fail-open)", val)
+	}
+}
+
+func TestLoadTokenBudgetsFromPath(t *testing.T) {
+	dir := t.TempDir()
+
+	// populated file: budgets parsed per class, invalid values skipped
+	path := dir + "/effort-classes.yml"
+	content := "schema_version: \"effort-classes.v1\"\nclasses:\n" +
+		"  - name: docs\n    default_effort: low\n    ladder_token_budget: 250000\n" +
+		"  - name: feature\n    default_effort: high\n    ladder_token_budget: not-a-number\n" +
+		"  - name: test\n    default_effort: medium\n"
+	if werr := os.WriteFile(path, []byte(content), 0o644); werr != nil {
+		t.Fatalf("write fixture: %v", werr)
+	}
+	budgets := LoadTokenBudgets(path)
+	if got := budgets["docs"]; got != 250000 {
+		t.Errorf("docs budget = %d, want 250000", got)
+	}
+	if val, ok := budgets["feature"]; ok {
+		t.Errorf("feature budget present = %d, want absent (non-numeric skipped)", val)
+	}
+	if val, ok := budgets["test"]; ok {
+		t.Errorf("test budget present = %d, want absent", val)
+	}
+
+	// missing file: fail-open empty map
+	missing := LoadTokenBudgets(dir + "/absent.yml")
+	if len(missing) != 0 {
+		t.Errorf("missing-file budgets = %v, want empty (fail-open)", missing)
+	}
+
+	// empty path: default location resolves upward; in an unregistered dir
+	// this must still fail open rather than panic
+	empty := LoadTokenBudgets("")
+	if empty == nil {
+		t.Error("empty-path budgets nil, want non-nil map")
 	}
 }
