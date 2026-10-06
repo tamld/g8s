@@ -95,3 +95,48 @@ agree with the epistemics, add the instrumentation requirements:
 1. Session A: execute plans/261006-v016-cut/plan.md gates G1-G5.
 2. Session B (fresh, from the mercenary handoff): aegis.
 3. F-recursion probe: brief after v0.16 tag; read_only first.
+
+## Addendum (operator proposal): role-specialized recursion — the clerk pattern
+
+Operator: F1/F2 get DIFFERENT spawn strategies; Jev assists tool-call
+selection; and at F2/F3 a dedicated LOW-effort worker for
+organizing/reporting/processing — cheap on effort, FREE of context
+pollution. Layer semantics: F0 holds goals/strategy, F1 holds
+action/planning, F2 executes.
+
+Supervisor verdict: AGREE with the core — it splits two budgets this
+model had conflated: effort (thinking depth) and context-purity are
+INDEPENDENT dials. The clerk fixes the coordination tax: F1 context
+growth drops from O(raw results) to O(digests). Three sharpenings:
+
+1. **Clerk = lateral F2, not F3.** Depth costs verification fidelity
+   per level; laterality does not. F3 exists ONLY as reduce-of-reduce
+   when digests exceed one context (map-reduce), activated by
+   measurement (YAGNI). Trees stay wide and shallow.
+2. **Clerk compresses by POINTER, not paraphrase** (anti-Goodhart):
+   output must cite file:line / task-id / receipt refs — same
+   fail-closed culture as claims #548 and the lessons pipeline
+   (no-self-grade, must-cite). A clerk saying "all fine" is the
+   failure mode; a clerk saying "3 findings, see X/Y/Z" is safe.
+   The clean-context clerk is also the natural diagnosis-rung and
+   patrol-reporting role — one role, three consumers.
+3. **Layer assignment refined by the clerk itself**: it EXTRACTS
+   reporting/aggregation from F1, leaving F1 purely action+planning.
+   Information flow: F0 widest-view/least-detail → F1 digest in,
+   directive out → F2-doer deep-detail/narrow-scope → F2-clerk the
+   wide-raw → clean-narrow choke point.
+
+**Task topology = the third declarative axis** (beside effort, model):
+the brief declares `topology: N doers + M clerks (+ verifier)`;
+deterministic-first, Jev SUGGESTS tool-calls and result routing,
+never mandates (Jev DISTRIBUTES, optional — ratified). Topology is
+earned by measurement: baseline exists (95-file audit = 287K
+single-worker) vs doer+clerk — F1 token delta + digest quality vs
+F0's direct verification.
+
+**Runtime honesty makes this the RIGHT first F1→F2 exercise**: F2
+writes need receipt delegation (ADR-gated, unbuilt), but a clerk is
+read_only by nature — zero containment risk, no delegation needed.
+The clerk activates the supported-never-exercised F1→F2 edge, measures
+saved parent tokens against the existing baselines, and produces
+g8s returns (telemetry + a ladder diagnosis-role unification).
