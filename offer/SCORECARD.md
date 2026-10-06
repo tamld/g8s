@@ -6,7 +6,7 @@ Source: issue #442.
 
 | Wave | Project | Profile | Onboarded | First-audit (M2) | Status |
 |------|---------|---------|-----------|------------------|--------|
-| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **9 real findings total**: gate-audit 2 (structure markers + links) + worker-audit 7 (2 stale version refs, 2 date-rot >4mo, 2 link-rot, 1 orphan) — first worker dispatch at LOW tier, 218s, 91 files | M1 ✓ · M2 ✓ — pilot live; Phase 3.1 effort loader LANDED (#556) |
+| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **47 real findings total**: gate-audit 2 (structure markers + links) + worker-audit 7 (2 stale version refs, 2 date-rot >4mo, 2 link-rot, 1 orphan; 91 files, 218s, LOW) + GATE 3.4 audit **38** (12 stale refs — Mandalay/Plane retirement unreconciled, 23 date-rot, 2 link-rot, 1 orphan; 48 files, LOW) | M1 ✓ · M2 ✓ — pilot live; effort machinery LANDED: Phase 3.1 loader #556, 3.2 adapter+knob #557, 3.3 classes+telemetry #558/#559, GATE 3.4 E2E at `--effort low` SATISFIED (effort fields + usage tokens recorded on a real dispatch) |
 | 2 | defense-in-depth | security | — | — | pending |
 | 3 | aegis | infra | — | — | pending |
 | 3 | homelab-proxmox | infra/utility | — | — | pending |
