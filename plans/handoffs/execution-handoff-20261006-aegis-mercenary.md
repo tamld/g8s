@@ -117,3 +117,21 @@ vừa làm tận dụng tối đa resource của hệ thống, vừa dogfood t�
 - v0.16 cut plan: plans/261006-v016-cut/plan.md (g8s)
 - Memory: g8s-effort-optimization, g8s-dispatch-mechanics-v012,
   feedback-jev-escalation-autonomy
+
+## Addendum (2026-10-07 — pre-deployment)
+
+- **Pre-registered pass criteria** (anti-theater, cannot be gamed
+  after the fact): your session passes when the Returns Ledger is 5/5
+  WITH citations — issues filed, lessons proposed via `g8s lesson`,
+  infra-review-class telemetry on g8s #550, ladder traversals
+  recorded, end handoff written. "Fixed lots of stuff" with an empty
+  ledger = session FAILED regardless of output volume.
+- **Operating frame**: plans/261006-two-project-ops/brainstorm.md —
+  one project per session (you hold ONLY aegis detail); the g8s-side
+  session runs the v0.16 cut in parallel at the worker-queue level;
+  distraction → ledger, not → hands.
+- **First F1→F2 exercise**: your read_only inventory sweeps are the
+  candidate first rung — if the worker spawns clerk-style subagents
+  (aggregate/cite, read_only), that is the supported-never-exercised
+  edge getting exercised; record it in the ledger.
+- Route doc: plans/handoffs/execution-handoff-20261007-deploy.md.
