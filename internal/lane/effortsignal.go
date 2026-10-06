@@ -76,7 +76,7 @@ func (r SignalResult) EffortSignals() EffortSignalsPayload {
 // Hypothesis matrix v1:
 //   - blast=high ∧ loc>200 -> high
 //   - blast=high -> at least medium (elevates registry < medium to medium; registry >= medium stands)
-//   - blast=low ∧ loc<=50 -> low
+//   - blast=low -> low (any LOC; v1.1 fills the low/51-200 cell)
 //   - otherwise the registry result (or medium floor) stands
 func ResolveEffortSignals(
 	explicit string,
@@ -110,10 +110,14 @@ func ResolveEffortSignals(
 			decHasSuggestion = true
 		}
 	case BlastLow:
-		if loc <= 50 {
-			decSuggestion = config.EffortLow
-			decHasSuggestion = true
-		}
+		// blast=low -> low regardless of LOC: low-blast work that went
+		// wrong is cheap to notice and revert, and the patrol evidence
+		// (41-95 file read-only audits, all comparable quality at low,
+		// P1 sampling #550) shows scan scale does not deepen thinking.
+		// The loc<=50 bound left the low/51-200 cell hole-y — declared
+		// suggestions went empty and the source mislabeled as registry.
+		decSuggestion = config.EffortLow
+		decHasSuggestion = true
 	}
 
 	// Determine winning non-explicit level and source (the baseline prior)
@@ -133,7 +137,7 @@ func ResolveEffortSignals(
 				priorSource = EffortSourceDeclared
 			}
 		} else {
-			// blast=high ∧ loc>200 -> high; blast=low ∧ loc<=50 -> low
+			// blast=high ∧ loc>200 -> high; blast=low -> low (any LOC)
 			priorEffort = decSuggestion
 			priorSource = EffortSourceDeclared
 		}
