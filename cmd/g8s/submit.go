@@ -17,6 +17,7 @@ import (
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/lane"
 	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/settings"
 )
@@ -57,10 +58,14 @@ func runSubmit(args []string) {
 		exitUsage("submit", "effort", *traceID, fmt.Sprintf("invalid --effort %q: allowed ladder is [%s]", *effortFlag, strings.Join(config.EffortLadder, ", ")), fmt.Sprintf("Specify an effort level from [%s]", strings.Join(config.EffortLadder, ", ")), *jsonl)
 	}
 
+	var effortPassed bool
 	var providerPassed bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "provider" {
 			providerPassed = true
+		}
+		if f.Name == "effort" {
+			effortPassed = true
 		}
 	})
 
@@ -154,6 +159,33 @@ func runSubmit(args []string) {
 		}
 	}
 
+	var classPaths []string
+	for _, p := range addDirs {
+		clean := filepath.Clean(p)
+		if rel, err := filepath.Rel(cwd, clean); err == nil && !strings.HasPrefix(rel, "..") {
+			classPaths = append(classPaths, filepath.ToSlash(rel))
+		} else {
+			classPaths = append(classPaths, filepath.ToSlash(clean))
+		}
+	}
+
+	ec, ecErr := lane.LoadEffortClasses()
+	if ecErr != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, ecErr, "Failed to load effort classes", *jsonl)
+	}
+	className, defaultEffort := ec.ResolveClass(classPaths)
+
+	requestedEffort := defaultEffort
+	var effortOverride bool
+	var effortOverrideDown bool
+	if effortPassed {
+		requestedEffort = *effortFlag
+		effortOverride = true
+		if lane.IsOverrideDown(*effortFlag, defaultEffort) {
+			effortOverrideDown = true
+		}
+	}
+
 	if *routeFlag == "auto" {
 		var routePaths []string
 		if len(addDirs) > 0 {
@@ -165,7 +197,7 @@ func runSubmit(args []string) {
 			Paths:       routePaths,
 			TimeoutHint: *timeout,
 			Manifest:    manifest,
-			Effort:      *effortFlag,
+			Effort:      requestedEffort,
 		})
 		if routeErr != nil {
 			var mandErr *routing.MandatoryEffortError
@@ -184,7 +216,7 @@ func runSubmit(args []string) {
 	}
 
 	// Resolve effort for the effective provider and model across both manual and auto routes
-	effortRes, effortErr := routing.ResolveEffort(manifest, effectiveProvider, effectiveModel, *effortFlag)
+	effortRes, effortErr := routing.ResolveEffort(manifest, effectiveProvider, effectiveModel, requestedEffort)
 	if effortErr != nil {
 		var mandErr *routing.MandatoryEffortError
 		if errors.As(effortErr, &mandErr) {
@@ -209,13 +241,20 @@ func runSubmit(args []string) {
 	defer store.Close()
 
 	payloadMap := map[string]any{
-		"prompt":     prompt,
-		"model":      effectiveModel,
-		"role":       effectiveRole,
-		"permission": *permission,
-		"timeout":    *timeout,
-		"add_dirs":   dirs,
-		"actor":      *actor,
+		"prompt":       prompt,
+		"model":        effectiveModel,
+		"role":         effectiveRole,
+		"permission":   *permission,
+		"timeout":      *timeout,
+		"add_dirs":     dirs,
+		"actor":        *actor,
+		"effort_class": className,
+	}
+	if effortOverride {
+		payloadMap["effort_override"] = true
+	}
+	if effortOverrideDown {
+		payloadMap["effort_override_down"] = true
 	}
 	if effectiveProvider != "" {
 		payloadMap["provider"] = effectiveProvider
