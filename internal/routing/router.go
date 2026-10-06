@@ -27,6 +27,12 @@ type Decision struct {
 	// only; zero otherwise) — feeds the M3 cost-per-route metric (issue #518).
 	JevInputTokens  int64 `json:"jev_input_tokens,omitempty"`
 	JevOutputTokens int64 `json:"jev_output_tokens,omitempty"`
+
+	// Effort fields (issue #550 / C1 adapter)
+	EffortRequested    string `json:"effort_requested,omitempty"`
+	EffortApplied      string `json:"effort_applied,omitempty"`
+	EffortMismatch     bool   `json:"effort_mismatch,omitempty"`
+	EffortBudgetTokens int    `json:"effort_budget_tokens,omitempty"`
 }
 
 // RouteRequest carries task context for provider/model/role assignment.
@@ -36,6 +42,7 @@ type RouteRequest struct {
 	Summary     string       `json:"summary"`
 	TimeoutHint string       `json:"timeout_hint"`
 	Manifest    *config.File `json:"manifest,omitempty"` // providers.json, may be nil → catalog defaults
+	Effort      string       `json:"effort,omitempty"`
 }
 
 type candidateModel struct {
@@ -318,13 +325,38 @@ func RouteDeterministic(req RouteRequest) Decision {
 // Route assigns provider, model, and role using deterministic rules first,
 // with optional Jev assistance if configured.
 func Route(ctx context.Context, req RouteRequest) (Decision, error) {
+	manifest := req.Manifest
+	if manifest == nil {
+		manifest = DefaultManifest()
+	}
+	if cat, err := config.LoadDefaultCatalog(); err == nil && cat != nil {
+		_ = cat.MergeInto(manifest)
+	}
+	req.Manifest = manifest
+
 	layer1 := RouteDeterministic(req)
 
+	dec := layer1
 	mode := getRouterMode(ctx)
-	if mode != "jev_assisted" {
-		return layer1, nil
+	if mode == "jev_assisted" {
+		candidates := extractCandidates(req.Manifest)
+		var err error
+		dec, err = jevAssist(ctx, req, layer1, candidates)
+		if err != nil {
+			return dec, err
+		}
 	}
 
-	candidates := extractCandidates(req.Manifest)
-	return jevAssist(ctx, req, layer1, candidates)
+	effortRes, err := ResolveEffort(req.Manifest, dec.Provider, dec.Model, req.Effort)
+	if err != nil {
+		return dec, err
+	}
+	if effortRes.HasResolvedEntry {
+		dec.EffortRequested = effortRes.Requested
+		dec.EffortApplied = effortRes.Applied
+		dec.EffortMismatch = effortRes.Mismatch
+		dec.EffortBudgetTokens = effortRes.BudgetTokens
+	}
+
+	return dec, nil
 }

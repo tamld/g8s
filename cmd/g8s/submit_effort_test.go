@@ -1,0 +1,305 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/tamld/g8s/internal/cli"
+)
+
+// TestSubmitEffort_DefaultMediumLandsInPayload asserts that omitting --effort
+// defaults to "medium" and records effort, effort_requested, and effort_applied in payload.
+func TestSubmitEffort_DefaultMediumLandsInPayload(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "default_effort.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "default-effort-task",
+		"--prompt", "Task prompt without explicit effort flag",
+	)
+	if code != 0 {
+		t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+
+	reqJSON := getTaskRequestJSON(t, dbPath, "default-effort-task")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if payload["effort"] != "medium" {
+		t.Errorf("effort = %v, want medium", payload["effort"])
+	}
+	if payload["effort_requested"] != "medium" {
+		t.Errorf("effort_requested = %v, want medium", payload["effort_requested"])
+	}
+	if payload["effort_applied"] != "medium" {
+		t.Errorf("effort_applied = %v, want medium", payload["effort_applied"])
+	}
+}
+
+// TestSubmitEffort_BadLevel_UsageError asserts that an effort outside the canonical ladder
+// triggers a typed usage exit naming the allowed ladder.
+func TestSubmitEffort_BadLevel_UsageError(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "bad_effort.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	badLevels := []string{"invalid", "superhigh", "turbo", "fast", ""}
+	for _, lvl := range badLevels {
+		t.Run("bad_level_"+lvl, func(t *testing.T) {
+			env, code, raw := runSubmitCLI(t, binPath, envVars,
+				"--idempotency-key", "bad-effort-"+lvl,
+				"--prompt", "Test invalid effort flag",
+				"--effort", lvl,
+			)
+			if code != 2 {
+				t.Fatalf("exit code = %d, want 2 (E_USAGE); raw: %s", code, raw)
+			}
+			if env.Error == nil {
+				t.Fatalf("expected error envelope, got nil; raw: %s", raw)
+			}
+			if env.Error.Code != cli.CodeUsage {
+				t.Errorf("error.code = %q, want %q (E_USAGE)", env.Error.Code, cli.CodeUsage)
+			}
+			if !strings.Contains(env.Error.Message, "invalid --effort") {
+				t.Errorf("expected error message to mention 'invalid --effort', got %q", env.Error.Message)
+			}
+			if !strings.Contains(env.Error.Message, "allowed ladder") {
+				t.Errorf("expected error message to name allowed ladder, got %q", env.Error.Message)
+			}
+		})
+	}
+}
+
+// TestSubmitEffort_AppliedRecorded asserts that effort_applied and advisory signals
+// (effort_mismatch, effort_budget_tokens) are recorded in the payload when the adapter maps levels.
+func TestSubmitEffort_AppliedRecorded(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "applied.db")
+
+	manifestPath := filepath.Join(tempDir, "providers.json")
+	manifestJSON := `{
+		"providers": [
+			{
+				"name": "toggle-prov",
+				"class": "platform_dispatch",
+				"models": [
+					{
+						"id": "toggle-model",
+						"effort_style": "toggle",
+						"supported_efforts": ["medium", "high"],
+						"default_effort": "medium"
+					}
+				]
+			},
+			{
+				"name": "budget-prov",
+				"class": "platform_dispatch",
+				"models": [
+					{
+						"id": "budget-model",
+						"effort_style": "budget",
+						"supported_efforts": ["low", "medium", "high"],
+						"default_effort": "medium",
+						"effort_budget_map": {
+							"low": 2048,
+							"high": 32768
+						}
+					}
+				]
+			},
+			{
+				"name": "named-prov",
+				"class": "platform_dispatch",
+				"models": [
+					{
+						"id": "named-model",
+						"effort_style": "named",
+						"supported_efforts": ["low", "high"],
+						"default_effort": "low"
+					}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(manifestPath, []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write test providers.json: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + manifestPath,
+	}
+
+	// 1. Toggle model requested low -> maps to nearest medium with mismatch=true
+	t.Run("toggle_nearest_mismatch", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "toggle-task",
+			"--prompt", "Test toggle nearest mapping",
+			"--provider", "toggle-prov",
+			"--model", "toggle-model",
+			"--effort", "low",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "toggle-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["effort"] != "medium" {
+			t.Errorf("effort = %v, want medium", payload["effort"])
+		}
+		if payload["effort_requested"] != "low" {
+			t.Errorf("effort_requested = %v, want low", payload["effort_requested"])
+		}
+		if payload["effort_applied"] != "medium" {
+			t.Errorf("effort_applied = %v, want medium", payload["effort_applied"])
+		}
+		if payload["effort_mismatch"] != true {
+			t.Errorf("effort_mismatch = %v, want true", payload["effort_mismatch"])
+		}
+	})
+
+	// 2. Budget model requested medium (missing key) -> maps to nearest low with tokens=2048 and mismatch=true
+	t.Run("budget_nearest_tokens_recorded", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "budget-task",
+			"--prompt", "Test budget nearest mapping with tokens",
+			"--provider", "budget-prov",
+			"--model", "budget-model",
+			"--effort", "medium",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "budget-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["effort"] != "low" {
+			t.Errorf("effort = %v, want low", payload["effort"])
+		}
+		if payload["effort_requested"] != "medium" {
+			t.Errorf("effort_requested = %v, want medium", payload["effort_requested"])
+		}
+		if payload["effort_applied"] != "low" {
+			t.Errorf("effort_applied = %v, want low", payload["effort_applied"])
+		}
+		if payload["effort_mismatch"] != true {
+			t.Errorf("effort_mismatch = %v, want true", payload["effort_mismatch"])
+		}
+		if tokens, ok := payload["effort_budget_tokens"].(float64); !ok || int(tokens) != 2048 {
+			t.Errorf("effort_budget_tokens = %v, want 2048", payload["effort_budget_tokens"])
+		}
+	})
+
+	// 3. Named model requested medium (distance to low and high equal) -> tie picks lower (low)
+	t.Run("named_tie_picks_lower", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "named-task",
+			"--prompt", "Test named tie-picks-lower",
+			"--provider", "named-prov",
+			"--model", "named-model",
+			"--effort", "medium",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "named-task")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["effort"] != "low" {
+			t.Errorf("effort = %v, want low", payload["effort"])
+		}
+		if payload["effort_requested"] != "medium" {
+			t.Errorf("effort_requested = %v, want medium", payload["effort_requested"])
+		}
+		if payload["effort_applied"] != "low" {
+			t.Errorf("effort_applied = %v, want low", payload["effort_applied"])
+		}
+		if payload["effort_mismatch"] != true {
+			t.Errorf("effort_mismatch = %v, want true", payload["effort_mismatch"])
+		}
+	})
+}
+
+// TestSubmitEffort_HardRefuse_ExitsBeforeQueueing asserts that requesting effort "none"
+// on a mandatory-reasoning model hard-refuses locally and exits BEFORE queuing any task in SQLite.
+func TestSubmitEffort_HardRefuse_ExitsBeforeQueueing(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "hard_refuse.db")
+
+	manifestPath := filepath.Join(tempDir, "providers.json")
+	manifestJSON := `{
+		"providers": [
+			{
+				"name": "refuse-prov",
+				"class": "platform_dispatch",
+				"models": [
+					{
+						"id": "mandatory-model",
+						"effort_style": "named",
+						"supported_efforts": ["low", "medium", "high", "xhigh"],
+						"default_effort": "high",
+						"mandatory": true
+					}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(manifestPath, []byte(manifestJSON), 0o644); err != nil {
+		t.Fatalf("write test providers.json: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + manifestPath,
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "hard-refuse-task",
+		"--prompt", "Must fail and not queue task",
+		"--provider", "refuse-prov",
+		"--model", "mandatory-model",
+		"--effort", "none",
+	)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code on hard-refuse, got %d; raw: %s", code, raw)
+	}
+	if env.Error == nil {
+		t.Fatalf("expected error envelope on hard-refuse, got nil; raw: %s", raw)
+	}
+	if !strings.Contains(env.Error.Message, "mandatory") || !strings.Contains(env.Error.Message, "refused") {
+		t.Errorf("unexpected error message: %q", env.Error.Message)
+	}
+
+	// Verify no task was queued in the database
+	db, err := sql.Open("sqlite", dbPath)
+	if err == nil {
+		defer db.Close()
+		var count int
+		_ = db.QueryRow("SELECT COUNT(*) FROM tasks WHERE idempotency_key = 'hard-refuse-task'").Scan(&count)
+		if count > 0 {
+			t.Fatalf("task was queued despite hard-refuse; expected zero queued tasks")
+		}
+	}
+}
