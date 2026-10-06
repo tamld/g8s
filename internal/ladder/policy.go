@@ -54,8 +54,15 @@ func NextEffortLevel(view *routing.ModelEffortView, currentEffort string) (strin
 	}
 
 	supported := view.SupportedEfforts
-	if len(supported) == 0 {
-		if view.EffortStyle == config.EffortStyleBakedName || view.Provider == "agy" ||
+	if view.EffortStyle == config.EffortStyleBakedName {
+		// A baked variant declares exactly ONE level; effort escalation moves
+		// across the family ladder and the dispatch realigns the model to the
+		// matching variant (issue #563 C3). Using the single-element supported
+		// list here would jump low -> high and skip the middle rungs
+		// (issue #568 follow-up).
+		supported = []string{config.EffortLow, config.EffortMedium, config.EffortHigh}
+	} else if len(supported) == 0 {
+		if view.Provider == "agy" ||
 			strings.HasPrefix(view.Model, "gemini-") || strings.Contains(view.Model, "agy") {
 			supported = []string{config.EffortLow, config.EffortMedium, config.EffortHigh}
 		} else {

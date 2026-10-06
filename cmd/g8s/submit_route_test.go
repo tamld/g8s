@@ -197,8 +197,11 @@ func TestSubmitRoute_Table(t *testing.T) {
 			extraArgs:    []string{"--add-dir", "cmd/g8s"},
 			wantRole:     "collector",
 			wantProvider: "agy",
-			wantModel:    "gemini-3.8-flash-high",
-			wantSource:   "deterministic",
+			// Router picks flash-high; default effort (medium) then realigns the
+			// baked model to the matching variant (issue #563 C3, un-shadowed by
+			// the #568 catalog fix).
+			wantModel:  "gemini-3.8-flash-medium",
+			wantSource: "deterministic",
 		},
 		{
 			name:         "trust-boundary path routes to test-runner class with largest context window",
@@ -208,7 +211,7 @@ func TestSubmitRoute_Table(t *testing.T) {
 			extraArgs:    []string{"--add-dir", "internal/receipt"},
 			wantRole:     "test-runner",
 			wantProvider: "agy",
-			wantModel:    "gemini-3.8-flash-high",
+			wantModel:    "gemini-3.8-flash-medium", // realigned from flash-high at default effort (#568)
 			wantSource:   "deterministic",
 		},
 		{
@@ -218,7 +221,7 @@ func TestSubmitRoute_Table(t *testing.T) {
 			routeFlag:    "auto",
 			wantRole:     "collector",
 			wantProvider: "agy",
-			wantModel:    "gemini-3.8-flash-high",
+			wantModel:    "gemini-3.8-flash-medium", // realigned from flash-high at default effort (#568)
 			wantSource:   "deterministic",
 		},
 		{

@@ -42,37 +42,16 @@ type EffortResult struct {
 	HasResolvedEntry bool   `json:"-"`
 }
 
-// bakedEffortSuffixes contains the canonical ladder levels that can be baked into a model ID.
-var bakedEffortSuffixes = []string{
-	config.EffortLow,
-	config.EffortMedium,
-	config.EffortHigh,
-	config.EffortXHigh,
-	config.EffortMax,
-}
-
-// DetectBakedEffort returns the baked effort level and true if modelID ends with
-// one of the canonical ladder suffixes (-low, -medium, -high, -xhigh, -max).
-// Matching is case-sensitive.
-func DetectBakedEffort(modelID string) (string, bool) {
-	for _, lvl := range bakedEffortSuffixes {
-		if strings.HasSuffix(modelID, "-"+lvl) {
-			return lvl, true
-		}
-	}
-	return "", false
-}
-
 // AdaptEffort is a pure function that translates a requested effort level
 // into an applied effort level based on the model's declared effort capabilities.
 //
 // Rules (design point 3, fail-safe):
 //   - HARD-REFUSE: Mandatory == true AND requested == "none" -> typed MandatoryEffortError.
-//   - baked-suffix: model ID ending with ladder suffix (-low/-medium/-high/-xhigh/-max)
-//     always coerces applied to the baked level (mismatch = true when requested != "" and
-//     requested != baked; budget tokens = 0). Replaces pass-through for baked-suffix model IDs.
 //   - unknown entry (nil) -> pass-through: applied = requested, mismatch = false ("" stays "").
-//     (Baked-suffix model IDs are handled above; non-baked unknown entries pass through verbatim).
+//     Baked-suffix model ids are deliberately NOT coerced here: the ratified
+//     model/effort realignment contract (issue #563 C3, cmd/g8s submit) rewrites the
+//     MODEL to the matching variant, which preserves per-class effort differentiation
+//     for the cost-per-class telemetry (issue #568).
 //   - requested "" -> applied = entry DefaultEffort when it is a ladder level;
 //     adaptive/dynamic or empty default -> applied = "".
 //   - baked-name -> always pass-through (the wrapper resolves {effort} variant; mismatch = false).
@@ -87,15 +66,6 @@ func AdaptEffort(view *ModelEffortView, requested string) (applied string, misma
 		return "", false, 0, &MandatoryEffortError{Provider: view.Provider, Model: view.Model}
 	}
 
-	if view != nil {
-		if baked, ok := DetectBakedEffort(view.Model); ok {
-			mismatch := requested != "" && requested != baked
-			return baked, mismatch, 0, nil
-		}
-	}
-
-	// Unknown entry (nil) -> pass-through: applied = requested, mismatch = false ("" stays "").
-	// Baked-suffix models are coerced above; non-baked unknown entries pass through verbatim.
 	if view == nil {
 		return requested, false, 0, nil
 	}
@@ -219,12 +189,6 @@ func ResolveEffort(manifest *config.File, provider, modelID, requested string) (
 func ResolveEffortWithCatalog(manifest *config.File, cat *config.Catalog, provider, modelID, requested string) (EffortResult, error) {
 	view := resolveModelEffortView(manifest, cat, provider, modelID)
 	hasResolved := view != nil
-	if view == nil && modelID != "" {
-		view = &ModelEffortView{
-			Provider: provider,
-			Model:    modelID,
-		}
-	}
 
 	applied, mismatch, tokens, err := AdaptEffort(view, requested)
 	if err != nil {
@@ -258,9 +222,6 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 							}
 						}
 					}
-					if modelID != "" {
-						view.Model = modelID
-					}
 					return view
 				}
 			}
@@ -273,9 +234,6 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 			if catProv, ok := cat.FindProvider(provider); ok {
 				if catModel, ok := findCatalogModel(catProv, modelID); ok {
 					view := NormalizeCatalogModel(catProv.Name, &catProv, &catModel)
-					if modelID != "" {
-						view.Model = modelID
-					}
 					return view
 				}
 			}
@@ -284,9 +242,6 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 			for _, catProv := range cat.Providers {
 				if catModel, ok := findCatalogModel(catProv, modelID); ok {
 					view := NormalizeCatalogModel(catProv.Name, &catProv, &catModel)
-					if modelID != "" {
-						view.Model = modelID
-					}
 					return view
 				}
 			}

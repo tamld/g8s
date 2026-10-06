@@ -328,21 +328,22 @@ func TestAdaptEffort_Table(t *testing.T) {
 			wantTokens:   0,
 			wantErr:      false,
 		},
-		// 13. baked suffix coercion
+		// 13. baked suffix ids: the adapter passes the requested level through;
+		// the submit-layer realignment contract (issue #563 C3) owns the rewrite.
 		{
-			name: "baked suffix high coerces requested low to high with mismatch",
+			name: "baked suffix id with undeclared style passes requested low through unchanged",
 			view: &ModelEffortView{
 				Provider: "agy",
 				Model:    "gemini-3.8-flash-high",
 			},
 			requested:    "low",
-			wantApplied:  "high",
-			wantMismatch: true,
+			wantApplied:  "low",
+			wantMismatch: false,
 			wantTokens:   0,
 			wantErr:      false,
 		},
 		{
-			name: "baked suffix high matches requested high with no mismatch",
+			name: "baked suffix id passes requested high through unchanged",
 			view: &ModelEffortView{
 				Provider: "agy",
 				Model:    "gemini-3.8-flash-high",
@@ -354,26 +355,26 @@ func TestAdaptEffort_Table(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			name: "baked suffix high with empty requested applies high with no mismatch",
+			name: "baked suffix id with empty requested stays empty",
 			view: &ModelEffortView{
 				Provider: "agy",
 				Model:    "gemini-3.8-flash-high",
 			},
 			requested:    "",
-			wantApplied:  "high",
+			wantApplied:  "",
 			wantMismatch: false,
 			wantTokens:   0,
 			wantErr:      false,
 		},
 		{
-			name: "baked suffix medium coerces requested low to medium with mismatch",
+			name: "baked suffix medium id passes requested low through unchanged",
 			view: &ModelEffortView{
 				Provider: "agy",
 				Model:    "gemini-3.8-flash-medium",
 			},
 			requested:    "low",
-			wantApplied:  "medium",
-			wantMismatch: true,
+			wantApplied:  "low",
+			wantMismatch: false,
 			wantTokens:   0,
 			wantErr:      false,
 		},
@@ -432,14 +433,14 @@ func TestAdaptEffort_Table(t *testing.T) {
 			wantErr:      false,
 		},
 		{
-			name: "baked suffix high with non-mandatory requested none coerces to high with mismatch",
+			name: "baked suffix id with non-mandatory requested none passes none through unchanged",
 			view: &ModelEffortView{
 				Provider: "agy",
 				Model:    "gemini-3.8-flash-high",
 			},
 			requested:    "none",
-			wantApplied:  "high",
-			wantMismatch: true,
+			wantApplied:  "none",
+			wantMismatch: false,
 			wantTokens:   0,
 			wantErr:      false,
 		},
@@ -515,7 +516,9 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 		},
 	}
 
-	// 1. Direct lookup with suffix match on baked-name model coerces low to high with mismatch
+	// 1. Direct lookup with suffix match on a baked-name model passes the
+	// requested level through — the submit-layer realignment (issue #563 C3)
+	// owns the model rewrite, not the adapter (issue #568).
 	res, err := ResolveEffortWithCatalog(nil, cat, "agy", "gemini-3.8-flash-high", "low")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -523,11 +526,11 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 	if !res.HasResolvedEntry {
 		t.Errorf("expected HasResolvedEntry to be true")
 	}
-	if res.Applied != "high" {
-		t.Errorf("applied = %q, want high", res.Applied)
+	if res.Applied != "low" {
+		t.Errorf("applied = %q, want low", res.Applied)
 	}
-	if !res.Mismatch {
-		t.Errorf("expected mismatch=true for baked-name with different requested level")
+	if res.Mismatch {
+		t.Errorf("expected mismatch=false for baked-name pass-through")
 	}
 
 	// 2. Direct lookup of mandatory reasoning model requested none -> hard refuse
@@ -556,7 +559,8 @@ func TestResolveEffort_DirectCatalogLookup(t *testing.T) {
 func TestRoute_DecisionEffortFields(t *testing.T) {
 	manifest := DefaultManifest()
 
-	// 1. Requested "low" on auto route coerces gemini-3.8-flash-high to high with mismatch
+	// 1. Requested "low" on auto route passes through for the baked-name
+	// model — the submit layer realigns the model, not the adapter (#568).
 	dec, err := Route(context.Background(), RouteRequest{
 		Prompt:   "General inventory collection task",
 		Paths:    []string{},
@@ -569,11 +573,11 @@ func TestRoute_DecisionEffortFields(t *testing.T) {
 	if dec.EffortRequested != config.EffortLow {
 		t.Errorf("EffortRequested = %q, want %q", dec.EffortRequested, config.EffortLow)
 	}
-	if dec.EffortApplied != config.EffortHigh {
-		t.Errorf("EffortApplied = %q, want %q", dec.EffortApplied, config.EffortHigh)
+	if dec.EffortApplied != config.EffortLow {
+		t.Errorf("EffortApplied = %q, want %q", dec.EffortApplied, config.EffortLow)
 	}
-	if !dec.EffortMismatch {
-		t.Errorf("EffortMismatch = false, want true")
+	if dec.EffortMismatch {
+		t.Errorf("EffortMismatch = true, want false")
 	}
 
 	// 2. Requested "" on auto route should apply model's default effort
@@ -595,113 +599,58 @@ func TestRoute_DecisionEffortFields(t *testing.T) {
 	}
 }
 
-func TestDetectBakedEffort(t *testing.T) {
-	tests := []struct {
-		modelID   string
-		wantLevel string
-		wantOk    bool
-	}{
-		{"gemini-3.8-flash-low", "low", true},
-		{"gemini-3.8-flash-medium", "medium", true},
-		{"gemini-3.8-flash-high", "high", true},
-		{"some-model-xhigh", "xhigh", true},
-		{"model-max", "max", true},
-		{"model-maxv2", "", false},
-		{"flow-highx", "", false},
-		{"gemini-3.8-flash-HIGH", "", false}, // case-sensitive
-		{"gemini-3.8-flash-High", "", false},
-		{"gemini-3.8-flash", "", false},
-		{"gemini-3.8-flash-{effort}", "", false},
-		{"high", "", false}, // no hyphen prefix
-		{"-high", "high", true},
-		{"", "", false},
-	}
-	for _, tc := range tests {
-		name := tc.modelID
-		if name == "" {
-			name = "<empty>"
+func TestResolveEffort_BakedSuffixPassThrough(t *testing.T) {
+	// The adapter must NOT coerce baked-suffix model ids (issue #568): the
+	// ratified realignment contract (issue #563 C3) rewrites the MODEL at the
+	// submit layer, which keeps per-class effort differentiation. These rows
+	// are stable whether or not the default catalog resolves the id.
+
+	// 1. Manifest without the agy provider -> unknown id passes through.
+	noAgy := &config.File{Providers: []config.ProviderEntry{
+		{Name: "other", Models: []config.ModelEntry{{ID: "other-model"}}},
+	}}
+	for _, tc := range []struct{ requested, want string }{
+		{"low", "low"}, {"high", "high"}, {"medium", "medium"},
+	} {
+		res, err := ResolveEffort(noAgy, "agy", "gemini-3.8-flash-high", tc.requested)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		t.Run(name, func(t *testing.T) {
-			gotLevel, gotOk := DetectBakedEffort(tc.modelID)
-			if gotLevel != tc.wantLevel || gotOk != tc.wantOk {
-				t.Errorf("DetectBakedEffort(%q) = (%q, %v), want (%q, %v)",
-					tc.modelID, gotLevel, gotOk, tc.wantLevel, tc.wantOk)
-			}
-		})
-	}
-}
-
-func TestResolveEffort_BakedSuffixCases(t *testing.T) {
-	manifest := DefaultManifest()
-
-	// 1. (gemini-3.8-flash-high, low) -> applied high, mismatch true
-	res, err := ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "low")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Applied != "high" || !res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want high true", res.Applied, res.Mismatch)
+		if res.Applied != tc.want || res.Mismatch {
+			t.Errorf("nil-view (%q): got applied=%q mismatch=%v, want %q false", tc.requested, res.Applied, res.Mismatch, tc.want)
+		}
 	}
 
-	// 2. (gemini-3.8-flash-high, high) -> applied high, no mismatch
-	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "high")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Applied != "high" || res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want high false", res.Applied, res.Mismatch)
-	}
-
-	// 3. (gemini-3.8-flash-high, "") -> applied high, no mismatch
-	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-high", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Applied != "high" || res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want high false", res.Applied, res.Mismatch)
-	}
-
-	// 4. (gemini-3.8-flash-medium, low) -> applied medium, mismatch true
-	res, err = ResolveEffort(manifest, "agy", "gemini-3.8-flash-medium", "low")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Applied != "medium" || !res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want medium true", res.Applied, res.Mismatch)
-	}
-
-	// 5. (some-model-xhigh, xhigh) -> applied xhigh, no mismatch
-	res, err = ResolveEffort(manifest, "", "some-model-xhigh", "xhigh")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Applied != "xhigh" || res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want xhigh false", res.Applied, res.Mismatch)
-	}
-
-	// 6. non-baked unknown id (no suffix) -> unchanged pass-through
-	res, err = ResolveEffort(manifest, "", "unknown-custom-model", "low")
+	// 2. Manifest WITH a baked-name agy entry -> the baked rule passes the
+	// requested level through (mismatch never set at the adapter layer).
+	bakedManifest := &config.File{Providers: []config.ProviderEntry{
+		{
+			Name: "agy",
+			Models: []config.ModelEntry{{
+				ID:          "gemini-3.8-flash-high",
+				EffortStyle: config.EffortStyleBakedName,
+			}},
+		},
+	}}
+	res, err := ResolveEffort(bakedManifest, "agy", "gemini-3.8-flash-high", "low")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if res.Applied != "low" || res.Mismatch {
-		t.Errorf("got applied=%q mismatch=%v, want low false", res.Applied, res.Mismatch)
+		t.Errorf("baked resolved: got applied=%q mismatch=%v, want low false", res.Applied, res.Mismatch)
 	}
 
-	// 7. baked id + mandatory + none -> typed hard-refuse error
-	mandatoryManifest := &config.File{
-		Providers: []config.ProviderEntry{
-			{
-				Name: "agy",
-				Models: []config.ModelEntry{
-					{
-						ID:        "gemini-3.8-flash-high",
-						Mandatory: true,
-					},
-				},
-			},
+	// 3. Baked id + mandatory + none -> typed hard-refuse (unchanged).
+	mandatoryManifest := &config.File{Providers: []config.ProviderEntry{
+		{
+			Name: "agy",
+			Models: []config.ModelEntry{{
+				ID:          "gemini-3.8-flash-high",
+				EffortStyle: config.EffortStyleBakedName,
+				Mandatory:   true,
+			}},
 		},
-	}
+	}}
 	_, err = ResolveEffort(mandatoryManifest, "agy", "gemini-3.8-flash-high", "none")
 	if err == nil {
 		t.Fatalf("expected error on mandatory none, got nil")
@@ -711,9 +660,9 @@ func TestResolveEffort_BakedSuffixCases(t *testing.T) {
 		t.Fatalf("expected MandatoryEffortError, got %T: %v", err, err)
 	}
 
-	// 8. suffix-lookalike that is NOT a ladder suffix (e.g. model-maxv2, flow-highx) -> NOT baked, pass-through
+	// 4. Suffix lookalikes that are NOT ladder suffixes -> plain pass-through.
 	for _, lookalike := range []string{"model-maxv2", "flow-highx"} {
-		res, err = ResolveEffort(manifest, "", lookalike, "low")
+		res, err = ResolveEffort(noAgy, "", lookalike, "low")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

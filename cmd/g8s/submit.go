@@ -423,17 +423,13 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 
 	// 1. Check user manifest if provided
 	if manifest != nil {
-		for _, p := range manifest.Providers {
-			if !strings.EqualFold(p.Name, provider) {
-				continue
-			}
-			for _, m := range p.Models {
-				if matchModelID(m.ID, modelID) {
-					return m.EffortStyle == config.EffortStyleBakedName
-				}
-			}
-			return false
+		if verdict, decided := manifestBakedNameVerdict(manifest, provider, modelID); decided {
+			return verdict
 		}
+		// Undeclared style on the matched manifest model: fall through to the
+		// catalog, the effort-style SSoT. (Issue #568: platform manifests declare
+		// model ids without styles and shadowed the catalog's baked-name verdict,
+		// so mismatched (model, effort) combos reached the worker CLI and died.)
 	}
 
 	// 2. Check default catalog for the provider
@@ -452,4 +448,25 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 	}
 
 	return false
+}
+
+// manifestBakedNameVerdict reports whether the user manifest itself decides the
+// baked-name question for (provider, modelID). decided=false means the matched
+// model entry declares no effort style and the catalog must be consulted.
+func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (baked bool, decided bool) {
+	for _, p := range manifest.Providers {
+		if !strings.EqualFold(p.Name, provider) {
+			continue
+		}
+		for _, m := range p.Models {
+			if matchModelID(m.ID, modelID) {
+				if m.EffortStyle == "" {
+					return false, false
+				}
+				return m.EffortStyle == config.EffortStyleBakedName, true
+			}
+		}
+		return false, true
+	}
+	return false, false
 }

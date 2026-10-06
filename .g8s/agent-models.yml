@@ -167,8 +167,18 @@ providers:
     field: model-name-suffix
     default_effort: high
     mandatory: false
-    notes: "local wrapper; template substitution gemini-3.8-flash-{effort}; medium tier verified dispatchable 2026-10-04 (issue #550 data point)"
+    # Sources:
+    # - providers.json model list (observed variants: gemini-3.8-flash-low, gemini-3.8-flash-medium, gemini-3.8-flash-high)
+    # - agy --help effort levels (low|medium|high|xhigh|max)
+    # - live task evidence 237be821 (worker CLI accepts --effort matching suffix; refuses mismatches with "invalid model selection")
+    notes: "model ids carry the effort suffix; the worker CLI accepts --effort only when it equals the id suffix; mismatched combos are refused (\"invalid model selection\")"
     models:
-      - id: gemini-3.8-flash
-        supported_efforts: [low, medium, high]
+      - id: gemini-3.8-flash-low
+        supported_efforts: [low]
+        default_effort: low
+      - id: gemini-3.8-flash-medium
+        supported_efforts: [medium]
+        default_effort: medium
+      - id: gemini-3.8-flash-high
+        supported_efforts: [high]
         default_effort: high

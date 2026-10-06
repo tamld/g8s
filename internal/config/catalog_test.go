@@ -176,8 +176,8 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	for _, prov := range cat.Providers {
 		totalModels += len(prov.Models)
 	}
-	if totalModels != 29 {
-		t.Fatalf("got %d total models across providers, want 29", totalModels)
+	if totalModels != 31 {
+		t.Fatalf("got %d total models across providers, want 31", totalModels)
 	}
 
 	// Spot-check agy
@@ -188,12 +188,208 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	if agy.EffortStyle != EffortStyleBakedName {
 		t.Errorf("agy effort_style = %q, want %q", agy.EffortStyle, EffortStyleBakedName)
 	}
-	flash, ok := agy.FindModel("gemini-3.8-flash")
+	flash, ok := agy.FindModel("gemini-3.8-flash-high")
 	if !ok {
-		t.Fatal("gemini-3.8-flash missing in agy provider")
+		t.Fatal("gemini-3.8-flash-high missing in agy provider")
 	}
 	if flash.DefaultEffort != EffortHigh {
-		t.Errorf("gemini-3.8-flash default_effort = %q, want %q", flash.DefaultEffort, EffortHigh)
+		t.Errorf("gemini-3.8-flash-high default_effort = %q, want %q", flash.DefaultEffort, EffortHigh)
+	}
+}
+
+func TestCatalog_AgyBakedNameProvider(t *testing.T) {
+	cat, err := LoadDefaultCatalog()
+	if err != nil {
+		t.Fatalf("LoadDefaultCatalog failed: %v", err)
+	}
+
+	// 1. Proving agy provider loads and has baked-name style
+	agy, ok := cat.FindProvider("agy")
+	if !ok {
+		t.Fatal("agy provider not found in catalog")
+	}
+	if agy.EffortStyle != EffortStyleBakedName {
+		t.Errorf("agy effort_style = %q, want %q", agy.EffortStyle, EffortStyleBakedName)
+	}
+	if !strings.Contains(agy.Notes, "invalid model selection") {
+		t.Errorf("agy notes = %q, want notes documenting invalid model selection refusal", agy.Notes)
+	}
+
+	// 2. Table rows proving each observed variant resolves with a single-element supported list
+	// and default_effort equals that level.
+	variantRows := []struct {
+		modelID    string
+		wantEffort string
+	}{
+		{
+			modelID:    "gemini-3.8-flash-low",
+			wantEffort: EffortLow,
+		},
+		{
+			modelID:    "gemini-3.8-flash-medium",
+			wantEffort: EffortMedium,
+		},
+		{
+			modelID:    "gemini-3.8-flash-high",
+			wantEffort: EffortHigh,
+		},
+	}
+
+	for _, tt := range variantRows {
+		t.Run("variant_"+tt.modelID, func(t *testing.T) {
+			m, ok := agy.FindModel(tt.modelID)
+			if !ok {
+				t.Fatalf("FindModel(%q) = not found, want found", tt.modelID)
+			}
+			if m.ID != tt.modelID {
+				t.Errorf("m.ID = %q, want %q", m.ID, tt.modelID)
+			}
+			if len(m.SupportedEfforts) != 1 {
+				t.Fatalf("m.SupportedEfforts = %v, want exactly 1 element", m.SupportedEfforts)
+			}
+			if m.SupportedEfforts[0] != tt.wantEffort {
+				t.Errorf("m.SupportedEfforts[0] = %q, want %q", m.SupportedEfforts[0], tt.wantEffort)
+			}
+			if m.DefaultEffort != tt.wantEffort {
+				t.Errorf("m.DefaultEffort = %q, want %q", m.DefaultEffort, tt.wantEffort)
+			}
+		})
+	}
+
+	// 3. Table rows proving FindProvider/FindModel hit for (agy, gemini-3.8-flash-high)
+	hitRows := []struct {
+		name         string
+		providerName string
+		modelID      string
+		wantHit      bool
+	}{
+		{
+			name:         "exact match",
+			providerName: "agy",
+			modelID:      "gemini-3.8-flash-high",
+			wantHit:      true,
+		},
+		{
+			name:         "case-insensitive provider and model",
+			providerName: "AGY",
+			modelID:      "Gemini-3.8-Flash-High",
+			wantHit:      true,
+		},
+		{
+			name:         "upper-case model id",
+			providerName: "agy",
+			modelID:      "GEMINI-3.8-FLASH-HIGH",
+			wantHit:      true,
+		},
+	}
+
+	for _, tt := range hitRows {
+		t.Run("hit_"+tt.name, func(t *testing.T) {
+			p, ok := cat.FindProvider(tt.providerName)
+			if !ok {
+				t.Fatalf("FindProvider(%q) = not found", tt.providerName)
+			}
+			m, ok := p.FindModel(tt.modelID)
+			if ok != tt.wantHit {
+				t.Fatalf("FindModel(%q) hit = %v, want %v", tt.modelID, ok, tt.wantHit)
+			}
+			if m.ID != "gemini-3.8-flash-high" {
+				t.Errorf("m.ID = %q, want gemini-3.8-flash-high", m.ID)
+			}
+			if m.DefaultEffort != EffortHigh {
+				t.Errorf("m.DefaultEffort = %q, want %q", m.DefaultEffort, EffortHigh)
+			}
+			if len(m.SupportedEfforts) != 1 || m.SupportedEfforts[0] != EffortHigh {
+				t.Errorf("m.SupportedEfforts = %v, want [%s]", m.SupportedEfforts, EffortHigh)
+			}
+		})
+	}
+
+	// 4. Table rows proving unknown agy variants resolve to nil entry (F1's backstop territory).
+	unknownRows := []struct {
+		name    string
+		modelID string
+	}{
+		{
+			name:    "unobserved level max",
+			modelID: "gemini-3.8-flash-max",
+		},
+		{
+			name:    "unobserved level xhigh",
+			modelID: "gemini-3.8-flash-xhigh",
+		},
+		{
+			name:    "unobserved level none",
+			modelID: "gemini-3.8-flash-none",
+		},
+		{
+			name:    "unobserved level minimal",
+			modelID: "gemini-3.8-flash-minimal",
+		},
+		{
+			name:    "bare family id without suffix",
+			modelID: "gemini-3.8-flash",
+		},
+		{
+			name:    "arbitrary unknown model",
+			modelID: "gemini-3.8-flash-turbo",
+		},
+		{
+			name:    "unrelated model id",
+			modelID: "gpt-6-astra",
+		},
+	}
+
+	for _, tt := range unknownRows {
+		t.Run("unknown_"+tt.name, func(t *testing.T) {
+			m, ok := agy.FindModel(tt.modelID)
+			if ok {
+				t.Errorf("FindModel(%q) returned %+v (hit), want not found (nil entry for F1 backstop)", tt.modelID, m)
+			}
+			// ModelCatalog zero-value check:
+			if m.ID != "" || len(m.SupportedEfforts) != 0 || m.DefaultEffort != "" {
+				t.Errorf("FindModel(%q) returned non-zero entry: %+v", tt.modelID, m)
+			}
+		})
+	}
+
+	// 5. Table rows proving the loader still tolerates the file being absent (fail-open, existing behavior unchanged).
+	absentRows := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "nonexistent relative file",
+			path: "nonexistent-agent-models.yml",
+		},
+		{
+			name: "nonexistent absolute file",
+			path: "/nonexistent/path/to/agent-models.yml",
+		},
+	}
+
+	for _, tt := range absentRows {
+		t.Run("absent_file_"+tt.name, func(t *testing.T) {
+			absentCat, err := LoadCatalog(tt.path)
+			if err == nil {
+				t.Fatalf("LoadCatalog(%q) succeeded, want error", tt.path)
+			}
+			if absentCat != nil {
+				t.Errorf("LoadCatalog(%q) returned non-nil catalog: %+v", tt.path, absentCat)
+			}
+
+			// Fail-open: nil catalog safely no-ops on lookup and merge
+			p, ok := absentCat.FindProvider("agy")
+			if ok || p.Name != "" {
+				t.Errorf("nil catalog FindProvider('agy') = (%+v, %v), want zero value and false", p, ok)
+			}
+
+			manifest := &File{}
+			rep := absentCat.MergeInto(manifest)
+			if rep.FilledModels != 0 || rep.SkippedProviders != 0 || rep.UnknownProviders != 0 {
+				t.Errorf("nil catalog MergeInto = %+v, want zero report", rep)
+			}
+		})
 	}
 }
 
