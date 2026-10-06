@@ -418,7 +418,8 @@ func TestRedR4_Dim2_PayloadWiring(t *testing.T) {
 		if err := json.Unmarshal(fullData, &fullMap); err != nil {
 			t.Fatalf("unmarshal full EffortResult map: %v", err)
 		}
-		if fullMap["effort_requested"] != "high" || fullMap["effort_applied"] != "medium" || fullMap["effort_mismatch"] != true || int(fullMap["effort_budget_tokens"].(float64)) != 4096 {
+		budgetTokens, _ := fullMap["effort_budget_tokens"].(float64)
+		if fullMap["effort_requested"] != "high" || fullMap["effort_applied"] != "medium" || fullMap["effort_mismatch"] != true || int(budgetTokens) != 4096 {
 			t.Errorf("Rule 2.5 violation: full EffortResult round-trip failed: %+v", fullMap)
 		}
 	})

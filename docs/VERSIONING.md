@@ -16,7 +16,7 @@ $$\mathbf{v\text{MAJOR}.\text{MINOR}.\text{PATCH}[-\text{PRERELEASE}]}$$
 ## 2. Release Cadence & Phases
 
 ```
-v0.1.0-alpha (Current) ──► v0.1.0-beta (Parity Complete) ──► v0.1.0 (Public Launch) ──► v1.0.0 (Production Stable)
+v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05, Current) ──► v0.16.0 (In Preparation) ──► v1.0.0 (Production Stable)
 ```
 
 | Version Milestone | Target Scope | Stability Level |
@@ -24,6 +24,9 @@ v0.1.0-alpha (Current) ──► v0.1.0-beta (Parity Complete) ──► v0.1.0 
 | **`v0.1.0-alpha`** | Milestone 1 (Foundation): Core Harness, SQLite WAL ControlPlane, Write Receipt Engine. | Experimental (Private repo) |
 | **`v0.1.0-beta`** | Milestone 2 (Capabilities): Stdio MCP server, Pluggable Providers (AGY, Claude, Gemini). | Staging & Testing |
 | **`v0.1.0`** | Milestone 3 (OS Daemon & Packaging): Multi-OS Service (launchd/systemd/windows), GoReleaser. | Public Open-Source Launch |
+| **`v0.14.0`** | Feature wave release (2026-10-03). | Delivered |
+| **`v0.15.0`** | Integrity hardening release (2026-10-05). | Delivered (Current) |
+| **`v0.16.0`** | Self-measuring effort telemetry release. | In preparation |
 | **`v1.0.0`** | 100% Test Parity, Formal Security Audit, Stable MCP & CLI Interface guarantee. | Production GA |
 
 ---

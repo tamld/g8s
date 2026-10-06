@@ -84,7 +84,7 @@ For enterprise environments requiring supply chain security (SLSA Level 3):
 ```sh
 # Verify Cosign blob attestation
 cosign verify-blob \
-  --certificate-identity "https://github.com/tamld/g8s/.github/workflows/release.yml@refs/tags/v0.1.0" \
+  --certificate-identity "https://github.com/tamld/g8s/.github/workflows/release.yml@refs/tags/v0.15.0" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --signature checksums.txt.sig \
   checksums.txt

@@ -62,7 +62,7 @@ $ g8s doctor
 
 🏥 Running g8s System Diagnostics...
 
-[✓] Pure-Go Binary Integrity (v0.1.0-alpha, darwin/arm64)
+[✓] Pure-Go Binary Integrity (v0.15.0, darwin/arm64)
 [✓] State Directory & Database Permissions (0700/0600)
 [✓] Worker Provider: agy (Ready, 10 concurrency slots)
 [!] Background Daemon Service: NOT RUNNING
