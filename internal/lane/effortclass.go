@@ -398,6 +398,107 @@ func ResolveClass(paths []string) (string, string) {
 	return ec.ResolveClass(paths)
 }
 
+// isPathUnderRoot checks if a path resolves inside the given root.
+// Returns the root-relative path and true if inside, or ("", false) otherwise.
+// Pure function: operates lexically; reconciles relative/absolute paths without modifying process cwd.
+func isPathUnderRoot(path, root string) (string, bool) {
+	cleanP := filepath.Clean(path)
+	cleanR := filepath.Clean(root)
+
+	rel, err := filepath.Rel(cleanR, cleanP)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel, true
+	}
+
+	if filepath.IsAbs(cleanR) != filepath.IsAbs(cleanP) {
+		absP, errP := filepath.Abs(cleanP)
+		absR, errR := filepath.Abs(cleanR)
+		if errP == nil && errR == nil {
+			relAbs, errAbs := filepath.Rel(absR, absP)
+			if errAbs == nil && relAbs != ".." && !strings.HasPrefix(relAbs, ".."+string(filepath.Separator)) {
+				return relAbs, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+// ResolveClassForRoots resolves write-scope paths against effort class registries across multiple roots.
+// Sibling precedence rules (in order):
+//  1. If ALL classPaths resolve under ONE root (filepath base check per path against each root)
+//     and <root>/.g8s/effort-classes.yml EXISTS:
+//     Load that file (LoadEffortClassesFile) and resolve the paths (relative to that root) against it.
+//     Sibling config wins for sibling work.
+//     If the sibling registry exists but is malformed, a typed error is returned (fails loudly).
+//  2. Otherwise -> repo registry (upward findFile from CWD) with fail-open unregistered floor.
+func ResolveClassForRoots(classPaths []string, roots []string) (className, defaultEffort string, err error) {
+	if len(classPaths) > 0 && len(roots) > 0 {
+		type candidateRoot struct {
+			root     string
+			relPaths []string
+		}
+		var candidates []candidateRoot
+
+		for _, root := range roots {
+			cleanRoot := filepath.Clean(root)
+			allUnder := true
+			relPaths := make([]string, 0, len(classPaths))
+			for _, p := range classPaths {
+				rel, ok := isPathUnderRoot(p, cleanRoot)
+				if !ok {
+					allUnder = false
+					break
+				}
+				relPaths = append(relPaths, filepath.ToSlash(rel))
+			}
+			if allUnder {
+				candidates = append(candidates, candidateRoot{
+					root:     cleanRoot,
+					relPaths: relPaths,
+				})
+			}
+		}
+
+		if len(candidates) > 0 {
+			// Sort candidates by root path length descending (most specific / deepest root wins)
+			sort.SliceStable(candidates, func(i, j int) bool {
+				return len(candidates[i].root) > len(candidates[j].root)
+			})
+			chosen := candidates[0]
+			siblingConfig := filepath.Join(chosen.root, DefaultEffortClassesPath)
+			if fi, statErr := os.Stat(siblingConfig); statErr == nil && !fi.IsDir() {
+				ec, loadErr := LoadEffortClassesFile(siblingConfig)
+				if loadErr != nil {
+					return "", "", loadErr
+				}
+				cls, eff := ec.ResolveClass(chosen.relPaths)
+				return cls, eff, nil
+			}
+			// Chosen root has NO registry: sibling paths must never be
+			// classified by the g8s repo registry — matching repo-relative
+			// globs against absolute sibling paths can only ever match by
+			// accident (Windows-runner incident on PR #562, where a temp
+			// ...\docs\arch.md path matched the repo's docs class). The
+			// g8s repo root itself is the exception: its registry IS the
+			// repo registry, so the fallback below resolves it correctly.
+			if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+				if absRoot, aerr := filepath.Abs(chosen.root); aerr == nil && filepath.Clean(absRoot) != filepath.Clean(cwd) {
+					return UnregisteredClassName, config.EffortMedium, nil
+				}
+			}
+		}
+	}
+
+	// Fallback: upward findFile from CWD (repo registry)
+	ec, loadErr := LoadEffortClasses()
+	if loadErr != nil {
+		return "", "", loadErr
+	}
+	cls, eff := ec.ResolveClass(classPaths)
+	return cls, eff, nil
+}
+
 // EffortLadderIndex returns the index of level on config.EffortLadder, or -1 if outside ladder.
 func EffortLadderIndex(level string) int {
 	for i, l := range config.EffortLadder {
