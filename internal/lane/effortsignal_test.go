@@ -203,14 +203,20 @@ func TestResolveEffortSignals_MatrixRows(t *testing.T) {
 			wantRegistrySug: "high",
 		},
 		{
-			name:            "blast_low_loc_51_registry_high_stands",
+			// blast=low -> low at ANY loc (matrix v1.1: the loc<=50 bound
+			// left the low/51-200 cell empty — declared suggestions went
+			// empty and the source mislabeled as registry, caught live by
+			// patrol round 1 on a 95-file dispatch). Declared low also
+			// overrides a registry high: the author's blast assessment is
+			// the point of the signal, recorded via override_down.
+			name:            "blast_low_loc_51_declares_low_over_registry_high",
 			blast:           BlastLow,
 			loc:             51,
 			regClass:        "core",
 			regEffort:       "high",
-			wantEffort:      config.EffortHigh,
-			wantSource:      EffortSourceRegistry,
-			wantDeclaredSug: "",
+			wantEffort:      config.EffortLow,
+			wantSource:      EffortSourceDeclared,
+			wantDeclaredSug: config.EffortLow,
 			wantRegistrySug: "high",
 		},
 		{
