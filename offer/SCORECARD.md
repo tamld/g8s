@@ -11,6 +11,7 @@ Source: issue #442.
 | 3 | aegis | infra | 2026-10-06 (sibling effort registry + AGENTS wiring committed; lane/trust scaffolding pre-existing) | **First-audit day-one**: 19 files (docs/adrs/ 14 ADRs + 5 root docs) — 4 orphaned/stale root scratch artifacts, legacy repo name (`web-login-solo`) citations, ADR status/version drift; 246K tokens, LOW auto-classified via the infra-profile registry | M1 ✓ (3/5 — falsification target hit day 1 of the window) · M2 ✓ — wave 3 live, in the weekly patrol |
 | 3 | homelab-proxmox | infra/utility | — | — | pending |
 | 3 | hash-checker | utility | — | — | pending (repo not created yet) |
+| 4 | tuneflow | TBD at onboarding | — | — | **queued NEXT** after the aegis mercenary session (operator priority #3; repo exists) |
 
 ## Falsification tracker
 
