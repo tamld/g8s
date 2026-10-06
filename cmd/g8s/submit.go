@@ -224,6 +224,22 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, effortErr, "Failed to resolve effort", *jsonl)
 	}
 
+	// Baked-name model/effort alignment:
+	// When effective model matches baked-name pattern (-<level>) for a baked-name provider
+	// and differs from effort_applied, rewrite model to -{effort_applied}, record model_requested
+	// and model_realigned=true. Plain pass-through when they already agree or model is not baked-name.
+	var modelRequested string
+	var modelRealigned bool
+	if isBakedNameProvider(manifest, effectiveProvider, effectiveModel) {
+		if baseName, suffixLvl, ok := parseBakedModelSuffix(effectiveModel); ok {
+			if effortRes.Applied != "" && !strings.EqualFold(suffixLvl, effortRes.Applied) {
+				modelRequested = effectiveModel
+				effectiveModel = baseName + "-" + effortRes.Applied
+				modelRealigned = true
+			}
+		}
+	}
+
 	// Validate request against security harness gatekeeper
 	if err := harness.ValidateRequest(prompt, effectiveRole, *permission, dirs, *skipPermissions, *receiptID); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
@@ -249,6 +265,10 @@ func runSubmit(args []string) {
 		"actor":        *actor,
 		"effort_class": className,
 	}
+	if modelRealigned {
+		payloadMap["model_requested"] = modelRequested
+		payloadMap["model_realigned"] = true
+	}
 	if effortOverride {
 		payloadMap["effort_override"] = true
 	}
@@ -266,7 +286,7 @@ func runSubmit(args []string) {
 	}
 	if routeDecision != nil {
 		payloadMap["provider"] = routeDecision.Provider
-		payloadMap["model"] = routeDecision.Model
+		payloadMap["model"] = effectiveModel
 		payloadMap["role"] = routeDecision.Role
 		payloadMap["route_source"] = routeDecision.Source
 		payloadMap["route_reason"] = routeDecision.Reason
@@ -313,4 +333,73 @@ func runSubmit(args []string) {
 	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "", *jsonl)
 	}
+}
+
+func parseBakedModelSuffix(modelID string) (string, string, bool) {
+	for _, lvl := range config.EffortLadder {
+		suffix := "-" + lvl
+		if strings.HasSuffix(strings.ToLower(modelID), suffix) {
+			base := modelID[:len(modelID)-len(suffix)]
+			return base, lvl, true
+		}
+	}
+	return "", "", false
+}
+
+func matchModelID(candID, targetID string) bool {
+	if strings.EqualFold(candID, targetID) {
+		return true
+	}
+	candTrimmed := strings.TrimSuffix(candID, "-{effort}")
+	targetTrimmed := strings.TrimSuffix(targetID, "-{effort}")
+	if strings.EqualFold(candTrimmed, targetTrimmed) {
+		return true
+	}
+	for _, lvl := range config.EffortLadder {
+		if strings.EqualFold(candTrimmed, strings.TrimSuffix(targetTrimmed, "-"+lvl)) {
+			return true
+		}
+		if strings.EqualFold(strings.TrimSuffix(candTrimmed, "-"+lvl), targetTrimmed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
+	if provider == "" {
+		return false
+	}
+
+	// 1. Check user manifest if provided
+	if manifest != nil {
+		for _, p := range manifest.Providers {
+			if !strings.EqualFold(p.Name, provider) {
+				continue
+			}
+			for _, m := range p.Models {
+				if matchModelID(m.ID, modelID) {
+					return m.EffortStyle == config.EffortStyleBakedName
+				}
+			}
+			return false
+		}
+	}
+
+	// 2. Check default catalog for the provider
+	cat, err := config.LoadDefaultCatalog()
+	if err == nil && cat != nil {
+		if cp, ok := cat.FindProvider(provider); ok {
+			if cp.EffortStyle == config.EffortStyleBakedName {
+				return true
+			}
+			for _, m := range cp.Models {
+				if matchModelID(m.ID, modelID) {
+					return m.EffortStyle == config.EffortStyleBakedName
+				}
+			}
+		}
+	}
+
+	return false
 }

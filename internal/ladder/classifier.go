@@ -143,13 +143,16 @@ var (
 		"content filter",
 		"safety policy",
 		"ambiguous prompt",
+		"conflicts with --effort",
+		"invalid model selection",
 	}
 )
 
 var (
 	// 400 rejection pattern mentioning effort level
-	re400Effort = regexp.MustCompile(`(?i)(?:400|bad request|invalid[_\s-]?argument|unsupported[_\s-]?parameter|unknown[_\s-]?parameter).*(?:reasoning[_\s-]?effort|effort).*?\b(none|minimal|low|medium|high|xhigh|max)\b`)
-	reEffort400 = regexp.MustCompile(`(?i)\b(none|minimal|low|medium|high|xhigh|max)\b.*(?:is not supported|unsupported|not allowed|invalid reasoning[_\s-]?effort)`)
+	re400Effort  = regexp.MustCompile(`(?i)(?:400|bad request|invalid[_\s-]?argument|unsupported[_\s-]?parameter|unknown[_\s-]?parameter|conflicts with --effort|invalid model selection).*(?:reasoning[_\s-]?effort|effort).*?\b(none|minimal|low|medium|high|xhigh|max)\b`)
+	reEffort400  = regexp.MustCompile(`(?i)\b(none|minimal|low|medium|high|xhigh|max)\b.*(?:is not supported|unsupported|not allowed|invalid reasoning[_\s-]?effort)`)
+	reEffortFlag = regexp.MustCompile(`(?i)(?:--effort[=\s]+|reasoning[_\s-]?effort[=\s':]+|effort[=\s':]+)\b(none|minimal|low|medium|high|xhigh|max)\b`)
 )
 
 // DetectStalenessTag detects when a provider dispatch fails with a 400-class error
@@ -172,10 +175,19 @@ func DetectStalenessTag(text, model, defaultEffort string) string {
 		}
 		return fmt.Sprintf("catalog-stale(%s, %s)", mdl, lvl)
 	}
+	if m := reEffortFlag.FindStringSubmatch(combined); len(m) >= 2 && (strings.Contains(combined, "conflicts with --effort") || strings.Contains(combined, "invalid model selection") || strings.Contains(combined, "400") || strings.Contains(combined, "invalid_argument") || strings.Contains(combined, "bad request")) {
+		lvl := strings.ToLower(m[1])
+		mdl := model
+		if mdl == "" {
+			mdl = "unknown-model"
+		}
+		return fmt.Sprintf("catalog-stale(%s, %s)", mdl, lvl)
+	}
 
-	// Also check if text mentions HTTP 400 or invalid argument and an explicit effort level was given
-	if (strings.Contains(combined, "400") || strings.Contains(combined, "invalid_argument") || strings.Contains(combined, "bad request")) &&
-		(strings.Contains(combined, "effort") || strings.Contains(combined, "reasoning")) {
+	// Also check if text mentions HTTP 400 or invalid argument / refusal markers and an explicit effort level was given
+	if (strings.Contains(combined, "400") || strings.Contains(combined, "invalid_argument") || strings.Contains(combined, "bad request") ||
+		strings.Contains(combined, "conflicts with --effort") || strings.Contains(combined, "invalid model selection")) &&
+		(strings.Contains(combined, "effort") || strings.Contains(combined, "reasoning") || strings.Contains(combined, "invalid model selection")) {
 		for _, lvl := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
 			if strings.Contains(combined, lvl) {
 				mdl := model
