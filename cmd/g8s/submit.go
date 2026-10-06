@@ -46,6 +46,8 @@ func runSubmit(args []string) {
 	fs.Var(&addDirs, "add-dir", "additional allowed directory (repeatable, defaults to cwd; must stay inside scope roots)")
 	scopeRootFlag := fs.String("scope-root", "", "comma-separated scope roots extending the jail beyond the working directory (#348)")
 	routeFlag := fs.String("route", "manual", "task routing mode (manual|auto, defaults to manual)")
+	blastRadiusFlag := fs.String("blast-radius", "", "declared blast radius (low|medium|high)")
+	locEstimateFlag := fs.Int("loc-estimate", 0, "declared LOC estimate (positive int)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
@@ -60,6 +62,8 @@ func runSubmit(args []string) {
 
 	var effortPassed bool
 	var providerPassed bool
+	var blastRadiusPassed bool
+	var locEstimatePassed bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "provider" {
 			providerPassed = true
@@ -67,7 +71,25 @@ func runSubmit(args []string) {
 		if f.Name == "effort" {
 			effortPassed = true
 		}
+		if f.Name == "blast-radius" {
+			blastRadiusPassed = true
+		}
+		if f.Name == "loc-estimate" {
+			locEstimatePassed = true
+		}
 	})
+
+	if blastRadiusPassed {
+		trimmed := strings.ToLower(strings.TrimSpace(*blastRadiusFlag))
+		if !lane.IsValidBlastRadius(trimmed) {
+			exitUsage("submit", "blast-radius", *traceID, fmt.Sprintf("invalid --blast-radius %q: allowed values are low, medium, high", *blastRadiusFlag), "Specify --blast-radius=low, medium, or high", *jsonl)
+		}
+		*blastRadiusFlag = trimmed
+	}
+
+	if locEstimatePassed && *locEstimateFlag <= 0 {
+		exitUsage("submit", "loc-estimate", *traceID, fmt.Sprintf("invalid --loc-estimate %d: must be a positive integer", *locEstimateFlag), "Specify a positive integer for --loc-estimate", *jsonl)
+	}
 
 	var effectiveProvider string
 	if providerPassed {
@@ -174,14 +196,38 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, ecErr, "Failed to load effort classes", *jsonl)
 	}
 
+	hasSignals := blastRadiusPassed || locEstimatePassed
+	var sigRes lane.SignalResult
+	var explicitEffort string
+	if effortPassed {
+		explicitEffort = *effortFlag
+	}
+
 	requestedEffort := defaultEffort
 	var effortOverride bool
 	var effortOverrideDown bool
-	if effortPassed {
-		requestedEffort = *effortFlag
-		effortOverride = true
-		if lane.IsOverrideDown(*effortFlag, defaultEffort) {
-			effortOverrideDown = true
+	if hasSignals {
+		sigRes = lane.ResolveEffortSignals(
+			explicitEffort,
+			*blastRadiusFlag,
+			*locEstimateFlag,
+			className,
+			defaultEffort,
+		)
+		requestedEffort = sigRes.Effort
+		if effortPassed {
+			effortOverride = true
+			if sigRes.OverrideDown {
+				effortOverrideDown = true
+			}
+		}
+	} else {
+		if effortPassed {
+			requestedEffort = *effortFlag
+			effortOverride = true
+			if lane.IsOverrideDown(*effortFlag, defaultEffort) {
+				effortOverrideDown = true
+			}
 		}
 	}
 
@@ -274,6 +320,10 @@ func runSubmit(args []string) {
 	}
 	if effortOverrideDown {
 		payloadMap["effort_override_down"] = true
+	}
+	if hasSignals {
+		payloadMap["effort_source"] = sigRes.Source
+		payloadMap["effort_signals"] = sigRes.EffortSignals()
 	}
 	if effectiveProvider != "" {
 		payloadMap["provider"] = effectiveProvider
