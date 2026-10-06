@@ -224,6 +224,7 @@ g8s/
 │   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness
 │   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers
 │   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s,
+│   ├── ladder/ — implements the quality-ladder failure classification, policy escalation, and telemetry gauges
 │   ├── lane/ — implements ALDC Layer 1 gate-lane routing and Layer 2 Jev-assisted
 │   ├── lessons/ — implements schema, append-only ledger, and fail-closed machine checks for retrospective lessons
 │   ├── lockfile/ — provides non-blocking exclusive advisory file locks used

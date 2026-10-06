@@ -176,6 +176,8 @@ func main() {
 		runVerify(os.Args[2:])
 	case "lesson":
 		runLesson(os.Args[2:])
+	case "ladder":
+		runLadder(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -1461,6 +1463,7 @@ func printUsage() {
 	fmt.Println("  autopilot    Manage cron-based supervisor trigger (g8s autopilot start|status|trigger)")
 	fmt.Println("  serve        Run daemon mode with HTTP API server (g8s serve [--address :8080])")
 	fmt.Println("  verify       Run verifier-class acceptance checks on a task (g8s verify --task <id>)")
+	fmt.Println("  ladder       Quality-ladder failure classification and escalation (g8s ladder status|advance|gauges)")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
