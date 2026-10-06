@@ -664,8 +664,10 @@ func TestBakedNameAlignmentHelpers(t *testing.T) {
 	if !isBakedNameProvider(nil, "agy", "gemini-3.8-flash-low") {
 		t.Errorf("expected isBakedNameProvider for agy to be true")
 	}
-	if isBakedNameProvider(nil, "", "gemini-3.8-flash-low") {
-		t.Errorf("expected isBakedNameProvider for empty provider to be false")
+	// Provider-less submits decide from the model id alone (issue #568): the
+	// catalog carries the agy baked-name variants, so flash-low resolves true.
+	if !isBakedNameProvider(nil, "", "gemini-3.8-flash-low") {
+		t.Errorf("expected isBakedNameProvider for empty provider with a catalog baked id to be true")
 	}
 	if isBakedNameProvider(nil, "openai", "gpt-5.5-low") {
 		t.Errorf("expected isBakedNameProvider for openai to be false")

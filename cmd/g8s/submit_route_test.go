@@ -105,8 +105,10 @@ func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	if payload["prompt"] != "Perform codebase sanity verification" {
 		t.Errorf("prompt = %v, want expected prompt", payload["prompt"])
 	}
-	if payload["model"] != "gemini-3.8-flash-high" {
-		t.Errorf("model = %v, want gemini-3.8-flash-high", payload["model"])
+	// Default effort (medium) realigns the baked-name model to the matching
+	// variant (issue #563 C3, un-shadowed by #568) — on manual routes too.
+	if payload["model"] != "gemini-3.8-flash-medium" {
+		t.Errorf("model = %v, want gemini-3.8-flash-medium", payload["model"])
 	}
 	if payload["role"] != "collector" {
 		t.Errorf("role = %v, want collector", payload["role"])
@@ -225,10 +227,12 @@ func TestSubmitRoute_Table(t *testing.T) {
 			wantSource:   "deterministic",
 		},
 		{
-			name:       "--route absent defaults to manual without router fields",
-			key:        "tbl-absent",
-			prompt:     "Legacy submit behavior",
-			wantRole:   "collector",
+			name:     "--route absent defaults to manual without router fields",
+			key:      "tbl-absent",
+			prompt:   "Legacy submit behavior",
+			wantRole: "collector",
+			// This test manifest OWNS (agy, flash-high) with no declared style:
+			// manifest ownership decides, no realignment, model stays (#568 rule).
 			wantModel:  "gemini-3.8-flash-high",
 			wantSource: "", // none
 		},
@@ -238,8 +242,8 @@ func TestSubmitRoute_Table(t *testing.T) {
 			prompt:       "Legacy submit behavior",
 			routeFlag:    "manual",
 			wantRole:     "collector",
-			wantModel:    "gemini-3.8-flash-high",
-			wantSource:   "", // none
+			wantModel:    "gemini-3.8-flash-high", // manifest-owned id, no realignment (#568)
+			wantSource:   "",                      // none
 			checkBytesTo: "tbl-absent",
 		},
 	}

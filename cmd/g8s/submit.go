@@ -419,14 +419,16 @@ func matchModelID(candID, targetID string) bool {
 func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 	// 0. Manual submits may omit --provider entirely; the model id alone must
 	// decide (issue #568: the realignment never fired for provider-less
-	// submits because this gate required a provider name). Scan the manifest,
-	// then the catalog, for a baked-name declaration of this id.
+	// submits because this gate required a provider name). Manifest ownership
+	// first — if any manifest provider declares this id, that pairing decides
+	// (the realignment must never move a model onto a provider that does not
+	// declare the target variant). Otherwise the catalog decides.
 	if provider == "" {
 		if manifest != nil {
 			for _, p := range manifest.Providers {
 				for _, m := range p.Models {
-					if matchModelID(m.ID, modelID) && m.EffortStyle == config.EffortStyleBakedName {
-						return true
+					if matchModelID(m.ID, modelID) {
+						return m.EffortStyle == config.EffortStyleBakedName
 					}
 				}
 			}
@@ -482,6 +484,9 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 // for gemini-3.8-flash-high, so mismatched (model, effort) combos reached the
 // worker CLI and died).
 func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (baked bool, decided bool) {
+	if manifest == nil {
+		return false, false
+	}
 	for _, p := range manifest.Providers {
 		if !strings.EqualFold(p.Name, provider) {
 			continue
