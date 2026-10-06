@@ -18,6 +18,31 @@ import (
 
 const offerBundleVersion = "0.12.0"
 
+const knowledgeEffortClassesSeed = `# Effort Classes Configuration — Knowledge Profile (issue #550 / C2)
+# Maps task write-scope paths to reasoning effort defaults.
+# Schema: schema_version "effort-classes.v1", first match by priority wins.
+# Unregistered tasks implicitly default to medium (fail-open floor).
+
+schema_version: "effort-classes.v1"
+
+classes:
+  # pilot-proven: doc-freshness audits and markdown updates run reliably at low effort (SCORECARD Gate 3.4)
+  - name: docs
+    default_effort: low
+    priority: 10
+    paths:
+      - "*.md"
+      - "docs/**"
+
+  - name: test
+    default_effort: medium
+    priority: 20
+    paths:
+      - "*_test.*"
+      - "*_test.go"
+      - "**/*_test.go"
+`
+
 func runOffer(args []string) {
 	if len(args) == 0 {
 		exitUsage("offer", "", "", "unknown offer subcommand", "g8s offer init --profile <name> | check | version", false)
@@ -97,6 +122,14 @@ func runOfferInit(args []string) {
 		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
 		return
 	}
+	scaffold := []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml"}
+	if *profile == "knowledge" {
+		if werr := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(knowledgeEffortClassesSeed), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		scaffold = append(scaffold, ".g8s/effort-classes.yml")
+	}
 
 	toolsDir := filepath.Join(*dir, "tools")
 	if mkErr := os.MkdirAll(toolsDir, 0o700); mkErr != nil {
@@ -121,7 +154,7 @@ func runOfferInit(args []string) {
 	out := map[string]any{
 		"profile":  *profile,
 		"target":   *dir,
-		"scaffold": []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml"},
+		"scaffold": scaffold,
 		"gates":    offer.GateScripts(),
 		"next":     []string{"wire the gates into CI", "run 'g8s offer check' for the first audit", "report findings per Mode 3"},
 	}

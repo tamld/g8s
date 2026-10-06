@@ -4,11 +4,16 @@ package main
 // RED-first: these tests fail (runOffer undefined) before implementation.
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/lane"
 )
 
 func TestOfferInitScaffoldsFromProfile(t *testing.T) {
@@ -109,4 +114,83 @@ func execOffer(t *testing.T, dir string, args ...string) offerResult {
 		code = ee.ExitCode()
 	}
 	return offerResult{exitCode: code, output: string(out)}
+}
+
+// TestOfferKnowledgeEffortClassesSeed_Parses validates that the knowledge profile
+// effort-classes seed parses with ParseEffortClasses and contains the pilot-proven comment,
+// docs->low, test->medium, and unregistered floor medium.
+func TestOfferKnowledgeEffortClassesSeed_Parses(t *testing.T) {
+	if !strings.Contains(knowledgeEffortClassesSeed, "pilot-proven") {
+		t.Errorf("knowledge effort classes seed must include 'pilot-proven' comment")
+	}
+
+	ec, err := lane.ParseEffortClasses([]byte(knowledgeEffortClassesSeed))
+	if err != nil {
+		t.Fatalf("ParseEffortClasses failed on knowledgeEffortClassesSeed: %v", err)
+	}
+
+	cls, eff := ec.ResolveClass([]string{"docs/intro.md"})
+	if cls != "docs" || eff != config.EffortLow {
+		t.Errorf("docs/intro.md = (%q, %q), want (docs, low)", cls, eff)
+	}
+
+	cls, eff = ec.ResolveClass([]string{"internal/pkg/foo_test.go"})
+	if cls != "test" || eff != config.EffortMedium {
+		t.Errorf("foo_test.go = (%q, %q), want (test, medium)", cls, eff)
+	}
+
+	cls, eff = ec.ResolveClass([]string{"main.go"})
+	if cls != lane.UnregisteredClassName || eff != config.EffortMedium {
+		t.Errorf("main.go = (%q, %q), want (unregistered, medium)", cls, eff)
+	}
+}
+
+// TestOfferInitKnowledgeProfile_ScaffoldsEffortClasses asserts that `g8s offer init --profile knowledge`
+// writes .g8s/effort-classes.yml with mode 0o600 and includes it in the scaffold list.
+func TestOfferInitKnowledgeProfile_ScaffoldsEffortClasses(t *testing.T) {
+	dir := t.TempDir()
+	res := execOffer(t, dir, "init", "--profile", "knowledge", "--json")
+	if res.exitCode != 0 {
+		t.Fatalf("offer init exit = %d, output:\n%s", res.exitCode, res.output)
+	}
+
+	targetFile := filepath.Join(dir, ".g8s", "effort-classes.yml")
+	info, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("expected .g8s/effort-classes.yml to be created: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf(".g8s/effort-classes.yml permissions = %#o, want 0600", perm)
+	}
+
+	data, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatalf("read scaffolded effort-classes.yml: %v", err)
+	}
+	if _, err := lane.ParseEffortClasses(data); err != nil {
+		t.Fatalf("scaffolded effort-classes.yml failed to parse: %v", err)
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal([]byte(res.output), &env); err != nil {
+		t.Fatalf("failed to parse offer init json response: %v\nraw: %s", err, res.output)
+	}
+	dataMap, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("envelope Data is not a map: %v", env.Data)
+	}
+	scaffoldList, ok := dataMap["scaffold"].([]any)
+	if !ok {
+		t.Fatalf("envelope Data.scaffold is not an array: %v", dataMap["scaffold"])
+	}
+	found := false
+	for _, item := range scaffoldList {
+		if s, ok := item.(string); ok && s == ".g8s/effort-classes.yml" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("scaffold list %v does not contain .g8s/effort-classes.yml", scaffoldList)
+	}
 }

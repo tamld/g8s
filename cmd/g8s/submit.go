@@ -169,11 +169,10 @@ func runSubmit(args []string) {
 		}
 	}
 
-	ec, ecErr := lane.LoadEffortClasses()
+	className, defaultEffort, ecErr := lane.ResolveClassForRoots(classPaths, scopeRoots)
 	if ecErr != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, ecErr, "Failed to load effort classes", *jsonl)
 	}
-	className, defaultEffort := ec.ResolveClass(classPaths)
 
 	requestedEffort := defaultEffort
 	var effortOverride bool

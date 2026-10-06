@@ -303,3 +303,157 @@ func TestSubmitEffort_HardRefuse_ExitsBeforeQueueing(t *testing.T) {
 		}
 	}
 }
+
+// TestSubmitEffort_SiblingRegistryWins asserts that dispatches into a sibling repo
+// resolve the sibling's effort-classes.yml registry instead of defaulting to unregistered.
+func TestSubmitEffort_SiblingRegistryWins(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "sibling_effort.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	sibDir := t.TempDir()
+	g8sDir := filepath.Join(sibDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sibClasses := `schema_version: "effort-classes.v1"
+classes:
+  - name: sibling-docs
+    default_effort: low
+    priority: 10
+    paths:
+      - "docs/**"
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(sibClasses), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	docFile := filepath.Join(sibDir, "docs", "guide.md")
+	if err := os.MkdirAll(filepath.Dir(docFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docFile, []byte("# Guide"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "sibling-task",
+		"--prompt", "Doc audit task in sibling repo",
+		"--scope-root", sibDir,
+		"--add-dir", docFile,
+	)
+	if code != 0 {
+		t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+
+	reqJSON := getTaskRequestJSON(t, dbPath, "sibling-task")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if payload["effort_class"] != "sibling-docs" {
+		t.Errorf("effort_class = %v, want sibling-docs", payload["effort_class"])
+	}
+	if payload["effort"] != "low" {
+		t.Errorf("effort = %v, want low", payload["effort"])
+	}
+}
+
+// TestSubmitEffort_SiblingRegistryMalformed_FailsLoudly asserts that an explicitly
+// malformed sibling registry fails submit loudly (non-zero exit code + typed error).
+func TestSubmitEffort_SiblingRegistryMalformed_FailsLoudly(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "sibling_malformed.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	sibDir := t.TempDir()
+	g8sDir := filepath.Join(sibDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	brokenYAML := `schema_version: "effort-classes.v1"
+classes:
+  - name: docs
+    default_effort: low
+    priority: not-a-number
+    paths: ["docs/**"]
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(brokenYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	docFile := filepath.Join(sibDir, "docs", "guide.md")
+	if err := os.MkdirAll(filepath.Dir(docFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docFile, []byte("# Guide"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "broken-sibling-task",
+		"--prompt", "Doc task with broken sibling registry",
+		"--scope-root", sibDir,
+		"--add-dir", docFile,
+	)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for broken sibling registry, got 0; raw: %s", raw)
+	}
+	if env.Error == nil {
+		t.Fatalf("expected error envelope on malformed registry, got nil; raw: %s", raw)
+	}
+	if !strings.Contains(env.Error.Message, "effort classes") {
+		t.Errorf("expected error message to mention 'effort classes', got %q", env.Error.Message)
+	}
+}
+
+// TestSubmitEffort_SiblingWithoutRegistry_FallsBackToRepoRegistry asserts that
+// dispatches into a sibling without its own registry fall back to the repo registry.
+func TestSubmitEffort_SiblingWithoutRegistry_FallsBackToRepoRegistry(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "sibling_noreg.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	sibDir := t.TempDir()
+	codeFile := filepath.Join(sibDir, "src", "worker.go")
+	if err := os.MkdirAll(filepath.Dir(codeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codeFile, []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "noreg-sibling-task",
+		"--prompt", "Worker code in sibling without registry",
+		"--scope-root", sibDir,
+		"--add-dir", codeFile,
+	)
+	if code != 0 {
+		t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+
+	reqJSON := getTaskRequestJSON(t, dbPath, "noreg-sibling-task")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	// Falls back to repo registry -> external Go code is unregistered / medium
+	if payload["effort_class"] != "unregistered" {
+		t.Errorf("effort_class = %v, want unregistered", payload["effort_class"])
+	}
+	if payload["effort"] != "medium" {
+		t.Errorf("effort = %v, want medium", payload["effort"])
+	}
+}

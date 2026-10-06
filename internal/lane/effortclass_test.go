@@ -2,6 +2,8 @@ package lane
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -445,4 +447,236 @@ func TestTelemetryEventFields_Present(t *testing.T) {
 			t.Errorf("TraceEvent Payload missing key %q", k)
 		}
 	}
+}
+
+// TestResolveClassForRoots tests the C2 sibling-scoped effort class resolution rules:
+//  1. All paths under one root with a sibling registry -> sibling class wins.
+//  2. Paths spanning two roots -> repo registry (pinned fallback).
+//  3. Root without a registry -> repo registry fallback.
+//  4. Sibling file malformed -> typed error surfaced (fails loudly).
+//  5. Pure function seam: tests pass injected paths/roots with zero os.Chdir calls.
+func TestResolveClassForRoots(t *testing.T) {
+	// 1. Sibling registry wins when all paths resolve under one root
+	t.Run("sibling_registry_wins", func(t *testing.T) {
+		sibDir := t.TempDir()
+		g8sDir := filepath.Join(sibDir, ".g8s")
+		if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		sibYAML := `schema_version: "effort-classes.v1"
+classes:
+  - name: sibling-docs
+    default_effort: minimal
+    priority: 5
+    paths:
+      - "docs/**"
+`
+		if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(sibYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		paths := []string{
+			filepath.Join(sibDir, "docs", "intro.md"),
+			filepath.Join(sibDir, "docs", "api.md"),
+		}
+		roots := []string{"/other/root", sibDir}
+
+		className, defaultEffort, err := ResolveClassForRoots(paths, roots)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if className != "sibling-docs" {
+			t.Errorf("className = %q, want sibling-docs", className)
+		}
+		if defaultEffort != config.EffortMinimal {
+			t.Errorf("defaultEffort = %q, want %q", defaultEffort, config.EffortMinimal)
+		}
+	})
+
+	// 2. Paths spanning two roots fall back to repo registry (g8s CWD)
+	t.Run("paths_spanning_two_roots_fallback_to_repo", func(t *testing.T) {
+		sib1 := t.TempDir()
+		sib2 := t.TempDir()
+
+		for _, dir := range []string{sib1, sib2} {
+			g8sDir := filepath.Join(dir, ".g8s")
+			if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sibYAML := `schema_version: "effort-classes.v1"
+classes:
+  - name: custom-sib
+    default_effort: low
+    priority: 5
+    paths:
+      - "code/**"
+`
+			if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(sibYAML), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// A Go file in g8s repo defaults to unregistered / medium
+		paths := []string{
+			filepath.Join(sib1, "code", "a.go"),
+			filepath.Join(sib2, "code", "b.go"),
+		}
+		roots := []string{sib1, sib2}
+
+		className, defaultEffort, err := ResolveClassForRoots(paths, roots)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// In g8s repo, .go files are unregistered -> medium
+		if className != UnregisteredClassName {
+			t.Errorf("className = %q, want %q", className, UnregisteredClassName)
+		}
+		if defaultEffort != config.EffortMedium {
+			t.Errorf("defaultEffort = %q, want %q", defaultEffort, config.EffortMedium)
+		}
+	})
+
+	// 3. Root without a registry falls back to repo registry (g8s CWD)
+	t.Run("root_without_registry_fallback_to_repo", func(t *testing.T) {
+		sibNoReg := t.TempDir()
+
+		// Case A: path inside repo (CWD) matches repo's docs class
+		pathsRepo := []string{"docs/architecture.md"}
+		rootsRepo := []string{sibNoReg, "."}
+
+		className, defaultEffort, err := ResolveClassForRoots(pathsRepo, rootsRepo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if className != "docs" {
+			t.Errorf("className = %q, want docs", className)
+		}
+		if defaultEffort != config.EffortLow {
+			t.Errorf("defaultEffort = %q, want %q", defaultEffort, config.EffortLow)
+		}
+
+		// Case B: path inside sibling without registry falls open to unregistered / medium
+		pathsSib := []string{filepath.Join(sibNoReg, "docs", "arch.md")}
+		rootsSib := []string{sibNoReg}
+
+		className, defaultEffort, err = ResolveClassForRoots(pathsSib, rootsSib)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if className != UnregisteredClassName {
+			t.Errorf("className = %q, want %q", className, UnregisteredClassName)
+		}
+		if defaultEffort != config.EffortMedium {
+			t.Errorf("defaultEffort = %q, want %q", defaultEffort, config.EffortMedium)
+		}
+	})
+
+	// 4. Sibling file malformed surfaces typed error (does NOT silently swallow)
+	t.Run("sibling_file_malformed_surfaces_typed_error", func(t *testing.T) {
+		// Syntax / parse error (invalid priority integer)
+		sibParseErr := t.TempDir()
+		g8sDir := filepath.Join(sibParseErr, ".g8s")
+		if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		parseErrYAML := `schema_version: "effort-classes.v1"
+classes:
+  - name: docs
+    default_effort: low
+    priority: not-an-int
+    paths: ["*.md"]
+`
+		if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(parseErrYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		paths := []string{filepath.Join(sibParseErr, "docs", "readme.md")}
+		roots := []string{sibParseErr}
+
+		_, _, err := ResolveClassForRoots(paths, roots)
+		if err == nil {
+			t.Fatal("expected error for malformed sibling file, got nil")
+		}
+		var parseErr *EffortClassParseError
+		if !errors.As(err, &parseErr) {
+			t.Errorf("expected *EffortClassParseError, got: %T (%v)", err, err)
+		}
+
+		// Schema version error
+		sibBadSchema := t.TempDir()
+		g8sDirBad := filepath.Join(sibBadSchema, ".g8s")
+		if err := os.MkdirAll(g8sDirBad, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		badSchemaYAML := `schema_version: "effort-classes.v999"
+classes:
+  - name: docs
+    default_effort: low
+    priority: 10
+    paths: ["*.md"]
+`
+		if err := os.WriteFile(filepath.Join(g8sDirBad, "effort-classes.yml"), []byte(badSchemaYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		pathsBad := []string{filepath.Join(sibBadSchema, "docs", "readme.md")}
+		rootsBad := []string{sibBadSchema}
+
+		_, _, err = ResolveClassForRoots(pathsBad, rootsBad)
+		if err == nil {
+			t.Fatal("expected error for bad schema version, got nil")
+		}
+		var schemaErr *SchemaVersionError
+		if !errors.As(err, &schemaErr) {
+			t.Errorf("expected *SchemaVersionError, got: %T (%v)", err, err)
+		}
+
+		// Semantic validation error (unknown effort level)
+		sibValErr := t.TempDir()
+		g8sDirVal := filepath.Join(sibValErr, ".g8s")
+		if err := os.MkdirAll(g8sDirVal, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		valErrYAML := `schema_version: "effort-classes.v1"
+classes:
+  - name: docs
+    default_effort: super-ultra-turbo
+    priority: 10
+    paths: ["*.md"]
+`
+		if err := os.WriteFile(filepath.Join(g8sDirVal, "effort-classes.yml"), []byte(valErrYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		pathsVal := []string{filepath.Join(sibValErr, "docs", "readme.md")}
+		rootsVal := []string{sibValErr}
+
+		_, _, err = ResolveClassForRoots(pathsVal, rootsVal)
+		if err == nil {
+			t.Fatal("expected error for invalid effort level, got nil")
+		}
+		var valErr *EffortClassValidationError
+		if !errors.As(err, &valErr) {
+			t.Errorf("expected *EffortClassValidationError, got: %T (%v)", err, err)
+		}
+	})
+
+	// 5. Empty paths / empty roots degrade gracefully to repo registry
+	t.Run("empty_paths_or_roots", func(t *testing.T) {
+		cls, eff, err := ResolveClassForRoots(nil, []string{"/some/root"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cls != UnregisteredClassName || eff != config.EffortMedium {
+			t.Errorf("empty paths = (%q, %q), want (unregistered, medium)", cls, eff)
+		}
+
+		cls, eff, err = ResolveClassForRoots([]string{"anything.go"}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cls != UnregisteredClassName || eff != config.EffortMedium {
+			t.Errorf("nil roots = (%q, %q), want (unregistered, medium)", cls, eff)
+		}
+	})
 }
