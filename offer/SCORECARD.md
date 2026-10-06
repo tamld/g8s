@@ -6,7 +6,7 @@ Source: issue #442.
 
 | Wave | Project | Profile | Onboarded | First-audit (M2) | Status |
 |------|---------|---------|-----------|------------------|--------|
-| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **47 real findings total**: gate-audit 2 (structure markers + links) + worker-audit 7 (2 stale version refs, 2 date-rot >4mo, 2 link-rot, 1 orphan; 91 files, 218s, LOW) + GATE 3.4 audit **38** (12 stale refs — Mandalay/Plane retirement unreconciled, 23 date-rot, 2 link-rot, 1 orphan; 48 files, LOW) | M1 ✓ · M2 ✓ — pilot live; effort machinery LANDED: Phase 3.1 loader #556, 3.2 adapter+knob #557, 3.3 classes+telemetry #558/#559, GATE 3.4 E2E at `--effort low` SATISFIED (effort fields + usage tokens recorded on a real dispatch) |
+| 1 | tamld-llm-wiki | knowledge | 2026-10-05 (commit b26ca938, local branch codex/* — wiki session owns the push) | **~126 real findings total**: gate-audit 2 + worker-audit 7 (91 files, 218s, LOW) + GATE 3.4 **38** (48 files, 248s, LOW) + 1-Mindsets **79** (4 stale, 30 date-rot, 7 link-rot, 38 MoC-orphans; 41 files, 111s, LOW) + P1 sampling run (3-Automations re-do at HIGH: 699s, 1.09M tokens — comparable quality, floor trusted for the audit class) | M1 ✓ · M2 ✓ — pilot live; effort machinery LANDED (#556-#559, #561); P1 audit-sampling gauge FIRST READING recorded (#550): low tier floor TRUSTED for docs/audit class |
 | 2 | defense-in-depth | security | — | — | pending |
 | 3 | aegis | infra | — | — | pending |
 | 3 | homelab-proxmox | infra/utility | — | — | pending |
