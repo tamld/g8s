@@ -417,20 +417,43 @@ func matchModelID(candID, targetID string) bool {
 }
 
 func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
+	// 0. Manual submits may omit --provider entirely; the model id alone must
+	// decide (issue #568: the realignment never fired for provider-less
+	// submits because this gate required a provider name). Scan the manifest,
+	// then the catalog, for a baked-name declaration of this id.
 	if provider == "" {
+		if manifest != nil {
+			for _, p := range manifest.Providers {
+				for _, m := range p.Models {
+					if matchModelID(m.ID, modelID) && m.EffortStyle == config.EffortStyleBakedName {
+						return true
+					}
+				}
+			}
+		}
+		if cat, err := config.LoadDefaultCatalog(); err == nil && cat != nil {
+			for _, cp := range cat.Providers {
+				if cp.EffortStyle != config.EffortStyleBakedName {
+					continue
+				}
+				for _, m := range cp.Models {
+					if matchModelID(m.ID, modelID) {
+						return true
+					}
+				}
+			}
+		}
 		return false
 	}
 
-	// 1. Check user manifest if provided
-	if manifest != nil {
-		if verdict, decided := manifestBakedNameVerdict(manifest, provider, modelID); decided {
-			return verdict
-		}
-		// Undeclared style on the matched manifest model: fall through to the
-		// catalog, the effort-style SSoT. (Issue #568: platform manifests declare
-		// model ids without styles and shadowed the catalog's baked-name verdict,
-		// so mismatched (model, effort) combos reached the worker CLI and died.)
+	if verdict, decided := manifestBakedNameVerdict(manifest, provider, modelID); decided {
+		return verdict
 	}
+	// Undeclared style on the matched manifest model, or the manifest knows the
+	// provider but not this id: fall through to the catalog, the effort-style
+	// SSoT. (Issue #568: platform manifests declare model ids without styles and
+	// shadowed the catalog's baked-name verdict, so mismatched (model, effort)
+	// combos reached the worker CLI and died.)
 
 	// 2. Check default catalog for the provider
 	cat, err := config.LoadDefaultCatalog()
