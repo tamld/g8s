@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
 )
 
 func runSubmitCLI(t *testing.T, binPath string, envVars []string, args ...string) (testEnvelope, int, string) {
@@ -54,6 +55,7 @@ func getTaskRequestJSON(t *testing.T, dbPath string, idempotencyKey string) stri
 
 // TestSubmitRoute_GoldenByteIdentity tests requirement 1 and 4:
 // With --route absent vs --route manual, request_json stored in SQLite is byte-for-byte identical.
+
 func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
@@ -100,6 +102,21 @@ func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonAbsent), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
+	// DEBUG-CI (temporary): dump environment facts for the runner-only
+	// GoldenByteIdentity divergence.
+	wd, _ := os.Getwd()
+	t.Logf("DEBUG-CI cwd=%q", wd)
+	_, homeErr := os.UserHomeDir()
+	t.Logf("DEBUG-CI userHomeErr=%v", homeErr)
+	if catDbg, catErr := config.LoadDefaultCatalog(); catErr != nil {
+		t.Logf("DEBUG-CI catalogErr=%v", catErr)
+	} else if cpDbg, okDbg := catDbg.FindProvider("agy"); !okDbg {
+		t.Logf("DEBUG-CI catalog agy absent")
+	} else {
+		t.Logf("DEBUG-CI catalog agy style=%q models=%d", cpDbg.EffortStyle, len(cpDbg.Models))
+	}
+	t.Logf("DEBUG-CI isBakedProviderless=%v", isBakedNameProvider(nil, "", "gemini-3.8-flash-high"))
+	t.Logf("DEBUG-CI payload=%v", payload)
 
 	// Verify legacy payload fields are intact and no router fields leak into manual mode
 	if payload["prompt"] != "Perform codebase sanity verification" {
