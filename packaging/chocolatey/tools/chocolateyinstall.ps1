@@ -1,4 +1,4 @@
-$url = 'https://github.com/tamld/g8s/releases/download/v0.15.0/g8s_0.15.0_windows_amd64.msi'
+$url = 'https://github.com/tamld/g8s/releases/download/v0.16.0/g8s_0.16.0_windows_amd64.msi'
 $checksum = '<from checksums.txt>'
 $packageArgs = @{
   packageName    = 'g8s'
