@@ -46,6 +46,71 @@ type GaugesReport struct {
 	PassRates       []ClassEffortGauge     `json:"pass_rates"`
 	EscalationRates []ClassEscalationGauge `json:"escalation_rates"`
 	HITL            HITLMetric             `json:"hitl"`
+	TotalTokens     int                    `json:"total_tokens,omitempty"`
+}
+
+func isInvalidTokenEvent(ev telemetry.TraceEvent, lastTaskCumTokens map[string]int) bool {
+	if ev.InputTokens < 0 || ev.OutputTokens < 0 {
+		return true
+	}
+	if ev.Payload != nil {
+		for _, key := range []string{"input_tokens", "output_tokens", "tokens", "total_tokens", "cumulative_tokens"} {
+			if val, ok := ev.Payload[key]; ok {
+				switch v := val.(type) {
+				case int:
+					if v < 0 {
+						return true
+					}
+				case int64:
+					if v < 0 {
+						return true
+					}
+				case float64:
+					if v < 0 {
+						return true
+					}
+				}
+			}
+		}
+		for _, key := range []string{"cumulative_tokens", "cum_tokens"} {
+			if val, ok := ev.Payload[key]; ok {
+				var cum int
+				switch v := val.(type) {
+				case int:
+					cum = v
+				case int64:
+					cum = int(v)
+				case float64:
+					cum = int(v)
+				}
+				if ev.TaskID != "" && lastTaskCumTokens != nil {
+					if prev, exists := lastTaskCumTokens[ev.TaskID]; exists && cum < prev {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func eventTokens(ev telemetry.TraceEvent) int {
+	inTok := ev.InputTokens
+	outTok := ev.OutputTokens
+	if inTok == 0 && outTok == 0 && ev.Payload != nil {
+		if v, ok := ev.Payload["input_tokens"].(float64); ok && v > 0 {
+			inTok = int(v)
+		}
+		if v, ok := ev.Payload["output_tokens"].(float64); ok && v > 0 {
+			outTok = int(v)
+		}
+		if inTok == 0 && outTok == 0 {
+			if v, ok := ev.Payload["tokens"].(float64); ok && v > 0 {
+				inTok = int(v)
+			}
+		}
+	}
+	return inTok + outTok
 }
 
 func extractEventClass(ev telemetry.TraceEvent) string {
@@ -119,9 +184,6 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 		effort string
 	}
 
-	passCounts := make(map[pairKey]int)
-	failCounts := make(map[pairKey]int)
-
 	// Build map of tasks by task_id to inspect lineage
 	taskMap := make(map[string]*controlplane.Task)
 	classByTask := make(map[string]string)
@@ -145,8 +207,141 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 		}
 	}
 
-	// Tally pass and fail events per (class, effort)
+	// Resolve root task for every task in taskMap
+	rootTaskForTask := make(map[string]string)
+	for id, t := range taskMap {
+		cur := t
+		visited := make(map[string]bool)
+		for cur.ParentTaskID != nil && *cur.ParentTaskID != "" && !visited[cur.TaskID] {
+			visited[cur.TaskID] = true
+			parent, ok := taskMap[*cur.ParentTaskID]
+			if !ok {
+				rootTaskForTask[id] = *cur.ParentTaskID
+				break
+			}
+			cur = parent
+		}
+		if rootTaskForTask[id] == "" {
+			rootTaskForTask[id] = cur.TaskID
+		}
+	}
+
+	// Propagate class from root tasks to child tasks if missing
+	for id, rootID := range rootTaskForTask {
+		if classByTask[id] == "" && classByTask[rootID] != "" {
+			classByTask[id] = classByTask[rootID]
+		}
+	}
+
+	// Escalation and HITL rate calculations
+	rootTasksByClass := make(map[string]map[string]bool)
+	rungsByClass := make(map[string]int)
+
+	// Scan tasks from control plane
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		cls := classByTask[t.TaskID]
+		if cls == "" {
+			cls = "unregistered"
+		}
+		if filterClass != "" && !strings.EqualFold(cls, filterClass) {
+			continue
+		}
+
+		if t.ParentTaskID == nil || *t.ParentTaskID == "" {
+			// Root task
+			if rootTasksByClass[cls] == nil {
+				rootTasksByClass[cls] = make(map[string]bool)
+			}
+			rootTasksByClass[cls][t.TaskID] = true
+		} else {
+			// Escalation rung
+			rungsByClass[cls]++
+		}
+	}
+
+	// Helper to resolve the root task ID for an event
+	resolveRootTaskID := func(ev telemetry.TraceEvent, cls string) string {
+		if ev.SupervisorTaskID != nil && *ev.SupervisorTaskID != "" {
+			supID := *ev.SupervisorTaskID
+			if root, ok := rootTaskForTask[supID]; ok && root != "" {
+				return root
+			}
+			return supID
+		}
+		if ev.Payload != nil {
+			for _, k := range []string{"root_task_id", "supervisor_task_id", "parent_task_id"} {
+				if v, ok := ev.Payload[k].(string); ok && v != "" {
+					if root, ok := rootTaskForTask[v]; ok && root != "" {
+						return root
+					}
+					return v
+				}
+			}
+		}
+		if ev.TaskID != "" {
+			if root, ok := rootTaskForTask[ev.TaskID]; ok && root != "" {
+				return root
+			}
+		}
+		if roots, ok := rootTasksByClass[cls]; ok && len(roots) == 1 {
+			for rID := range roots {
+				return rID
+			}
+		}
+		return ev.TaskID
+	}
+
+	// 1. Filter events with token monotonicity validation (R3-9)
+	var validEvents []telemetry.TraceEvent
+	var cumulativeTokens int
+	lastTaskCumTokens := make(map[string]int)
+
 	for _, ev := range events {
+		if isInvalidTokenEvent(ev, lastTaskCumTokens) {
+			// R3-9: reject event that would move cumulative counter backwards
+			// Skip event, keep counter, do not panic, do not go negative
+			continue
+		}
+
+		cls := extractEventClass(ev)
+		if cls == "unregistered" && ev.TaskID != "" && classByTask[ev.TaskID] != "" {
+			cls = classByTask[ev.TaskID]
+		}
+		matchesFilter := filterClass == "" || strings.EqualFold(cls, filterClass)
+
+		tokDelta := eventTokens(ev)
+		if tokDelta > 0 && matchesFilter {
+			cumulativeTokens += tokDelta
+		}
+
+		if ev.Payload != nil && ev.TaskID != "" {
+			for _, key := range []string{"cumulative_tokens", "cum_tokens"} {
+				if val, ok := ev.Payload[key]; ok {
+					switch v := val.(type) {
+					case int:
+						if v > lastTaskCumTokens[ev.TaskID] {
+							lastTaskCumTokens[ev.TaskID] = v
+						}
+					case float64:
+						if int(v) > lastTaskCumTokens[ev.TaskID] {
+							lastTaskCumTokens[ev.TaskID] = int(v)
+						}
+					}
+				}
+			}
+		}
+
+		validEvents = append(validEvents, ev)
+	}
+
+	// Tally pass and fail events per (class, effort)
+	passCounts := make(map[pairKey]int)
+	failCounts := make(map[pairKey]int)
+
+	for _, ev := range validEvents {
 		cls := extractEventClass(ev)
 		if cls == "unregistered" && ev.TaskID != "" && classByTask[ev.TaskID] != "" {
 			cls = classByTask[ev.TaskID]
@@ -199,38 +394,10 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 		return ladderIndex(passRates[i].Effort) < ladderIndex(passRates[j].Effort)
 	})
 
-	// Escalation and HITL rate calculations
-	rootTasksByClass := make(map[string]map[string]bool)
-	rungsByClass := make(map[string]int)
-	hitlTasks := make(map[string]bool)
+	// Scan events for ladder rungs and HITL markers (deduped by root task ID per R3-10)
+	hitlRootTasks := make(map[string]bool)
 
-	// Scan tasks from control plane
-	for _, t := range tasks {
-		if t == nil {
-			continue
-		}
-		cls := classByTask[t.TaskID]
-		if cls == "" {
-			cls = "unregistered"
-		}
-		if filterClass != "" && !strings.EqualFold(cls, filterClass) {
-			continue
-		}
-
-		if t.ParentTaskID == nil || *t.ParentTaskID == "" {
-			// Root task
-			if rootTasksByClass[cls] == nil {
-				rootTasksByClass[cls] = make(map[string]bool)
-			}
-			rootTasksByClass[cls][t.TaskID] = true
-		} else {
-			// Escalation rung
-			rungsByClass[cls]++
-		}
-	}
-
-	// Scan events for ladder rungs and HITL markers
-	for _, ev := range events {
+	for _, ev := range validEvents {
 		cls := extractEventClass(ev)
 		if cls == "unregistered" && ev.TaskID != "" && classByTask[ev.TaskID] != "" {
 			cls = classByTask[ev.TaskID]
@@ -254,7 +421,7 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 			if act, ok := ev.Payload["action"].(string); ok && strings.EqualFold(act, "hitl") {
 				isHITL = true
 			}
-			if fv, ok := ev.Payload["final_verdict"].(string); ok && strings.HasPrefix(fv, "hitl") {
+			if fv, ok := ev.Payload["final_verdict"].(string); ok && strings.HasPrefix(strings.ToLower(fv), "hitl") {
 				isHITL = true
 			}
 			if r, ok := ev.Payload["ladder_rung"].(float64); ok && r > 0 {
@@ -266,8 +433,11 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 			// If tasks table was not supplied, count from events
 			rungsByClass[cls]++
 		}
-		if isHITL && ev.TaskID != "" {
-			hitlTasks[ev.TaskID] = true
+		if isHITL {
+			rootID := resolveRootTaskID(ev, cls)
+			if rootID != "" {
+				hitlRootTasks[rootID] = true
+			}
 		}
 	}
 
@@ -288,8 +458,21 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 	for cls := range allClasses {
 		taskCount := len(rootTasksByClass[cls])
 		if taskCount == 0 {
-			// Fallback: estimate from total events or distinct task IDs
-			taskCount = 1
+			// Fallback: estimate from distinct root task IDs in events for this class
+			distinct := make(map[string]bool)
+			for _, ev := range validEvents {
+				evCls := extractEventClass(ev)
+				if evCls == "unregistered" && ev.TaskID != "" && classByTask[ev.TaskID] != "" {
+					evCls = classByTask[ev.TaskID]
+				}
+				if strings.EqualFold(evCls, cls) {
+					distinct[resolveRootTaskID(ev, cls)] = true
+				}
+			}
+			taskCount = len(distinct)
+			if taskCount == 0 {
+				taskCount = 1
+			}
 		}
 		totalRounds += taskCount
 		rungs := rungsByClass[cls]
@@ -309,17 +492,27 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 		return escalationRates[i].Class < escalationRates[j].Class
 	})
 
-	if totalRounds == 0 {
+	// R3-11: Never leak unfiltered events/tasks into TotalRounds when filterClass is set
+	if filterClass == "" && totalRounds == 0 {
 		totalRounds = len(tasks)
 		if totalRounds == 0 {
-			totalRounds = len(events)
+			totalRounds = len(validEvents)
 		}
 	}
 
-	hitlCount := len(hitlTasks)
+	hitlCount := len(hitlRootTasks)
+	if totalRounds > 0 && hitlCount > totalRounds {
+		hitlCount = totalRounds
+	}
 	hitlRate := 0.0
 	if totalRounds > 0 {
 		hitlRate = round4(float64(hitlCount) / float64(totalRounds))
+	}
+	if hitlRate > 1.0 {
+		hitlRate = 1.0
+	}
+	if hitlRate < 0.0 {
+		hitlRate = 0.0
 	}
 
 	return &GaugesReport{
@@ -331,6 +524,7 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 			HITLPackets: hitlCount,
 			HITLRate:    hitlRate,
 		},
+		TotalTokens: cumulativeTokens,
 	}
 }
 

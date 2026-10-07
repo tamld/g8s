@@ -3,6 +3,7 @@ package ladder
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,43 @@ import (
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/routing"
 )
+
+var (
+	// ErrDuplicateRungIndex indicates that the lineage history contains duplicate rung indices.
+	ErrDuplicateRungIndex = errors.New("duplicate rung index in lineage history")
+
+	// ErrRungDiscontinuity indicates that lineage rung indices contain gaps or skips.
+	ErrRungDiscontinuity = errors.New("rung sequence discontinuity in lineage history")
+)
+
+// DuplicateRungIndexError provides rich details when a duplicate rung index is encountered in lineage history.
+type DuplicateRungIndexError struct {
+	TaskID    string
+	RungIndex int
+}
+
+func (e *DuplicateRungIndexError) Error() string {
+	return fmt.Sprintf("task %s lineage contains duplicate rung index %d", e.TaskID, e.RungIndex)
+}
+
+func (e *DuplicateRungIndexError) Unwrap() error {
+	return ErrDuplicateRungIndex
+}
+
+// RungDiscontinuityError provides rich details when a rung index gap/skip is encountered in lineage history.
+type RungDiscontinuityError struct {
+	TaskID       string
+	ExpectedRung int
+	ActualRung   int
+}
+
+func (e *RungDiscontinuityError) Error() string {
+	return fmt.Sprintf("task %s lineage sequence discontinuity: expected rung %d, got %d", e.TaskID, e.ExpectedRung, e.ActualRung)
+}
+
+func (e *RungDiscontinuityError) Unwrap() error {
+	return ErrRungDiscontinuity
+}
 
 // LadderAction describes the decision reached for the next step of the ladder.
 type LadderAction string
@@ -242,6 +280,41 @@ func EvaluateNextRung(ctx PolicyContext) RungPlan {
 			Action:       ActionHITL,
 			Reason:       err.Error(),
 			RefusalError: err,
+		}
+	}
+
+	// Lineage integrity checks: duplicate rung indices (R3-1) and sequence continuity (R3-3)
+	if len(ctx.History) > 0 {
+		seenRungs := make(map[int]bool, len(ctx.History))
+		for _, h := range ctx.History {
+			if seenRungs[h.RungIndex] {
+				err := &DuplicateRungIndexError{
+					TaskID:    ctx.RootTaskID,
+					RungIndex: h.RungIndex,
+				}
+				return RungPlan{
+					Action:       "",
+					Reason:       err.Error(),
+					RefusalError: err,
+				}
+			}
+			seenRungs[h.RungIndex] = true
+		}
+
+		for i := 1; i < len(ctx.History); i++ {
+			expected := ctx.History[i-1].RungIndex + 1
+			if ctx.History[i].RungIndex > expected {
+				err := &RungDiscontinuityError{
+					TaskID:       ctx.RootTaskID,
+					ExpectedRung: expected,
+					ActualRung:   ctx.History[i].RungIndex,
+				}
+				return RungPlan{
+					Action:       "",
+					Reason:       err.Error(),
+					RefusalError: err,
+				}
+			}
 		}
 	}
 

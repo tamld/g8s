@@ -215,11 +215,6 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 	// 4. Double-advance of the same rung
 	t.Run("double_advance_same_rung_rejected", func(t *testing.T) {
 		// Rule: Rung state machine must reject double-advance of the same rung (duplicate RungIndex in history).
-		// FINDING-R3-1:
-		// Expected: EvaluateNextRung detects duplicate rung index in history and returns a refusal error / rejects double-advance.
-		// Actual: EvaluateNextRung blindly uses len(ctx.History) = 2, advancing past Rung 1 without refusal error.
-		t.Skip("FINDING-R3-1: EvaluateNextRung accepts double-advance with duplicate rung indices in history without refusal")
-
 		ctx := PolicyContext{
 			RootTaskID:     "task-root-dup",
 			Class:          "feature",
@@ -234,8 +229,21 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 			LatestVerdict: ClassifierVerdict{Shape: ShapeEffort},
 		}
 		plan := EvaluateNextRung(ctx)
+		if plan.Action != "" {
+			t.Errorf("expected Action empty on refusal, got %q", plan.Action)
+		}
 		if plan.RefusalError == nil {
 			t.Fatalf("expected refusal error on duplicate rung index in history, got plan %+v", plan)
+		}
+		if !errors.Is(plan.RefusalError, ErrDuplicateRungIndex) {
+			t.Errorf("RefusalError = %v, want ErrDuplicateRungIndex", plan.RefusalError)
+		}
+		var dupErr *DuplicateRungIndexError
+		if !errors.As(plan.RefusalError, &dupErr) {
+			t.Fatalf("expected DuplicateRungIndexError, got %T", plan.RefusalError)
+		}
+		if dupErr.RungIndex != 0 {
+			t.Errorf("DuplicateRungIndexError RungIndex = %d, want 0", dupErr.RungIndex)
 		}
 	})
 
@@ -270,11 +278,6 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 	// 6. Lineage integrity: skipped rungs in history
 	t.Run("lineage_integrity_skipped_rungs", func(t *testing.T) {
 		// Rule: Lineage rungs must be contiguous without gaps (parent chain cannot skip rungs; e.g. Rung 0 then Rung 2).
-		// FINDING-R3-3:
-		// Expected: Lineage integrity check refuses progression when rung indices contain gaps/skips.
-		// Actual: EvaluateNextRung checks only len(ctx.History) and allows skipped rungs without validation.
-		t.Skip("FINDING-R3-3: EvaluateNextRung does not validate history sequence continuity, accepting skipped rungs")
-
 		ctx := PolicyContext{
 			RootTaskID:     "task-root-gap",
 			Class:          "feature",
@@ -289,8 +292,21 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 			},
 		}
 		plan := EvaluateNextRung(ctx)
+		if plan.Action != "" {
+			t.Errorf("expected Action empty on refusal, got %q", plan.Action)
+		}
 		if plan.RefusalError == nil {
 			t.Fatalf("expected refusal error on skipped rung in lineage, got %+v", plan)
+		}
+		if !errors.Is(plan.RefusalError, ErrRungDiscontinuity) {
+			t.Errorf("RefusalError = %v, want ErrRungDiscontinuity", plan.RefusalError)
+		}
+		var discErr *RungDiscontinuityError
+		if !errors.As(plan.RefusalError, &discErr) {
+			t.Fatalf("expected RungDiscontinuityError, got %T", plan.RefusalError)
+		}
+		if discErr.ExpectedRung != 1 || discErr.ActualRung != 2 {
+			t.Errorf("RungDiscontinuityError = %+v, want ExpectedRung=1, ActualRung=2", discErr)
 		}
 	})
 
@@ -776,25 +792,71 @@ func TestRedtest_Dimension4_EvidencePackets(t *testing.T) {
 	// 2. Missing required fields validation
 	t.Run("missing_required_fields_validation", func(t *testing.T) {
 		// Rule: Evidence packets must validate required fields (RootTaskID, Class, FinalVerdict); empty fields should be rejected.
-		// FINDING-R3-6:
-		// Expected: BuildEvidencePacket validates required fields and rejects empty RootTaskID, Class, or FinalVerdict.
-		// Actual: BuildEvidencePacket accepts empty strings for all required fields without validation.
-		t.Skip("FINDING-R3-6: BuildEvidencePacket does not validate required fields (RootTaskID, Class, FinalVerdict)")
+		pEmpty := BuildEvidencePacket("", "", "", "reason", nil, nil, 0)
+		if pEmpty.ValidationError == nil {
+			t.Fatalf("expected validation error for empty required fields, got nil")
+		}
+		if !errors.Is(pEmpty.ValidationError, ErrMissingRequiredField) {
+			t.Errorf("expected ErrMissingRequiredField, got %v", pEmpty.ValidationError)
+		}
+		var missingErr *MissingRequiredFieldError
+		if !errors.As(pEmpty.ValidationError, &missingErr) {
+			t.Fatalf("expected MissingRequiredFieldError, got %T", pEmpty.ValidationError)
+		}
+		if err := pEmpty.Validate(); err == nil {
+			t.Errorf("expected Validate() error on empty packet")
+		}
+		var buf bytes.Buffer
+		if err := pEmpty.WriteJSON(&buf); err == nil {
+			t.Errorf("expected WriteJSON to reject empty packet")
+		}
 
-		packet := BuildEvidencePacket("", "", "", "reason", nil, nil, 0)
-		if packet.RootTaskID == "" || packet.Class == "" || packet.FinalVerdict == "" {
-			t.Fatalf("expected validation rejection for empty required fields, packet constructed: %+v", packet)
+		// Subtest: missing RootTaskID
+		pNoRoot := BuildEvidencePacket("", "feature", "hitl", "reason", nil, nil, 0)
+		if pNoRoot.ValidationError == nil || !errors.Is(pNoRoot.ValidationError, ErrMissingRequiredField) {
+			t.Errorf("expected ErrMissingRequiredField for empty RootTaskID, got %v", pNoRoot.ValidationError)
+		}
+		if errors.As(pNoRoot.ValidationError, &missingErr) && missingErr.Field != "RootTaskID" {
+			t.Errorf("expected Field 'RootTaskID', got %s", missingErr.Field)
+		}
+
+		// Subtest: missing Class
+		pNoClass := BuildEvidencePacket("t-root", "", "hitl", "reason", nil, nil, 0)
+		if pNoClass.ValidationError == nil || !errors.Is(pNoClass.ValidationError, ErrMissingRequiredField) {
+			t.Errorf("expected ErrMissingRequiredField for empty Class, got %v", pNoClass.ValidationError)
+		}
+		if errors.As(pNoClass.ValidationError, &missingErr) && missingErr.Field != "Class" {
+			t.Errorf("expected Field 'Class', got %s", missingErr.Field)
+		}
+
+		// Subtest: missing FinalVerdict
+		pNoVerdict := BuildEvidencePacket("t-root", "feature", "", "reason", nil, nil, 0)
+		if pNoVerdict.ValidationError == nil || !errors.Is(pNoVerdict.ValidationError, ErrMissingRequiredField) {
+			t.Errorf("expected ErrMissingRequiredField for empty FinalVerdict, got %v", pNoVerdict.ValidationError)
+		}
+		if errors.As(pNoVerdict.ValidationError, &missingErr) && missingErr.Field != "FinalVerdict" {
+			t.Errorf("expected Field 'FinalVerdict', got %s", missingErr.Field)
+		}
+
+		// Subtest: valid packet passes validation
+		pValid := BuildEvidencePacket("t-root", "feature", "hitl", "reason", nil, nil, 0)
+		if pValid.ValidationError != nil {
+			t.Errorf("expected valid packet to have nil ValidationError, got %v", pValid.ValidationError)
+		}
+		if err := pValid.Validate(); err != nil {
+			t.Errorf("expected Validate() nil for valid packet, got %v", err)
+		}
+
+		// Subtest: NewEvidencePacket returns typed error
+		_, newErr := NewEvidencePacket("", "", "", "reason", nil, nil, 0)
+		if newErr == nil || !errors.Is(newErr, ErrMissingRequiredField) {
+			t.Errorf("expected NewEvidencePacket to return ErrMissingRequiredField, got %v", newErr)
 		}
 	})
 
 	// 3. WriteToFile reject path escapes
 	t.Run("write_to_file_reject_path_escapes", func(t *testing.T) {
 		// Rule: WriteToFile must validate target path and reject path escapes / directory traversal (e.g. ../../escaped.json).
-		// FINDING-R3-7:
-		// Expected: WriteToFile rejects paths containing '..' or escaping directory boundaries.
-		// Actual: WriteToFile calls os.Create directly with no path validation, permitting path escapes.
-		t.Skip("FINDING-R3-7: WriteToFile does not validate destination paths, allowing directory traversal escapes")
-
 		dir := t.TempDir()
 		safeSubdir := filepath.Join(dir, "safe")
 		if err := os.Mkdir(safeSubdir, 0o755); err != nil {
@@ -802,10 +864,43 @@ func TestRedtest_Dimension4_EvidencePackets(t *testing.T) {
 		}
 
 		packet := BuildEvidencePacket("t-root", "feature", "hitl", "path-escape-test", nil, nil, 0)
+		packet.ScopeRoot = safeSubdir
+
+		// Case A: Path escape outside declared scope root
 		escapePath := filepath.Join(safeSubdir, "..", "escaped.json")
 		err := packet.WriteToFile(escapePath)
 		if err == nil {
-			t.Fatalf("expected error rejecting path escape %s, write succeeded", escapePath)
+			t.Fatalf("expected error rejecting path escape %s outside scope root %s, write succeeded", escapePath, safeSubdir)
+		}
+		if !errors.Is(err, ErrInvalidDestinationPath) {
+			t.Errorf("expected ErrInvalidDestinationPath, got %v", err)
+		}
+
+		// Case B: Raw path traversal fragment (..)
+		rawTraversal := safeSubdir + "/../escaped.json"
+		errTraversal := packet.WriteToFile(rawTraversal)
+		if errTraversal == nil {
+			t.Fatalf("expected error rejecting raw traversal %s, write succeeded", rawTraversal)
+		}
+
+		// Case C: Denied fragment (.git)
+		gitPath := filepath.Join(safeSubdir, ".git", "leak.json")
+		errGit := packet.WriteToFile(gitPath)
+		if errGit == nil {
+			t.Fatalf("expected error rejecting denied fragment in %s, write succeeded", gitPath)
+		}
+
+		// Case D: Denied fragment (.env, .ssh)
+		sshPath := filepath.Join(safeSubdir, ".ssh", "id_rsa")
+		errSSH := packet.WriteToFile(sshPath)
+		if errSSH == nil {
+			t.Fatalf("expected error rejecting denied fragment in %s, write succeeded", sshPath)
+		}
+
+		// Case E: Valid path within scope root succeeds
+		validPath := filepath.Join(safeSubdir, "valid_evidence.json")
+		if err := packet.WriteToFile(validPath); err != nil {
+			t.Fatalf("expected valid path %s to succeed, got %v", validPath, err)
 		}
 	})
 
@@ -987,13 +1082,12 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 	})
 
 	// 7. Counter going backwards (monotonicity guard)
+	// 7. Counter going backwards (monotonicity guard)
 	t.Run("counter_going_backwards_monotonicity_guard", func(t *testing.T) {
 		// Rule: Token and counter metrics must be monotonic and non-negative; negative token values must be guarded.
 		// FINDING-R3-9:
 		// Expected: ComputeGauges validates token counters and rejects or clamps negative values.
 		// Actual: ComputeGauges does not validate token counter monotonicity, accepting negative values.
-		t.Skip("FINDING-R3-9: ComputeGauges does not validate token counter monotonicity, accepting negative values")
-
 		ev := []telemetry.TraceEvent{
 			{
 				ID: "ev-neg", TaskID: "t-neg", EventType: telemetry.TraceEventTaskCompleted,
@@ -1002,7 +1096,42 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 			},
 		}
 		report := ComputeGauges(ev, nil, "")
-		_ = report
+		if len(report.PassRates) != 0 {
+			t.Errorf("PassRates len = %d, want 0 (negative token event must be rejected)", len(report.PassRates))
+		}
+		if report.TotalTokens < 0 {
+			t.Errorf("TotalTokens = %d, want non-negative", report.TotalTokens)
+		}
+
+		// Sequence validation: valid event (700 tokens), then negative token event (-500 tokens), then valid event (100 tokens)
+		seqEvents := []telemetry.TraceEvent{
+			{
+				ID: "ev-1", TaskID: "t-seq-1", EventType: telemetry.TraceEventTaskCompleted,
+				Class: "docs", EffortApplied: "low", ExitCode: &exit0, Timestamp: now,
+				InputTokens: 500, OutputTokens: 200,
+			},
+			{
+				ID: "ev-2-neg", TaskID: "t-seq-2", EventType: telemetry.TraceEventTaskCompleted,
+				Class: "docs", EffortApplied: "low", ExitCode: &exit0, Timestamp: now,
+				InputTokens: -500, OutputTokens: -100,
+			},
+			{
+				ID: "ev-3", TaskID: "t-seq-3", EventType: telemetry.TraceEventTaskCompleted,
+				Class: "docs", EffortApplied: "low", ExitCode: &exit0, Timestamp: now,
+				InputTokens: 100, OutputTokens: 0,
+			},
+		}
+		seqReport := ComputeGauges(seqEvents, nil, "")
+		if len(seqReport.PassRates) != 1 {
+			t.Fatalf("seqReport PassRates len = %d, want 1", len(seqReport.PassRates))
+		}
+		if seqReport.PassRates[0].PassCount != 2 || seqReport.PassRates[0].TotalCount != 2 {
+			t.Errorf("PassCount = %d, TotalCount = %d, want 2 passed / 2 total (rejected event skipped)",
+				seqReport.PassRates[0].PassCount, seqReport.PassRates[0].TotalCount)
+		}
+		if seqReport.TotalTokens != 800 {
+			t.Errorf("TotalTokens = %d, want 800 (counter kept at previous level on rejected event)", seqReport.TotalTokens)
+		}
 	})
 
 	// 8. Rate values stay within [0, 1] — HITL rate
@@ -1011,8 +1140,6 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 		// FINDING-R3-10:
 		// Expected: HITLRate stays within [0.0, 1.0] even when multiple child rungs emit HITL events for the same root task.
 		// Actual: HITLRate exceeds 1.0 (reaches 3.0) because multiple child rung task IDs are counted in hitlTasks against root totalRounds.
-		t.Skip("FINDING-R3-10: HITLRate exceeds 1.0 when multiple child rungs emit HITL events for the same root task")
-
 		// 1 root task
 		tasks := []*controlplane.Task{
 			{TaskID: "root-task-1", Request: []byte(`{"class":"feature"}`)},
@@ -1024,9 +1151,18 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 			{ID: "e3", TaskID: "child-rung-3", Class: "feature", Tags: []string{"hitl"}, Timestamp: now},
 		}
 		report := ComputeGauges(events, tasks, "")
-		if report.HITL.HITLRate > 1.0 {
-			t.Fatalf("HITLRate = %f > 1.0 (total rounds = %d, hitl packets = %d)",
+		if report.HITL.HITLRate > 1.0 || report.HITL.HITLRate < 0.0 {
+			t.Fatalf("HITLRate = %f not within [0, 1] (total rounds = %d, hitl packets = %d)",
 				report.HITL.HITLRate, report.HITL.TotalRounds, report.HITL.HITLPackets)
+		}
+		if report.HITL.HITLRate != 1.0 {
+			t.Errorf("HITLRate = %f, want 1.0", report.HITL.HITLRate)
+		}
+		if report.HITL.HITLPackets != 1 {
+			t.Errorf("HITLPackets = %d, want 1 (deduped to single root task)", report.HITL.HITLPackets)
+		}
+		if report.HITL.TotalRounds != 1 {
+			t.Errorf("TotalRounds = %d, want 1", report.HITL.TotalRounds)
 		}
 	})
 
@@ -1077,14 +1213,24 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 		// FINDING-R3-11:
 		// Expected: When filterClass does not match any class, HITL.TotalRounds should be 0.
 		// Actual: ComputeGauges lines 312-316 fall back to unfiltered len(events), returning TotalRounds = 1.
-		t.Skip("FINDING-R3-11: ComputeGauges leaks unfiltered events into HITL.TotalRounds when class filter matches nothing")
-
 		ev := []telemetry.TraceEvent{
 			{ID: "e1", TaskID: "t1", EventType: telemetry.TraceEventTaskCompleted, Class: "real-class", EffortApplied: "low", ExitCode: &exit0, Timestamp: now},
 		}
 		report := ComputeGauges(ev, nil, "unknown-class")
 		if report.HITL.TotalRounds != 0 {
 			t.Errorf("TotalRounds = %d, want 0", report.HITL.TotalRounds)
+		}
+		if report.HITL.HITLPackets != 0 {
+			t.Errorf("HITLPackets = %d, want 0", report.HITL.HITLPackets)
+		}
+		if report.HITL.HITLRate != 0.0 {
+			t.Errorf("HITLRate = %f, want 0.0", report.HITL.HITLRate)
+		}
+		if len(report.PassRates) != 0 {
+			t.Errorf("PassRates len = %d, want 0", len(report.PassRates))
+		}
+		if len(report.EscalationRates) != 0 {
+			t.Errorf("EscalationRates len = %d, want 0", len(report.EscalationRates))
 		}
 	})
 
@@ -1100,6 +1246,111 @@ func TestRedtest_Dimension5_GaugesMath(t *testing.T) {
 		}
 		if report.PassRates[0].Class != "docs" {
 			t.Errorf("Class = %s, want docs", report.PassRates[0].Class)
+		}
+	})
+
+	// 12. Boundary: exactly at 1.0 rate
+	t.Run("boundary_exactly_at_1_0_rate", func(t *testing.T) {
+		// Rule: Gauges rate calculations accurately evaluate and bound exactly at 1.0 (both PassRate and HITLRate).
+		root1 := "root-bound-1"
+		root2 := "root-bound-2"
+		tasks := []*controlplane.Task{
+			{TaskID: root1, Request: []byte(`{"class":"feature"}`)},
+			{TaskID: root2, Request: []byte(`{"class":"feature"}`)},
+		}
+		events := []telemetry.TraceEvent{
+			{
+				ID: "ev-b1", TaskID: root1, EventType: telemetry.TraceEventTaskCompleted,
+				Class: "feature", EffortApplied: "low", ExitCode: &exit0, Timestamp: now,
+				Tags: []string{"hitl"},
+			},
+			{
+				ID: "ev-b2", TaskID: root2, EventType: telemetry.TraceEventTaskCompleted,
+				Class: "feature", EffortApplied: "low", ExitCode: &exit0, Timestamp: now,
+				Tags: []string{"hitl"},
+			},
+		}
+		report := ComputeGauges(events, tasks, "feature")
+		if len(report.PassRates) != 1 || report.PassRates[0].PassRate != 1.0 {
+			t.Errorf("PassRate = %+v, want exactly 1.0", report.PassRates)
+		}
+		if report.HITL.TotalRounds != 2 {
+			t.Errorf("TotalRounds = %d, want 2", report.HITL.TotalRounds)
+		}
+		if report.HITL.HITLPackets != 2 {
+			t.Errorf("HITLPackets = %d, want 2", report.HITL.HITLPackets)
+		}
+		if report.HITL.HITLRate != 1.0 {
+			t.Errorf("HITLRate = %f, want exactly 1.0", report.HITL.HITLRate)
+		}
+	})
+
+	// 13. Boundary: empty input
+	t.Run("boundary_empty_input", func(t *testing.T) {
+		// Rule: Explicit empty slices (with or without filterClass) return 0 rounds, 0 rates, and empty sections without panic.
+		// Unfiltered empty slices
+		repUnfiltered := ComputeGauges([]telemetry.TraceEvent{}, []*controlplane.Task{}, "")
+		if len(repUnfiltered.PassRates) != 0 {
+			t.Errorf("PassRates len = %d, want 0", len(repUnfiltered.PassRates))
+		}
+		if len(repUnfiltered.EscalationRates) != 0 {
+			t.Errorf("EscalationRates len = %d, want 0", len(repUnfiltered.EscalationRates))
+		}
+		if repUnfiltered.HITL.TotalRounds != 0 || repUnfiltered.HITL.HITLPackets != 0 || repUnfiltered.HITL.HITLRate != 0.0 {
+			t.Errorf("HITL metric = %+v, want zeroes", repUnfiltered.HITL)
+		}
+		if repUnfiltered.TotalTokens != 0 {
+			t.Errorf("TotalTokens = %d, want 0", repUnfiltered.TotalTokens)
+		}
+
+		// Filtered empty slices
+		repFiltered := ComputeGauges([]telemetry.TraceEvent{}, []*controlplane.Task{}, "feature")
+		if len(repFiltered.PassRates) != 0 {
+			t.Errorf("filtered PassRates len = %d, want 0", len(repFiltered.PassRates))
+		}
+		if len(repFiltered.EscalationRates) != 0 {
+			t.Errorf("filtered EscalationRates len = %d, want 0", len(repFiltered.EscalationRates))
+		}
+		if repFiltered.HITL.TotalRounds != 0 || repFiltered.HITL.HITLPackets != 0 || repFiltered.HITL.HITLRate != 0.0 {
+			t.Errorf("filtered HITL metric = %+v, want zeroes", repFiltered.HITL)
+		}
+		if repFiltered.TotalTokens != 0 {
+			t.Errorf("filtered TotalTokens = %d, want 0", repFiltered.TotalTokens)
+		}
+	})
+
+	// 14. Boundary: single root multi-HITL
+	t.Run("boundary_single_root_multi_hitl", func(t *testing.T) {
+		// Rule: Single root task with multiple child escalation rungs all emitting HITL packets deduplicates to 1 HITL packet and HITLRate = 1.0.
+		rootID := "root-multi-hitl-task"
+		tasks := []*controlplane.Task{
+			{TaskID: rootID, Request: []byte(`{"class":"security"}`)},
+			{TaskID: "rung-1", ParentTaskID: &rootID, Request: []byte(`{"class":"security"}`)},
+			{TaskID: "rung-2", ParentTaskID: &rootID, Request: []byte(`{"class":"security"}`)},
+			{TaskID: "rung-3", ParentTaskID: &rootID, Request: []byte(`{"class":"security"}`)},
+			{TaskID: "rung-4", ParentTaskID: &rootID, Request: []byte(`{"class":"security"}`)},
+		}
+		events := []telemetry.TraceEvent{
+			{ID: "ev-r1", TaskID: "rung-1", SupervisorTaskID: &rootID, Class: "security", Tags: []string{"ladder", "hitl"}, Timestamp: now},
+			{ID: "ev-r2", TaskID: "rung-2", SupervisorTaskID: &rootID, Class: "security", Tags: []string{"ladder", "hitl"}, Timestamp: now},
+			{ID: "ev-r3", TaskID: "rung-3", SupervisorTaskID: &rootID, Class: "security", Tags: []string{"ladder", "hitl"}, Timestamp: now},
+			{ID: "ev-r4", TaskID: "rung-4", SupervisorTaskID: &rootID, Class: "security", Tags: []string{"ladder", "hitl-packet"}, Timestamp: now},
+		}
+		report := ComputeGauges(events, tasks, "security")
+		if report.HITL.TotalRounds != 1 {
+			t.Errorf("TotalRounds = %d, want 1", report.HITL.TotalRounds)
+		}
+		if report.HITL.HITLPackets != 1 {
+			t.Errorf("HITLPackets = %d, want 1 (deduped across 4 child rungs)", report.HITL.HITLPackets)
+		}
+		if report.HITL.HITLRate != 1.0 {
+			t.Errorf("HITLRate = %f, want 1.0 (boundary within [0,1])", report.HITL.HITLRate)
+		}
+		if len(report.EscalationRates) != 1 {
+			t.Fatalf("EscalationRates count = %d, want 1", len(report.EscalationRates))
+		}
+		if report.EscalationRates[0].TasksCount != 1 || report.EscalationRates[0].RungsFired != 4 || report.EscalationRates[0].EscalationRate != 4.0 {
+			t.Errorf("EscalationRate = %+v, want tasks=1, rungs=4, rate=4.0", report.EscalationRates[0])
 		}
 	})
 }
@@ -1192,6 +1443,9 @@ func TestRedtest_Dimension6_PolicyThresholds(t *testing.T) {
 		ctx := baseCtx
 		ctx.TokenBudget = 0
 		ctx.History = make([]RungRecord, 5)
+		for i := range ctx.History {
+			ctx.History[i].RungIndex = i
+		}
 		plan := EvaluateNextRung(ctx)
 		if errors.Is(plan.RefusalError, ErrCeilingReached) {
 			t.Fatalf("ceiling error fired prematurely at rung 5: %+v", plan)
