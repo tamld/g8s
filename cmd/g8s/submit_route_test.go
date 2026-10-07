@@ -58,10 +58,15 @@ func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "golden.db")
+	// Hermetic: point G8S_PROVIDERS at an absent file so the submit resolves
+	// the manifest-nil provider-less path deterministically — a polluted user
+	// home (a test-written or init-scaffolded providers.json) must not change
+	// the realignment outcome (issue #568 follow-up).
 	envVars := []string{
 		"G8S_DB=" + dbPath,
 		"G8S_ROUTER_MODE=",
 		"TYPESAFE_API_KEYS=",
+		"G8S_PROVIDERS=" + filepath.Join(t.TempDir(), "absent-providers.json"),
 	}
 
 	// Submit task without --route flag
@@ -100,7 +105,6 @@ func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonAbsent), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-
 	// Verify legacy payload fields are intact and no router fields leak into manual mode
 	if payload["prompt"] != "Perform codebase sanity verification" {
 		t.Errorf("prompt = %v, want expected prompt", payload["prompt"])

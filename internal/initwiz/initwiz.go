@@ -326,7 +326,8 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 					"class": "platform_dispatch",
 					"models": []map[string]any{
 						{
-							"id": "gemini-3.8-flash-high",
+							"id":           "gemini-3.8-flash-high",
+							"effort_style": "baked-name",
 						},
 					},
 					"slots": 8,
