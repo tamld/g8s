@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/telemetry"
 	_ "modernc.org/sqlite"
 )
@@ -537,7 +538,7 @@ func LoadTelemetryEvents(ctx context.Context, dbPath string) ([]telemetry.TraceE
 		return nil, fmt.Errorf("stat telemetry db %s: %w", dbPath, err)
 	}
 
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro", dbPath))
+	db, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "?mode=ro"))
 	if err != nil {
 		return nil, fmt.Errorf("open telemetry db: %w", err)
 	}
