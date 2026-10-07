@@ -19,3 +19,13 @@ Source: issue #442.
 - M2: wiki first-audit caught 2 real issues (structure markers + links) — metric SATISFIED for wave 1
 - M3: 0/2 contribution packets
 - M4: retention clock starts 2026-10-05 (3-month check ~2027-01-05)
+
+## Two-project stress test — verdict (pre-registered 2026-10-06, adjudicated 2026-10-07)
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| 1. v0.16.0 tagged + CI | tag 0dea3b9, release 11 assets draft=false, #568/#571 closed same-day | **PASS** (verified by strategy session) |
+| 2. aegis Returns Ledger 5/5 cited | aegis#2357 MERGED (5 red files + secrets removal + docs-debt) · g8s#566/#567/#569 filed, #568 fixed same-day · #550 telemetry (infra-review→high n=2, ceiling falsified n=5) · ladder armed 0-traversal (honest) · return handoff 6406370 | **PASS** (verified; one claim gap found: this row itself was claimed but missing — added now) |
+| 3. patrol unattended round | automation-87f06732 first scheduled fire = Monday 2026-10-12 | **PENDING** — verifies 10-12 |
+
+**Verdict: PASS on criteria 1–2 (verified); criterion 3 completes with the first unattended patrol round.** Meta-evidence: convergent defect discovery (#566 found independently by both sessions within the same hour, from two doors, neither seeing the other's books) = context independence demonstrated, not declared.
