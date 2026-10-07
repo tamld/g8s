@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -530,7 +531,11 @@ func pathMatches(cleanFile, pattern string) bool {
 		}
 	}
 	// 3. Glob matching (e.g. *.md, internal/worker/proc_*)
-	m, _ := filepath.Match(cleanPattern, cleanFile)
+	// path.Match (POSIX) instead of filepath.Match: the separator must be '/'
+	// on every platform — filepath.Match's separator is os.PathSeparator, so
+	// on Windows '*' crosses '/' and patterns like *.md match whole nested
+	// paths (issue #570, red-cell R1-1 + Windows E2E oracle).
+	m, _ := path.Match(cleanPattern, cleanFile)
 	return m
 }
 
@@ -549,7 +554,7 @@ func globstarMatch(fileSegs, patSegs []string) bool {
 	if len(fileSegs) == 0 {
 		return false
 	}
-	m, _ := filepath.Match(patSegs[0], fileSegs[0])
+	m, _ := path.Match(patSegs[0], fileSegs[0])
 	if !m {
 		return false
 	}
