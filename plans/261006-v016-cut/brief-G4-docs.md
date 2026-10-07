@@ -45,15 +45,22 @@ version.go, packaging, or any Go code.
    priority wins, unregistered fails open to medium) > declared
    signals (blast radius + LOC estimate demote the path class —
    cite the matrix v1.1 rule: blast=low declares low at any LOC).
-3. Baked-name platform models: ids ending in -low/-medium/-high
-   carry their effort; a class/flag effort that disagrees with the
-   suffix gets the MODEL realigned to the matching variant
-   (model_realigned=true in the payload, requested model kept as
-   model_requested); ids unknown to the catalog are coerced to the
-   baked level with effort_mismatch=true instead (defense in
-   depth, issue #568). Show the payload fields a user can inspect:
-   effort_requested / effort_applied / effort_class /
-   effort_budget_tokens / effort_mismatch / model_realigned.
+3. Baked-name platform models (FINAL semantics, issue #568): ids ending
+   in -low/-medium/-high/-xhigh/-max carry their effort. Resolution
+   order: (a) if the platform manifest declares the (provider, model)
+   pair, its declared effort style decides — a style-less entry means
+   not baked; (b) otherwise the effort catalog (.g8s/agent-models.yml,
+   agy registered as baked-name with the three variants) decides, for
+   named and provider-less submits alike. When the catalog calls the
+   model baked and the class/flag effort disagrees with the suffix, the
+   MODEL is realigned to the matching variant at submit: payload records
+   model_requested (the picked model) and model_realigned=true; the
+   effort level itself passes through unchanged — per-class effort
+   differentiation is preserved (docs-class tasks run at low on
+   flash-low, verified live: task 5c44b300). Show the payload fields a
+   user can inspect: effort_requested / effort_applied / effort_class /
+   effort_budget_tokens / effort_mismatch / effort_override /
+   model_requested / model_realigned.
 4. The telemetry: where per-class cost comes from (token capture
    in worker usage records, supervisor-metrics aggregation) — one
    sentence + pointer, no fabricated numbers.
