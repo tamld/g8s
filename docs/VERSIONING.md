@@ -16,7 +16,7 @@ $$\mathbf{v\text{MAJOR}.\text{MINOR}.\text{PATCH}[-\text{PRERELEASE}]}$$
 ## 2. Release Cadence & Phases
 
 ```
-v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05, Current) ──► v0.16.0 (In Preparation) ──► v1.0.0 (Production Stable)
+v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-07, Current) ──► v1.0.0 (Production Stable)
 ```
 
 | Version Milestone | Target Scope | Stability Level |
@@ -26,7 +26,7 @@ v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05, Current) ──► v0.16.0 (
 | **`v0.1.0`** | Milestone 3 (OS Daemon & Packaging): Multi-OS Service (launchd/systemd/windows), GoReleaser. | Public Open-Source Launch |
 | **`v0.14.0`** | Feature wave release (2026-10-03). | Delivered |
 | **`v0.15.0`** | Integrity hardening release (2026-10-05). | Delivered (Current) |
-| **`v0.16.0`** | Self-measuring effort telemetry release. | In preparation |
+| **`v0.16.0`** | Self-measuring effort telemetry release (2026-10-07): effort manifest + adapter + `submit --effort`, class registry + signal demotion, token telemetry, quality ladder + gauges, baked-name realignment (#568), ladder hardening (#570). | Delivered (Current) |
 | **`v1.0.0`** | 100% Test Parity, Formal Security Audit, Stable MCP & CLI Interface guarantee. | Production GA |
 
 ---
