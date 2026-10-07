@@ -51,6 +51,34 @@
     eval: "pi-001"
     source: docs/designs/gate-lane-routing.md
 
+- id: claim-effort-class-registry
+  claim: "Write-scope class registry maps paths to effort defaults, first match by priority wins, unregistered fails open to medium"
+  evidence:
+    test: TestParseEffortClasses_Table
+    eval: ""
+    source: .g8s/effort-classes.yml
+
+- id: claim-effort-signal-demotion
+  claim: "Declared signals (blast radius + LOC estimate) demote the path-class effort per matrix v1.1"
+  evidence:
+    test: TestResolveEffortSignals_MatrixRows
+    eval: ""
+    source: internal/lane/effortsignal.go
+
+- id: claim-effort-baked-realignment
+  claim: "Baked-name model ids realign to the matching variant at submit and mismatched (model, effort) combos are never queued"
+  evidence:
+    test: TestSubmitEffort_RealignmentConsumesWinningLevel
+    eval: ""
+    source: cmd/g8s/submit_effort_test.go
+
+- id: claim-effort-token-telemetry
+  claim: "Telemetry task_completed events carry class, effort level and input/output token fields for per-class cost aggregation"
+  evidence:
+    test: TestTelemetryEventFields_Present
+    eval: ""
+    source: internal/lane/effortclass.go
+
 unbound:
   - id: claim-worker-single-attempt
     claim: "Single attempt worker execution"
@@ -347,3 +375,19 @@ unbound:
       eval: ""
       demo: "bin/g8s resubmit --help"
       source: docs/ENTERPRISE_LEDGER.md
+
+  - id: claim-effort-submit-knob
+    claim: "Submit validates --effort against the 7-level ladder at parse time, default medium"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s submit --help"
+      source: cmd/g8s/submit.go
+
+  - id: claim-ladder-gauges-cli
+    claim: "Ladder gauges report pass-rate, escalation-rate and HITL metrics per class"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s ladder gauges"
+      source: cmd/g8s/ladder.go
