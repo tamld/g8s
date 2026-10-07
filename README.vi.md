@@ -137,6 +137,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 | Từ 0 đến task ủy quyền đầu tiên | [docs/quickstart.md](docs/quickstart.md) |
 | Ma trận lệnh đầy đủ & runbook | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
 | Cấu hình & vòng đời service | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
+| Cấu hình effort & thang chất lượng | [docs/user-guide/effort.md](docs/user-guide/effort.md) |
 | Bảo mật & kiểm chứng | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
 | Tích hợp provider | [docs/integrations/](docs/integrations/) |
 | Decision records | [docs/decisions/](docs/decisions/): ADR-0001…0032 |
@@ -157,7 +158,7 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 | v0.13.0 (2026-09-30) | Queue đa provider, sóng hardening B–E, tín hiệu event-driven (`signals/tasks.jsonl` + `watch --failed`), release gate 7–8 | **Xong** |
 | v0.14.0 (2026-10-03) | Vòng AI-factory: auto-retry ✅ (#501/#502), router tới tay người dùng — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), vòng tự-đóng đầu tiên — [#516](https://github.com/tamld/g8s/issues/516); cắt bản = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Xong** |
 | v0.15.0 (mục tiêu) | Retrospective-as-task — cơ quan tự trưởng thành — [#519](https://github.com/tamld/g8s/issues/519) | Kế hoạch |
-| v0.16.0 (mục tiêu) | Tối ưu effort: manifest effort trung hòa provider (adapter named/budget/baked-name), ánh xạ lớp việc→effort, telemetry chi phí theo lớp — [#550](https://github.com/tamld/g8s/issues/550) | Đã lên kế hoạch |
+| v0.16.0 (mục tiêu) | Tối ưu effort: manifest effort trung hòa provider (adapter named/budget/baked-name), ánh xạ lớp việc→effort, telemetry chi phí theo lớp — [#550](https://github.com/tamld/g8s/issues/550) | **Xong** |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép

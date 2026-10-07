@@ -47,9 +47,10 @@ g8s submit \
 | `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
+| `--effort` | `string` | `"medium"` | Target worker reasoning effort level (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). See [effort.md](effort.md). |
 | `--route` | `string` | `"manual"` | Routing mode (`manual` or `auto`). When `auto`, selects provider, model, and role using context-based rules and manifest configuration with optional Jev assistance. See [routing.md](routing.md). |
 
-> See [providers.md](providers.md) for multi-provider setup, and [routing.md](routing.md) for task routing.
+> See [providers.md](providers.md) for multi-provider setup, [routing.md](routing.md) for task routing, and [effort.md](effort.md) for reasoning effort configuration and the quality ladder.
 
 ---
 
@@ -633,6 +634,56 @@ g8s service install
 | `auto_retry_max_per_task` | Maximum automatic retries per original task (0-10, default 2). |
 | `auto_retry_max_per_hour` | Maximum automatic retries per hour per state directory (0-1000, default 10). |
 | `autonomy_level` | Autonomy posture level (0 = manual/no auto-merge, 1 = docs-lane auto-merge). |
+
+---
+
+### 31. `g8s ladder` — Quality Ladder Escalation & Telemetry
+Inspects failure lineage, evaluates automated quality-ladder escalation plans, advances tasks through multi-rung remediation, and reports empirical pass/escalation gauges. See [effort.md](effort.md) for detailed ladder policies.
+
+```sh
+# Display ladder lineage, cumulative tokens used, and next rung plan
+g8s ladder status <task-id>
+
+# Advance to the next ladder rung (escalate effort, model alternative, or emit HITL packet)
+g8s ladder advance <task-id> --prompt "Refined instructions for retry"
+
+# Advance and write HITL evidence packet to file if human review is required
+g8s ladder advance <task-id> --out ./hitl-packet.json
+
+# Report empirical pass-rates, escalation-rates, and HITL metrics
+g8s ladder gauges
+g8s ladder gauges docs
+```
+
+#### Subcommands:
+- `g8s ladder status <task-id>`: Traverses task lineage to root, aggregates cumulative token consumption against class budgets, inspects latest failure shape, and plans next action.
+- `g8s ladder advance <task-id>`: Executes the planned next rung. Dispatches diagnosis at Rung 0, escalates effort along supported subsets at Rungs 1..3, tries alternative models at Rungs 4..5, or refuses to HITL.
+- `g8s ladder gauges [class]`: Computes pass rates per `(class, effort)`, escalation rates per class, and overall HITL rates from telemetry events and task history.
+
+#### Flags (`g8s ladder status`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task` / `--task-id` | `string` | `""` | Task ID to inspect (can be passed as positional argument). |
+| `--db` | `string` | `""` | Path to control-plane database (`g8s.db`). |
+| `--telemetry-db` | `string` | `""` | Path to telemetry database (`telemetry.db`). |
+
+#### Flags (`g8s ladder advance`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task` / `--task-id` | `string` | `""` | Task ID to advance (can be passed as positional argument). |
+| `--prompt` | `string` | `""` | Task prompt for escalation re-dos (required for Rungs 1..5). |
+| `--prompt-file` | `string` | `""` | Path to file containing task prompt for escalation re-dos. |
+| `--receipt-id` | `string` | `""` | Fresh write receipt ID (required if advancing a `workspace_write` task). |
+| `--out` | `string` | `""` | Optional file path to write HITL evidence packet when human review is required. |
+| `--db` | `string` | `""` | Path to control-plane database (`g8s.db`). |
+| `--telemetry-db` | `string` | `""` | Path to telemetry database (`telemetry.db`). |
+
+#### Flags (`g8s ladder gauges`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--class` | `string` | `""` | Filter gauges for a specific task class (can be passed as positional argument). |
+| `--db` | `string` | `""` | Path to control-plane database (`g8s.db`). |
+| `--telemetry-db` | `string` | `""` | Path to telemetry database (`telemetry.db`). |
 
 ---
 

@@ -172,6 +172,7 @@ Tool reference: [docs/user-guide/mcp-tools.md](docs/user-guide/mcp-tools.md).
 | Zero to first delegated task | [docs/quickstart.md](docs/quickstart.md) |
 | Full command matrix & runbooks | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
 | Configuration & service lifecycle | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
+| Effort configuration & quality ladder | [docs/user-guide/effort.md](docs/user-guide/effort.md) |
 | Security & verification | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
 | Provider integrations | [docs/integrations/](docs/integrations/) (Antigravity, Claude Desktop, Cursor, Windsurf) |
 | Requirements & acceptance | [docs/PRD.md](docs/PRD.md), [docs/SRS.md](docs/SRS.md), [docs/DOD_DOR.md](docs/DOD_DOR.md) |
@@ -195,7 +196,7 @@ Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and 
 | v0.13.0 (2026-09-30) | Multi-provider queue, hardening waves B–E, event-driven signals (signals/tasks.jsonl + `watch --failed`), release gates 7–8 | **Done** |
 | v0.14.0 (2026-10-03) | AI-factory loop, stage 1: budgeted auto-retry ✅ (#501/#502), router in user hands — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), first unattended closed round — [#516](https://github.com/tamld/g8s/issues/516); cut = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Done** |
 | v0.15.0 (target) | Retrospective-as-task — the self-maturity organ — [#519](https://github.com/tamld/g8s/issues/519) | Planned |
-| v0.16.0 (target) | Effort optimization: provider-neutral effort manifest (named/budget/baked-name adapters), task-class→effort mapping, per-class cost telemetry — [#550](https://github.com/tamld/g8s/issues/550), plans/261004-effort-optimization | Planned |
+| v0.16.0 (target) | Effort optimization: provider-neutral effort manifest (named/budget/baked-name adapters), task-class→effort mapping, per-class cost telemetry — [#550](https://github.com/tamld/g8s/issues/550), plans/261004-effort-optimization | **Done** |
 | v1.0.0 (2026-12-15) | GA: 6-month homelab stability, enterprise security signoff, distributed fleet mTLS | Planned |
 
 ## Project Structure
