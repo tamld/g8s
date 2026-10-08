@@ -1082,4 +1082,3 @@ func (m *Manager) PurgeExpired(maxAge time.Duration, maxRows int) (int64, error)
 	}
 	return affected, nil
 }
-
