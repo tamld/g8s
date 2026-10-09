@@ -421,7 +421,8 @@ func ComputeGauges(events []telemetry.TraceEvent, tasks []*controlplane.Task, fi
 			if act, ok := ev.Payload["action"].(string); ok && strings.EqualFold(act, "hitl") {
 				isHITL = true
 			}
-			if fv, ok := ev.Payload["final_verdict"].(string); ok && strings.HasPrefix(strings.ToLower(fv), "hitl") {
+			// ⚡ Bolt Optimization: Use zero-allocation length guard and EqualFold instead of strings.HasPrefix(strings.ToLower)
+			if fv, ok := ev.Payload["final_verdict"].(string); ok && len(fv) >= 4 && strings.EqualFold(fv[:4], "hitl") {
 				isHITL = true
 			}
 			if r, ok := ev.Payload["ladder_rung"].(float64); ok && r > 0 {
