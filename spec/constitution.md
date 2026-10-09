@@ -35,7 +35,7 @@
 
 ## 2. Coding & Architecture Standards
 
-* **Language**: Go 1.26.0 (Zero-CGO, Pure-Go).
+* **Language**: Go 1.26.9 (Zero-CGO, Pure-Go).
 * **CLI Architecture**: Standard library `flag.FlagSet` for command routing; pure-Go zero-dependency configuration.
 * **Testing Standard**: 100% boundary testing for security filters, race condition validation (`go test -race ./...`), mock clock testing for TTL expiry.
 * **Licensing**: All files are distributed under the MIT License.
