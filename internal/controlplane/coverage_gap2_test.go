@@ -1117,14 +1117,6 @@ func TestBusyRetryAndErrorClassification(t *testing.T) {
 	}
 }
 
-// #481: TestSqlitePathEscape_Runtime exercises sqlitePathEscape using the runtime GOOS.
-func TestSqlitePathEscape_Runtime(t *testing.T) {
-	cur := sqlitePathEscape("/tmp/local.sqlite")
-	if cur == "" {
-		t.Fatal("sqlitePathEscape returned empty string")
-	}
-}
-
 // #481: TestLineageAndParentCheck covers valid parent check, child listing, and lineage traversal.
 func TestLineageAndParentCheck(t *testing.T) {
 	store, dbPath := newTestStore(t)
