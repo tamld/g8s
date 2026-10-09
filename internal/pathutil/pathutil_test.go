@@ -314,3 +314,34 @@ func TestSQLiteURI(t *testing.T) {
 		})
 	}
 }
+
+// #336: Windows file URIs must keep drive colons and separators literal
+// while still escaping URI-significant characters (injection guarantee).
+func TestSQLiteURI_Migrated(t *testing.T) {
+	cases := []struct {
+		path, query, want string
+	}{
+		// Non-Windows keeps url.PathEscape behavior
+		{"foo/bar.db", "", "file:foo/bar.db"},
+		{"/tmp/foo?bar.db", "", "file:///tmp/foo%3Fbar.db"},
+		{"my db.sqlite", "", "file:my db.sqlite"},
+
+		// Windows behavior
+		{`C:\path\to\db.sqlite`, "", `file:///C:/path/to/db.sqlite`},
+		{`C:\path\to\my db.sqlite`, "", `file:///C:/path/to/my db.sqlite`},
+		{`C:\path\to\db?mode=ro.sqlite`, "mode=ro", `file:///C:/path/to/db%3Fmode=ro.sqlite?mode=ro`},
+		{`C:\path\to\db#tag.sqlite`, "", `file:///C:/path/to/db%23tag.sqlite`},
+		{`\\server\share\db.sqlite`, "", `file://server/share/db.sqlite`},
+		{`C:/mixed/path/db.sqlite`, "", `file:///C:/mixed/path/db.sqlite`},
+		{`C:\Users\tamld\.local\state\g8s\g8s.db`, "", `file:///C:/Users/tamld/.local/state/g8s/g8s.db`},
+		{`C:\evil?x=1#g`, "", `file:///C:/evil%3Fx=1%23g`},
+		{"/Users/tamld/state/g8s.db", "", "file:///Users/tamld/state/g8s.db"},
+		{"/opt/g8s/state.db", "", "file:///opt/g8s/state.db"},
+	}
+
+	for _, tc := range cases {
+		if got := SQLiteURI(tc.path, tc.query); got != tc.want {
+			t.Errorf("SQLiteURI(%q, %q) = %q, want %q", tc.path, tc.query, got, tc.want)
+		}
+	}
+}
