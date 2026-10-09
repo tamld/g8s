@@ -407,7 +407,8 @@ func isDocsPath(p string) bool {
 	if strings.HasPrefix(clean, "docs/") || clean == "docs" {
 		return true
 	}
-	if strings.HasSuffix(strings.ToLower(clean), ".md") {
+	// ⚡ Bolt Optimization: Use zero-allocation length guard and EqualFold instead of strings.HasSuffix(strings.ToLower)
+	if len(clean) >= 3 && strings.EqualFold(clean[len(clean)-3:], ".md") {
 		return true
 	}
 	return false
