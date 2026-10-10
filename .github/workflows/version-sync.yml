@@ -90,7 +90,7 @@ jobs:
             exit 0
           fi
           
-          GO_MOD_MAJOR_MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1,2)
+          GO_MOD_MAJOR_MINOR=$GO_MOD_VERSION
           
           if [ "$GO_MOD_MAJOR_MINOR" != "$WORKFLOW_VERSION" ]; then
             echo "::error::Go version mismatch: go.mod=$GO_MOD_VERSION (normalized: $GO_MOD_MAJOR_MINOR), workflows=$WORKFLOW_VERSION"
