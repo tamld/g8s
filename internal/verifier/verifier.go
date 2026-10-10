@@ -177,7 +177,7 @@ func isValidCitation(s string) bool {
 	}
 
 	// Rationale cannot start with another citation or citation prefix
-	if strings.HasPrefix(rest, "#") || strings.HasPrefix(strings.ToLower(rest), "incident:") {
+	if strings.HasPrefix(rest, "#") || len(rest) >= 9 && strings.EqualFold(rest[:9], "incident:") {
 		return false
 	}
 
