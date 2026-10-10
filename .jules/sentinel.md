@@ -11,3 +11,7 @@
 **Vulnerability:** Calls to `exec.Command("git", ...)` appended paths or branch names without explicitly indicating the end of options using `--`. If an untrusted path or branch name starts with `-`, Git parses it as an option, which can lead to command option injection.
 **Learning:** Command-line interfaces like `git` often parse any argument starting with `-` as an option unless `--` is explicitly used. This is especially risky when injecting uncontrolled or dynamic paths.
 **Prevention:** When invoking command-line tools that accept options using Go's `exec.Command`, always prepend `--` immediately before variable arguments (like paths or branches) to prevent them from being parsed as flags.
+## $(date +%Y-%m-%d) - Bump Go Version to Fix Vulnerabilities
+**Vulnerability:** The project was using Go 1.26.0, which contains vulnerabilities in `net/http` (GO-2026-6610, GO-2026-6605, GO-2026-6603), `mime/multipart` (GO-2026-6608), and `crypto/tls` (GO-2026-6607). These were detected by the CI Quality Gate scanner.
+**Learning:** Outdated Go patch versions often contain critical standard library vulnerabilities.
+**Prevention:** Regularly bump the Go patch version in `go.mod` (e.g., from 1.26.0 to 1.26.9) to incorporate standard library security fixes.
