@@ -19,3 +19,9 @@
 **Vulnerability:** After bumping the Go version in `go.mod` to 1.26.9, GitHub Actions CI failed because the `actions/setup-go@v7` step in multiple workflows was pinned to `1.26` (which resolved to `1.26.8`), causing a mismatch.
 **Learning:** When bumping the Go version in `go.mod`, it is crucial to also update the Go version specified in all GitHub Actions workflows (`.github/workflows/*.yml`) to match.
 **Prevention:** Use a search-and-replace command across the `.github/workflows/` directory to update `go-version` parameters whenever bumping the project's Go version.
+## $(date +%Y-%m-%d) - Version Sync Workflow Normalization Flaw
+**Learning:** The version sync check uses the format `GO_MOD_MAJOR_MINOR=$(echo "$GO_MOD_VERSION" | cut -d. -f1,2)`. This logic assumed that `go.mod` files always specify only the MAJOR.MINOR version (e.g., `1.26`). However, if `go.mod` is bumped to explicitly require a patch version (e.g., `go 1.26.9`), `cut -d. -f1,2` truncates the version to `1.26`, leading to an artificial version mismatch failure when compared against `WORKFLOW_VERSION` (which correctly resolves to `1.26.9`).
+**Action:** Removed the major/minor truncation logic in `.github/workflows/version-sync.yml` to directly compare the full `GO_MOD_VERSION` against the `WORKFLOW_VERSION`.
+## $(date +%Y-%m-%d) - Go Version Documentation Contract Sync
+**Learning:** The project implements a Documentation ↔ Code Contract Gate (`ci_doc_contract_check.sh`) which ensures `go.mod`'s Go version strictly matches SSoT documentation (`ARCHITECTURE_ROADMAP.md`, `constitution.md`, `manifest.json`, `README.md`, `README.vi.md`). Bumping the version in `go.mod` without updating these files causes a CI Quality Gate failure.
+**Action:** Used `sed` to recursively replace references to the old Go version with the newly bumped patch version across the required documentation and specification files.
