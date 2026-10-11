@@ -177,7 +177,9 @@ func isValidCitation(s string) bool {
 	}
 
 	// Rationale cannot start with another citation or citation prefix
-	if strings.HasPrefix(rest, "#") || strings.HasPrefix(strings.ToLower(rest), "incident:") {
+	// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+	// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+	if strings.HasPrefix(rest, "#") || (len(rest) >= 9 && strings.EqualFold(rest[:9], "incident:")) {
 		return false
 	}
 
