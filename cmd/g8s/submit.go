@@ -388,7 +388,9 @@ func runSubmit(args []string) {
 func parseBakedModelSuffix(modelID string) (string, string, bool) {
 	for _, lvl := range config.EffortLadder {
 		suffix := "-" + lvl
-		if strings.HasSuffix(strings.ToLower(modelID), suffix) {
+		// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive suffix checking
+		// instead of strings.HasSuffix(strings.ToLower()) which allocates a new string on the heap.
+		if len(modelID) >= len(suffix) && strings.EqualFold(modelID[len(modelID)-len(suffix):], suffix) {
 			base := modelID[:len(modelID)-len(suffix)]
 			return base, lvl, true
 		}
