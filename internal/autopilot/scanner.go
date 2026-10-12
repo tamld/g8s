@@ -275,7 +275,7 @@ func (s *Scanner) scanStaleTodos(ctx context.Context) error {
 				DiscoveredAt: time.Now(),
 				Metadata: map[string]string{
 					"file":     path,
-					"line":     fmt.Sprintf("%d", lineNum),
+					"line":     fmt.Sprintf("%d", matchLineNum),
 					"todo_tag": matches[1],
 				},
 			}
