@@ -1,0 +1,522 @@
+# g8s Quality Gate — AI anti-pattern detection.
+#
+# Catches what gofmt + vet + race tests cannot:
+#   - Silent error swallowing (errcheck)
+#   - Type safety bypass (grep for `as any`, `// nolint`)
+#   - Cowboy debug prints (grep for fmt.Println in non-test code)
+#   - Panic as bypass (`panic("...)` , `t.Skip()`)
+#   - Security smells (gosec)
+#   - CVE in deps (govulncheck)
+#   - Coverage drops
+#   - Complexity / size (gocognit, funlen)
+#
+# Plan ref: .sisyphus/plans/g8s-orchestration.md §0 (Design Philosophy)
+
+name: Quality
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  path-scope:
+    name: Scope Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Paths
+        id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1...HEAD 2>/dev/null || true)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          CODE_CHANGED="false"
+          DOCS_CHANGED="false"
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if [[ "$file" == docs/* ]] || [[ "$file" == *.md ]] || [[ "$file" == spec/* ]] || [[ "$file" == .claude/* ]]; then
+              DOCS_CHANGED="true"
+            else
+              CODE_CHANGED="true"
+            fi
+          done <<< "$CHANGED"
+
+          if [ -z "$CHANGED" ]; then
+            CODE_CHANGED="true"
+          fi
+
+          echo "code=$CODE_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "docs=$DOCS_CHANGED" >> "$GITHUB_OUTPUT"
+
+  quality:
+    name: Quality Gate
+    needs: [path-scope]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Setup Go (1.25 for golangci-lint compatibility with go.mod)
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.9'
+
+      - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout=10m
+      - name: Cache modules
+        uses: actions/cache@v6
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-gomod-${{ hashFiles('go.sum') }}
+
+      - name: gofumpt strict
+        if: env.CI_LANE != 'docs'
+        run: |
+          unformatted=$(gofumpt -l . 2>/dev/null | grep -v '^reference/' || true)
+          echo "gofumpt found: '$unformatted'"
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not gofumpt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Layer-ownership gate (DEBT-34)
+        if: env.CI_LANE != 'docs'
+        run: bash tools/ci_layer_check.sh
+
+      - name: Layer-ownership self-test
+        if: env.CI_LANE != 'docs'
+        run: bash tools/ci_layer_check_test.sh
+
+      - name: go vet
+        if: env.CI_LANE != 'docs'
+        run: go vet ./...
+        env:
+          CGO_ENABLED: '0'
+
+      - name: golangci-lint (staticcheck, errcheck, gosec, govulncheck, gocognit)
+        run: golangci-lint run
+
+      - name: Cyclomatic complexity <= 15
+        if: env.CI_LANE != 'docs'
+        run: |
+          high=$(gocognit -over 15 ./... 2>/dev/null || true)
+          if [ -n "$high" ]; then
+            echo "::error::Functions with cyclomatic complexity > 15:"
+            echo "$high"
+            exit 1
+          fi
+
+      - name: AI anti-pattern self-test
+        shell: bash
+        run: bash tools/ai_lint_test.sh
+
+      - name: Brief anti-pattern self-test
+        shell: bash
+        run: bash tools/brief_lint_test.sh
+
+      - name: AI anti-pattern lint (DEBT-21 + DEBT-49)
+        shell: bash
+        run: bash tools/ai_lint.sh
+
+      - name: Brief anti-pattern lint (DEBT-51)
+        shell: bash
+        run: bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/
+
+      - name: Doc-Code Contract Check (Issue #208)
+        shell: bash
+        run: bash tools/ci_doc_contract_check.sh
+
+      - name: Quantitative claims check (#447)
+        shell: bash
+        run: bash tools/claims_check.sh
+
+      - name: Link integrity check
+        shell: bash
+        run: bash tools/ci_link_integrity.sh
+
+      - name: Version sync check
+        shell: bash
+        run: bash tools/ci_version_sync_check.sh
+
+      - name: No debug prints in library code
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: |
+          debug_hits=$(grep -rn 'fmt\.Println\|console\.log' --include='*.go' . 2>/dev/null | grep -v '_test.go' | grep -v 'cmd/g8s/' | grep -v '//.*fmt\.Println' || true)
+          if [ -n "$debug_hits" ]; then
+            echo "::warning::fmt.Println() in library code (CLI cmd/g8s exempt):"
+            echo "$debug_hits"
+            # warning-only, not blocking — but visible in PR
+          fi
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: go test/race/fuzz/ratchet skipped (not applicable)"
+            exit 0
+          fi
+
+      - name: Coverage threshold >= 80%
+        if: env.CI_LANE != 'docs'
+        env:
+          CGO_ENABLED: '1'
+        shell: bash
+        run: |
+          # Use -v flag for per-package coverage (Go 1.26+ condensed output needs -v)
+          COV_FILE=$(mktemp)
+          trap 'rm -f "$COV_FILE"' EXIT
+          echo "=== Running go test with coverage (-v for per-package) ==="
+          go test -count=1 -v -cover ./... 2>&1 | tee "$COV_FILE"
+          TEST_EXIT=${PIPESTATUS[0]}
+          echo "=== go test exit code: $TEST_EXIT ==="
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "::error::go test failed with exit code $TEST_EXIT"
+            exit 1
+          fi
+
+          # Extract per-package coverage from 'ok' lines, excluding cmd/g8s
+          awk '
+            /^ok[ \t]/ && !/cmd\/g8s/ {
+              # Line format: ok[ \t]github.com/tamld/g8s/pkg[ \t](time)[ \t]coverage: XX.X% of statements
+              for (i = 1; i <= NF; i++) {
+                if ($i ~ /^coverage:/) {
+                  pct = $(i+1)
+                  gsub(/%/, "", pct)
+                  total += pct
+                  count++
+                  break
+                }
+              }
+            }
+            END {
+              if (count == 0) exit 1
+              avg = total / count
+              printf "%.2f\n%d\n", avg, count
+            }
+          ' "$COV_FILE" > /tmp/cov_result.txt
+
+          if [ ! -s /tmp/cov_result.txt ]; then
+            echo "::error::coverage extraction failed"
+            exit 1
+          fi
+
+          read avg count < /tmp/cov_result.txt
+          echo "Aggregate coverage: ${avg}% across ${count} packages (cmd/g8s excluded)"
+
+          awk -v a="$avg" 'BEGIN { if (a+0 < 80) { exit 1 } else { exit 0 } }' || {
+            echo "::error::Aggregate coverage ${avg}% is below 80% threshold"
+            exit 1
+          }
+
+      - name: Coverage Ratchet
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: |
+          read avg count < /tmp/cov_result.txt
+          BASELINE_FILE=".g8s/coverage-baseline"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            mkdir -p .g8s
+            echo "$avg" > "$BASELINE_FILE"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            # .g8s/ is the gitignored runtime dir; the baseline is a tracked
+            # artifact maintained by this bot, so force-add is required.
+            git add -f "$BASELINE_FILE"
+            if ! git diff --staged --quiet; then
+              # [skip ci] is intentional loop prevention: without it this bot
+              # commit triggers Quality again, the ratchet writes a new
+              # baseline, and commits forever. The skipped commit changes
+              # exactly one tracked file (.g8s/coverage-baseline) — no code.
+              git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
+              git push origin main || echo "::warning::Failed to push coverage baseline"
+            fi
+          else
+            if [ -f "$BASELINE_FILE" ]; then
+              bash tools/ci_coverage_ratchet.sh --baseline "$BASELINE_FILE" --current "$avg"
+            else
+              echo "::warning::No coverage baseline found at $BASELINE_FILE; skipping ratchet check."
+            fi
+          fi
+
+      - name: Dogfooding CI Gate (Brief Issue & Consume Roundtrip)
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: |
+          DB_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-$$.db"
+          PAYLOAD_FILE="${RUNNER_TEMP:-/tmp}/ci-payload-$$.md"
+          DOD_FILE="${RUNNER_TEMP:-/tmp}/ci-dod-$$.md"
+          BRIEF_FILE="${RUNNER_TEMP:-/tmp}/ci-brief-$$.md"
+          BIN_PATH="${RUNNER_TEMP:-/tmp}/g8s-ci-bin"
+
+          trap 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm" "$PAYLOAD_FILE" "$DOD_FILE" "$BRIEF_FILE" "$BIN_PATH"' EXIT
+
+          printf "# CI Dogfooding Task\nScope: internal/brief/brief.go\n" > "$PAYLOAD_FILE"
+          echo "- [x] Self-dogfooding brief dispatch validated" > "$DOD_FILE"
+
+          go build -o "$BIN_PATH" ./cmd/g8s
+
+          # 1. Issue brief
+          ISSUE_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-issue \
+            --title "ci-self-dogfood" \
+            --payload-file "$PAYLOAD_FILE" \
+            --dod-file "$DOD_FILE" \
+            --issued-by ci-bot \
+            --ttl 1h)
+
+          printf 'Brief issue output:\n%s\n' "$ISSUE_OUT"
+
+          BRIEF_ID=$(printf '%s\n' "$ISSUE_OUT" | jq -r '.data.id // .id // empty')
+          if [ -z "$BRIEF_ID" ] || [ "$BRIEF_ID" = "null" ]; then
+            echo "::error::Failed to capture brief ID from brief-issue output"
+            exit 1
+          fi
+
+          # 2. Consume brief
+          CONSUME_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-consume --id "$BRIEF_ID")
+
+          printf 'Brief consume output:\n%s\n' "$CONSUME_OUT"
+
+          STATUS=$(printf '%s\n' "$CONSUME_OUT" | jq -r '.data.status // .status // empty')
+          if [ "$STATUS" != "consumed" ]; then
+            echo "::error::Expected status 'consumed', got '$STATUS'"
+            exit 1
+          fi
+
+          # 3. Orchestrate brief-file
+          printf "# Orchestrate CI Task\nCI payload.\n## DoD\n- [x] DoD item\n" > "$BRIEF_FILE"
+          ORCH_BRIEF_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --brief-file "$BRIEF_FILE" --issued-by sisyphus --ttl 1h)
+          if [ -z "$ORCH_BRIEF_ID" ] || [[ "$ORCH_BRIEF_ID" != brief-* ]]; then
+            echo "::error::Failed to obtain brief ID from orchestrate --brief-file: '$ORCH_BRIEF_ID'"
+            exit 1
+          fi
+
+          # 4. Orchestrate dispatch (re-issue)
+          DISPATCH_ID=$(G8S_DB="$DB_PATH" "$BIN_PATH" orchestrate --dispatch "$ORCH_BRIEF_ID" --ttl 1h)
+          if [ -z "$DISPATCH_ID" ] || [[ "$DISPATCH_ID" != brief-* ]]; then
+            echo "::error::Failed to obtain brief ID from orchestrate --dispatch: '$DISPATCH_ID'"
+            exit 1
+          fi
+
+          # 5. Consume dispatched brief
+          CONSUME_DISPATCH_OUT=$(G8S_DB="$DB_PATH" "$BIN_PATH" brief-consume --id "$DISPATCH_ID")
+          DISPATCH_STATUS=$(printf '%s\n' "$CONSUME_DISPATCH_OUT" | jq -r '.data.status // .status // empty')
+          if [ "$DISPATCH_STATUS" != "consumed" ]; then
+            echo "::error::Expected dispatched brief status 'consumed', got '$DISPATCH_STATUS'"
+            exit 1
+          fi
+
+          echo "Dogfooding CI gate passed: Brief $BRIEF_ID and Dispatched $DISPATCH_ID verified consumed."
+
+      - name: Vulnerability scan (govulncheck)
+        if: env.CI_LANE != 'docs'
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+      - name: Native fuzzing (external-input parsers)
+        if: env.CI_LANE != 'docs'
+        # Note: deeper fuzzing runs are manual/quarterly.
+        shell: bash
+        run: |
+          go test -run '^$' -fuzz FuzzConfigLoad -fuzztime 30s ./internal/config/
+          go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 30s ./internal/receipt/
+          go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 30s ./internal/worker/
+          go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 30s ./internal/dispatch/
+
+      - name: Upload coverage artifact
+        if: always() && env.CI_LANE != 'docs'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.out
+
+  quality-windows:
+    # #336: the quality suite previously ran ubuntu-only; this job gives
+    # Windows a first-class vet+test pass (coverage parsing and golangci-lint
+    # remain Linux-only by design).
+    name: Quality Gate (windows-latest)
+    needs: [path-scope]
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Windows go vet/test skipped (not applicable)"
+            exit 0
+          fi
+
+      - name: Setup Go
+        if: env.CI_LANE != 'docs'
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.9'
+
+      - name: Cache modules
+        if: env.CI_LANE != 'docs'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: go vet (Windows)
+        if: env.CI_LANE != 'docs'
+        run: go vet ./...
+
+      - name: go test (Windows, CGO=0)
+        if: env.CI_LANE != 'docs'
+        run: go test -count=1 ./...
+
+  cross-platform:
+    name: Cross-Platform Build
+    needs: [path-scope]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane
+        shell: bash
+        run: |
+          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+            CI_LANE="docs"
+          else
+            CI_LANE="build"
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          export CI_LANE
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        shell: bash
+        run: |
+          if [ "${CI_LANE}" = "docs" ]; then
+            echo "::notice::docs lane: Cross-Platform Build skipped (not applicable)"
+            exit 0
+          fi
+
+      - name: Setup Go
+        if: env.CI_LANE != 'docs'
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.9'
+
+      - name: Verify Cross-Platform Compilation
+        if: env.CI_LANE != 'docs'
+        run: |
+          GOOS=linux go build ./...
+          GOOS=darwin go build ./...
+          GOOS=windows go build ./...
+
+  verify:
+    name: Verify Gate
+    needs: [path-scope, quality, quality-windows, cross-platform]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate Status Verification
+        shell: bash
+        run: |
+          SCOPE_RESULT="${{ needs.path-scope.result }}"
+          QUALITY_RESULT="${{ needs.quality.result }}"
+          QUALITY_WIN_RESULT="${{ needs.quality-windows.result }}"
+          CROSS_RESULT="${{ needs.cross-platform.result }}"
+
+          echo "path-scope: $SCOPE_RESULT"
+          echo "quality: $QUALITY_RESULT"
+          echo "quality-windows: $QUALITY_WIN_RESULT"
+          echo "cross-platform: $CROSS_RESULT"
+
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "::error::Path scope job failed."
+            exit 1
+          fi
+
+          if [ "$QUALITY_RESULT" != "success" ] && [ "$QUALITY_RESULT" != "skipped" ]; then
+            echo "::error::Quality Gate failed with state: $QUALITY_RESULT"
+            exit 1
+          fi
+
+          if [ "$QUALITY_WIN_RESULT" != "success" ] && [ "$QUALITY_WIN_RESULT" != "skipped" ]; then
+            echo "::error::Windows Quality Gate failed with state: $QUALITY_WIN_RESULT"
+            exit 1
+          fi
+
+          if [ "$CROSS_RESULT" != "success" ] && [ "$CROSS_RESULT" != "skipped" ]; then
+            echo "::error::Cross-Platform Gate failed with state: $CROSS_RESULT"
+            exit 1
+          fi
+
+          echo "Quality Verification Gate PASSED (all required jobs succeeded or safely skipped)."
