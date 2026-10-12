@@ -5,6 +5,7 @@
 package autopilot
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"fmt"
@@ -208,11 +209,51 @@ func (s *Scanner) scanStaleTodos(ctx context.Context) error {
 			return nil
 		}
 
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
+		// ⚡ Bolt Optimization: Replace `strings.Split(string(content), "\n")` with zero-allocation byte scanning
+		target := []byte("@agy-fix-me")
+		idx := 0
+		lineNum := 1
+		for {
+			j := bytes.Index(content[idx:], target)
+			if j < 0 {
+				break
+			}
+
+			// Count newlines to update the current line number
+			lineNum += bytes.Count(content[idx:idx+j], []byte("\n"))
+
+			// Find line boundaries
+			start := idx + j
+			for start > 0 && content[start-1] != '\n' {
+				start--
+			}
+			end := idx + j
+			for end < len(content) && content[end] != '\n' {
+				end++
+			}
+
+			line := string(content[start:end])
 			matches := todoRegex.FindStringSubmatch(line)
+
+			// Include the newline in the processed block so the next iteration counts it correctly
+			idx = end
+			if idx < len(content) && content[idx] == '\n' {
+				idx++
+				lineNum++
+			}
+
 			if matches == nil {
+				if idx >= len(content) {
+					break
+				}
 				continue
+			}
+
+			// The match occurred on the line *before* the newline we just advanced over
+			matchLineNum := lineNum - 1
+			if end == len(content) && content[end-1] != '\n' {
+				// If the file does not end with a newline and we matched the last line, we didn't increment lineNum for a newline
+				matchLineNum = lineNum
 			}
 
 			// Extract the TODO description
@@ -222,19 +263,19 @@ func (s *Scanner) scanStaleTodos(ctx context.Context) error {
 			}
 
 			item := &WorkItem{
-				ID:           fmt.Sprintf("todo-%s-%d", filepath.Base(path), i+1),
+				ID:           fmt.Sprintf("todo-%s-%d", filepath.Base(path), matchLineNum),
 				Source:       SourceStaleTodo,
-				Title:        fmt.Sprintf("Stale TODO in %s:%d", path, i+1),
+				Title:        fmt.Sprintf("Stale TODO in %s:%d", path, matchLineNum),
 				Description:  desc,
 				FilePath:     path,
-				LineNumber:   i + 1,
+				LineNumber:   matchLineNum,
 				Severity:     0.3, // Medium-low severity
 				Confidence:   0.7, // High confidence it's a real TODO
 				Cost:         2.0, // Low effort to fix
 				DiscoveredAt: time.Now(),
 				Metadata: map[string]string{
 					"file":     path,
-					"line":     fmt.Sprintf("%d", i+1),
+					"line":     fmt.Sprintf("%d", lineNum),
 					"todo_tag": matches[1],
 				},
 			}
