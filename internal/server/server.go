@@ -51,7 +51,7 @@ func NewServer(config Config, store *controlplane.Store) *Server {
 
 	s.httpSrv = &http.Server{
 		Addr:              config.Address,
-		Handler:           s.authMiddleware(s.corsMiddleware(mux)),
+		Handler:           s.corsMiddleware(s.authMiddleware(mux)),
 		ReadHeaderTimeout: config.ReadHeaderTimeout,
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
