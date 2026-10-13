@@ -11,7 +11,7 @@
 **Vulnerability:** Calls to `exec.Command("git", ...)` appended paths or branch names without explicitly indicating the end of options using `--`. If an untrusted path or branch name starts with `-`, Git parses it as an option, which can lead to command option injection.
 **Learning:** Command-line interfaces like `git` often parse any argument starting with `-` as an option unless `--` is explicitly used. This is especially risky when injecting uncontrolled or dynamic paths.
 **Prevention:** When invoking command-line tools that accept options using Go's `exec.Command`, always prepend `--` immediately before variable arguments (like paths or branches) to prevent them from being parsed as flags.
-## 2026-10-13 - Vulnerable Go Standard Library via Outdated go.mod
-**Vulnerability:** The `go.mod` file specified `go 1.26.0`, which exposed the codebase to 27 known vulnerabilities in the Go standard library (e.g., GO-2026-6610, GO-2026-6608).
-**Learning:** `govulncheck` scans the Go standard library and application code for known CVEs. An outdated `go.mod` file inherently imports vulnerable standard library packages and can fail CI check suites automatically.
-**Prevention:** Regularly bump the Go version in `go.mod` and run `govulncheck ./...` to detect standard library vulnerabilities, then ensure `go mod tidy` is run to sync dependencies.
+## 2026-10-13 - Inconsistent Go Toolchain Versions Across CI Workflows
+**Vulnerability:** The project bumped `go.mod` to Go 1.26.9, but GitHub Actions workflows still hardcoded `go-version: '1.26'` (which resolved to an older cached `1.26.8`). This caused a mismatch where the Go toolchain refused to build or test the code because the runner's Go version (1.26.8) was older than the module requirement (1.26.9), causing widespread CI failures.
+**Learning:** When bumping the Go version in `go.mod` to address standard library vulnerabilities, you must also explicitly bump the `go-version` parameters in all GitHub Actions workflow files (`.github/workflows/*.yml`) using `actions/setup-go` to ensure the runners install the matching toolchain.
+**Prevention:** Always `grep -rn "go-version" .github/workflows/` when updating `go.mod` to synchronize the runner environments with the new module requirement.
