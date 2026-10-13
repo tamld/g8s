@@ -11,3 +11,7 @@
 **Vulnerability:** Calls to `exec.Command("git", ...)` appended paths or branch names without explicitly indicating the end of options using `--`. If an untrusted path or branch name starts with `-`, Git parses it as an option, which can lead to command option injection.
 **Learning:** Command-line interfaces like `git` often parse any argument starting with `-` as an option unless `--` is explicitly used. This is especially risky when injecting uncontrolled or dynamic paths.
 **Prevention:** When invoking command-line tools that accept options using Go's `exec.Command`, always prepend `--` immediately before variable arguments (like paths or branches) to prevent them from being parsed as flags.
+## 2026-10-13 - Vulnerable Go Standard Library via Outdated go.mod
+**Vulnerability:** The `go.mod` file specified `go 1.26.0`, which exposed the codebase to 27 known vulnerabilities in the Go standard library (e.g., GO-2026-6610, GO-2026-6608).
+**Learning:** `govulncheck` scans the Go standard library and application code for known CVEs. An outdated `go.mod` file inherently imports vulnerable standard library packages and can fail CI check suites automatically.
+**Prevention:** Regularly bump the Go version in `go.mod` and run `govulncheck ./...` to detect standard library vulnerabilities, then ensure `go mod tidy` is run to sync dependencies.
