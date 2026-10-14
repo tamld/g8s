@@ -104,7 +104,11 @@ func parseAGYResult(stdoutText string) *agyResult {
 	return lastResult
 }
 
-// extractAGYUsage scans captured stdout for token usage reported by AGY in result or step_update events.
+// extractAGYUsage scans captured stdout for token usage reported by AGY in
+// result or step_update events. When a terminal result event is present, its
+// cumulative usage is returned directly; when the stream ends early (e.g. on
+// timeout) without a terminal result event, per-step step_update usage records
+// are summed so partial runs report accurate cumulative token consumption.
 func extractAGYUsage(stdoutText string) *agyUsage {
 	lines := strings.Split(stdoutText, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -117,20 +121,37 @@ func extractAGYUsage(stdoutText string) *agyUsage {
 			return ar.Result.Usage
 		}
 		var probe struct {
-			Event string `json:"event"`
-			Step  *struct {
-				Usage *agyUsage `json:"usage"`
-			} `json:"step_update"`
 			Usage *agyUsage `json:"usage"`
 		}
-		if json.Unmarshal([]byte(line), &probe) == nil {
-			if probe.Usage != nil {
-				return probe.Usage
-			}
-			if probe.Step != nil && probe.Step.Usage != nil {
-				return probe.Step.Usage
-			}
+		if json.Unmarshal([]byte(line), &probe) == nil && probe.Usage != nil {
+			return probe.Usage
 		}
+	}
+
+	var sum agyUsage
+	foundStepUsage := false
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var probe struct {
+			Step *struct {
+				Usage *agyUsage `json:"usage"`
+			} `json:"step_update"`
+		}
+		if json.Unmarshal([]byte(line), &probe) == nil && probe.Step != nil && probe.Step.Usage != nil {
+			u := probe.Step.Usage
+			sum.InputTokens += u.InputTokens
+			sum.OutputTokens += u.OutputTokens
+			sum.ThinkingTokens += u.ThinkingTokens
+			sum.CacheReadTokens += u.CacheReadTokens
+			sum.TotalTokens += u.TotalTokens
+			foundStepUsage = true
+		}
+	}
+	if foundStepUsage {
+		return &sum
 	}
 	return nil
 }
@@ -270,6 +291,13 @@ type WorktreeIsolator interface {
 	// release function. release(true) keeps the worktree for inspection
 	// (deliverable survival — the point of #427); release(false) discards.
 	AcquireWorktree(ctx context.Context, taskID string) (dir string, release func(keep bool), err error)
+}
+
+// RepoWorktreeIsolator extends WorktreeIsolator for cross-repo dispatches
+// where task add_dirs point to a sibling git repository outside cwd.
+type RepoWorktreeIsolator interface {
+	WorktreeIsolator
+	AcquireRepoWorktree(ctx context.Context, repoDir, taskID string) (dir string, release func(keep bool), err error)
 }
 
 // WithWorktreeIsolator wires the isolation seam. Only workspace_write
@@ -724,7 +752,17 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	var releaseWorktree func(keep bool)
 	var isolatedWorktreeDir string
 	if req.Permission == "workspace_write" && s.isolator != nil {
-		if wt, release, err := s.isolator.AcquireWorktree(ctx, task.TaskID); err == nil {
+		var (
+			wt      string
+			release func(keep bool)
+			err     error
+		)
+		if repoIso, ok := s.isolator.(RepoWorktreeIsolator); ok && spawnDir != "" {
+			wt, release, err = repoIso.AcquireRepoWorktree(ctx, spawnDir, task.TaskID)
+		} else {
+			wt, release, err = s.isolator.AcquireWorktree(ctx, task.TaskID)
+		}
+		if err == nil {
 			spawnDir = wt
 			releaseWorktree = release
 			isolatedWorktreeDir = wt

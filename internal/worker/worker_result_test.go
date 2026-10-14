@@ -197,3 +197,24 @@ func TestL3RejectIsAdvisoryByDefault(t *testing.T) {
 		t.Fatal("G8S_L3_JEV_BLOCK=1 must opt into blocking")
 	}
 }
+
+func TestExtractAGYUsageSumsStepUpdatesWhenResultMissing(t *testing.T) {
+	partialStream := strings.Join([]string{
+		`{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":1200,"output_tokens":150,"thinking_tokens":20,"cache_read_tokens":5000,"total_tokens":1350}}}`,
+		`{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":1800,"output_tokens":250,"thinking_tokens":30,"cache_read_tokens":6000,"total_tokens":2050}}}`,
+	}, "\n")
+
+	got := extractAGYUsage(partialStream)
+	if got == nil {
+		t.Fatal("expected summed usage from step_update events, got nil")
+	}
+	if got.InputTokens != 3000 || got.OutputTokens != 400 || got.ThinkingTokens != 50 || got.CacheReadTokens != 11000 || got.TotalTokens != 3400 {
+		t.Fatalf("expected cumulative step_update usage {3000,400,50,11000,3400}, got %+v", got)
+	}
+
+	completedStream := partialStream + "\n" + `{"event":"result","result":{"status":"SUCCESS","usage":{"input_tokens":3000,"output_tokens":400,"thinking_tokens":50,"cache_read_tokens":11000,"total_tokens":3400}}}`
+	gotCompleted := extractAGYUsage(completedStream)
+	if gotCompleted == nil || gotCompleted.TotalTokens != 3400 {
+		t.Fatalf("expected terminal result usage 3400, got %+v", gotCompleted)
+	}
+}
