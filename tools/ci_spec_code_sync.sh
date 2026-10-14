@@ -39,10 +39,14 @@ if [ -z "$CHANGED_FILES" ] && git rev-parse --git-dir >/dev/null 2>&1; then
     fi
 fi
 
+if [ "$SPEC_ROOT" = "spec/openspec" ] && [ ! -d "$SPEC_ROOT" ] && [ -d "$GO_ROOT/docs/openspec/specs" ]; then
+    SPEC_ROOT="$GO_ROOT/docs/openspec/specs"
+fi
+
 FAIL=0
 WARN=0
 
-for spec in "$SPEC_ROOT"/*.md; do
+for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md; do
     [ -e "$spec" ] || continue
     status=$(grep -m1 '^\*\*Status\*\*:' "$spec" || true)
     enforced=0
@@ -100,7 +104,15 @@ for spec in "$SPEC_ROOT"/*.md; do
         for name in ${names[@]}; do
             name=$(echo "$name" | tr -d ' ')
             [ -n "$name" ] || continue
-            if ! grep -rq "func ${name}(" "$GO_ROOT" --include='*.go' 2>/dev/null; then
+            pin_found=0
+            if grep -rq "func ${name}(" "$GO_ROOT" --include='*.go' 2>/dev/null; then
+                pin_found=1
+            elif [ -f "$GO_ROOT/$name" ] || [ -f "$GO_ROOT/tests/$name" ]; then
+                pin_found=1
+            elif [ -d "$GO_ROOT/tests" ] && find "$GO_ROOT/tests" -name "$name" 2>/dev/null | grep -q .; then
+                pin_found=1
+            fi
+            if [ "$pin_found" -eq 0 ]; then
                 echo "::error::spec-code sync: $spec:$line_no scenario \"$title\" pins test \"$name\" which does not exist under $GO_ROOT (#420 G1)"
                 FAIL=$((FAIL + 1))
             fi

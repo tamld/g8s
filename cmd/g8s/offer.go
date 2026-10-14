@@ -179,7 +179,7 @@ func runOffer(args []string) {
 func printOfferUsage() {
 	fmt.Println("Usage: g8s offer <init|check|version> [flags]")
 	fmt.Println("\nSubcommands:")
-	fmt.Println("  init --profile <knowledge|security|infra|utility> [--dir <target>] [--force]")
+	fmt.Println("  init --profile <knowledge|security|infra|utility> [--dir <target>] [--force] [--gates-only]")
 	fmt.Println("                                Scaffold .g8s/ + gate scripts from the embedded profile")
 	fmt.Println("  check [--dir <target>] [--gates <list>]   Run the copied gates (first audit)")
 	fmt.Println("  version                                   Print the offer bundle version")
@@ -188,59 +188,64 @@ func printOfferUsage() {
 func runOfferInit(args []string) {
 	fs := flag.NewFlagSet("offer init", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
-	profile := fs.String("profile", "", "profile: knowledge | security | infra | utility (required)")
+	profile := fs.String("profile", "", "profile: knowledge | security | infra | utility (required unless --gates-only)")
 	dir := fs.String("dir", ".", "target project directory")
 	force := fs.Bool("force", false, "overwrite an existing scaffold")
+	gatesOnly := fs.Bool("gates-only", false, "install/refresh tools/ci_*.sh gate scripts without modifying .g8s/ registries")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("offer", "init", *traceID, err.Error(), "", *jsonl)
 	}
-	known := false
-	for name := range offer.Profiles() {
-		if name == *profile {
-			known = true
-		}
-	}
-	if !known {
-		exitUsage("offer", "init", *traceID, fmt.Sprintf("unknown profile %q (valid: knowledge, security, infra, utility)", *profile), "g8s offer init --profile security", *jsonl)
-		return
-	}
 
-	g8sDir := filepath.Join(*dir, ".g8s")
-	if !*force {
-		if _, err := os.Stat(g8sDir); err == nil {
-			exitUsage("offer", "init", *traceID, "target already scaffolded (.g8s/ exists) — use --force to overwrite", "g8s offer init --profile "+*profile+" --force", *jsonl)
+	var scaffold []string
+	if !*gatesOnly {
+		known := false
+		for name := range offer.Profiles() {
+			if name == *profile {
+				known = true
+			}
+		}
+		if !known {
+			exitUsage("offer", "init", *traceID, fmt.Sprintf("unknown profile %q (valid: knowledge, security, infra, utility)", *profile), "g8s offer init --profile security", *jsonl)
 			return
 		}
-	}
 
-	seed, ok := offer.Seed(*profile, "trust")
-	if !ok {
-		exitRuntime("offer", "init", *traceID, cli.CodeRuntime, fmt.Errorf("no trust seed embedded for profile %q", *profile), "", *jsonl)
-		return
+		g8sDir := filepath.Join(*dir, ".g8s")
+		if !*force {
+			if _, err := os.Stat(g8sDir); err == nil {
+				exitUsage("offer", "init", *traceID, "target already scaffolded (.g8s/ exists) — use --force to overwrite or --gates-only to refresh gate scripts", "g8s offer init --profile "+*profile+" --force", *jsonl)
+				return
+			}
+		}
+
+		seed, ok := offer.Seed(*profile, "trust")
+		if !ok {
+			exitRuntime("offer", "init", *traceID, cli.CodeRuntime, fmt.Errorf("no trust seed embedded for profile %q", *profile), "", *jsonl)
+			return
+		}
+		lanes, ok := offer.Seed(*profile, "lanes")
+		if !ok {
+			exitRuntime("offer", "init", *traceID, cli.CodeRuntime, fmt.Errorf("no lanes seed embedded for profile %q", *profile), "", *jsonl)
+			return
+		}
+		if mkErr := os.MkdirAll(g8sDir, 0o700); mkErr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, mkErr, "", *jsonl)
+			return
+		}
+		if werr := os.WriteFile(filepath.Join(g8sDir, "trust-boundaries.yml"), []byte(seed), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		if werr := os.WriteFile(filepath.Join(g8sDir, "lane-bundles.yml"), []byte(lanes), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		effortSeed := effortClassesSeedForProfile(*profile)
+		if werr := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(effortSeed), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"}
 	}
-	lanes, ok := offer.Seed(*profile, "lanes")
-	if !ok {
-		exitRuntime("offer", "init", *traceID, cli.CodeRuntime, fmt.Errorf("no lanes seed embedded for profile %q", *profile), "", *jsonl)
-		return
-	}
-	if mkErr := os.MkdirAll(g8sDir, 0o700); mkErr != nil {
-		exitRuntime("offer", "init", *traceID, cli.CodeIO, mkErr, "", *jsonl)
-		return
-	}
-	if werr := os.WriteFile(filepath.Join(g8sDir, "trust-boundaries.yml"), []byte(seed), 0o600); werr != nil {
-		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
-		return
-	}
-	if werr := os.WriteFile(filepath.Join(g8sDir, "lane-bundles.yml"), []byte(lanes), 0o600); werr != nil {
-		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
-		return
-	}
-	effortSeed := effortClassesSeedForProfile(*profile)
-	if werr := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(effortSeed), 0o600); werr != nil {
-		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
-		return
-	}
-	scaffold := []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"}
 
 	toolsDir := filepath.Join(*dir, "tools")
 	if mkErr := os.MkdirAll(toolsDir, 0o700); mkErr != nil {
@@ -263,16 +268,21 @@ func runOfferInit(args []string) {
 	}
 
 	out := map[string]any{
-		"profile":  *profile,
-		"target":   *dir,
-		"scaffold": scaffold,
-		"gates":    offer.GateScripts(),
-		"next":     []string{"wire the gates into CI", "run 'g8s offer check' for the first audit", "report findings per Mode 3"},
+		"profile":    *profile,
+		"target":     *dir,
+		"gates_only": *gatesOnly,
+		"scaffold":   scaffold,
+		"gates":      offer.GateScripts(),
+		"next":       []string{"wire the gates into CI", "run 'g8s offer check' for the first audit", "report findings per Mode 3"},
 	}
 	env := cli.NewEnvelope("offer_init", "offer", "init", out)
 	env.TraceID = *traceID
 	if *jsonMode || *jsonl {
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	if *gatesOnly {
+		fmt.Printf("offer: refreshed gate scripts into %s/tools\n", *dir)
 		return
 	}
 	fmt.Printf("offer: scaffolded %s profile into %s\nnext: wire the gates into CI, then run 'g8s offer check'\n", *profile, *dir)
@@ -336,9 +346,19 @@ func overallStatus(fail int) string {
 }
 
 // runCapture executes a gate script with the target as repo root and
-// returns combined output. Failures surface as non-zero exit codes (the
-// caller records them — check never panics).
+// returns combined output. When the target repository does not vendor
+// tools/ci_*.sh on disk (e.g. L1-domain-locked repos like aegis), it
+// falls back to executing the embedded gate script from the binary.
 func runCapture(script, dir string) (string, error) {
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		if raw, ok := offer.GateScript(filepath.Base(script)); ok {
+			cmd := exec.Command("bash", "-s")
+			cmd.Dir = dir
+			cmd.Stdin = strings.NewReader(raw)
+			out, runErr := cmd.CombinedOutput()
+			return string(out), runErr
+		}
+	}
 	cmd := exec.Command("bash", script)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()

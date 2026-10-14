@@ -1785,3 +1785,19 @@ func (p workerPoolIsolator) AcquireWorktree(ctx context.Context, taskID string) 
 		}
 	}, nil
 }
+
+func (p workerPoolIsolator) AcquireRepoWorktree(ctx context.Context, repoDir, taskID string) (string, func(keep bool), error) {
+	if strings.TrimSpace(repoDir) != "" {
+		if targetPool, err := orchestrator.NewPool(orchestrator.PoolOptions{Repo: repoDir, Prefix: "wt"}); err == nil {
+			wt, acqErr := targetPool.Acquire(ctx, taskID)
+			if acqErr == nil {
+				return wt.Path, func(keep bool) {
+					if rerr := targetPool.Release(context.Background(), wt, keep); rerr != nil {
+						fmt.Fprintf(os.Stderr, "[warn] worker: release worktree: %v\n", rerr)
+					}
+				}, nil
+			}
+		}
+	}
+	return p.AcquireWorktree(ctx, taskID)
+}

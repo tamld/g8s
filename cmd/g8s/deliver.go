@@ -40,6 +40,7 @@ func runDeliver(args []string) {
 	_ = actor
 	dryRun := fs.Bool("dry-run", false, "perform validation and list files without copying")
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
+	worktreeFlag := fs.String("worktree", "", "explicit preserved worktree directory (#427 deliverable survival)")
 
 	// Allow flags to appear before or after positional task-id
 	var positional []string
@@ -48,7 +49,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -67,7 +68,7 @@ func runDeliver(args []string) {
 		taskID = fs.Arg(0)
 	}
 	if taskID == "" {
-		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--dry-run]", "Provide a task ID", *jsonl)
+		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--worktree <dir>] [--dry-run]", "Provide a task ID", *jsonl)
 	}
 
 	// 1. Resolve the task from the control plane
@@ -89,7 +90,7 @@ func runDeliver(args []string) {
 		exitRuntime("deliver", "", *traceID, cli.CodeNotFound, fmt.Errorf("unknown task: %s", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
 	}
 
-	// 2. Read the task's result JSON
+	// 2. Read the task's result JSON (or explicit --worktree override for #427 preserved worktrees)
 	var res deliverableResult
 	if len(task.Result) > 0 {
 		if err := json.Unmarshal(task.Result, &res); err != nil {
@@ -98,12 +99,15 @@ func runDeliver(args []string) {
 				"Task result is not valid JSON", *jsonl)
 		}
 	}
-	if res.Deliverable == nil || res.Deliverable.Mode != "worktree" || strings.TrimSpace(res.Deliverable.Dir) == "" {
+	deliverableDir := strings.TrimSpace(*worktreeFlag)
+	if deliverableDir == "" && res.Deliverable != nil && res.Deliverable.Mode == "worktree" {
+		deliverableDir = strings.TrimSpace(res.Deliverable.Dir)
+	}
+	if deliverableDir == "" {
 		exitUsage("deliver", "", *traceID,
 			fmt.Sprintf("no deliverable pointer for %s (attempt was not worktree-isolated, failed, or predates the pointer contract)", taskID),
-			"", *jsonl)
+			"Pass --worktree <dir> to deliver a preserved worktree after supervisor inspection", *jsonl)
 	}
-	deliverableDir := strings.TrimSpace(res.Deliverable.Dir)
 
 	// 3. In the pointer dir, run `git status --porcelain`
 	cmd := exec.Command("git", "status", "--porcelain")
@@ -243,11 +247,13 @@ func runDeliver(args []string) {
 
 	// 4. Receipt gate (the enforcement moment)
 	var payload struct {
-		ReceiptID string `json:"receipt_id"`
+		ReceiptID string   `json:"receipt_id"`
+		AddDirs   []string `json:"add_dirs"`
 	}
 	var wrapper struct {
 		Payload struct {
-			ReceiptID string `json:"receipt_id"`
+			ReceiptID string   `json:"receipt_id"`
+			AddDirs   []string `json:"add_dirs"`
 		} `json:"payload"`
 	}
 	if len(task.Request) > 0 {
@@ -309,6 +315,15 @@ func runDeliver(args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("resolve current working directory: %w", err), "", *jsonl)
+	}
+	addDirs := payload.AddDirs
+	if len(addDirs) == 0 {
+		addDirs = wrapper.Payload.AddDirs
+	}
+	if len(addDirs) > 0 && strings.TrimSpace(addDirs[0]) != "" {
+		if fi, statErr := os.Stat(strings.TrimSpace(addDirs[0])); statErr == nil && fi.IsDir() {
+			cwd = strings.TrimSpace(addDirs[0])
+		}
 	}
 
 	var toApply []string

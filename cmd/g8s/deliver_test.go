@@ -1127,3 +1127,53 @@ func TestDeliverSymlinkDeletionSkipped(t *testing.T) {
 		t.Errorf("symlink_file.txt is no longer a symlink")
 	}
 }
+
+func TestDeliverPreservedWorktreeOverrideAndCrossRepo(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	callerDir := t.TempDir()
+	siblingRepoDir := initGitRepo(t)
+	wtDir := createWorktree(t, siblingRepoDir, "case-preserved-cross-repo")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	if err := os.WriteFile(filepath.Join(wtDir, "recovered.txt"), []byte("recovered deliverable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"recovered.txt"})
+
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewControlPlane: %v", err)
+	}
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"prompt":     "cross-repo preserved worktree test",
+		"receipt_id": rcID,
+		"add_dirs":   []string{siblingRepoDir},
+	})
+	task, err := store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
+		IdempotencyKey: "preserved-cross-repo-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Model:          "gemini-3.8-flash-high",
+		AddDirs:        []string{siblingRepoDir},
+		Payload:        payloadBytes,
+	})
+	store.Close()
+	if err != nil {
+		t.Fatalf("SubmitTask: %v", err)
+	}
+
+	res := runDeliverCmd(t, binPath, callerDir, dbPath, task.TaskID, "--worktree", wtDir)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	got, err := os.ReadFile(filepath.Join(siblingRepoDir, "recovered.txt"))
+	if err != nil {
+		t.Fatalf("recovered.txt not delivered to siblingRepoDir: %v", err)
+	}
+	if string(got) != "recovered deliverable" {
+		t.Fatalf("unexpected recovered.txt content: %q", string(got))
+	}
+}

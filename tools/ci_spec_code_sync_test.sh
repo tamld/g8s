@@ -160,6 +160,21 @@ run_test "ghost pin in proposed delta fails" fail \
     "$GATE_SCRIPT" --spec-root "$SPEC_DIR" --go-root "$FIXTURE_ROOT" \
     --changed-files "$SPEC_DIR/99-draft-spec.md"
 
+# 8. Polyglot test-file pin (e.g. tests/api.test.js) resolves cleanly.
+mkdir -p "$FIXTURE_ROOT/tests"
+echo "// js test" > "$FIXTURE_ROOT/tests/api.test.js"
+cat > "$SPEC_DIR/99-draft-spec.md" <<'EOF'
+---
+**Status**: `APPLIED`
+
+#### Scenario: polyglot js test file pin
+<!-- tests: api.test.js -->
+- resolves to tests/api.test.js on disk.
+EOF
+run_test "polyglot test-file pin passes" pass \
+    "$GATE_SCRIPT" --spec-root "$SPEC_DIR" --go-root "$FIXTURE_ROOT" \
+    --changed-files "$SPEC_DIR/99-draft-spec.md"
+
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
     echo "SPEC-CODE SYNC GATE TEST SUITE: $FAILURES failure(s)."

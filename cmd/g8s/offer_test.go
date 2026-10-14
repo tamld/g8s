@@ -80,6 +80,36 @@ func TestOfferInitUnknownProfileExit2(t *testing.T) {
 	}
 }
 
+func TestOfferInitGatesOnlyPreservesExistingG8sDir(t *testing.T) {
+	dir := t.TempDir()
+	g8sDir := filepath.Join(dir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	customContent := "# custom sibling effort classes\nschema_version: \"effort-classes.v1\"\n"
+	if err := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(customContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := execOffer(t, dir, "init", "--gates-only")
+	if cmd.exitCode != 0 {
+		t.Fatalf("--gates-only must exit 0 even when .g8s/ exists, got %d:\n%s", cmd.exitCode, cmd.output)
+	}
+	got, err := os.ReadFile(filepath.Join(g8sDir, "effort-classes.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != customContent {
+		t.Errorf("--gates-only overwrote custom .g8s/effort-classes.yml: got %q, want %q", string(got), customContent)
+	}
+	for _, f := range []string{
+		"tools/ci_spec_code_sync.sh", "tools/ci_structure_sync.sh", "tools/ci_link_integrity.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("--gates-only missing gate script %s: %v", f, err)
+		}
+	}
+}
+
 func TestOfferCheckRunsGates(t *testing.T) {
 	dir := t.TempDir()
 	execOffer(t, dir, "init", "--profile", "utility")
@@ -88,6 +118,15 @@ func TestOfferCheckRunsGates(t *testing.T) {
 	cmd := execOffer(t, dir, "check")
 	if cmd.exitCode != 0 || !strings.Contains(cmd.output, "overall: PASS") {
 		t.Fatalf("offer check on clean scaffold must exit 0 with overall: PASS, got %d:\n%s", cmd.exitCode, cmd.output)
+	}
+}
+
+func TestOfferCheckEmbeddedFallbackWithoutToolsDir(t *testing.T) {
+	// L1-domain-locked repos (e.g. aegis) keep .g8s/ only and forbid top-level tools/*.sh.
+	dir := t.TempDir()
+	cmd := execOffer(t, dir, "check")
+	if cmd.exitCode != 0 || !strings.Contains(cmd.output, "overall: PASS") {
+		t.Fatalf("offer check without tools/ on disk must fall back to embedded gates and PASS, got %d:\n%s", cmd.exitCode, cmd.output)
 	}
 }
 
