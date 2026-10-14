@@ -11,12 +11,15 @@ closest; tune the seeds to the project.
 
 ## Step 2 — Scaffold `.g8s/`
 
-From the profile's trust-boundary + lane-bundle seeds, create:
+Run `g8s offer init --profile <knowledge|security|infra|utility> --dir <repo>`
+(or `--gates-only` to refresh `tools/ci_*.sh` without overwriting customized
+`.g8s/*.yml` registries). This creates:
 
 ```text
 .g8s/
 ├── trust-boundaries.yml   # seeded from the profile; tuned to the project
-└── lane-bundles.yml       # lane → gate-bundle map from the profile
+├── lane-bundles.yml       # lane → gate-bundle map from the profile
+└── effort-classes.yml     # path/signal-driven effort-class defaults
 ```
 
 Tuning is expected: the profile is the pattern, the project is the
@@ -26,23 +29,31 @@ repeats).
 
 ## Step 3 — Wire the three generic gates
 
-Copy from `g8s/tools/` and wire into the project's CI (they are
-project-agnostic — they take a repo root):
+Run `g8s offer check --dir <repo>` (executes `<repo>/tools/ci_*.sh` when
+present, or falls back automatically to the embedded gate scripts in `g8s`
+for L1-domain-locked repositories that forbid top-level `tools/*.sh`):
 
 | Script | Enforces | Needs |
 |---|---|---|
-| `ci_spec_code_sync.sh` (+test) | Delta scenarios pinned to real tests | `spec/openspec/` conventions (skips gracefully if absent) |
-| `ci_structure_sync.sh` (+test) | README structure truth | README markers + `go list` (Go projects; Markdown-only repos skip) |
+| `ci_spec_code_sync.sh` (+test) | Delta scenarios pinned to real tests (`func TestX(` or `tests/<file>`) | `spec/openspec/` or `docs/openspec/specs/` (`*.md` & `*/*.md`; skips gracefully if absent) |
+| `ci_structure_sync.sh` (+test) | README structure truth (`go list` or `docs/README.md` taxonomy) | README markers + `go.mod` or `docs/README.md` (skips gracefully when neither is present) |
 | `ci_link_integrity.sh` (+test) | No dead relative links | Nothing |
 
-## Step 4 — Run the first brief
+## Step 4 — Run the first brief & cross-repo remediation
 
-Dispatch the first real task through g8s (this is the dogfood):
+Dispatch the first audit (`read_only`) or bounded fix (`workspace_write`) through `g8s`:
 
 ```bash
-g8s brief-issue --title "..." --payload-file ... --dod-file ... --permission read_only
-g8s submit --idempotency-key <key> --prompt "..." --role verifier ...
-g8s worker --once=false --concurrency 2
+# Read-only first audit
+g8s submit --idempotency-key <key> --prompt "..." --role verifier --scope-root <repo> --add-dir <repo>
+g8s worker --once
+
+# Delegated cross-repo write (isolated git worktree + single-use receipt)
+RID=$(g8s receipt issue --path "docs/**" --json | jq -r '.data.receipt_id')
+AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --idempotency-key <key> --prompt "..." \
+  --permission workspace_write --receipt-id "$RID" --scope-root <repo> --add-dir <repo> --skip-permissions
+g8s worker --once
+g8s deliver <task-id>
 ```
 
 Report the outcome — including failures — per the charter's Mode 3

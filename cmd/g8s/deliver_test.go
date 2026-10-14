@@ -1164,9 +1164,20 @@ func TestDeliverPreservedWorktreeOverrideAndCrossRepo(t *testing.T) {
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
-	res := runDeliverCmd(t, binPath, callerDir, dbPath, task.TaskID, "--worktree", wtDir)
+	res := runDeliverCmd(t, binPath, callerDir, dbPath, task.TaskID, "--worktree", wtDir, "--prune-worktree")
 	if res.exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+	if !data.PrunedWorktree {
+		t.Fatalf("expected PrunedWorktree=true when --prune-worktree is passed")
+	}
+	if _, statErr := os.Stat(wtDir); !os.IsNotExist(statErr) {
+		t.Fatalf("expected worktree %s to be pruned after --prune-worktree, got err=%v", wtDir, statErr)
 	}
 
 	got, err := os.ReadFile(filepath.Join(siblingRepoDir, "recovered.txt"))

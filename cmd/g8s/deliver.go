@@ -32,6 +32,7 @@ type deliverData struct {
 	Deleted        []string `json:"deleted,omitempty"`
 	Skipped        []string `json:"skipped"`
 	ReceiptID      string   `json:"receipt_id"`
+	PrunedWorktree bool     `json:"pruned_worktree,omitempty"`
 }
 
 func runDeliver(args []string) {
@@ -39,6 +40,7 @@ func runDeliver(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	dryRun := fs.Bool("dry-run", false, "perform validation and list files without copying")
+	pruneWorktree := fs.Bool("prune-worktree", false, "remove the isolated git worktree and wt/<task-id> branch after successful delivery")
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
 	worktreeFlag := fs.String("worktree", "", "explicit preserved worktree directory (#427 deliverable survival)")
 
@@ -68,7 +70,7 @@ func runDeliver(args []string) {
 		taskID = fs.Arg(0)
 	}
 	if taskID == "" {
-		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--worktree <dir>] [--dry-run]", "Provide a task ID", *jsonl)
+		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--worktree <dir>] [--prune-worktree] [--dry-run]", "Provide a task ID", *jsonl)
 	}
 
 	// 1. Resolve the task from the control plane
@@ -478,6 +480,20 @@ func runDeliver(args []string) {
 		deleted = append(deleted, toDelete...)
 	}
 
+	pruned := false
+	if *pruneWorktree && !*dryRun {
+		rmCmd := exec.Command("git", "worktree", "remove", "--force", deliverableDir)
+		rmCmd.Dir = cwd
+		if out, rmErr := rmCmd.CombinedOutput(); rmErr == nil {
+			pruned = true
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove worktree %s: %v (%s)\n", deliverableDir, rmErr, strings.TrimSpace(string(out)))
+		}
+		brCmd := exec.Command("git", "branch", "-D", "wt/"+taskID)
+		brCmd.Dir = cwd
+		_, _ = brCmd.CombinedOutput()
+	}
+
 	data := deliverData{
 		TaskID:         taskID,
 		DeliverableDir: deliverableDir,
@@ -485,6 +501,7 @@ func runDeliver(args []string) {
 		Deleted:        deleted,
 		Skipped:        skipped,
 		ReceiptID:      receiptID,
+		PrunedWorktree: pruned,
 	}
 
 	if *jsonMode || *jsonl {

@@ -138,3 +138,52 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
   ("issue #481 briefs"). After every push to main, expect exactly the
   closes you intended. Recovery when one fires early: reopen → evidence
   comment → `gh issue close --reason completed`.
+
+## 13. Cross-repo `workspace_write` isolation & preserved-worktree delivery (2026-10-14 mercenary campaign)
+
+- When F0 dispatches a `workspace_write` task from `g8s` into a sibling
+  repository (`aegis`, `tuneflow`, `homelab-proxmox`), pass BOTH
+  `--scope-root <sibling-repo>` and `--add-dir <sibling-repo>` along with
+  `--receipt-id <id>` (where receipt `--path` globs are relative to the
+  sibling repository root) and `AGY_MCP_ALLOW_WORKSPACE_WRITE=1`.
+- `RepoWorktreeIsolator` (`AcquireRepoWorktree`) branches the isolated git
+  worktree (`$G8S_STATE_DIR/worktrees/wt-<hash>`) from the sibling
+  repository (`add_dirs[0]`), never from `g8s`.
+- `g8s deliver <task-id>` resolves `add_dirs[0]` automatically. If a worker
+  times out after completing its file edits on disk (`#427` deliverable
+  survival), inspect the diff in `$G8S_STATE_DIR/worktrees/wt-<hash>` and
+  run `g8s deliver <task-id> --worktree <wt-dir>` — this still enforces the
+  full Zero-Trust Receipt Gate (`VerifyScope` + `ConsumeWriteReceipt`).
+- After delivering to a sibling repo, prune temporary worktrees and `wt/*`
+  branches (`git -C <repo> worktree remove --force <wt-dir>` and
+  `git -C <repo> branch -D wt/<task-id>`) before running the sibling repo's
+  pre-push hooks.
+
+## 14. Atomic F1 slice quota (`<= 8 files / worker`) & JS/TS worktree `node_modules` trap
+
+- Empirical benchmark from parallel `aegis` + `tuneflow` waves:
+  - Bundling `18+ files` (3 issues) into a single `workspace_write` worker
+    causes `130–151+` tool steps and hits the `360s` timeout ceiling.
+  - Right-sizing each F1 worker to **`<= 8–9 files`** (`1 issue-slice = 1
+    worker = 1 receipt`, `<= 40` tool steps) brings completion down to
+    **`20s–149s`** (`28K–186K` tokens) with `100% succeeded` status across 3
+    concurrent F1 workers.
+- Git worktrees (`wt-<hash>`) do NOT contain gitignored `node_modules`.
+  In Node.js/TypeScript sibling repos (`aegis`, `tuneflow`), instruct F1
+  workers either to perform file edits only (leaving test runner execution
+  to F0 post-delivery) or to invoke `<sibling-repo>/node_modules/.bin/vitest`
+  directly — never let F1 workers waste 30+ steps debugging missing
+  `node_modules` or creating symlinks inside the worktree.
+
+## 15. Sibling pre-push & layer-ownership gate matrix
+
+- `tamld/aegis`: enforces `rule-anti-cowboy` on `pre-push` (`feat/` and
+  `fix/` commits cannot push directly to `main`; push a feature branch and
+  merge via `gh pr create` + `gh pr merge --squash --delete-branch`) and
+  enforces L1 Domain Lock (no top-level `tools/*.sh`; `g8s offer check`
+  uses embedded gate scripts via `bash -s`).
+- `tamld/g8s`: enforces `DEBT-34` (`tools/ci_layer_check.sh`) across
+  `origin/main...HEAD`. Never push commits touching two layers (`cmd/g8s/`
+  and `internal/worker/`) in the same `git push`; push each layer-disjoint
+  commit sequentially so `origin/main...HEAD` stays single-layer per push.
+

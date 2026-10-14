@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.1.0
-last_updated: "2026-09-30"
+version: 4.2.0
+last_updated: "2026-10-14"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -57,7 +57,7 @@ task receipt (operator mandate 2026-09-27).
 | Verified g8s defect or contribution | **Mode 3** | `references/mode-3-upstream-contribution.md` |
 | Detect problems → report without leaking project data | **Security** | `references/security-redaction-playbook.md` |
 | Admission/failure patterns | **Reference** | `references/binary-admission.md`, `references/anti-patterns.md` |
-| Multi-project tenancy, worker liveness, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.1 addendum — field-proven contracts from the 2026-09-29/30 campaign) |
+| Multi-project tenancy, cross-repo worktrees, atomic F1 quotas, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.2 addendum — field-proven contracts through 2026-10-14 cross-repo campaign) |
 
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 
@@ -71,9 +71,11 @@ Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 2. **Packet before worker.** No dispatch without the minimum packet below.
    Default result is `BLOCKED` — never a broader prompt, never a direct CLI
    fallback (`agy` shell), never provider shopping.
-3. **Read-only default.** Writes require separate explicit authorization,
-   path-scoped receipt proof, and worktree isolation (`g8s worker
-   --concurrency N` hard-gates N>1 on isolation; default N=1 is serial).
+3. **Read-only default.** Writes require separate explicit authorization
+   (`AGY_MCP_ALLOW_WORKSPACE_WRITE=1`), path-scoped single-use receipt proof
+   (`g8s receipt issue --path <glob>`), and worktree isolation (`RepoWorktreeIsolator`
+   for sibling repos via `--scope-root <repo> --add-dir <repo>`, harvested via
+   `g8s deliver <task-id> [--worktree <dir>]`).
 4. **Verify before accept.** Cited output, task/receipt shape, oracle,
    baseline/status/diff, redaction. Worker output never promotes canonical
    knowledge or task authority. One packet per worker; workers never review
@@ -82,7 +84,7 @@ Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
    packets (`references/security-redaction-playbook.md`); never secrets,
    provider config, raw prompts, raw logs, or raw receipts.
 6. **One slice at a time.** Start a new slice only after the current verdict.
-   Parallelism requires disjoint roots and one packet per worker.
+   Parallelism requires disjoint roots (`<= 8–9 files/worker`) and one packet per worker.
 
 ## Minimum worker packet
 

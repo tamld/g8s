@@ -145,6 +145,20 @@ cat > "$NON_GO_ROOT/README.md" <<'EOF'
 EOF
 run_test "non-Go repo without go.mod skips gracefully" pass \
     "$SYNC_SCRIPT" --repo-root "$NON_GO_ROOT" --readme "$NON_GO_ROOT/README.md"
+
+# 8. Non-Go repository with docs/README.md enforces first-level docs/ taxonomy.
+mkdir -p "$NON_GO_ROOT/docs/adr" "$NON_GO_ROOT/docs/openspec"
+cat > "$NON_GO_ROOT/docs/README.md" <<'EOF'
+# Docs Index
+- `adr/` — Architecture decisions
+- `openspec/` — Living capability specs
+EOF
+run_test "non-Go repo with complete docs/README.md passes" pass \
+    "$SYNC_SCRIPT" --repo-root "$NON_GO_ROOT" --readme "$NON_GO_ROOT/README.md"
+
+mkdir -p "$NON_GO_ROOT/docs/undocumented_lane"
+run_test "non-Go repo with undocumented docs/ subdir fails" fail \
+    "$SYNC_SCRIPT" --repo-root "$NON_GO_ROOT" --readme "$NON_GO_ROOT/README.md"
 rm -rf "$NON_GO_ROOT"
 
 if [ "$FAILURES" -gt 0 ]; then
@@ -154,3 +168,4 @@ if [ "$FAILURES" -gt 0 ]; then
 fi
 echo ""
 echo "STRUCTURE SYNC GATE TEST SUITE: all tests passed."
+
