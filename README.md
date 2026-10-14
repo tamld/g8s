@@ -241,6 +241,7 @@ g8s/
 │   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
 │   ├── routing/ — routes tasks to providers, models, and roles using deterministic rules and optional LLM assistance
 │   ├── runtime/ — provides runtime verification utilities for executable identity
+│   ├── search/ — implements a native cross-platform file discovery and content search engine
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
 │   ├── service/ — manages the g8s background worker as an OS daemon
 │   ├── settings/ — manages persistent, atomic user and system configurations for g8s

@@ -319,6 +319,7 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 		report.Checks = append(report.Checks, d.checkWindowsEnvironment()...)
 	}
 	report.Checks = append(report.Checks, checkWorkerBinaries()...)
+	report.Checks = append(report.Checks, checkSearchEngine())
 	report.Checks = append(report.Checks, checkProviders())
 	report.Checks = append(report.Checks, checkProvidersFile())
 	report.Checks = append(report.Checks, checkHarnessProfiles())
@@ -473,6 +474,22 @@ func checkWorkerBinaries() []DiagnosticResult {
 		}
 	}
 	return results
+}
+
+func checkSearchEngine() DiagnosticResult {
+	if path, err := exec.LookPath("rg"); err == nil {
+		return DiagnosticResult{
+			Name:    "Search Engine",
+			Status:  "OK",
+			Message: fmt.Sprintf("Native Go search engine active; ripgrep turbo available at %s", path),
+			Details: path,
+		}
+	}
+	return DiagnosticResult{
+		Name:    "Search Engine",
+		Status:  "OK",
+		Message: "Native Go search engine active (optional ripgrep CLI not found in PATH)",
+	}
 }
 
 func checkProviders() DiagnosticResult {
