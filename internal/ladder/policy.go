@@ -245,7 +245,16 @@ func EvaluateNextRung(ctx PolicyContext) RungPlan {
 	currentRung := len(ctx.History)
 
 	// 1. Check success
-	if ctx.LatestSucceeded {
+	hasSucceeded := ctx.LatestSucceeded
+	if !hasSucceeded {
+		for _, h := range ctx.History {
+			if strings.EqualFold(h.Verdict, "success") || strings.EqualFold(h.Verdict, "succeeded") || strings.EqualFold(h.Verdict, "passed") {
+				hasSucceeded = true
+				break
+			}
+		}
+	}
+	if hasSucceeded {
 		return RungPlan{
 			RungIndex: currentRung,
 			Action:    ActionDone,
@@ -301,9 +310,22 @@ func EvaluateNextRung(ctx PolicyContext) RungPlan {
 			seenRungs[h.RungIndex] = true
 		}
 
+		if ctx.History[0].RungIndex < 0 {
+			err := &RungDiscontinuityError{
+				TaskID:       ctx.RootTaskID,
+				ExpectedRung: 0,
+				ActualRung:   ctx.History[0].RungIndex,
+			}
+			return RungPlan{
+				Action:       "",
+				Reason:       err.Error(),
+				RefusalError: err,
+			}
+		}
+
 		for i := 1; i < len(ctx.History); i++ {
 			expected := ctx.History[i-1].RungIndex + 1
-			if ctx.History[i].RungIndex > expected {
+			if ctx.History[i].RungIndex != expected {
 				err := &RungDiscontinuityError{
 					TaskID:       ctx.RootTaskID,
 					ExpectedRung: expected,

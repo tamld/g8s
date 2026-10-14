@@ -1610,3 +1610,59 @@ func TestRunOnceArtifactAlteredEvidenceLake(t *testing.T) {
 		t.Fatalf("expected altered_fields=[response] in centralized receipt, got %+v", receiptRes["altered_fields"])
 	}
 }
+
+func TestRunOnceWallClockDurationAndProviderDuration(t *testing.T) {
+	now := time.Date(2026, 10, 14, 2, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	env := newWorkerEnv(t, clock)
+
+	env.runner.factory = func(opts SpawnOptions) Child {
+		child := newFakeChild(0)
+		// startTime was already captured before Spawn; advance the clock by 18s
+		// (well below submitTask's 30s timeout) so collect() measures 18s wall-clock.
+		mu.Lock()
+		now = now.Add(18 * time.Second)
+		mu.Unlock()
+		agyStdout := `{"type":"result","result":{"status":"SUCCESS","response":"Completed analysis of module inventory.","duration_seconds":15.5,"usage":{"input_tokens":120,"output_tokens":30,"total_tokens":150}}}` + "\n"
+		if opts.Stdout != nil {
+			_, _ = opts.Stdout.Write([]byte(agyStdout))
+		}
+		close(child.done)
+		return child
+	}
+
+	_ = submitTask(t, env, "idem-wallclock-575", 1, map[string]any{
+		"prompt":      "verify duration",
+		"role":        "collector",
+		"permission":  "read_only",
+		"result_mode": "stdout",
+	})
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-575",
+		LeaseSeconds: 120,
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected claimed task")
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(claimed.Result, &res); err != nil {
+		t.Fatalf("unmarshal claimed.Result: %v", err)
+	}
+	durSec, _ := res["duration_seconds"].(float64)
+	if durSec != 18.0 {
+		t.Fatalf("expected wall-clock duration_seconds=18.0, got %v (res=%+v)", durSec, res)
+	}
+	provDur, _ := res["provider_duration_seconds"].(float64)
+	if provDur != 15.5 {
+		t.Fatalf("expected provider_duration_seconds=15.5, got %v (res=%+v)", provDur, res)
+	}
+}

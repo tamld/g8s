@@ -917,6 +917,87 @@ func TestFindGhostProcesses_ClaudeWithoutHeartbeatIgnored(t *testing.T) {
 	}
 }
 
+func TestFindGhostProcesses_SkipsAncestorSupervisorChain(t *testing.T) {
+	tempDir := t.TempDir()
+
+	selfPID := os.Getpid()
+	parentPID := os.Getppid()
+	ancestorPID := 100
+	if ancestorPID == selfPID || ancestorPID == parentPID {
+		ancestorPID = 10001
+	}
+	ghostPID := ancestorPID + 500
+	if ghostPID == selfPID || ghostPID == parentPID {
+		ghostPID++
+	}
+
+	lister := &mockCleanupProcessLister{
+		processes: []process.ProcessInfo{
+			{
+				PID:         ancestorPID,
+				PPID:        1,
+				Binary:      "agy",
+				CommandLine: "agy supervisor",
+				CWD:         tempDir,
+			},
+			{
+				PID:         parentPID,
+				PPID:        ancestorPID,
+				Binary:      "zsh",
+				CommandLine: "zsh -c g8s cleanup",
+				CWD:         tempDir,
+			},
+			{
+				PID:         selfPID,
+				PPID:        parentPID,
+				Binary:      "g8s",
+				CommandLine: "g8s cleanup",
+				CWD:         tempDir,
+			},
+			{
+				PID:         ghostPID,
+				PPID:        1,
+				Binary:      "agy",
+				CommandLine: "agy worker --task=99",
+				CWD:         tempDir,
+			},
+		},
+	}
+
+	pm := &DefaultProcessManager{
+		RepoDir: tempDir,
+		Lister:  lister,
+	}
+
+	ghosts, err := pm.FindGhostProcesses(context.Background(), filepath.Join(tempDir, ".heartbeat"), 5*time.Minute, time.Now)
+	if err != nil {
+		t.Fatalf("FindGhostProcesses failed: %v", err)
+	}
+
+	for _, g := range ghosts {
+		if g.PID == ancestorPID {
+			t.Fatalf("expected ancestor PID %d to be excluded from ghosts, but it was flagged", ancestorPID)
+		}
+		if g.PID == parentPID {
+			t.Fatalf("expected parent PID %d to be excluded from ghosts, but it was flagged", parentPID)
+		}
+		if g.PID == selfPID {
+			t.Fatalf("expected self PID %d to be excluded from ghosts, but it was flagged", selfPID)
+		}
+	}
+
+	foundGhost := false
+	for _, g := range ghosts {
+		if g.PID == ghostPID {
+			foundGhost = true
+			break
+		}
+	}
+	if !foundGhost {
+		t.Fatalf("expected unrelated process PID %d to be flagged as ghost", ghostPID)
+	}
+}
+
 func TestGhostProcessCleanup_AuditLogAppended(t *testing.T) {
 	tempDir := t.TempDir()
 	auditLog := filepath.Join(tempDir, ".cleanup-audit.jsonl")

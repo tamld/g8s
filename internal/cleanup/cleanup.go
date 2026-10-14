@@ -263,13 +263,35 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 	selfPID := os.Getpid()
 	parentPID := os.Getppid()
 
+	ppidByPID := make(map[int]int, len(procs))
+	for _, p := range procs {
+		if p.PID > 0 {
+			ppidByPID[p.PID] = p.PPID
+		}
+	}
+	ppidByPID[selfPID] = parentPID
+
+	ancestors := map[int]bool{
+		selfPID:   true,
+		parentPID: true,
+	}
+	curr := parentPID
+	for i := 0; i < 64; i++ {
+		next, ok := ppidByPID[curr]
+		if !ok || next <= 1 || ancestors[next] {
+			break
+		}
+		ancestors[next] = true
+		curr = next
+	}
+
 	// Load all known heartbeats
 	heartbeats := LoadHeartbeats(heartbeatDir)
 
 	for _, p := range procs {
 		pid := p.PID
 		ppid := p.PPID
-		if pid <= 0 || pid == selfPID || pid == parentPID {
+		if pid <= 0 || ancestors[pid] {
 			continue
 		}
 
@@ -1017,7 +1039,53 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 			Action: "killed",
 		})
 	}
+	if !cfg.DryRun {
+		pruneDeadHeartbeatFiles(cfg.HeartbeatDir, 5*time.Minute, cfg.Clock, cfg.ProcessManager)
+	}
 	return items, nil
+}
+
+func pruneDeadHeartbeatFiles(baseDir string, maxAge time.Duration, clock func() time.Time, pm ProcessManager) {
+	if baseDir == "" {
+		baseDir = ".heartbeat"
+	}
+	now := time.Now()
+	if clock != nil {
+		now = clock()
+	}
+	dirs := []string{
+		baseDir,
+		filepath.Join(baseDir, "agy"),
+		filepath.Join(baseDir, "claude"),
+	}
+	for _, d := range dirs {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			p := filepath.Join(d, entry.Name())
+			data, err := os.ReadFile(p)
+			if err != nil {
+				continue
+			}
+			var hb HeartbeatData
+			if err := json.Unmarshal(data, &hb); err != nil || hb.PID <= 0 {
+				continue
+			}
+			if pm != nil && pm.IsProcessAlive(hb.PID) {
+				continue
+			}
+			lastUpdate, err := time.Parse(time.RFC3339, hb.LastUpdate)
+			if err == nil && now.Sub(lastUpdate) <= maxAge {
+				continue
+			}
+			_ = os.Remove(p)
+		}
+	}
 }
 
 // 2. Orphan worktrees sweep

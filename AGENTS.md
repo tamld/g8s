@@ -4,35 +4,62 @@
 
 ---
 
-## 0. The Machine-Readable SSoT Manifest
+## 0. The Machine-Readable SSoT Manifest & Declarative Registries
 
-For programmatic inspection without parsing prose, read [`manifest.json`](manifest.json) at the repository root. It contains the exact JSON schema maps, active OpenSpec deltas, roles, permission matrices, and milestone progress.
+For programmatic inspection without parsing prose, read [`manifest.json`](manifest.json) at the repository root and the declarative governance registries under `.g8s/`:
+- [`manifest.json`](manifest.json): JSON schema maps, active OpenSpec deltas, roles, permission matrices, and release metadata.
+- [`.g8s/agent-models.yml`](.g8s/agent-models.yml) & [`.g8s/effort-classes.yml`](.g8s/effort-classes.yml): Provider-neutral model effort catalog (`named` / `budget` / `baked-name` / `toggle`) and path/signal-driven effort-class defaults.
+- [`.g8s/verifier-classes.yml`](.g8s/verifier-classes.yml), [`.g8s/lane-bundles.yml`](.g8s/lane-bundles.yml), [`.g8s/trust-boundaries.yml`](.g8s/trust-boundaries.yml): Machine-check acceptance verifiers, ALDC gate-lane routing (`0/D/R/F/S`), and P0 trust boundaries.
 
 ---
 
-## 0.1. Vocabulary Reservation: F0/F1/F2 (containment levels)
+## 0.1. Vocabulary Reservation & Recursive Agent Architecture: F0 / F1 / F2
 
-Bare tokens **F0/F1/F2 are RESERVED** for the containment tiers — F0 = Brain/supervisor, F1 = g8s-harness worker spawned by F0, **F2 = subagent spawned recursively BY a worker** (platform-native by default; `F2 ⊆ F1 ⊆ F0`). They are exponentials of the supervisor→worker structure, not sequence numbers. Wave/slice ordinals MUST carry a prefix (`WF1`, never bare `F1`). Canonical definitions, routing rules (default platform-native; recursive-g8s is ADR-gated), the cardinality law, and the implementation audit: [`docs/decisions/0032-containment-levels.md`](docs/decisions/0032-containment-levels.md).
+Bare tokens **F0/F1/F2 are RESERVED** for the exponential containment tiers ([`docs/decisions/0032-containment-levels.md`](docs/decisions/0032-containment-levels.md)):
+- **F0 — Brain / Supervisor Tier**: Full trust; exclusive authority holder (architecture, git commits, vault promotion, write receipt issuance). `Operator ↔ F0 = 1-1`.
+- **F1 — Worker Tier**: Spawned BY **F0** THROUGH the `g8s` harness (`g8s submit` + `g8s worker`: queue claim, CAS lease, path-scoped single-use Write Receipt, isolated git worktree, killable OS process group `Setpgid`). `F0 ↔ F1 = 1-n` fan-out.
+- **F2 — Subagent Tier**: Spawned recursively BY **F1** workers themselves inside the worker's platform (`define_subagent` / `invoke_subagent`) by default, sharing F1's sandbox and receipt boundary (`F2 ⊆ F1 ⊆ F0`). Recursive `g8s` (`F1` calling `g8s submit`) is reserved and ADR-gated.
+- **Cardinality Law**: `1 issue = 1 worker = 1 receipt` (strict `1-1`); **`F1 ↔ F1 = 0`** (no horizontal edges; coordinate only via frozen briefs and disjoint receipts); **`F0 ↔ F2 = 0 direct`** (F2 is visible to F0 only through F1's sealed evidence — never skip layers); `n workers ↔ queue = n-1` (SQLite WAL single-winner).
+- **Naming Discipline**: Wave and slice ordinals MUST carry a prefix (`WF1..WFN`, never bare `F1..FN`). Bare `F3+` does not exist.
 
 ---
 
 ## 1. Zero-Context Lazy Loading Protocol (Mandatory Reading Order)
 
-Do NOT randomly scan the entire repository or the `reference/` directory. Follow this 4-step progressive disclosure reading order:
+Do NOT randomly scan the entire repository or the `reference/` directory. Follow this 5-step progressive disclosure reading order:
 
 ```text
-1. README.md      -> 2. CONSTITUTION    -> 3. REFACTOR PLAN   -> 4. OPENSPEC
-   (ID & Overview)      (Invariant Rules)      (Active Task)         (Spec Delta)
+1. README & MANIFEST -> 2. CONSTITUTION & CHARTER -> 3. PLANS & ISSUES -> 4. OPENSPEC & ADRs -> 5. JIT REFERENCE
+   (ID & Surface)          (Invariants & 6 Laws)        (Active Slice)       (Spec Contracts)      (Python Baseline)
 ```
 
-1. **Step 1 — Understand Identity & Purpose**: Read [`README.md`](README.md) (1 min).
-2. **Step 2 — Anchor Invariant Rules (Constitution)**: Read [`spec/constitution.md`](spec/constitution.md) (Zero-CGO, Pure-Go, 2-Tier governance, Process isolation).
-3. **Step 3 — Locate Active Task & Progress**: Read [`docs/REFACTORING_PLAN.md`](docs/REFACTORING_PLAN.md) (Find the first uncompleted `[ ]` task).
-4. **Step 4 — Read the Technical Spec Delta**: Read the corresponding spec in [`spec/openspec/`](spec/openspec/) (e.g. `02-receipt-delegation-spec.md`).
+1. **Step 1 — Understand Identity & Surface**: Read [`README.md`](README.md) and [`manifest.json`](manifest.json).
+2. **Step 2 — Anchor Invariant Rules & Supervisor Charter**: Read [`spec/constitution.md`](spec/constitution.md) and [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md) (plus [`hard-boundary.md`](skills/g8s-supervisor/references/hard-boundary.md) and [`operational-hard-lessons.md`](skills/g8s-supervisor/references/operational-hard-lessons.md)).
+3. **Step 3 — Locate Active Campaign, Offer Rollout & Debt**: Check [`plans/handoffs/`](plans/handoffs/), active campaign ledgers in [`plans/`](plans/), [`offer/SCORECARD.md`](offer/SCORECARD.md), open GitHub issues (`gh issue list`), and [`docs/REFACTORING_PLAN.md`](docs/REFACTORING_PLAN.md).
+4. **Step 4 — Read Technical Spec Deltas & ADRs**: Read the corresponding spec in [`spec/openspec/`](spec/openspec/) and architectural decisions in [`docs/decisions/`](docs/decisions/).
 5. **Step 5 (JIT Only) — Reference Python Baseline**: Only inspect the specific file in [`reference/python/`](reference/python/) matching your current task.
 
 ---
 
-## 2. Deep Reference Documentation
+## 2. Supervisor Operating Protocol: Skills, Dogfooding, Offer Bundle & Tooling
+
+1. **Skills & OS Shared Layer (`~/.agents/skills`)**:
+   - **Repo Charter**: [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md) (manifest at [`skills/manifest.json`](skills/manifest.json)) is the canonical supervisor operating charter. Keep `~/.agents/skills/g8s-supervisor` synced with `skills/g8s-supervisor`.
+   - **OS Shared Layer**: Global skills reside in `~/.agents/skills/` (registered for Antigravity via `~/.gemini/config/skills.json`). Query the deterministic JIT router before starting complex tasks: `python3 ~/.agents/skills/_shared/scripts/skill-router.py --strict "<task>"`.
+2. **Mandatory Self-Dogfooding (`F0 → F1` via `g8s`)**:
+   - **Rebuild First (Lesson #6)**: Always run `make local` and `./bin/g8s doctor --json` after every merge before dispatching workers to avoid the stale-binary trap.
+   - **Session State Isolation**: Concurrent supervisor sessions MUST isolate queues via `G8S_STATE_DIR=~/.local/state/g8s-sess-<id>`.
+   - **Event-Driven Supervision**: Dispatch bounded worker packets via `./bin/g8s submit` and `./bin/g8s worker`, and wake via `./bin/g8s watch --task <id> --milestone worker-complete` or `./bin/g8s watch --failed` (polling is fallback only).
+   - **Evidence over Verdicts**: Harvest worktrees under `$G8S_STATE_DIR/worktrees`, run `./bin/g8s verify --task <id>`, and inspect actual diffs on disk before accepting or committing.
+3. **Offer Bundle (`offer/`) for Sibling Repositories**:
+   - Pull-based adoption ([`offer/README.md`](offer/README.md), [`offer/ONBOARDING.md`](offer/ONBOARDING.md), [`offer/SCORECARD.md`](offer/SCORECARD.md)) provides 4 domain profiles ([`knowledge`](offer/profiles/knowledge.md), [`security`](offer/profiles/security.md), [`infra`](offer/profiles/infra.md), [`utility`](offer/profiles/utility.md)) and 3 repo-agnostic CI gates (`tools/ci_spec_code_sync.sh`, `tools/ci_structure_sync.sh`, `tools/ci_link_integrity.sh`). Defects discovered during sibling runs flow back to `g8s` as sanitized Mode 3 packets.
+4. **System-1 Reflex (`Jev` / TypeSafe) & Cognitive Harness (`wiki.py`)**:
+   - **Jev (TypeSafe SystemOne)**: Enforces **Sensor ≠ Decider** across 3 boundaries: (a) L1 Pre-Mutation Triage (`./bin/g8s reflex triage --summary "..." --files "..."` enriched with Context Broker `ContextPacket`), (b) Router Assist (`G8S_ROUTER_MODE=jev_assisted`), and (c) L3 Output Quality & Memory Promotion Gate. Never expose raw API keys in JSON envelopes, logs, or issue packets.
+   - **LLM Wiki (`wiki.py`)**: Run `~/.local/bin/wiki.py orient` to align with Second Brain governance (`R-Second-Brain-Partitioning`, `R-Zero-Leakage-DLP-Protocol`, `R-Git-Worktree-Isolation`, `R-Git-Push-Cleanliness`).
+
+---
+
+## 3. Deep Reference Documentation
 
 For the complete SSoT Architecture & Governance Map, JIT Task Routing Decision Tree, Strict Development Invariants, OpenSpec Deltas, and Multi-Agent Protocols, see [`docs/AGENTS_FULL.md`](docs/AGENTS_FULL.md).
+

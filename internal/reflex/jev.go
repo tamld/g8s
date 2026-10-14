@@ -261,6 +261,22 @@ func (g *ReflexGate) rotateKey() string {
 	return g.keys[g.keyIdx]
 }
 
+// MaskKey redacts a secret API key while preserving prefix and suffix for telemetry and auditing.
+// It is idempotent: MaskKey(MaskKey(raw)) == MaskKey(raw).
+func MaskKey(key string) string {
+	k := strings.TrimSpace(key)
+	if k == "" || k == "none" {
+		return k
+	}
+	if strings.Contains(k, "...") {
+		return k
+	}
+	if len(k) <= 8 {
+		return "***"
+	}
+	return k[:4] + "..." + k[len(k)-4:]
+}
+
 // EmitSignal queries the System 1 reflex sensor (Jev or deterministic fallback)
 // and returns pure empirical risk telemetry without taking operational actions.
 func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexSignal, error) {
@@ -362,13 +378,14 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		Confidence: conf,
 		LatencyMs:  elapsed,
 		Source:     "jev",
-		KeyUsed:    activeKey,
+		KeyUsed:    MaskKey(activeKey),
 		Reason:     reason,
 		IsFallback: false,
 	}, nil
 }
 
 func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageVerdict {
+	signal.KeyUsed = MaskKey(signal.KeyUsed)
 	return TriageVerdict{
 		Action:     action,
 		Signal:     signal,
@@ -377,7 +394,7 @@ func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageV
 		Confidence: signal.Confidence,
 		LatencyMs:  signal.LatencyMs,
 		Reason:     reason,
-		KeyUsed:    signal.KeyUsed,
+		KeyUsed:    MaskKey(signal.KeyUsed),
 		IsFallback: signal.IsFallback,
 	}
 }
@@ -476,7 +493,7 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 		Confidence: conf,
 		LatencyMs:  time.Since(start).Milliseconds(),
 		Source:     "jev",
-		KeyUsed:    activeKey,
+		KeyUsed:    MaskKey(activeKey),
 		IsFallback: false,
 	}, nil
 }
@@ -500,6 +517,7 @@ func EvaluateOutputQuality(signal ReflexSignal) OutputQualityVerdict {
 // It consumes the empirical ReflexSignal, correlates it with the task contract,
 // and deterministically emits an authoritative TriageVerdict.
 func (g *ReflexGate) EvaluatePolicy(signal ReflexSignal, req TriageRequest) TriageVerdict {
+	signal.KeyUsed = MaskKey(signal.KeyUsed)
 	// Rule 1: Instant Kill on high sandbox breach probability (Active Defense)
 	if signal.BreachProb >= 0.70 {
 		return newVerdict(signal, ActionInstantKill,

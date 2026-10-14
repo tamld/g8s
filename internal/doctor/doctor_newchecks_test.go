@@ -77,6 +77,28 @@ func TestCheckProvidersFileMatrix(t *testing.T) {
 	if !strings.Contains(res.Message, "fix providers.json or remove it to fall back to built-ins") {
 		t.Fatalf("expected fix advice in message, got: %s", res.Message)
 	}
+
+	// 5. Stale model IDs for catalog provider (#566) -> WARN
+	staleContent := `{
+		"providers": [
+			{
+				"class": "platform_dispatch",
+				"name": "agy",
+				"models": [{"id": "gemini-3.7-flash-high"}]
+			}
+		]
+	}`
+	stalePath := filepath.Join(tempDir, "stale_providers.json")
+	if err := os.WriteFile(stalePath, []byte(staleContent), 0o600); err != nil {
+		t.Fatalf("write stale providers.json: %v", err)
+	}
+	res = checkProvidersFile(stalePath)
+	if res.Status != "WARN" {
+		t.Fatalf("expected WARN for stale model IDs, got %s: %s", res.Status, res.Message)
+	}
+	if !strings.Contains(res.Message, "Stale model IDs") {
+		t.Fatalf("expected 'Stale model IDs' in message, got: %s", res.Message)
+	}
 }
 
 func TestCheckDiskSpaceThreshold(t *testing.T) {

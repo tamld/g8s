@@ -22,10 +22,11 @@ func TestDefaultSuite_SelfAuditProbesRegistered(t *testing.T) {
 	}
 
 	requiredProbes := map[string]string{
-		"refusal-echo":       "#443",
-		"worktree-discard":   "#443", // #443-f2 / #450
-		"sanitizer-fidelity": "#434", // #434 / #445
-		"receipt-bypass":     "#",    // #359 / #366
+		"refusal-echo":             "#443",
+		"worktree-discard":         "#443", // #443-f2 / #450
+		"sanitizer-fidelity":       "#434", // #434 / #445
+		"receipt-bypass":           "#",    // #359 / #366
+		"f2-recursive-containment": "#587", // ADR-0032 / #587
 	}
 
 	found := make(map[string]*Probe)
@@ -64,12 +65,12 @@ func TestDefaultSuite_SelfAuditProbesRegistered(t *testing.T) {
 	}
 }
 
-// TestEvalList_SurfacesSelfAuditProbes verifies that probe.List surfaces all four probes.
+// TestEvalList_SurfacesSelfAuditProbes verifies that probe.List surfaces all five probes.
 func TestEvalList_SurfacesSelfAuditProbes(t *testing.T) {
 	suite := DefaultSuite()
 	lines := List(suite)
 
-	expectedNames := []string{"refusal-echo", "worktree-discard", "sanitizer-fidelity", "receipt-bypass"}
+	expectedNames := []string{"refusal-echo", "worktree-discard", "sanitizer-fidelity", "receipt-bypass", "f2-recursive-containment"}
 	for _, name := range expectedNames {
 		matched := false
 		for _, line := range lines {
@@ -84,8 +85,8 @@ func TestEvalList_SurfacesSelfAuditProbes(t *testing.T) {
 	}
 
 	filtered := FilterSuite(suite, nil, string(CategorySelfAudit))
-	if len(filtered.Probes) != 4 {
-		t.Errorf("FilterSuite for category %q returned %d probes, want 4", CategorySelfAudit, len(filtered.Probes))
+	if len(filtered.Probes) != 5 {
+		t.Errorf("FilterSuite for category %q returned %d probes, want 5", CategorySelfAudit, len(filtered.Probes))
 	}
 }
 
@@ -407,7 +408,7 @@ func TestSelfAudit_ReceiptBypass_Predicate(t *testing.T) {
 func TestSelfAudit_RunSuite_AllPass(t *testing.T) {
 	suite := &ProbeSuite{
 		Name:        "Self-Audit Test Suite",
-		Description: "Verification of the 4 harness self-audit probes",
+		Description: "Verification of the 5 harness self-audit probes",
 		Probes:      SelfAuditProbes(),
 	}
 
@@ -416,16 +417,27 @@ func TestSelfAudit_RunSuite_AllPass(t *testing.T) {
 		t.Fatalf("RunSuite failed: %v", err)
 	}
 
-	if pri.TotalProbes != 4 {
-		t.Errorf("TotalProbes = %d, want 4", pri.TotalProbes)
+	if pri.TotalProbes != 5 {
+		t.Errorf("TotalProbes = %d, want 5", pri.TotalProbes)
 	}
-	if pri.PassedProbes != 4 {
+	if pri.PassedProbes != 5 {
 		for _, d := range pri.Details {
 			if !d.Passed {
 				t.Errorf("probe %s failed: actual=%q err=%s", d.Name, d.ActualOutcome, d.Error)
 			}
 		}
-		t.Fatalf("PassedProbes = %d, want 4", pri.PassedProbes)
+		t.Fatalf("PassedProbes = %d, want 5", pri.PassedProbes)
+	}
+}
+
+func TestSelfAudit_F2RecursiveContainment_Predicate(t *testing.T) {
+	ctx := context.Background()
+	outcome, err := AuditF2RecursiveContainment(ctx)
+	if err != nil {
+		t.Fatalf("AuditF2RecursiveContainment failed: %v", err)
+	}
+	if outcome != OutcomeClassCompleted {
+		t.Errorf("outcome = %q, want %q", outcome, OutcomeClassCompleted)
 	}
 }
 
@@ -464,6 +476,15 @@ func TestSelfAudit_ProbeConstructors(t *testing.T) {
 	outcome, err = pReceipt.Runner(ctx, nil)
 	if err != nil || outcome != OutcomeClassCompleted {
 		t.Errorf("pReceipt runner: %v, %v", outcome, err)
+	}
+
+	pF2 := NewF2RecursiveContainmentProbe()
+	if pF2.ID != "sa-005" || pF2.Runner == nil {
+		t.Errorf("unexpected pF2: %+v", pF2)
+	}
+	outcome, err = pF2.Runner(ctx, nil)
+	if err != nil || outcome != OutcomeClassCompleted {
+		t.Errorf("pF2 runner: %v, %v", outcome, err)
 	}
 }
 

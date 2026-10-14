@@ -478,11 +478,19 @@ func TestDimension3_GlobSemantics(t *testing.T) {
 // lowercase patterns (docs/**).
 // In internal/lane/lane.go lines 533 & 552, filepath.Match is invoked instead of path.Match.
 func TestGlobSemantics_WindowsOracle_PathMatchVsFilepathMatch(t *testing.T) {
-	// Rule: Path matching for slash-normalized paths must use path.Match, not filepath.Match,
-	// to prevent Windows runners from case-insensitively widening effort classes (issue #517 oracle).
-	// Expected: lane.go uses path.Match for glob matching.
-	// Actual: lane.go lines 533 and 552 call filepath.Match which on Windows folds case.
-	t.Skip("FINDING-R1-1: lane.go uses filepath.Match which is case-insensitive on Windows (issue #517 oracle)")
+	src, err := os.ReadFile("lane.go")
+	if err != nil {
+		t.Fatalf("read lane.go: %v", err)
+	}
+	if strings.Contains(string(src), "filepath.Match(") {
+		t.Fatalf("Rule violation (FINDING-R1-1): lane.go must use path.Match, not filepath.Match")
+	}
+	if pathMatches("DOCS/x.md", "docs/**") {
+		t.Errorf("expected DOCS/x.md not to match docs/** under case-sensitive path.Match")
+	}
+	if !pathMatches("docs/x.md", "docs/**") {
+		t.Errorf("expected docs/x.md to match docs/**")
+	}
 }
 
 // ============================================================================

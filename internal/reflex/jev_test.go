@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -604,5 +605,186 @@ func TestEmitOutputQualitySignalIncludesContextPacket(t *testing.T) {
 	}
 	if _, hasCP := state["context_packet"]; hasCP {
 		t.Fatalf("v1 request must not contain context_packet, got %v", state)
+	}
+}
+
+func TestMaskKeyRedactsRawSecret(t *testing.T) {
+	rawSecret := "ts_secret_live_9876543210abcdef"
+	expectedMasked := "ts_s...cdef"
+
+	var mu sync.Mutex
+	var receivedAuthHeaders []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receivedAuthHeaders = append(receivedAuthHeaders, r.Header.Get("Authorization"))
+		mu.Unlock()
+
+		resp := JevResponse{
+			Model: "jev-1.13.0",
+			Answers: map[string]Answer{
+				"risk_tier": {
+					Type:       "score",
+					Score:      1.1,
+					Confidence: 0.90,
+				},
+				"sandbox_breach": {
+					Type:       "noul",
+					Noul:       0.05,
+					Confidence: 0.95,
+				},
+				"output_quality": {
+					Type:       "score",
+					Score:      4.5,
+					Confidence: 0.90,
+				},
+				"output_authenticity": {
+					Type:       "noul",
+					Noul:       0.02,
+					Confidence: 0.90,
+				},
+			},
+			Usage: Usage{InputTokens: 100, OutputTokens: 20},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	gate := NewReflexGate(
+		WithEndpoint(ts.URL),
+		WithKeys([]string{rawSecret}),
+		WithEnvFile(false),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 1. TriageMutation test
+	req := TriageRequest{
+		TaskID:        "task-mask-test",
+		FilesModified: []string{"README.md"},
+		DiffSummary:   "update docs",
+		AllowedPaths:  []string{"*.md"},
+	}
+
+	verdict, err := gate.TriageMutation(ctx, req)
+	if err != nil {
+		t.Fatalf("TriageMutation failed: %v", err)
+	}
+
+	// 2. EmitOutputQualitySignal test
+	oqReq := OutputQualityRequest{
+		TaskID:        "task-mask-test",
+		OutputExcerpt: "safe output",
+		ExpectedShape: "docs",
+		ExitCode:      0,
+		DurationSec:   1,
+	}
+
+	oqSignal, err := gate.EmitOutputQualitySignal(ctx, oqReq)
+	if err != nil {
+		t.Fatalf("EmitOutputQualitySignal failed: %v", err)
+	}
+
+	// 3. Verify HTTP server received full Authorization: Bearer <rawSecret> header
+	mu.Lock()
+	headerCount := len(receivedAuthHeaders)
+	headers := append([]string(nil), receivedAuthHeaders...)
+	mu.Unlock()
+
+	expectedHeader := "Bearer " + rawSecret
+	if headerCount < 2 {
+		t.Fatalf("expected at least 2 HTTP requests to mock server, got %d", headerCount)
+	}
+	for i, h := range headers {
+		if h != expectedHeader {
+			t.Errorf("request %d: expected header %q, got %q", i, expectedHeader, h)
+		}
+	}
+
+	// 4. Assert TriageVerdict serialization hides raw secret and exposes masked key
+	verdictBytes, err := json.Marshal(verdict)
+	if err != nil {
+		t.Fatalf("failed to marshal TriageVerdict: %v", err)
+	}
+	verdictStr := string(verdictBytes)
+	if strings.Contains(verdictStr, rawSecret) {
+		t.Fatalf("TriageVerdict JSON leaked raw secret: %s", verdictStr)
+	}
+	if !strings.Contains(verdictStr, expectedMasked) {
+		t.Fatalf("TriageVerdict JSON missing masked key %q: %s", expectedMasked, verdictStr)
+	}
+	if !strings.Contains(verdictStr, `"key_used":"`+expectedMasked+`"`) {
+		t.Fatalf("TriageVerdict JSON key_used field missing masked key: %s", verdictStr)
+	}
+	if verdict.KeyUsed != expectedMasked {
+		t.Fatalf("verdict.KeyUsed = %q, want %q", verdict.KeyUsed, expectedMasked)
+	}
+	if verdict.Signal.KeyUsed != expectedMasked {
+		t.Fatalf("verdict.Signal.KeyUsed = %q, want %q", verdict.Signal.KeyUsed, expectedMasked)
+	}
+
+	// 5. Assert ReflexSignal serialization hides raw secret and exposes masked key
+	signalBytes, err := json.Marshal(oqSignal)
+	if err != nil {
+		t.Fatalf("failed to marshal ReflexSignal: %v", err)
+	}
+	signalStr := string(signalBytes)
+	if strings.Contains(signalStr, rawSecret) {
+		t.Fatalf("ReflexSignal JSON leaked raw secret: %s", signalStr)
+	}
+	if !strings.Contains(signalStr, expectedMasked) {
+		t.Fatalf("ReflexSignal JSON missing masked key %q: %s", expectedMasked, signalStr)
+	}
+	if !strings.Contains(signalStr, `"key_used":"`+expectedMasked+`"`) {
+		t.Fatalf("ReflexSignal JSON key_used field missing masked key: %s", signalStr)
+	}
+	if oqSignal.KeyUsed != expectedMasked {
+		t.Fatalf("oqSignal.KeyUsed = %q, want %q", oqSignal.KeyUsed, expectedMasked)
+	}
+
+	// Also check verdict.Signal JSON
+	verdictSignalBytes, err := json.Marshal(verdict.Signal)
+	if err != nil {
+		t.Fatalf("failed to marshal verdict.Signal: %v", err)
+	}
+	verdictSignalStr := string(verdictSignalBytes)
+	if strings.Contains(verdictSignalStr, rawSecret) {
+		t.Fatalf("verdict.Signal JSON leaked raw secret: %s", verdictSignalStr)
+	}
+	if !strings.Contains(verdictSignalStr, expectedMasked) {
+		t.Fatalf("verdict.Signal JSON missing masked key %q: %s", expectedMasked, verdictSignalStr)
+	}
+
+	// 6. Assert MaskKey edge cases and idempotency
+	edgeCases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"   ", ""},
+		{"none", "none"},
+		{" none ", "none"},
+		{"1", "***"},
+		{"12345678", "***"},
+		{"short", "***"},
+		{"***", "***"},
+		{"ts_live_secret_123456", "ts_l...3456"},
+		{rawSecret, expectedMasked},
+		{"abcd...wxyz", "abcd...wxyz"},
+		{expectedMasked, expectedMasked},
+	}
+
+	for _, tc := range edgeCases {
+		got := MaskKey(tc.input)
+		if got != tc.want {
+			t.Errorf("MaskKey(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+		// Idempotency check: MaskKey(MaskKey(input)) == want
+		double := MaskKey(got)
+		if double != tc.want {
+			t.Errorf("MaskKey(MaskKey(%q)) = %q, want %q", tc.input, double, tc.want)
+		}
 	}
 }

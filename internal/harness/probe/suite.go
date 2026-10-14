@@ -290,11 +290,12 @@ func DefaultSuite() *ProbeSuite {
 				},
 			},
 
-			// Category: Self-Audit (4 probes) — known failure classes (#451)
+			// Category: Self-Audit (5 probes) — known failure classes (#451, #587)
 			NewRefusalEchoProbe(),
 			NewWorktreeDiscardProbe(),
 			NewSanitizerFidelityProbe(),
 			NewReceiptBypassProbe(),
+			NewF2RecursiveContainmentProbe(),
 		},
 	}
 }

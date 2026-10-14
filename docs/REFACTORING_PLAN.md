@@ -153,44 +153,38 @@ All shipped and published on GitHub Releases (verified 2026-09-25 by roadmap-tru
 
 ---
 
-### v0.11.0 — Memory, Telemetry & Adversarial Evals (In Progress)
-**Target**: 2026-10-05
+### Historical releases v0.11.0 → v0.16.0 (Completed)
+All shipped, tagged, and verified on GitHub Releases:
 
-| Workstream | Status | Notes |
-|-----------|--------|-------|
-| DELTA-21 Unified Decoupled Memory Facade | ✅ Merged | PR #325, ADR-0019 |
-| Docs-contract gate + adversarial probe suite | ✅ Merged | PR #324 (progress on #254) |
-| Reflex-gated debt campaign #319/#321 | ✅ Merged | PR #330, ADR-0020 |
-| Delegated-write E2E: receipt consume + host materialization + workspace jail | ✅ Merged | PRs #352/#353, plan 260925-0930 (closes #346/#348) |
-| Closed-Loop Worker Trace Telemetry | 🔄 In Progress | Issue #253; Windows batch-ingest bug #342 |
-| Adversarial Safety Probes & Behavioral Evals | 🔄 In Progress | Issue #254 |
-| **Throughput & Multi-Session Capability** | 📋 Planned | see rows below (operator directive 2026-09-25) |
-
-**Throughput & Multi-Session rows (v0.11.0)** — raise speed and safe parallelism:
-
-| Item | Design notes | Priority |
-|------|--------------|----------|
-| Session-scoped state isolation | per-session g8s.db namespace or repo-lock so concurrent supervisors never move each other's refs/HEAD (D6 contention class, 2026-09-25 campaign) | P0 |
-| Worktree-isolated `worker --once` default | every bare worker dispatch runs in a dedicated worktree; shared-checkout requires explicit `--in-place` | P0 |
-| FanOut concurrency + session quotas exposed in config | per-submitter quota enforcement (schema v10 `session_id` already lands the data) | P1 |
-| Result streaming: `g8s get --tail` + bounded streaming reads | supervisors observe long worker sessions without polling full transcripts | P1 |
-| CLI envelope conformance suite | every `--json` command emits `{v,kind,data}`; guards the D3 class permanently | P1 |
+| Version | Highlight |
+|---------|-----------|
+| v0.11.0 | Unified Decoupled Memory Facade (DELTA-21), delegated-write E2E jail, closed-loop trace telemetry |
+| v0.12.0 (2026-09-27) | Concurrent dispatch (`--concurrency N`), session isolation, memory promotion gate, Context Broker, live eval |
+| v0.13.0 (2026-09-30) | Multi-provider queue affinity, hardening waves B–E, event-driven signals (`signals/tasks.jsonl` + `watch --failed`) |
+| v0.14.0 (2026-10-03) | AI-factory stage 1: budgeted auto-retry (ADR-0029), context router (ADR-0030), gate-lane router (ADR-0024), verifier registry (#515), unattended closed round (#534), F0/F1/F2 containment vocabulary (ADR-0032) |
+| v0.15.0 (2026-10-05) | Lessons pipeline (`g8s lesson create|verify|list`), agent-models catalog v1 (`.g8s/agent-models.yml`), live Jev SystemOne benchmark (#543), claims-integrity gate (50 claims) |
+| v0.16.0 (2026-10-07) | Provider-neutral effort optimization (#550/#556/#557), effort-class registry (#558), signal-based effort demotion (#564), Quality Ladder CLI & diagnosis dispatch (#561/#563), baked-name realignment (#568) |
 
 ---
 
-### v0.12.0 — Code Intelligence & Service Unification (Planned)
-**Target**: 2026-11-01
+### v0.17.0 — Security DLP, Delivery Integrity, Telemetry & Effort Ergonomics (Completed 2026-10-14)
+**Delivered**: 2026-10-14
 
-| Issue | Description | Priority |
-|-------|-------------|----------|
-| DELTA-20 | Code Intelligence Tiers 0.5–2 (dynamic blast radius) | P1 |
-| #8/#12 | kardianos/service cross-platform unification | P2 |
-| #342/#336 | Windows-native fixes: telemetry batch ingest, CPU sampling, file-lock containment (needs Windows host) | P1 |
-| #326–#329 | Cleanup channel + CLI envelope + reflex CLI enforcement | P1 |
-| Reflex-gated dispatch | `g8s reflex triage` wired into the dispatch path as a pre-spawn gate (ADR-0020) | P1 |
+| Issue / Item | Description | Priority | Status |
+|--------------|-------------|----------|--------|
+| [x] #586 | Mask/redact `KeyUsed` (`key_used`) in `internal/reflex` (`ReflexSignal` / `TriageVerdict`) so `g8s reflex triage --json` never emits plaintext `TYPESAFE_API_KEY` | P0 | ✅ Complete |
+| [x] #588 | Fix `FindGhostProcesses` subshell ancestor PID skip and prune dead `.heartbeat/agy/*.json` files on `g8s cleanup --target ghost-process --force` | P0 | ✅ Complete |
+| [x] #575 | Fix AGY `result.duration` and `result.duration_seconds` reporting wall-clock elapsed time + `provider_duration_seconds` and populate `usage` on timeout/error/cancel | P0 | ✅ Complete |
+| [x] #569 | `g8s deliver` copy-apply v2: propagate worker-deleted files (`git rm` inside worktree) with receipt scope enforcement and `deleted` list in envelope | P0 | ✅ Complete |
+| [x] #570 (R4-1, R4-2) | Validate `g8s ladder advance --out` path against scope/denied fragments (R4-1); emit typed JSON error envelope on unreadable `submit --prompt-file` (R4-2) | P1 | ✅ Complete |
+| [x] #567 & #570 (R1-1) | Effort-class registry glob matching (`docs/**` nested + root files, slash-normalized `path.Match` for Windows R1-1), `--class` flag, and receipt `allowed_paths` fallback | P1 | ✅ Complete |
+| [x] #566 | Provider-less manual submit baked-name resolution against stale manifests and `doctor` stale provider model ID diagnostic warning | P1 | ✅ Complete |
+| [x] #570 (R3-2/4/5/8) | Quality Ladder continuity, monotonic rung order, exit-code-127 vs brief marker precedence, and duplicate task ID deduplication in evidence history | P1 | ✅ Complete |
+| [x] #587 | ADR-0032 `F1->F2` recursive subagent containment self-audit probe (`sa-005` `f2-recursive-containment`) | P2 | ✅ Complete |
 
 ---
 
 ### v1.0.0 — GA Release
 **Target**: 2026-12-15  
-**Criteria**: All P0/P1 issues resolved, ≥6 months stable on ct122 homelab, documentation complete, migration guide from Python baseline published.
+**Criteria**: All P0/P1 issues resolved, ≥6 months homelab stability, enterprise security signoff, distributed fleet mTLS, migration guide from Python baseline published.
+

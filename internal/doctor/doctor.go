@@ -568,12 +568,55 @@ func checkProvidersFile(customPath ...string) DiagnosticResult {
 		}
 	}
 
+	if cat, catErr := config.LoadDefaultCatalog(); catErr == nil && cat != nil {
+		for _, p := range cfg.Providers {
+			catProv, ok := cat.FindProvider(p.Name)
+			if !ok || len(p.Models) == 0 || len(catProv.Models) == 0 {
+				continue
+			}
+			matched := 0
+			for _, m := range p.Models {
+				if providerModelMatchesCatalog(m.ID, catProv) {
+					matched++
+				}
+			}
+			if matched == 0 {
+				return DiagnosticResult{
+					Name:    "Providers File",
+					Status:  "WARN",
+					Message: fmt.Sprintf("Stale model IDs in %s for provider %q (none match current catalog #566; update or remove providers.json)", path, p.Name),
+					Details: path,
+				}
+			}
+		}
+	}
+
 	return DiagnosticResult{
 		Name:    "Providers File",
 		Status:  "OK",
 		Message: fmt.Sprintf("%d provider(s) loaded cleanly from %s", len(cfg.Providers), path),
 		Details: path,
 	}
+}
+
+func providerModelMatchesCatalog(modelID string, catProv config.ProviderCatalog) bool {
+	if _, ok := catProv.FindModel(modelID); ok {
+		return true
+	}
+	trimmed := strings.TrimSuffix(modelID, "-{effort}")
+	for _, cm := range catProv.Models {
+		catTrimmed := strings.TrimSuffix(cm.ID, "-{effort}")
+		if strings.EqualFold(trimmed, catTrimmed) {
+			return true
+		}
+		for _, lvl := range config.EffortLadder {
+			if strings.EqualFold(strings.TrimSuffix(trimmed, "-"+lvl), catTrimmed) ||
+				strings.EqualFold(trimmed, strings.TrimSuffix(catTrimmed, "-"+lvl)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 const minFreeDiskSpaceBytes uint64 = 2 * 1024 * 1024 * 1024 // 2 GiB

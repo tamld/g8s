@@ -548,13 +548,14 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 
 // workerResult is the JSON contract a worker writes to result.json.
 type workerResult struct {
-	OK                bool            `json:"ok"`
-	Status            string          `json:"status"`
-	Reason            string          `json:"reason,omitempty"`
-	Summary           string          `json:"summary,omitempty"`
-	Response          string          `json:"response,omitempty"`
-	ContractViolation json.RawMessage `json:"contract_violation,omitempty"`
-	Usage             *agyUsage       `json:"usage,omitempty"`
+	OK                      bool            `json:"ok"`
+	Status                  string          `json:"status"`
+	Reason                  string          `json:"reason,omitempty"`
+	Summary                 string          `json:"summary,omitempty"`
+	Response                string          `json:"response,omitempty"`
+	ContractViolation       json.RawMessage `json:"contract_violation,omitempty"`
+	Usage                   *agyUsage       `json:"usage,omitempty"`
+	ProviderDurationSeconds float64         `json:"provider_duration_seconds,omitempty"`
 }
 
 // maxResultFileBytes caps the worker-written result file — a cheap worker-side
@@ -737,6 +738,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 
 	marker := attemptMarker(task.TaskID, task.Attempts)
+	startTime := s.clock()
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,
@@ -797,7 +799,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, s.clock(), isolatedWorktreeDir, req)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, startTime, isolatedWorktreeDir, req)
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -1254,13 +1256,24 @@ func (s *Supervisor) collect(
 	os.Remove(stdoutPath) // worker output is never persisted.
 	os.Remove(stderrPath)
 
+	durationSec := s.clock().Sub(startTime).Seconds()
+	if durationSec < 0 {
+		durationSec = 0
+	}
+
 	switch {
 	case reason == "lease_lost" || strings.HasPrefix(reason, "lease_lost"):
 		return s.snapshot(ctx, taskID, runDir, promptPath)
 	case reason == "cancelled":
+		env := outcomeEnvelope(false, "cancelled", stdoutText, stderrText)
+		env["duration"] = durationSec
+		env["duration_seconds"] = durationSec
+		if u := extractAGYUsage(stdoutText); u != nil {
+			env["usage"] = u
+		}
 		s.ingestTrace(telemetry.TraceEventTaskCancelled, taskID, nil, "cancelled by orchestrator")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(outcomeEnvelope(false, "cancelled", stdoutText, stderrText)),
+			Result:    mustJSON(env),
 			Success:   false,
 			Retryable: false,
 			Err:       "cancelled by orchestrator",
@@ -1269,9 +1282,15 @@ func (s *Supervisor) collect(
 			return nil, fmt.Errorf("finish cancelled attempt: %w", ferr)
 		}
 	case reason == "timeout":
+		env := outcomeEnvelope(false, "timeout", stdoutText, stderrText)
+		env["duration"] = durationSec
+		env["duration_seconds"] = durationSec
+		if u := extractAGYUsage(stdoutText); u != nil {
+			env["usage"] = u
+		}
 		s.ingestTrace(telemetry.TraceEventTaskTimeout, taskID, nil, "execution deadline exceeded")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(outcomeEnvelope(false, "timeout", stdoutText, stderrText)),
+			Result:    mustJSON(env),
 			Success:   false,
 			Retryable: true,
 			Err:       "execution deadline exceeded",
@@ -1508,6 +1527,9 @@ func (s *Supervisor) collect(
 			}
 			m["duration"] = durationSec
 			m["duration_seconds"] = durationSec
+			if wr.ProviderDurationSeconds > 0 {
+				m["provider_duration_seconds"] = wr.ProviderDurationSeconds
+			}
 			if wr.Usage != nil && m["usage"] == nil {
 				m["usage"] = wr.Usage
 			}
@@ -1733,6 +1755,7 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			Status:  "failed",
 			Reason:  reason,
 			Summary: fmt.Sprintf("child process returned error envelope: %s", reason),
+			Usage:   extractAGYUsage(stdoutText),
 		}
 	}
 
@@ -1740,12 +1763,21 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 	agyRes := parseAGYResult(stdoutText)
 	if agyRes != nil {
 		if agyRes.Result.Status == "ERROR" {
-			return workerResult{
+			usage := agyRes.Result.Usage
+			if usage == nil {
+				usage = extractAGYUsage(stdoutText)
+			}
+			res := workerResult{
 				OK:      false,
 				Status:  "failed",
 				Reason:  agyRes.Result.Error,
 				Summary: fmt.Sprintf("AGY returned error result: %s", agyRes.Result.Error),
+				Usage:   usage,
 			}
+			if agyRes.Result.DurationSeconds > 0 {
+				res.ProviderDurationSeconds = agyRes.Result.DurationSeconds
+			}
+			return res
 		}
 		if agyRes.Result.Status == "SUCCESS" {
 			// #344: a content-filter refusal is never task evidence, even
@@ -1777,13 +1809,17 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			if usage == nil {
 				usage = extractAGYUsage(stdoutText)
 			}
-			return workerResult{
+			res := workerResult{
 				OK:       true,
 				Status:   "succeeded",
 				Response: agyRes.Result.Response,
 				Summary:  "AGY completed successfully",
 				Usage:    usage,
 			}
+			if agyRes.Result.DurationSeconds > 0 {
+				res.ProviderDurationSeconds = agyRes.Result.DurationSeconds
+			}
+			return res
 		}
 	}
 
@@ -1830,6 +1866,7 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 				Status:  "failed",
 				Reason:  "agent stream ended in error_message without a result event",
 				Summary: "worker stream terminated mid-task before producing a result (likely context/step ceiling)",
+				Usage:   extractAGYUsage(stdoutText),
 			}
 		}
 		return workerResult{
@@ -1846,12 +1883,14 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			Status:  "failed",
 			Reason:  fmt.Sprintf("worker stream ended in error_message (exit code %d)", code),
 			Summary: "worker terminated mid-task before producing a result",
+			Usage:   extractAGYUsage(stdoutText),
 		}
 	}
 	return workerResult{
 		OK:     false,
 		Status: "failed",
 		Reason: fmt.Sprintf("worker process exited with code %d", code),
+		Usage:  extractAGYUsage(stdoutText),
 	}
 }
 
@@ -1909,6 +1948,7 @@ func (s *Supervisor) validateResult(
 			allowed := map[string]bool{
 				"ok": true, "status": true, "reason": true, "summary": true,
 				"response": true, "contract_violation": true, "usage": true,
+				"provider_duration_seconds": true,
 			}
 			for k := range rawMap {
 				if !allowed[k] {
@@ -2474,6 +2514,9 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 	}
 	if wr.Usage != nil {
 		envelope["usage"] = wr.Usage
+	}
+	if wr.ProviderDurationSeconds > 0 {
+		envelope["provider_duration_seconds"] = wr.ProviderDurationSeconds
 	}
 	if stdout != "" {
 		envelope["stdout"] = sanitizeTrack(stdout, "stdout", &altered)

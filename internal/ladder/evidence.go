@@ -115,16 +115,22 @@ func BuildEvidencePacket(
 		validationErr = &MissingRequiredFieldError{Field: "FinalVerdict"}
 	}
 
+	seenTasks := make(map[string]bool)
+	hist := make([]RungRecord, 0, len(history))
 	totalTokens := 0
 	for _, r := range history {
+		if r.TaskID != "" && seenTasks[r.TaskID] {
+			continue
+		}
+		if r.TaskID != "" {
+			seenTasks[r.TaskID] = true
+		}
+		hist = append(hist, r)
 		totalTokens += r.Tokens
 	}
 
 	checks := make([]string, len(exactFailingChecks))
 	copy(checks, exactFailingChecks)
-
-	hist := make([]RungRecord, len(history))
-	copy(hist, history)
 
 	return &EvidencePacket{
 		RootTaskID:         rootTaskID,
@@ -135,7 +141,7 @@ func BuildEvidencePacket(
 		LadderHistory:      hist,
 		TotalTokens:        totalTokens,
 		TokenBudget:        tokenBudget,
-		TotalRungs:         len(history),
+		TotalRungs:         len(hist),
 		Timestamp:          time.Now().UTC(),
 		ValidationError:    validationErr,
 	}

@@ -105,44 +105,55 @@ Incoming Task:
 | **DELTA-12** | [`12-lineage-cte-and-stream-pipe-spec.md`](../spec/openspec/12-lineage-cte-and-stream-pipe-spec.md) | `internal/controlplane` | APPLIED |
 | **DELTA-13** | [`13-dx-ax-init-and-autorepair-spec.md`](../spec/openspec/13-dx-ax-init-and-autorepair-spec.md) | `internal/initwiz` | APPLIED |
 | **DELTA-20** | [`20-code-intel-adapter-spec.md`](../spec/openspec/20-code-intel-adapter-spec.md) | `internal/codeintel` | PROPOSED |
+| **DELTA-21** | [`21-unified-memory-adapter-spec.md`](../spec/openspec/21-unified-memory-adapter-spec.md) | `internal/memory` | ACCEPTED |
 
 ---
 
-## 6. AGY Dispatch Reference & Multi-Agent Protocol
+## 6. Containment Hierarchy (F0/F1/F2) & Multi-Agent Protocol
 
-When orchestrating subagents via `agy` or other CLI workers:
+When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-0032`](decisions/0032-containment-levels.md) & [`skills/g8s-supervisor/SKILL.md`](../skills/g8s-supervisor/SKILL.md)):
 
-1. **Brief Formulation**: Every task delegated to a subagent must have a clear objective, role definition, bounded scope, and explicit exit criteria.
-2. **Write Receipt Lifecycle**:
-   - Brain issues write receipts with bounded paths and strict TTLs.
-   - Worker consumes receipt upon mutation; receipts cannot be reused once validated/consumed.
-   - Expired or revoked receipts immediately reject mutation requests.
-3. **Heartbeat Emission**:
-   - Workers emit per-session heartbeat timestamps periodically into `.g8s/heartbeats/<session_id>.json`.
-   - The supervisor/control plane monitors heartbeats to detect hung or crashed workers.
-4. **Lifecycle & Worktree Cleanup**:
-   - Transient worktrees created for subagent execution are automatically pruned on terminal state (`COMPLETED`, `FAILED`, `CANCELLED`).
-   - `g8s cleanup` performs safe garbage collection of ghost processes, orphan worktrees, and stale branches.
+1. **Exponential Containment Levels (`F0 ⊇ F1 ⊇ F2`)**:
+   - **F0 (Brain / Supervisor)**: Holds exclusive authority over architecture, git commits, vault promotion, and Write Receipt issuance (`Operator ↔ F0 = 1-1`).
+   - **F1 (Worker)**: Spawned by F0 through the `g8s` harness (`g8s submit` + `g8s worker`) in an isolated git worktree and OS process group (`Setpgid`). Strict **Cardinality Law**: `1 issue = 1 worker = 1 receipt`, `F1 ↔ F1 = 0`.
+   - **F2 (Recursive Subagent of Worker)**: Spawned recursively by F1 inside F1's native platform (`define_subagent` / `invoke_subagent`), inheriting F1's sandbox and receipt scope (`F0 ↔ F2 = 0 direct`).
+2. **Brief Formulation & Admission**:
+   - Always rebuild `./bin/g8s` (`make local`) and run `./bin/g8s doctor --json` after every merge before dispatching (Lesson #6: Stale-Binary Trap).
+   - Isolate concurrent supervisor sessions with `G8S_STATE_DIR=~/.local/state/g8s-sess-<id>`.
+   - Every delegated task requires a bounded brief, explicit role/permission profile, and acceptance oracle.
+3. **Write Receipt & Delivery Lifecycle**:
+   - F0 issues single-use Write Receipts with bounded `allowed_paths` globs and strict TTLs.
+   - Wake on completion via event-driven signals (`./bin/g8s watch --task <id> --milestone worker-complete` or `./bin/g8s watch --failed`); polling is fallback only.
+   - Harvest deliverables from `$G8S_STATE_DIR/worktrees`, run `./bin/g8s verify --task <id>`, and verify the physical diff on disk before accepting.
+4. **System-1 Reflex (`Jev` / TypeSafe) & Cognitive Harness (`wiki.py`)**:
+   - **Jev (TypeSafe SystemOne)**: Operates at L1 Pre-Mutation Triage (`./bin/g8s reflex triage`), Router Assist (`G8S_ROUTER_MODE=jev_assisted`), and L3 Post-Run Output Quality / Memory Promotion Gate while preserving **Sensor ≠ Decider**. Never emit raw API keys in JSON outputs or logs.
+   - **Offer Bundle (`offer/`) & `wiki.py`**: Sibling repositories adopt `g8s` via [`offer/ONBOARDING.md`](../offer/ONBOARDING.md) and return sanitized Mode 3 packets. Align session state with Second Brain governance via `~/.local/bin/wiki.py orient`.
 
 ---
 
 ## 7. Verification & CI Quality Gates
 
-All pull requests and code modifications must pass the following local and CI quality gates:
+All pull requests and code modifications must pass the following local and CI quality gates (`./tools/pre_push.sh`):
 
 ```bash
-# 1. Run full test suite with race detector (Zero-CGO)
-CGO_ENABLED=0 go test -v -race ./...
+# 1. Run full test suite with race detector (Zero-CGO + Race)
+CGO_ENABLED=0 go test -v ./...
+CGO_ENABLED=1 go test -v -race ./...
 
-# 2. Run static analysis and formatting
+# 2. Run static analysis, formatting, and doc-code contracts
 go vet ./...
 test -z "$(gofmt -l .)"
+bash tools/ci_doc_contract_check.sh
+bash tools/ci_link_integrity.sh
+bash tools/claims_check.sh
 
 # 3. Verify cross-platform compilation
 GOOS=linux GOARCH=amd64 go build ./cmd/g8s
 GOOS=windows GOARCH=amd64 go build ./cmd/g8s
 GOOS=darwin GOARCH=arm64 go build ./cmd/g8s
 
-# 4. Check AI anti-pattern linting
+# 4. Check AI & Brief anti-pattern linting
 bash tools/ai_lint.sh
+bash tools/brief_lint.sh
 ```
+

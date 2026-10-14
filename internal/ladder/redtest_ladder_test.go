@@ -253,7 +253,6 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 		// FINDING-R3-2:
 		// Expected: EvaluateNextRung inspects History verdicts and terminates with ActionDone when any rung succeeded.
 		// Actual: EvaluateNextRung only inspects LatestSucceeded; it ignores historical rung success verdicts.
-		t.Skip("FINDING-R3-2: EvaluateNextRung ignores historical rung success verdicts unless LatestSucceeded is explicitly set")
 
 		ctx := PolicyContext{
 			RootTaskID:     "task-root-hist-succ",
@@ -316,7 +315,6 @@ func TestRedtest_Dimension1_RungStateMachine(t *testing.T) {
 		// FINDING-R3-4:
 		// Expected: EvaluateNextRung rejects non-monotonic or decreasing rung index history.
 		// Actual: EvaluateNextRung accepts out-of-order history records without error.
-		t.Skip("FINDING-R3-4: EvaluateNextRung accepts non-monotonic rung index order in history")
 
 		ctx := PolicyContext{
 			RootTaskID:     "task-root-rev",
@@ -722,7 +720,6 @@ func TestRedtest_Dimension3_Classifier(t *testing.T) {
 		// FINDING-R3-5:
 		// Expected: Brief marker in ErrorText takes precedence over exit code 127 per rule 5.
 		// Actual: Exit code 127 returns ShapeEnv at line 251 before ErrorText is scanned for brief markers.
-		t.Skip("FINDING-R3-5: Exit code 127 overrides brief markers in ErrorText, violating brief-precedence collision rule")
 
 		c127 := 127
 		ev := FailureEvidence{
@@ -910,7 +907,6 @@ func TestRedtest_Dimension4_EvidencePackets(t *testing.T) {
 		// FINDING-R3-8:
 		// Expected: BuildEvidencePacket detects duplicate task IDs in history and flags/rejects them.
 		// Actual: BuildEvidencePacket blindly copies history and double-counts tokens.
-		t.Skip("FINDING-R3-8: BuildEvidencePacket does not detect duplicate task IDs in history, causing double-counting")
 
 		historyWithDupes := []RungRecord{
 			{RungIndex: 0, TaskID: "task-dup-1", Tokens: 1000, Shape: ShapeEffort},

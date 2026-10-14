@@ -239,20 +239,16 @@ func ClassifyFailure(ev FailureEvidence) ClassifierVerdict {
 
 	// Exit code inspection
 	hasEnvExitCode := false
+	var exitCodeEnvReason string
+	var matchedEnv []string
 	if ev.ExitCode != nil {
 		switch *ev.ExitCode {
 		case 126:
-			return ClassifierVerdict{
-				Shape:    ShapeEnv,
-				Reason:   "binary/CLI execution failed (exit code 126)",
-				StaleTag: staleTag,
-			}
+			exitCodeEnvReason = "binary/CLI execution failed (exit code 126)"
+			matchedEnv = append(matchedEnv, "exit-code-126")
 		case 127:
-			return ClassifierVerdict{
-				Shape:    ShapeEnv,
-				Reason:   "binary/CLI not found (exit code 127)",
-				StaleTag: staleTag,
-			}
+			exitCodeEnvReason = "binary/CLI not found (exit code 127)"
+			matchedEnv = append(matchedEnv, "exit-code-127")
 		case 2: // Timeout in worker convention
 			hasEnvExitCode = true
 		}
@@ -269,7 +265,6 @@ func ClassifyFailure(ev FailureEvidence) ClassifierVerdict {
 		}
 	}
 
-	var matchedEnv []string
 	for _, m := range envMarkers {
 		if strings.Contains(text, m) {
 			matchedEnv = append(matchedEnv, m)
@@ -300,6 +295,14 @@ func ClassifyFailure(ev FailureEvidence) ClassifierVerdict {
 		return ClassifierVerdict{
 			Shape:    ShapeBrief,
 			Reason:   fmt.Sprintf("brief-shaped defect (%s)", strings.Join(matchedBrief, ", ")),
+			StaleTag: staleTag,
+		}
+	}
+
+	if !hasBrief && exitCodeEnvReason != "" {
+		return ClassifierVerdict{
+			Shape:    ShapeEnv,
+			Reason:   exitCodeEnvReason,
 			StaleTag: staleTag,
 		}
 	}
