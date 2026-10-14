@@ -43,6 +43,119 @@ classes:
       - "**/*_test.go"
 `
 
+const securityEffortClassesSeed = `# Effort Classes Configuration — Security Profile (issue #550 / C2)
+# Maps task write-scope paths to reasoning effort defaults.
+# Schema: schema_version "effort-classes.v1", first match by priority wins.
+# Unregistered tasks implicitly default to medium (fail-open floor).
+
+schema_version: "effort-classes.v1"
+
+classes:
+  - name: security-review
+    default_effort: high
+    priority: 10
+    paths:
+      - "src/guards/**"
+      - "src/core/**"
+      - "SECURITY.md"
+
+  - name: test
+    default_effort: medium
+    priority: 20
+    paths:
+      - "tests/**"
+      - "*_test.*"
+      - "**/*_test.*"
+
+  - name: docs
+    default_effort: low
+    priority: 30
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "wiki/**"
+      - "templates/**"
+      - "examples/**"
+`
+
+const infraEffortClassesSeed = `# Effort Classes Configuration — Infra Profile (issue #550 / C2)
+# Maps task write-scope paths to reasoning effort defaults.
+# Schema: schema_version "effort-classes.v1", first match by priority wins.
+# Unregistered tasks implicitly default to medium (fail-open floor).
+
+schema_version: "effort-classes.v1"
+
+classes:
+  - name: infra-review
+    default_effort: high
+    priority: 10
+    paths:
+      - "infrastructure/**"
+      - "proxmox/**"
+      - "traefik/**"
+      - "teleport/**"
+      - "vaultwarden/**"
+      - "docker-compose*.yml"
+      - "*.env*"
+
+  - name: test
+    default_effort: medium
+    priority: 20
+    paths:
+      - "tests/**"
+      - "scripts/**"
+      - "bin/**"
+
+  - name: docs
+    default_effort: low
+    priority: 30
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "knowledge/**"
+      - "templates/**"
+`
+
+const utilityEffortClassesSeed = `# Effort Classes Configuration — Utility Profile (issue #550 / C2)
+# Maps task write-scope paths to reasoning effort defaults.
+# Schema: schema_version "effort-classes.v1", first match by priority wins.
+# Unregistered tasks implicitly default to medium (fail-open floor).
+
+schema_version: "effort-classes.v1"
+
+classes:
+  # pilot-proven: doc-freshness audits and markdown updates run reliably at low effort (SCORECARD Gate 3.4)
+  - name: docs
+    default_effort: low
+    priority: 10
+    paths:
+      - "*.md"
+      - "docs/**"
+
+  - name: test
+    default_effort: medium
+    priority: 20
+    paths:
+      - "tests/**"
+      - "*_test.*"
+      - "**/*_test.*"
+      - "**/*.test.*"
+      - "**/*.spec.*"
+`
+
+func effortClassesSeedForProfile(profile string) string {
+	switch profile {
+	case "security":
+		return securityEffortClassesSeed
+	case "infra":
+		return infraEffortClassesSeed
+	case "utility":
+		return utilityEffortClassesSeed
+	default:
+		return knowledgeEffortClassesSeed
+	}
+}
+
 func runOffer(args []string) {
 	if len(args) == 0 {
 		exitUsage("offer", "", "", "unknown offer subcommand", "g8s offer init --profile <name> | check | version", false)
@@ -122,14 +235,12 @@ func runOfferInit(args []string) {
 		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
 		return
 	}
-	scaffold := []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml"}
-	if *profile == "knowledge" {
-		if werr := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(knowledgeEffortClassesSeed), 0o600); werr != nil {
-			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
-			return
-		}
-		scaffold = append(scaffold, ".g8s/effort-classes.yml")
+	effortSeed := effortClassesSeedForProfile(*profile)
+	if werr := os.WriteFile(filepath.Join(g8sDir, "effort-classes.yml"), []byte(effortSeed), 0o600); werr != nil {
+		exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+		return
 	}
+	scaffold := []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"}
 
 	toolsDir := filepath.Join(*dir, "tools")
 	if mkErr := os.MkdirAll(toolsDir, 0o700); mkErr != nil {

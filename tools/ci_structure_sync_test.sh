@@ -138,6 +138,15 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
+# 7. Non-Go repository (no go.mod) skips gracefully in gate mode.
+NON_GO_ROOT="$(mktemp -d)"
+cat > "$NON_GO_ROOT/README.md" <<'EOF'
+# Non-Go Repo
+EOF
+run_test "non-Go repo without go.mod skips gracefully" pass \
+    "$SYNC_SCRIPT" --repo-root "$NON_GO_ROOT" --readme "$NON_GO_ROOT/README.md"
+rm -rf "$NON_GO_ROOT"
+
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
     echo "STRUCTURE SYNC GATE TEST SUITE: $FAILURES failure(s)."

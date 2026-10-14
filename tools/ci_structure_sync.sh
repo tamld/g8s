@@ -116,6 +116,10 @@ if [ "$MODE" = "render" ]; then
 fi
 
 # --- gate mode -------------------------------------------------------------
+if [ ! -f "go.mod" ]; then
+    echo "STRUCTURE SYNC GATE: SKIP — no go.mod found (Go-project structure gate)."
+    exit 0
+fi
 if ! grep -q "$START_MARKER" "$README" || ! grep -q "$END_MARKER" "$README"; then
     echo "::error::structure sync: $README is missing the $START_MARKER / $END_MARKER markers (#420 G2)"
     exit 1

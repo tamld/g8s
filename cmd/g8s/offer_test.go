@@ -23,7 +23,7 @@ func TestOfferInitScaffoldsFromProfile(t *testing.T) {
 	if cmd.exitCode != 0 {
 		t.Fatalf("offer init exit = %d, output:\n%s", cmd.exitCode, cmd.output)
 	}
-	for _, f := range []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml"} {
+	for _, f := range []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("scaffold missing %s: %v", f, err)
 		}
@@ -84,10 +84,10 @@ func TestOfferCheckRunsGates(t *testing.T) {
 	dir := t.TempDir()
 	execOffer(t, dir, "init", "--profile", "utility")
 	// a clean utility scaffold has no spec dir + no markers — check must
-	// degrade gracefully (the gates skip absent surfaces) and exit 0.
+	// degrade gracefully (the gates skip absent surfaces) and exit 0 with overall: PASS.
 	cmd := execOffer(t, dir, "check")
-	if cmd.exitCode != 0 {
-		t.Fatalf("offer check on clean scaffold must exit 0, got %d:\n%s", cmd.exitCode, cmd.output)
+	if cmd.exitCode != 0 || !strings.Contains(cmd.output, "overall: PASS") {
+		t.Fatalf("offer check on clean scaffold must exit 0 with overall: PASS, got %d:\n%s", cmd.exitCode, cmd.output)
 	}
 }
 
