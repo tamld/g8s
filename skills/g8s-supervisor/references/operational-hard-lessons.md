@@ -154,8 +154,8 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
   survival), inspect the diff in `$G8S_STATE_DIR/worktrees/wt-<hash>` and
   run `g8s deliver <task-id> --worktree <wt-dir>` — this still enforces the
   full Zero-Trust Receipt Gate (`VerifyScope` + `ConsumeWriteReceipt`).
-- After delivering to a sibling repo, prune temporary worktrees and `wt/*`
-  branches (`git -C <repo> worktree remove --force <wt-dir>` and
+- After delivering to a sibling repo, pass `g8s deliver <task-id> --prune-worktree`
+  (or manually run `git -C <repo> worktree remove --force <wt-dir>` and
   `git -C <repo> branch -D wt/<task-id>`) before running the sibling repo's
   pre-push hooks.
 
@@ -166,8 +166,8 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
     causes `130–151+` tool steps and hits the `360s` timeout ceiling.
   - Right-sizing each F1 worker to **`<= 8–9 files`** (`1 issue-slice = 1
     worker = 1 receipt`, `<= 40` tool steps) brings completion down to
-    **`20s–149s`** (`28K–186K` tokens) with `100% succeeded` status across 3
-    concurrent F1 workers.
+    **`19.5s–149s`** (`26K–187K` tokens) with `100% succeeded` status across
+    3 parallel cross-repo rounds.
 - Git worktrees (`wt-<hash>`) do NOT contain gitignored `node_modules`.
   In Node.js/TypeScript sibling repos (`aegis`, `tuneflow`), instruct F1
   workers either to perform file edits only (leaving test runner execution
@@ -187,3 +187,10 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
   and `internal/worker/`) in the same `git push`; push each layer-disjoint
   commit sequentially so `origin/main...HEAD` stays single-layer per push.
 
+## 16. Cross-platform search standard: `ripgrep` (`rg`) vs `grep` / `find` (`offer/SEARCH_GUIDE.md`)
+
+- **Why `rg` over `grep` / `find`**:
+  1. **Zero BSD/GNU/Windows regex divergence**: macOS ships BSD `grep` (no `-P` PCRE2, flag drift vs Linux GNU `grep`), while `rg` provides identical Rust `regex` + PCRE2 (`-P`) and `-g` glob semantics across `darwin`, `linux`, and `windows`.
+  2. **Automatic `.gitignore` & binary hygiene**: Raw `grep -rn` or `find . | xargs grep` blindly scans `.git/`, `node_modules/`, `vendor/`, and `$G8S_STATE_DIR/worktrees/`, bloating worker tokens and risking `360s` timeouts. `rg` skips ignored/binary/hidden files automatically (use `--hidden -g '!.git'` when inspecting `.g8s/`, `.agents/`, or `.github/`).
+  3. **Dual-Engine CI Gate Pattern**: Portable scripts (`tools/ci_*.sh`) MUST use `if command -v rg >/dev/null 2>&1; then rg ...; else grep ...; fi` so workstations get `5x–20x` SIMD speedups while minimal containers degrade gracefully to POSIX `grep`/`find`.
+  4. **Windows path normalization**: Pass `rg --path-separator /` whenever matching output paths against `WriteReceipt` globs or OpenSpec manifests.

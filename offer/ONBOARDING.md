@@ -53,26 +53,30 @@ RID=$(g8s receipt issue --path "docs/**" --json | jq -r '.data.receipt_id')
 AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --idempotency-key <key> --prompt "..." \
   --permission workspace_write --receipt-id "$RID" --scope-root <repo> --add-dir <repo> --skip-permissions
 g8s worker --once
-g8s deliver <task-id>
+g8s deliver <task-id> --prune-worktree
 ```
 
 Report the outcome — including failures — per the charter's Mode 3
 (sanitized contribution packet → PR to g8s). That report is the learning
 loop closing.
 
-## Step 5 — Adopt the cadence
+## Step 5 — Adopt the cadence & cross-platform search discipline
 
 From the profile's audit-cadence recommendation. The deep-audit runner
 (`tools/run_audit_fanout.sh` in the g8s repo) is the reference for
-multi-dimension sweeps; adopt or adapt.
+multi-dimension sweeps; adopt or adapt. Follow [`SEARCH_GUIDE.md`](SEARCH_GUIDE.md)
+for cross-platform `ripgrep` (`rg`) vs `grep`/`find` usage across macOS,
+Linux, and Windows so F1 workers never stall scanning `node_modules/`,
+`vendor/`, or `.git/`.
 
 ## Agent pull path (fastest — no git)
 
 An autonomous agent pulls the offer without cloning:
 
 ```bash
-# 1. the onboarding guide (entry point)
+# 1. the onboarding guide & cross-platform search standard
 curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/ONBOARDING.md
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/SEARCH_GUIDE.md
 # 2. the profile for the project's nature
 curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/offer/profiles/security.md
 # 3. the three generic gate scripts (+ their test suites)

@@ -15,8 +15,12 @@ sanitized contribution packets (g8s-supervisor Mode 3).
    a repo root and they enforce spec↔code sync, README structure truth, and
    link integrity.
 3. **The supervisor charter** — [`skills/g8s-supervisor`](../skills/g8s-supervisor/SKILL.md)
-   v4.1.0: the operating practice for dispatching work through g8s
+   v4.2.0: the operating practice for dispatching work through g8s
    (admission-gated, fan-out, evidence-verified, leak-free reporting).
+4. **Cross-platform search standard** — [`SEARCH_GUIDE.md`](SEARCH_GUIDE.md):
+   why `ripgrep` (`rg`) replaces raw `grep -rn` / `find + xargs` across
+   macOS (BSD), Linux (GNU), and Windows, plus the dual-engine (`rg`-first
+   with POSIX `grep` fallback) pattern used in portable CI gates.
 
 ## Onboard in four steps
 
