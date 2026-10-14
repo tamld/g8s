@@ -1205,3 +1205,128 @@ func TestSanitizePythonTypeAnnotations537(t *testing.T) {
 		})
 	}
 }
+
+// #590: credential-parser call expressions, subscript/slice expressions,
+// attribute access, and variable pass-throughs must survive sanitization
+// byte-identical and compile cleanly under Python ast.parse.
+func TestSanitizeCredentialParserAssignment590(t *testing.T) {
+	pythonBin, _ := exec.LookPath("python3")
+	if pythonBin == "" {
+		pythonBin, _ = exec.LookPath("python")
+	}
+
+	assertPythonAST := func(t *testing.T, pyCode string) {
+		t.Helper()
+		if pythonBin == "" {
+			t.Fatal("python interpreter not found for ast.parse verification")
+		}
+		cmd := exec.Command(pythonBin, "-c", "import ast, sys; ast.parse(sys.stdin.read())")
+		cmd.Stdin = strings.NewReader(pyCode)
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("ast.parse failed on code %q: %v: %s", pyCode, err, string(combined))
+		}
+	}
+
+	publicPythonCases := []struct {
+		name string
+		code string
+	}{
+		{
+			name: "issue 590 exact deterministic regression input",
+			code: "api_key = parse_api_key(restored)\n",
+		},
+		{
+			name: "multi-argument and keyword call expression",
+			code: "api_key = parse_api_key(restored, offset=0, strict=True)\n",
+		},
+		{
+			name: "method call with slice argument",
+			code: "api_key = self._parse_api_key(buf[4:36])\n",
+		},
+		{
+			name: "3-level nested call expression (RT-590-2)",
+			code: "api_key = parse_api_key(bytes(memoryview(restored)))\n",
+		},
+		{
+			name: "os.environ.get and subscript lookup",
+			code: "token = os.environ.get(\"API_TOKEN\")\napi_key = restored[\"api_key\"]\nsecret = buf[4:36]\n",
+		},
+		{
+			name: "attribute access and variable pass-through",
+			code: "def init(self, api_key: str, token: str):\n    self.api_key = api_key\n    parsed_api_key = parse_api_key(api_key)\n    api_key = parsed_api_key\n    return Client(api_key=parse_api_key(api_key), token=token)\n",
+		},
+	}
+
+	for _, tc := range publicPythonCases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := SanitizeOutput(tc.code)
+			if out != tc.code {
+				t.Fatalf("byte-identity broken:\nwant: %q\ngot:  %q", tc.code, out)
+			}
+			assertPythonAST(t, out)
+		})
+	}
+
+	t.Run("JSON code artifact and source_lines transport (#590)", func(t *testing.T) {
+		jsonCode := `{"code":"def provision(restored: bytes) -> str:\n    api_key = parse_api_key(restored)\n    return api_key\n"}`
+		outCode := SanitizeOutput(jsonCode)
+		if outCode != jsonCode {
+			t.Fatalf("JSON code altered:\nwant: %s\ngot:  %s", jsonCode, outCode)
+		}
+		var payload struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal([]byte(outCode), &payload); err != nil {
+			t.Fatalf("json.Unmarshal failed: %v", err)
+		}
+		assertPythonAST(t, payload.Code)
+
+		jsonLines := `{"source_lines":["def provision(restored: bytes) -> str:","    api_key = parse_api_key(restored)","    return api_key"]}`
+		if outLines := SanitizeOutput(jsonLines); outLines != jsonLines {
+			t.Fatalf("JSON source_lines altered:\nwant: %s\ngot:  %s", jsonLines, outLines)
+		}
+	})
+
+	t.Run("real secrets and nested call/subscript secrets still redact", func(t *testing.T) {
+		secretCases := []struct {
+			name        string
+			input       string
+			wantContain string
+			forbid      string
+		}{
+			{
+				name:        "quoted secret assignment",
+				input:       `api_key = "hunter2"`,
+				wantContain: "api_key=<REDACTED>",
+				forbid:      "hunter2",
+			},
+			{
+				name:        "unquoted secret with parentheses",
+				input:       "password: p@ss(123)",
+				wantContain: "password=<REDACTED>",
+				forbid:      "123",
+			},
+			{
+				name:        "secret nested inside public call expression",
+				input:       `api_key = fetch(password="hunter2")`,
+				wantContain: "api_key = fetch(password=<REDACTED>",
+				forbid:      "hunter2",
+			},
+			{
+				name:        "secret nested after subscript expression (RT-590-1)",
+				input:       `api_key = items[0].fetch(password="hunter2")`,
+				wantContain: "api_key = items[0].fetch(password=<REDACTED>",
+				forbid:      "hunter2",
+			},
+		}
+		for _, sc := range secretCases {
+			out := SanitizeOutput(sc.input)
+			if !strings.Contains(out, sc.wantContain) {
+				t.Fatalf("%s: expected %q in %q", sc.name, sc.wantContain, out)
+			}
+			if strings.Contains(out, sc.forbid) {
+				t.Fatalf("%s: secret %q leaked in %q", sc.name, sc.forbid, out)
+			}
+		}
+	})
+}

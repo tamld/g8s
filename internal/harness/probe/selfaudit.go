@@ -326,6 +326,12 @@ func AuditSanitizerFidelity() error {
 		return fmt.Errorf("case 8: want password=<REDACTED>, got %q", out)
 	}
 
+	// Case 9: #590 credential-parser assignment inside JSON preserved byte-identical
+	c9In := "{\"code\":\"def provision(restored: bytes) -> str:\\n    api_key = parse_api_key(restored)\\n    return api_key\\n\"}"
+	if out := dispatch.SanitizeOutput(c9In); out != c9In {
+		return fmt.Errorf("case 9: want byte-exact unchanged output, got %q", out)
+	}
+
 	return nil
 }
 

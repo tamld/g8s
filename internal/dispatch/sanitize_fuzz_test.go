@@ -27,6 +27,10 @@ func FuzzSanitizeOutput(f *testing.F) {
 	f.Add([]byte(`{"cred":"credential=example-value-77\nnext chunk"}`))
 	f.Add([]byte("{\"dsn\":\"postgresql://user:pass@db.example.com/sales\\n\"}"))
 
+	// Seed 6: #590 credential-parser assignment cases
+	f.Add([]byte("api_key = parse_api_key(restored)"))
+	f.Add([]byte(`{"code":"def provision(restored: bytes) -> str:\n    api_key = parse_api_key(restored)\n    return api_key\n"}`))
+
 	// Incident #434 corpus cases that contain poison secrets to be redacted
 	corpus434PoisonCases := []string{
 		`{"type":"item.completed","text":"set password: abc\"def\" here"}`,
@@ -61,6 +65,8 @@ func FuzzSanitizeOutput(f *testing.F) {
 		`{"code":"token = False\ngood = True"}`,
 		`{"code":"x = f(token=False, retries=0, timeout=None)"}`,
 		"loader = pipeline(model, token=False, trust_remote_code=None, retries=0)",
+		"api_key = parse_api_key(restored)",
+		`{"code":"def provision(restored: bytes) -> str:\n    api_key = parse_api_key(restored)\n    return api_key\n"}`,
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {

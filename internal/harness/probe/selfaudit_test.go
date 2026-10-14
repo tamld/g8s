@@ -353,6 +353,15 @@ func TestSelfAudit_SanitizerFidelity_Predicate(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "case 9: #590 credential-parser assignment inside JSON preserved byte-identical",
+			input: "{\"code\":\"def provision(restored: bytes) -> str:\\n    api_key = parse_api_key(restored)\\n    return api_key\\n\"}",
+			validate: func(t *testing.T, in, out string) {
+				if out != in {
+					t.Fatalf("case 9: want byte-exact identical output, got %q", out)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {

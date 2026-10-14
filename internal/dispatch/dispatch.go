@@ -56,43 +56,116 @@ var sensitivePatterns = []struct {
 }
 
 // credentialAssignmentPattern captures the keyword and value separately so
-// the replacement can keep public literals and public type annotations intact
-// while normalizing the separator (password: x -> password=<REDACTED>,
-// matching the historical sanitizer output format).
+// the replacement can keep public literals, public type annotations, and
+// credential parser/extractor calls and expressions intact while normalizing
+// the separator (password: x -> password=<REDACTED>, matching historical format).
 //
 // Value capture groups atomic escapes (\.), bracketed generic arguments
-// ([...]), and terminates before quotes, whitespace, commas, braces, brackets,
-// and closing parentheses (#537).
-var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)((?:\\.|\[(?:[^\[\]\r\n]|\[[^\]\r\n]*\])*\]|[^"'\s,})\]\\]){3,})`)
+// ([...]), balanced parentheses ((...)), and terminates before quotes, whitespace,
+// commas, braces, brackets, and closing parentheses (#537, #590).
+var credentialAssignmentPattern = regexp.MustCompile(`(?i)\b(password|credential|secret|token|api[_-]?key)(\s*[:=]\s*["']?)((?:\\.|\[(?:[^\[\]\r\n]|\[[^\]\r\n]*\])*\]|\((?:[^()\r\n]|\([^()\r\n]*\))*\)|[^"'\s,(){}\[\]\\]){3,})`)
 
 // publicLiteralPattern matches values that are public API arguments, not
 // secrets (token=False, retries=0, timeout=None).
 var publicLiteralPattern = regexp.MustCompile(`(?i)^(?:true|false|none|null|nil|[-+]?\d+)$`)
 
 // publicTypePattern matches bare public type annotations and generic type
-// shapes (#537) that must not be redacted as credentials. Common type names
-// include str, int, float, bool, bytes, object, Any, None, dict, list, tuple,
-// set, Optional, Union, and generic forms like list[str] or dict[str, Any].
-var publicTypePattern = regexp.MustCompile(`(?i)^(?:str|int|float|bool|bytes|object|any|none|dict|list|tuple|set|optional|union)(?:\[[\w\s,.[\]"']*\])?$`)
+// shapes (#537, #590) that must not be redacted as credentials. Common type names
+// include str, int, float, bool, bytes, bytearray, memoryview, object, Any,
+// None, dict, list, tuple, set, Optional, Union, callable, sequence, mapping,
+// iterable, path, and generic forms like list[str] or dict[str, Any].
+var publicTypePattern = regexp.MustCompile(`(?i)^(?:str|int|float|bool|bytearray|bytes|memoryview|object|any|none|dict|list|tuple|set|optional|union|callable|sequence|mapping|iterable|path)(?:\[[\w\s,.[\]"']*\])?$`)
+
+// publicCodeCallPattern recognizes unquoted function/method call expressions
+// on the RHS (e.g., parse_api_key(restored), self._extract(buf), os.environ.get("API_KEY")).
+var publicCodeCallPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\(`)
+
+// publicCodeSubscriptPattern recognizes unquoted subscript/slice/generic-type
+// expressions on the RHS (e.g., restored["api_key"], buf[4:36], list[str]).
+var publicCodeSubscriptPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\[`)
+
+// publicCodeAttrPattern recognizes unquoted dotted attribute access on the RHS
+// (e.g., self.api_key, config.api_key, user.password).
+var publicCodeAttrPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// publicCodeIdentChainPattern matches a valid identifier or dotted attribute chain.
+var publicCodeIdentChainPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$`)
+
+// publicCodeVarPattern recognizes unquoted alphabetic snake_case variable
+// identifiers referencing credential nouns without digits (e.g.,
+// parsed_api_key, restored_key, raw_token, user_password).
+var publicCodeVarPattern = regexp.MustCompile(`(?i)^(?:[a-z]+_)+(?:api_key|key|token|secret|password|credential|cred|restored|parsed|raw|default|value|val)$|^(?:api_key|key|token|secret|password|credential|cred|restored|parsed|raw|default)_(?:[a-z_]+)$`)
 
 // redactCredentialAssignments redacts key=value credentials while leaving
-// public literal values intact (#373) and public type annotations intact (#537):
-// redacting token=False or token: str corrupts otherwise-valid generated Python.
+// public literal values intact (#373), public type annotations intact (#537),
+// and credential parser / extractor calls and expressions intact (#590):
+// redacting token=False, token: str, or api_key = parse_api_key(restored)
+// corrupts otherwise-valid generated Python code.
 func redactCredentialAssignments(value string) string {
-	return credentialAssignmentPattern.ReplaceAllStringFunc(value, func(m string) string {
-		subs := credentialAssignmentPattern.FindStringSubmatch(m)
-		if len(subs) < 4 {
-			return m
+	locs := credentialAssignmentPattern.FindAllStringSubmatchIndex(value, -1)
+	if len(locs) == 0 {
+		return value
+	}
+	var sb strings.Builder
+	sb.Grow(len(value))
+	last := 0
+	for _, loc := range locs {
+		matchStart, matchEnd := loc[0], loc[1]
+		sb.WriteString(value[last:matchStart])
+		m := value[matchStart:matchEnd]
+		subs1 := value[loc[2]:loc[3]]
+		subs2 := value[loc[4]:loc[5]]
+		subs3 := value[loc[6]:loc[7]]
+
+		// If quoted, always redact.
+		if strings.ContainsAny(subs2, "\"'") || strings.HasPrefix(subs3, `\"`) || strings.HasPrefix(subs3, `\'`) {
+			sb.WriteString(subs1 + "=<REDACTED>")
+			last = matchEnd
+			continue
 		}
-		core := subs[3]
-		if i := strings.IndexByte(subs[3], '\\'); i >= 0 {
-			core = subs[3][:i]
+		// For unquoted matches:
+		// 1. Deeply nested call or subscript where regex stopped before '(' or '[' (RT-590-2):
+		if matchEnd < len(value) && (value[matchEnd] == '(' || value[matchEnd] == '[') && publicCodeIdentChainPattern.MatchString(subs3) {
+			sb.WriteString(m)
+			last = matchEnd
+			continue
 		}
-		if publicLiteralPattern.MatchString(core) || publicTypePattern.MatchString(core) {
-			return m // public literal or public type annotation (possibly followed by transport escapes) — keep
+		// 2. Function/method calls: preserve call prefix and recurse on remainder.
+		if publicCodeCallPattern.MatchString(subs3) {
+			if openIdx := strings.IndexByte(subs3, '('); openIdx >= 0 {
+				sb.WriteString(subs1 + subs2 + subs3[:openIdx+1] + redactCredentialAssignments(subs3[openIdx+1:]))
+				last = matchEnd
+				continue
+			}
 		}
-		return subs[1] + "=<REDACTED>"
-	})
+		// 3. Subscript / slice / generic-type expressions: preserve subscript prefix and recurse on remainder (RT-590-1).
+		if publicCodeSubscriptPattern.MatchString(subs3) {
+			if openIdx := strings.IndexByte(subs3, '['); openIdx >= 0 {
+				sb.WriteString(subs1 + subs2 + subs3[:openIdx+1] + redactCredentialAssignments(subs3[openIdx+1:]))
+				last = matchEnd
+				continue
+			}
+		}
+		// 4. Literals, type annotations, dotted attributes, credential-referencing
+		// variables, and self-assignments (EqualFold core vs subs1).
+		core := subs3
+		if i := strings.IndexByte(subs3, '\\'); i >= 0 {
+			core = subs3[:i]
+		}
+		if publicLiteralPattern.MatchString(core) ||
+			publicTypePattern.MatchString(core) ||
+			publicCodeAttrPattern.MatchString(core) ||
+			publicCodeVarPattern.MatchString(core) ||
+			strings.EqualFold(core, subs1) {
+			sb.WriteString(m)
+			last = matchEnd
+			continue
+		}
+		sb.WriteString(subs1 + "=<REDACTED>")
+		last = matchEnd
+	}
+	sb.WriteString(value[last:])
+	return sb.String()
 }
 
 // violationPattern pairs a read-only contract detector with its class name.
