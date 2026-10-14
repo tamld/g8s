@@ -105,7 +105,9 @@ for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md; do
             name=$(echo "$name" | tr -d ' ')
             [ -n "$name" ] || continue
             pin_found=0
-            if command -v rg >/dev/null 2>&1; then
+            if [ -x "./bin/g8s" ] && ./bin/g8s search -q -F "func ${name}(" -g '*.go' "$GO_ROOT" 2>/dev/null; then
+                pin_found=1
+            elif command -v rg >/dev/null 2>&1; then
                 if rg -q -F "func ${name}(" -g '*.go' "$GO_ROOT" 2>/dev/null; then
                     pin_found=1
                 elif [ -f "$GO_ROOT/$name" ] || [ -f "$GO_ROOT/tests/$name" ]; then

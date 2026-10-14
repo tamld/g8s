@@ -1,7 +1,7 @@
 ---
 title: "Native Cross-Platform Search Engine (internal/search + g8s search)"
 description: "Ship ripgrep-semantics as a native CGO_ENABLED=0 feature in g8s with WriteReceipt scope filtering and Offer Bundle integration"
-status: in_progress
+status: completed
 priority: P1
 effort: 2h
 issue: 591
@@ -31,9 +31,9 @@ Ship `ripgrep`-semantics as a 100% native feature compiled into the single `CGO_
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | [Core Pure-Go Search Package & Doctor Probe](./phase-01-internal-search-engine.md) | Pending |
-| 2 | [CLI Subcommand g8s search & Receipt Scope Gate](./phase-02-cli-g8s-search-and-doctor.md) | Pending |
-| 3 | [Offer Gate Integration, README Sync & Adversarial Review](./phase-03-offer-gates-and-verification.md) | Pending |
+| 1 | [Core Pure-Go Search Package & Doctor Probe](./phase-01-internal-search-engine.md) | Completed |
+| 2 | [CLI Subcommand g8s search & Receipt Scope Gate](./phase-02-cli-g8s-search-and-doctor.md) | Completed |
+| 3 | [Offer Gate Integration, README Sync & Adversarial Review](./phase-03-offer-gates-and-verification.md) | Completed |
 
 ## Dependencies
 

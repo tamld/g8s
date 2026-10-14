@@ -75,6 +75,8 @@ func main() {
 		runEval(os.Args[2:])
 	case "offer":
 		runOffer(os.Args[2:])
+	case "search":
+		runSearch(os.Args[2:])
 	case "watch":
 		runWatch(os.Args[2:])
 	case "reflex":

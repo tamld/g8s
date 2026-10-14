@@ -199,3 +199,34 @@ func TestSearchExecute(t *testing.T) {
 		}
 	})
 }
+
+func TestSearchAdversarialRedTeam(t *testing.T) {
+	// 1. Path traversal & absolute path refusal in MatchesAllowedPaths
+	assert.False(t, search.MatchesAllowedPaths("../secret.txt", []string{"*"}))
+	assert.False(t, search.MatchesAllowedPaths("..", []string{"**"}))
+	assert.False(t, search.MatchesAllowedPaths("/etc/passwd", []string{"**"}))
+	assert.False(t, search.MatchesAllowedPaths("C:/Windows/System32/cmd.exe", []string{"**"}))
+
+	// 2. Globstar segment boundary accuracy (no partial prefix collisions)
+	assert.True(t, search.MatchesAllowedPaths("pkg/sub/deep/file.go", []string{"pkg/**/*.go"}))
+	assert.True(t, search.MatchesAllowedPaths("pkg/file.go", []string{"pkg/**/*.go"}))
+	assert.False(t, search.MatchesAllowedPaths("pkg_other/file.go", []string{"pkg/**/*.go"}))
+	assert.False(t, search.MatchesAllowedPaths("pkg/sub/file.txt", []string{"pkg/**/*.go"}))
+
+	// 3. ScopeRoot anchoring when searching a subdirectory
+	tempDir := t.TempDir()
+	subDir := filepath.Join(tempDir, "pkg", "allowed")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	target := filepath.Join(subDir, "scoped.go")
+	require.NoError(t, os.WriteFile(target, []byte("package allowed\n"), 0o644))
+
+	res, err := search.Execute(context.Background(), search.Options{
+		Roots:        []string{subDir},
+		ScopeRoot:    tempDir,
+		FilesOnly:    true,
+		AllowedPaths: []string{"pkg/allowed/**"},
+	})
+	require.NoError(t, err)
+	require.Len(t, res.Files, 1)
+	assert.Equal(t, filepath.ToSlash(target), res.Files[0])
+}
