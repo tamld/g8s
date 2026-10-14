@@ -11,3 +11,8 @@
 **Vulnerability:** Calls to `exec.Command("git", ...)` appended paths or branch names without explicitly indicating the end of options using `--`. If an untrusted path or branch name starts with `-`, Git parses it as an option, which can lead to command option injection.
 **Learning:** Command-line interfaces like `git` often parse any argument starting with `-` as an option unless `--` is explicitly used. This is especially risky when injecting uncontrolled or dynamic paths.
 **Prevention:** When invoking command-line tools that accept options using Go's `exec.Command`, always prepend `--` immediately before variable arguments (like paths or branches) to prevent them from being parsed as flags.
+
+## 2025-02-14 - CORS Preflight Auth Bypass Vulnerability
+**Vulnerability:** The HTTP server's middleware wrapped `corsMiddleware` inside `authMiddleware`. As a result, CORS preflight `OPTIONS` requests were blocked by the authentication middleware returning `401 Unauthorized` before the CORS headers could be applied.
+**Learning:** Browsers do not send `Authorization` headers on CORS preflight `OPTIONS` requests. Middleware that enforces authentication must be placed *after* CORS middleware in the request lifecycle, or it must explicitly whitelist `OPTIONS` requests.
+**Prevention:** Always place `corsMiddleware` as the outermost middleware (e.g., `s.corsMiddleware(s.authMiddleware(mux))`) to ensure `OPTIONS` requests are handled correctly and return the required CORS headers before authentication is enforced.
