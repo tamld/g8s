@@ -29,6 +29,7 @@ type deliverData struct {
 	TaskID         string   `json:"task_id"`
 	DeliverableDir string   `json:"deliverable_dir"`
 	Applied        []string `json:"applied"`
+	Deleted        []string `json:"deleted,omitempty"`
 	Skipped        []string `json:"skipped"`
 	ReceiptID      string   `json:"receipt_id"`
 }
@@ -115,6 +116,8 @@ func runDeliver(args []string) {
 	}
 
 	var rawCandidates []string
+	var deletedCandidates []string
+	seenDeleted := make(map[string]bool)
 	skipped := []string{}
 	seenSkipped := make(map[string]bool)
 
@@ -169,11 +172,10 @@ func runDeliver(args []string) {
 
 		if x == 'D' || y == 'D' {
 			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
-			if !seenSkipped[cleanTarget] {
-				seenSkipped[cleanTarget] = true
-				skipped = append(skipped, cleanTarget)
+			if !seenDeleted[cleanTarget] {
+				seenDeleted[cleanTarget] = true
+				deletedCandidates = append(deletedCandidates, cleanTarget)
 			}
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model delete in v1\n", rawPath)
 			continue
 		}
 
@@ -289,6 +291,11 @@ func runDeliver(args []string) {
 			offending = append(offending, file)
 		}
 	}
+	for _, file := range deletedCandidates {
+		if !deliverPathMatchesScope(file, rc.AllowedPaths) {
+			offending = append(offending, file)
+		}
+	}
 	if len(offending) > 0 {
 		for _, off := range offending {
 			fmt.Fprintf(os.Stderr, "out of scope path: %s\n", off)
@@ -318,7 +325,22 @@ func runDeliver(args []string) {
 		toApply = append(toApply, rel)
 	}
 
+	var toDelete []string
+	for _, rel := range deletedCandidates {
+		destPath := filepath.Join(cwd, filepath.FromSlash(rel))
+		if fi, err := os.Lstat(destPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			if !seenSkipped[rel] {
+				seenSkipped[rel] = true
+				skipped = append(skipped, rel)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: destination is a symlink\n", rel)
+			continue
+		}
+		toDelete = append(toDelete, rel)
+	}
+
 	applied := []string{}
+	var deleted []string
 	if !*dryRun {
 		type stagedFile struct {
 			tmpPath  string
@@ -428,14 +450,24 @@ func runDeliver(args []string) {
 			}
 			applied = append(applied, s.rel)
 		}
+
+		for _, rel := range toDelete {
+			destPath := filepath.Join(cwd, filepath.FromSlash(rel))
+			if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("remove deleted file %s: %w", rel, err), "", *jsonl)
+			}
+			deleted = append(deleted, rel)
+		}
 	} else {
 		applied = append(applied, toApply...)
+		deleted = append(deleted, toDelete...)
 	}
 
 	data := deliverData{
 		TaskID:         taskID,
 		DeliverableDir: deliverableDir,
 		Applied:        applied,
+		Deleted:        deleted,
 		Skipped:        skipped,
 		ReceiptID:      receiptID,
 	}
@@ -454,6 +486,13 @@ func runDeliver(args []string) {
 			fmt.Printf("would apply: %s\n", rel)
 		} else {
 			fmt.Printf("applied: %s\n", rel)
+		}
+	}
+	for _, rel := range deleted {
+		if *dryRun {
+			fmt.Printf("would delete: %s\n", rel)
+		} else {
+			fmt.Printf("deleted: %s\n", rel)
 		}
 	}
 	for _, rel := range skipped {

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/receipt"
 )
 
 // TestSubmitEffort_DefaultMediumLandsInPayload asserts that omitting --effort
@@ -1136,6 +1138,140 @@ func TestSubmitEffort_RealignmentConsumesWinningLevel(t *testing.T) {
 	}
 	if payload["model_requested"] != "gemini-3.8-flash-high" {
 		t.Errorf("model_requested = %v, want gemini-3.8-flash-high", payload["model_requested"])
+	}
+	if payload["model_realigned"] != true {
+		t.Errorf("model_realigned = %v, want true", payload["model_realigned"])
+	}
+}
+
+// TestSubmitEffort_ClassFlagAndReceiptFallback verifies issue #567:
+// 1. Explicit --class flag resolves effort_class and registry default_effort even without --add-dir.
+// 2. When --add-dir is omitted on workspace_write tasks, receipt allowed_paths are used to resolve effort_class.
+func TestSubmitEffort_ClassFlagAndReceiptFallback(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "class_receipt.db")
+	rcDBPath := filepath.Join(tempDir, "receipts.db")
+
+	mgr, err := receipt.NewReceiptManager(rcDBPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc, err := mgr.IssueReceipt("brain-supervisor", []string{"docs/guide.md"}, 10*time.Minute,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+			SchemaURI:      "g8s://envelope/write-receipt/v1",
+			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
+			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+		}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+			RulesetVersion: "v1",
+			PipelineDigest: "test-567",
+		}),
+		receipt.WithProvenanceContext("g8s/test", "HEAD", "test-567"),
+	)
+	mgr.Close()
+	if err != nil {
+		t.Fatalf("IssueReceipt: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + filepath.Join(tempDir, "absent-providers.json"),
+		"AGY_MCP_ALLOW_WORKSPACE_WRITE=1",
+	}
+
+	t.Run("explicit_class_flag_resolves_docs_low", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "explicit-class-docs",
+			"--prompt", "Summarize documentation with explicit --class",
+			"--class", "docs",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "explicit-class-docs")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["effort_class"] != "docs" {
+			t.Errorf("effort_class = %v, want docs", payload["effort_class"])
+		}
+		if payload["effort_applied"] != "low" {
+			t.Errorf("effort_applied = %v, want low", payload["effort_applied"])
+		}
+	})
+
+	t.Run("receipt_allowed_paths_fallback_resolves_docs_class", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "receipt-fallback-docs",
+			"--prompt", "Update docs/guide.md via receipt without --add-dir",
+			"--permission", "workspace_write",
+			"--receipt-id", rc.ReceiptID,
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "receipt-fallback-docs")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["effort_class"] != "docs" {
+			t.Errorf("effort_class = %v, want docs (resolved from receipt allowed_paths)", payload["effort_class"])
+		}
+		if payload["effort_applied"] != "low" {
+			t.Errorf("effort_applied = %v, want low", payload["effort_applied"])
+		}
+	})
+}
+
+// TestSubmitEffort_StaleProvidersManifestProviderlessRealigns verifies issue #566:
+// When a user's providers.json only lists older model IDs (e.g. gemini-3.7-flash-high)
+// and omits --provider, a submit for gemini-3.8-flash-high falls through to the catalog
+// and realigns baked-name effort as expected.
+func TestSubmitEffort_StaleProvidersManifestProviderlessRealigns(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "stale_manifest.db")
+
+	manifestPath := filepath.Join(tempDir, "providers.json")
+	staleManifest := `{
+		"providers": [
+			{
+				"name": "agy",
+				"class": "platform_dispatch",
+				"models": [
+					{"id": "gemini-3.7-flash-high"}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(manifestPath, []byte(staleManifest), 0o600); err != nil {
+		t.Fatalf("write stale providers.json: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + manifestPath,
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "stale-manifest-realign",
+		"--prompt", "Providerless submit with stale 3.7 manifest",
+		"--model", "gemini-3.8-flash-high",
+		"--effort", "low",
+	)
+	if code != 0 {
+		t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+	reqJSON := getTaskRequestJSON(t, dbPath, "stale-manifest-realign")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["model"] != "gemini-3.8-flash-low" {
+		t.Errorf("model = %v, want gemini-3.8-flash-low", payload["model"])
 	}
 	if payload["model_realigned"] != true {
 		t.Errorf("model_realigned = %v, want true", payload["model_realigned"])

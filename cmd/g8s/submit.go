@@ -18,6 +18,7 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/lane"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/settings"
 )
@@ -48,6 +49,7 @@ func runSubmit(args []string) {
 	routeFlag := fs.String("route", "manual", "task routing mode (manual|auto, defaults to manual)")
 	blastRadiusFlag := fs.String("blast-radius", "", "declared blast radius (low|medium|high)")
 	locEstimateFlag := fs.Int("loc-estimate", 0, "declared LOC estimate (positive int)")
+	classFlag := fs.String("class", "", "explicit effort class hint (e.g. docs, test, feature, discovery)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
@@ -119,13 +121,17 @@ func runSubmit(args []string) {
 			exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("prompt file rejected: %w", err), "Choose a prompt file outside denied/sensitive paths", *jsonl)
 		}
 		content, err := os.ReadFile(*promptFile)
-		failRuntime(err)
+		if err != nil {
+			exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Ensure the prompt file exists and is readable", *jsonl)
+		}
 		prompt = string(content)
 	} else if *promptFlag != "" {
 		prompt = *promptFlag
 	} else if !term.IsTerminal(int(os.Stdin.Fd())) {
 		content, err := io.ReadAll(os.Stdin)
-		failRuntime(err)
+		if err != nil {
+			exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to read prompt from stdin", *jsonl)
+		}
 		prompt = string(content)
 	}
 
@@ -190,10 +196,35 @@ func runSubmit(args []string) {
 			classPaths = append(classPaths, filepath.ToSlash(clean))
 		}
 	}
+	// #567: When no explicit --add-dir was passed, fall back to receipt allowed_paths
+	// for workspace_write tasks so repo-root dispatches with bounded receipts resolve class.
+	if len(classPaths) == 0 && *receiptID != "" {
+		if rcDBPath, rdbErr := receiptDatabasePath(); rdbErr == nil {
+			if rm, rmErr := receipt.NewReceiptManager(rcDBPath, nil); rmErr == nil {
+				if rc, vErr := rm.VerifyReceipt(*receiptID); vErr == nil && rc != nil {
+					for _, ap := range rc.AllowedPaths {
+						classPaths = append(classPaths, filepath.ToSlash(filepath.Clean(ap)))
+					}
+				}
+				rm.Close()
+			}
+		}
+	}
 
 	className, defaultEffort, ecErr := lane.ResolveClassForRoots(classPaths, scopeRoots)
 	if ecErr != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, ecErr, "Failed to load effort classes", *jsonl)
+	}
+	if explicitClass := strings.TrimSpace(*classFlag); explicitClass != "" {
+		className = explicitClass
+		if ec, loadErr := lane.LoadEffortClasses(); loadErr == nil && ec != nil {
+			for _, c := range ec.Classes {
+				if strings.EqualFold(c.Name, explicitClass) && c.DefaultEffort != "" {
+					defaultEffort = c.DefaultEffort
+					break
+				}
+			}
+		}
 	}
 
 	hasSignals := blastRadiusPassed || locEstimatePassed

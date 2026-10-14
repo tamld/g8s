@@ -14,6 +14,7 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/ladder"
 	"github.com/tamld/g8s/internal/lane"
 	"github.com/tamld/g8s/internal/pathutil"
@@ -586,6 +587,17 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 		return 2, &env, errors.New(msg)
 	}
 
+	if *outFlag != "" {
+		if err := harness.ValidateScopePath(*outFlag); err != nil {
+			msg := fmt.Sprintf("invalid --out path: %v", err)
+			env := cli.NewErrorEnvelope("ladder", "advance", *traceID, cli.CodeHarness, msg, "Choose an output file outside denied/sensitive paths", "")
+			if stderr != nil {
+				_ = cli.WriteResponse(stderr, env, *jsonl)
+			}
+			return 1, &env, err
+		}
+	}
+
 	dbPath := *dbFlag
 	if dbPath == "" {
 		var err error
@@ -673,7 +685,13 @@ func executeLadderAdvance(ctx context.Context, args []string, stdout, stderr io.
 		)
 
 		if *outFlag != "" {
-			_ = packet.WriteToFile(*outFlag)
+			if err := packet.WriteToFile(*outFlag); err != nil {
+				env := cli.NewErrorEnvelope("ladder", "advance", *traceID, cli.CodeIO, err.Error(), "Specify a writable output path outside denied locations", "")
+				if stderr != nil {
+					_ = cli.WriteResponse(stderr, env, *jsonl)
+				}
+				return 1, &env, err
+			}
 		}
 
 		data := map[string]any{

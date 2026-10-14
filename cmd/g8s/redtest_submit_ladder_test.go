@@ -874,10 +874,8 @@ func TestRedR4_Dim4_LadderSubcommands(t *testing.T) {
 
 		// Verification:
 		// Expected: --out to a denied path fragment (.git/) MUST be rejected by the security harness.
-		// Actual: ladder.go directly calls packet.WriteToFile(*outFlag) without ValidateScopePath,
-		// writing evidence into .git/leak_evidence.json.
 		if fileInfo, statErr := os.Stat(deniedOutFile); statErr == nil && fileInfo.Size() > 0 {
-			t.Skip("FINDING-R4-1: ladder advance --out does not validate evidence file path against allowed scope / denied fragments")
+			t.Fatalf("Rule 4.8 violation (FINDING-R4-1): evidence file was written to denied path %s", deniedOutFile)
 		}
 		if code != 1 || env == nil || env.Error == nil {
 			t.Fatalf("Rule 4.8 violation: unexpected status: code=%d env=%+v", code, env)
@@ -1244,13 +1242,8 @@ func TestRedR4_Dim6_EnvelopeDiscipline(t *testing.T) {
 
 		// Verification:
 		// Expected: Submit with unreadable prompt-file emits structured JSON error envelope (CodeIO / E_IO).
-		// Actual: submit.go calls failRuntime(err), which prints raw "ERROR: open ...: no such file or directory"
-		// to stderr without any JSON envelope.
-		if code != 0 && env.Error == nil && strings.HasPrefix(rawErr, "ERROR:") {
-			t.Skip("FINDING-R4-2: submit --prompt-file unreadable IO error calls failRuntime instead of exitRuntime, emitting raw text ERROR instead of JSON envelope")
-		}
-		if code == 0 || env.Error == nil {
-			t.Fatalf("Rule 6.4 violation: unexpected outcome: code=%d env=%+v out=%s err=%s", code, env, rawOut, rawErr)
+		if code == 0 || env.Error == nil || env.Error.Code != cli.CodeIO {
+			t.Fatalf("Rule 6.4 violation (FINDING-R4-2): unexpected outcome: code=%d env=%+v out=%s err=%s", code, env, rawOut, rawErr)
 		}
 	})
 }

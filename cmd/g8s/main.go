@@ -36,14 +36,6 @@ import (
 
 var AppName = "g8s"
 
-func failRuntime(err error) {
-	if err == nil {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-	os.Exit(1)
-}
-
 func exitUsage(cmd, sub, traceID, msg, hint string, jsonl bool) {
 	if traceID == "" {
 		traceID = cli.GenerateTraceID()

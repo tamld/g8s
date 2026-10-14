@@ -829,3 +829,301 @@ func TestDeliverSymlinkDestinationSkipped(t *testing.T) {
 		t.Errorf("regular.txt content mismatch: %q", string(regContent))
 	}
 }
+
+// 11. In-scope deletion applied: obsolete.txt removed, keep_and_modify.txt updated, Deleted reported.
+func TestDeliverInScopeDeletionApplied(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+
+	// Commits two files keep_and_modify.txt and obsolete.txt in repoDir
+	keepFile := filepath.Join(repoDir, "keep_and_modify.txt")
+	if err := os.WriteFile(keepFile, []byte("initial keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obsFile := filepath.Join(repoDir, "obsolete.txt")
+	if err := os.WriteFile(obsFile, []byte("initial obsolete"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitAdd := exec.Command("git", "add", "keep_and_modify.txt", "obsolete.txt")
+	gitAdd.Dir = repoDir
+	if out, err := gitAdd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	gitCommit := exec.Command("git", "commit", "-m", "add initial files")
+	gitCommit.Dir = repoDir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	wtDir := createWorktree(t, repoDir, "case-del-inscope")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// In worktree: modifies keep_and_modify.txt and removes obsolete.txt (git rm obsolete.txt)
+	if err := os.WriteFile(filepath.Join(wtDir, "keep_and_modify.txt"), []byte("modified keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRm := exec.Command("git", "rm", "obsolete.txt")
+	gitRm.Dir = wtDir
+	if out, err := gitRm.CombinedOutput(); err != nil {
+		t.Fatalf("git rm: %v\n%s", err, out)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"keep_and_modify.txt", "obsolete.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+
+	// Verify data.Applied contains "keep_and_modify.txt"
+	foundApplied := false
+	for _, a := range data.Applied {
+		if a == "keep_and_modify.txt" {
+			foundApplied = true
+			break
+		}
+	}
+	if !foundApplied {
+		t.Errorf("expected Applied to contain 'keep_and_modify.txt', got: %v", data.Applied)
+	}
+
+	// Verify data.Deleted contains "obsolete.txt"
+	foundDeleted := false
+	for _, d := range data.Deleted {
+		if d == "obsolete.txt" {
+			foundDeleted = true
+			break
+		}
+	}
+	if !foundDeleted {
+		t.Errorf("expected Deleted to contain 'obsolete.txt', got: %v", data.Deleted)
+	}
+
+	// Verify obsolete.txt is removed from repoDir
+	if _, err := os.Stat(filepath.Join(repoDir, "obsolete.txt")); !os.IsNotExist(err) {
+		t.Errorf("obsolete.txt was not removed from repoDir")
+	}
+
+	// Verify keep_and_modify.txt is updated in repoDir
+	content, err := os.ReadFile(filepath.Join(repoDir, "keep_and_modify.txt"))
+	if err != nil {
+		t.Fatalf("read keep_and_modify.txt: %v", err)
+	}
+	if string(content) != "modified keep" {
+		t.Errorf("keep_and_modify.txt content mismatch: %q", string(content))
+	}
+}
+
+// 12. Out-of-scope deletion refused: removing tracked file outside receipt scope causes refusal, leaving files untouched.
+func TestDeliverOutOfScopeDeletionRefused(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+
+	// Commits two files in repoDir
+	keepFile := filepath.Join(repoDir, "keep_and_modify.txt")
+	if err := os.WriteFile(keepFile, []byte("initial keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unauthFile := filepath.Join(repoDir, "unauthorized_delete.txt")
+	if err := os.WriteFile(unauthFile, []byte("initial unauthorized"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitAdd := exec.Command("git", "add", "keep_and_modify.txt", "unauthorized_delete.txt")
+	gitAdd.Dir = repoDir
+	if out, err := gitAdd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	gitCommit := exec.Command("git", "commit", "-m", "add initial files")
+	gitCommit.Dir = repoDir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	wtDir := createWorktree(t, repoDir, "case-del-outofscope")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// In worktree: modifies keep_and_modify.txt and removes unauthorized_delete.txt
+	if err := os.WriteFile(filepath.Join(wtDir, "keep_and_modify.txt"), []byte("modified keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRm := exec.Command("git", "rm", "unauthorized_delete.txt")
+	gitRm.Dir = wtDir
+	if out, err := gitRm.CombinedOutput(); err != nil {
+		t.Fatalf("git rm: %v\n%s", err, out)
+	}
+
+	// Receipt only covers keep_and_modify.txt
+	rcID := issueTestReceipt(t, rcDbPath, []string{"keep_and_modify.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code for out-of-scope deletion refusal, got 0")
+	}
+
+	combinedOutput := res.stderr + " " + res.stdout
+	if !strings.Contains(combinedOutput, "unauthorized_delete.txt") {
+		t.Errorf("expected offending path 'unauthorized_delete.txt' in output, got:\nstderr: %s\nstdout: %s", res.stderr, res.stdout)
+	}
+
+	// Verify both deleted file and modified file remain untouched in repoDir
+	cDel, err := os.ReadFile(filepath.Join(repoDir, "unauthorized_delete.txt"))
+	if err != nil {
+		t.Errorf("unauthorized_delete.txt missing from repoDir: %v", err)
+	} else if string(cDel) != "initial unauthorized" {
+		t.Errorf("unauthorized_delete.txt content changed: %q", string(cDel))
+	}
+
+	cMod, err := os.ReadFile(filepath.Join(repoDir, "keep_and_modify.txt"))
+	if err != nil {
+		t.Errorf("keep_and_modify.txt missing from repoDir: %v", err)
+	} else if string(cMod) != "initial keep" {
+		t.Errorf("keep_and_modify.txt modified despite out-of-scope refusal: %q", string(cMod))
+	}
+}
+
+// 13. Dry run deletion: lists deleted files, prints would delete in text mode, leaves file intact.
+func TestDeliverDryRunDeletion(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+
+	fPath := filepath.Join(repoDir, "delete_me.txt")
+	if err := os.WriteFile(fPath, []byte("dry delete content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAdd := exec.Command("git", "add", "delete_me.txt")
+	gitAdd.Dir = repoDir
+	if out, err := gitAdd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	gitCommit := exec.Command("git", "commit", "-m", "add delete_me")
+	gitCommit.Dir = repoDir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	wtDir := createWorktree(t, repoDir, "case-del-dryrun")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	gitRm := exec.Command("git", "rm", "delete_me.txt")
+	gitRm.Dir = wtDir
+	if out, err := gitRm.CombinedOutput(); err != nil {
+		t.Fatalf("git rm: %v\n%s", err, out)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"delete_me.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	// Test JSON mode with --dry-run
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID, "--dry-run")
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+	if len(data.Deleted) != 1 || data.Deleted[0] != "delete_me.txt" {
+		t.Fatalf("expected Deleted to contain ['delete_me.txt'], got: %v", data.Deleted)
+	}
+	// Verify file is NOT deleted from repoDir
+	if _, err := os.Stat(filepath.Join(repoDir, "delete_me.txt")); os.IsNotExist(err) {
+		t.Errorf("delete_me.txt should NOT be removed in dry-run mode")
+	}
+
+	// Test text mode output with --dry-run --json=false
+	resText := runDeliverCmd(t, binPath, repoDir, dbPath, taskID, "--dry-run", "--json=false")
+	if resText.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", resText.exitCode, resText.stderr, resText.stdout)
+	}
+	if !strings.Contains(resText.stdout, "would delete: delete_me.txt") {
+		t.Errorf("expected 'would delete: delete_me.txt' in stdout, got:\n%s", resText.stdout)
+	}
+}
+
+// 14. Symlink deletion skipped: symlinked destination corresponding to deleted file skipped with warning.
+func TestDeliverSymlinkDeletionSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+
+	// In repoDir: create target file and a symlink pointing to it
+	targetFile := filepath.Join(repoDir, "real_target.txt")
+	if err := os.WriteFile(targetFile, []byte("target file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(repoDir, "symlink_file.txt")
+	if err := os.Symlink("real_target.txt", symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	gitAdd := exec.Command("git", "add", "real_target.txt", "symlink_file.txt")
+	gitAdd.Dir = repoDir
+	if out, err := gitAdd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	gitCommit := exec.Command("git", "commit", "-m", "commit symlink")
+	gitCommit.Dir = repoDir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	wtDir := createWorktree(t, repoDir, "case-del-symlink")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	// In worktree: remove symlink_file.txt
+	gitRm := exec.Command("git", "rm", "symlink_file.txt")
+	gitRm.Dir = wtDir
+	if out, err := gitRm.CombinedOutput(); err != nil {
+		t.Fatalf("git rm: %v\n%s", err, out)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"symlink_file.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	var data deliverData
+	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+		t.Fatalf("unmarshal envelope data: %v", err)
+	}
+
+	// Verify symlink_file.txt was skipped
+	if len(data.Skipped) != 1 || data.Skipped[0] != "symlink_file.txt" {
+		t.Errorf("expected Skipped to contain ['symlink_file.txt'], got: %v", data.Skipped)
+	}
+	// Verify symlink is STILL present in repoDir
+	fi, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatalf("symlink_file.txt missing: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("symlink_file.txt is no longer a symlink")
+	}
+}
