@@ -407,7 +407,7 @@ func isDocsPath(p string) bool {
 	if strings.HasPrefix(clean, "docs/") || clean == "docs" {
 		return true
 	}
-	if strings.HasSuffix(strings.ToLower(clean), ".md") {
+	if len(clean) >= 3 && strings.EqualFold(clean[len(clean)-3:], ".md") {
 		return true
 	}
 	return false

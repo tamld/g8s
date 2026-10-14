@@ -46,7 +46,7 @@ jobs:
         if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.26.9'
 
       - name: Build g8s binary
         if: env.CI_LANE != 'docs'
