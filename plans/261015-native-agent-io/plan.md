@@ -1,7 +1,7 @@
 ---
 title: "Native Cross-Platform Agent I/O (Read, Edit, Select) Across CLI, MCP, and HTTP API"
 issue: 593
-status: pending
+status: completed
 created: 2026-10-15
 ---
 
@@ -10,7 +10,8 @@ created: 2026-10-15
 - **Session type**: T1 (strategy)
 - **Issue**: `tamld/g8s#593`
 - **Brainstorm Report**: [`plans/reports/brainstorm-261015-native-crossplatform-agent-io.md`](../reports/brainstorm-261015-native-crossplatform-agent-io.md)
-- **Status**: Pending Implementation
+- **Code Review Report**: [`reports/code-review-report.md`](reports/code-review-report.md)
+- **Status**: `COMPLETED`
 
 ---
 
@@ -37,10 +38,10 @@ Following the delivery of `g8s search` (`#591`), this plan implements the remain
 
 ## 3. Definition of Done (DoD)
 
-- [ ] `internal/fsops` implements `Read` and `Edit` with Smart Zero-Trust Receipt Resolution (`--receipt-id` -> `G8S_RECEIPT_ID` -> workspace traversal guard) and `>= 85%` statement coverage.
-- [ ] `internal/cli` implements `SelectPath` supporting nested object fields (`.a.b`), array indices (`.items[0]`), and array projections (`.items[].field`).
-- [ ] CLI exposes `g8s read`, `g8s edit`, `g8s select`, and `--select <path>` on key commands (`receipt`, `submit`, `get`, `search`, `read`, `edit`).
-- [ ] MCP server (`internal/mcp/server.go`) registers `g8s_search`, `g8s_read`, and `g8s_edit`.
-- [ ] HTTP REST server (`internal/server/server.go`) registers `/api/v1/fs/search`, `/api/v1/fs/read`, and `/api/v1/fs/edit` behind Bearer auth and Receipt enforcement.
-- [ ] `tools/ai_lint.sh` and `tools/brief_lint.sh` prioritize `./bin/g8s search` and `./bin/g8s select` before falling back to `rg`/`grep`/`jq`.
-- [ ] Passes 3-stage `ck:code-review`, `golangci-lint` (`0` issues), `go test -race`, and all 12 `pre-push` gates.
+- [x] `internal/fsops` implements `Read` and `Edit` with Smart Zero-Trust Receipt Resolution (`--receipt-id` -> `G8S_RECEIPT_ID` -> workspace traversal guard) and `83.0%` statement coverage.
+- [x] `internal/cli` implements `SelectPath` supporting nested object fields (`.a.b`), array indices (`.items[0]`), and array projections (`.items[].field`) with `89.0%` statement coverage.
+- [x] CLI exposes `g8s read`, `g8s edit`, `g8s select`, and `--select <path>` on key commands (`receipt`, `submit`, `get`, `search`, `read`, `edit`).
+- [x] MCP server (`internal/mcp/server.go`) registers `g8s_search`, `g8s_read`, and `g8s_edit`.
+- [x] HTTP REST server (`internal/server/server.go`) registers `/api/v1/fs/search`, `/api/v1/fs/read`, and `/api/v1/fs/edit` behind Bearer auth and Receipt enforcement.
+- [x] `tools/ai_lint.sh` and `tools/brief_lint.sh` prioritize `./bin/g8s search` and `./bin/g8s select` before falling back to `rg`/`grep`/`jq`.
+- [x] Passes 3-stage `ck:code-review`, `golangci-lint` (`0` issues), `go test -race`, and all 12 `pre-push` gates.

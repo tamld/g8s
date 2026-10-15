@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/receipt"
 )
 
 func TestServerLifecycle(t *testing.T) {
@@ -721,5 +723,92 @@ func TestApiErrorEnvelope(t *testing.T) {
 	}
 	if e, ok := body["error"].(map[string]any); !ok || e["code"] != "E_NOT_FOUND" {
 		t.Errorf("error.code=E_NOT_FOUND expected, got %v", body["error"])
+	}
+}
+
+type fakeReceiptVerifier struct {
+	rc  *receipt.WriteReceipt
+	err error
+}
+
+func (f *fakeReceiptVerifier) VerifyReceipt(receiptID string) (*receipt.WriteReceipt, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.rc == nil || f.rc.ReceiptID != receiptID {
+		return nil, fmt.Errorf("unknown receipt %s", receiptID)
+	}
+	return f.rc, nil
+}
+
+func TestFSEndpoints(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "app.go")
+	if err := os.WriteFile(target, []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	srv.SetReceiptVerifier(&fakeReceiptVerifier{
+		rc: &receipt.WriteReceipt{
+			ReceiptID:    "rc-http-1",
+			Issuer:       "brain",
+			AllowedPaths: []string{"app.go"},
+		},
+	})
+
+	// 1. POST /api/v1/fs/search
+	searchReqBody := fmt.Sprintf(`{"pattern":"func main","roots":[%q],"scope_root":%q}`, dir, dir)
+	reqSearch := httptest.NewRequest(http.MethodPost, "/api/v1/fs/search", bytes.NewBufferString(searchReqBody))
+	recSearch := httptest.NewRecorder()
+	srv.handleFSSearch(recSearch, reqSearch)
+	if recSearch.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/fs/search, got %d: %s", recSearch.Code, recSearch.Body.String())
+	}
+	if !strings.Contains(recSearch.Body.String(), "func main") {
+		t.Fatalf("expected match in search response: %s", recSearch.Body.String())
+	}
+
+	// 2. POST /api/v1/fs/read
+	readReqBody := fmt.Sprintf(`{"path":%q,"start_line":1,"end_line":2,"scope_root":%q}`, target, dir)
+	reqRead := httptest.NewRequest(http.MethodPost, "/api/v1/fs/read", bytes.NewBufferString(readReqBody))
+	recRead := httptest.NewRecorder()
+	srv.handleFSRead(recRead, reqRead)
+	if recRead.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/fs/read, got %d: %s", recRead.Code, recRead.Body.String())
+	}
+	var readResp struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(recRead.Body.Bytes(), &readResp); err != nil || readResp.SHA256 == "" {
+		t.Fatalf("expected sha256 in read response: %s", recRead.Body.String())
+	}
+
+	// 3. POST /api/v1/fs/edit without receipt_id -> 403 Forbidden
+	editNoRcBody := fmt.Sprintf(`{"path":%q,"old_string":"func main() {}","new_string":"func main() { println(1) }","scope_root":%q}`, target, dir)
+	reqEditNoRc := httptest.NewRequest(http.MethodPost, "/api/v1/fs/edit", bytes.NewBufferString(editNoRcBody))
+	recEditNoRc := httptest.NewRecorder()
+	srv.handleFSEdit(recEditNoRc, reqEditNoRc)
+	if recEditNoRc.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without receipt_id, got %d: %s", recEditNoRc.Code, recEditNoRc.Body.String())
+	}
+
+	// 4. POST /api/v1/fs/edit with valid receipt_id and CAS SHA-256 -> 200 OK
+	editOkBody := fmt.Sprintf(`{"path":%q,"old_string":"func main() {}","new_string":"func main() { println(1) }","if_sha256":%q,"scope_root":%q,"receipt_id":"rc-http-1"}`, target, readResp.SHA256, dir)
+	reqEditOk := httptest.NewRequest(http.MethodPost, "/api/v1/fs/edit", bytes.NewBufferString(editOkBody))
+	recEditOk := httptest.NewRecorder()
+	srv.handleFSEdit(recEditOk, reqEditOk)
+	if recEditOk.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/fs/edit, got %d: %s", recEditOk.Code, recEditOk.Body.String())
+	}
+
+	// 5. GET on /api/v1/fs/* -> 405 Method Not Allowed
+	for _, fn := range []http.HandlerFunc{srv.handleFSSearch, srv.handleFSRead, srv.handleFSEdit} {
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/fs/read", nil)
+		recGet := httptest.NewRecorder()
+		fn(recGet, reqGet)
+		if recGet.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("expected 405 on GET, got %d", recGet.Code)
+		}
 	}
 }

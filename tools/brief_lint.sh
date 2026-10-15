@@ -10,6 +10,8 @@
 set -euo pipefail
 
 IS_DEFAULT_RUN=0
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+G8S_BIN="${REPO_ROOT}/bin/g8s"
 TARGET_PATHS=("$@")
 if [ ${#TARGET_PATHS[@]} -eq 0 ]; then
     IS_DEFAULT_RUN=1
@@ -18,6 +20,28 @@ if [ ${#TARGET_PATHS[@]} -eq 0 ]; then
         TARGET_PATHS+=("/tmp/agy-*.md")
     fi
 fi
+
+list_go_files_in_dir() {
+    local dir="$1"
+    if [ -x "$G8S_BIN" ]; then
+        "$G8S_BIN" search --files -g "*.go" -g "!*_test.go" -g "!reference/**" "$dir" 2>/dev/null || true
+    elif command -v rg >/dev/null 2>&1; then
+        rg --files -g "*.go" -g "!*_test.go" -g "!reference/**" "$dir" 2>/dev/null || true
+    else
+        find "$dir" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true
+    fi
+}
+
+list_md_files_in_dir() {
+    local dir="$1"
+    if [ -x "$G8S_BIN" ]; then
+        "$G8S_BIN" search --files -g "*.md" -g "!reference/**" "$dir" 2>/dev/null || true
+    elif command -v rg >/dev/null 2>&1; then
+        rg --files -g "*.md" -g "!reference/**" "$dir" 2>/dev/null || true
+    else
+        find "$dir" -name "*.md" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true
+    fi
+}
 
 # A. supervisor_thinks
 # Grep all .go files under cmd/, internal/orchestrator/ (or passed target) for
@@ -36,7 +60,7 @@ check_supervisor_thinks() {
         elif [ -d "$p" ]; then
             while IFS= read -r f; do
                 [ -n "$f" ] && go_files+=("$f")
-            done < <(find "$p" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+            done < <(list_go_files_in_dir "$p")
         fi
     done
 
@@ -46,7 +70,7 @@ check_supervisor_thinks() {
             if [ -d "$d" ]; then
                 while IFS= read -r f; do
                     [ -n "$f" ] && go_files+=("$f")
-                done < <(find "$d" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+                done < <(list_go_files_in_dir "$d")
             fi
         done
     fi
@@ -210,7 +234,7 @@ run_brief_linter() {
         elif [ -d "$p" ]; then
             while IFS= read -r f; do
                 [ -n "$f" ] && md_files+=("$f")
-            done < <(find "$p" -name "*.md" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+            done < <(list_md_files_in_dir "$p")
         elif compgen -G "$p" > /dev/null; then
             for f in $p; do
                 [ -f "$f" ] && md_files+=("$f")

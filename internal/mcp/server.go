@@ -150,6 +150,9 @@ func (s *Server) RegisterTools() error {
 		"g8s_cancel_task":      s.cancelTaskTool,
 		"g8s_list_roles":       s.listRolesTool,
 		"g8s_list_permissions": s.listPermissionsTool,
+		"g8s_search":           s.searchTool,
+		"g8s_read":             s.readTool,
+		"g8s_edit":             s.editTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
@@ -163,6 +166,9 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_cancel_task", Description: "Request cooperative cancellation of a durable task.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","reason"]}`)},
 		{Name: "g8s_list_roles", Description: "Enumerate registered role profiles.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		{Name: "g8s_list_permissions", Description: "Enumerate permission profiles with MCP enablement metadata.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		{Name: "g8s_search", Description: "Native pure-Go repository search engine (regex/literal/file-list) with gitignore and receipt-scope support.", InputSchema: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"roots":{"type":"array","items":{"type":"string"}},"fixed_strings":{"type":"boolean"},"ignore_case":{"type":"boolean"},"globs":{"type":"array","items":{"type":"string"}},"files_only":{"type":"boolean"},"max_results":{"type":"integer"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}}}`)},
+		{Name: "g8s_read", Description: "Native pure-Go bounded file reader with line-range slicing, binary guard, SHA-256 fingerprint, and receipt-scope validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"max_bytes":{"type":"integer"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path"]}`)},
+		{Name: "g8s_edit", Description: "Native pure-Go atomic file editor with exact-match replacement, CAS SHA-256 precondition, CRLF/LF preservation, and mandatory write-receipt validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"if_sha256":{"type":"string"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path","old_string"]}`)},
 	}
 	return nil
 }

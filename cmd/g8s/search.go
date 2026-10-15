@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/search"
 )
@@ -106,6 +107,15 @@ func runSearch(args []string) {
 		roots = fs.Args()[1:]
 	}
 
+	resReceiptID, resScopeRoot, err := fsops.ResolveDelegationContext(*receiptID, *scopeRoot, false)
+	if err != nil {
+		exitRuntime("search", "", *traceID, cli.CodeHarness, err, "Delegation boundary violation", *jsonl)
+	}
+	*receiptID = resReceiptID
+	if *scopeRoot == "" && resScopeRoot != "." {
+		*scopeRoot = resScopeRoot
+	}
+
 	if len(roots) == 0 {
 		if *scopeRoot != "" {
 			roots = []string{*scopeRoot}
@@ -130,6 +140,9 @@ func runSearch(args []string) {
 		rc, err := receipts.VerifyReceipt(cleanReceiptID)
 		if err != nil {
 			exitRuntime("search", "", *traceID, cli.CodeDenied, fmt.Errorf("verify receipt %s: %w", cleanReceiptID, err), "Provide a valid unconsumed receipt ID", *jsonl)
+		}
+		if rc.Consumed {
+			exitRuntime("search", "", *traceID, cli.CodeDenied, fmt.Errorf("receipt %s already consumed", cleanReceiptID), "Provide a fresh write receipt", *jsonl)
 		}
 		allowedPaths = rc.AllowedPaths
 	}
@@ -161,7 +174,7 @@ func runSearch(args []string) {
 		os.Exit(1)
 	}
 
-	if *jsonMode || *jsonl {
+	if *jsonMode || *jsonl || cli.DefaultSelector() != "" {
 		data := searchData{
 			Matches:       res.Matches,
 			Files:         res.Files,
@@ -171,6 +184,7 @@ func runSearch(args []string) {
 			ReceiptID:     cleanReceiptID,
 		}
 		env := cli.NewEnvelope("search", "search", "", data)
+		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}

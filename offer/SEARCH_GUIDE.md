@@ -89,6 +89,27 @@ find_named_file() {
    - Always use `rg -n` and `rg --files` instead of `find` or `grep -rn` when locating target symbols and line numbers for F1 worker prompts.
    - Remember `.agents/`, `.g8s/`, and `.github/` are dot-directories: pass `--hidden -g '!.git'` when searching governance/agent configs (`rg --hidden -g '!.git' "pattern" .agents/`).
 2. **In F1 Worker Prompts**:
-   - Instruct F1 workers to use `rg` (or avoid shell search entirely when exact file paths and line ranges are already pre-supplied in the prompt per Lesson `#14`).
+   - Instruct F1 workers to use `./bin/g8s search`, `./bin/g8s read`, `./bin/g8s edit`, and `--select` (or `rg` as secondary fallback), avoiding `sed -i`, `awk`, `grep -rn`, `find`, and `jq`.
 3. **On Windows (`windows/amd64`)**:
-   - Always invoke `rg --path-separator /` when comparing file paths against `WriteReceipt` allowed globs or OpenSpec manifests so output paths use canonical forward slashes (`/`) on all OSes.
+   - Always invoke `./bin/g8s search` (which normalizes paths to `/` natively) or `rg --path-separator /` when comparing file paths against `WriteReceipt` allowed globs or OpenSpec manifests.
+
+---
+
+## 5. Native Cross-Platform Agent I/O Suite (`DELTA-23` / `#591` & `#593`)
+
+To eliminate external OS tool dependencies (`rg`, `grep`, `find`, `sed -i`, `awk`, `head`, `tail`, `jq`) and enforce **Write Receipt (`AllowedPaths`)** boundaries in-process across **macOS, Linux, and Windows**, `g8s` embeds a 100% pure-Go (`CGO_ENABLED=0`) Agent I/O suite exposed across **CLI, MCP, and HTTP REST API**:
+
+| Capability | Legacy Shell (OS-Dependent & Unscoped) | Native `g8s` CLI | MCP Tool (`g8s mcp`) | HTTP Daemon (`g8s serve`) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Search & File Discovery** | `rg`, `grep -rn`, `find . -name` | `g8s search [-F] [-i] [-g glob] [--files] <pattern> [path...]` | `g8s_search` | `POST /api/v1/fs/search` |
+| **Bounded File Read + SHA-256** | `cat`, `head`, `tail`, `sed -n 'M,Np'` | `g8s read --lines M:N [--max-bytes B] <file>` | `g8s_read` | `POST /api/v1/fs/read` |
+| **Atomic CAS File Edit** | `sed -i`, `awk`, `perl -pi`, `cat <<EOF >` | `g8s edit --old <str> --new <str> [--all] [--if-sha256 <h>] <file>` | `g8s_edit` | `POST /api/v1/fs/edit` |
+| **JSON Field Extraction** | `jq -r`, `python3 -c "import json..."` | `g8s <cmd> --select .data.field` or `g8s select <expr>` | *(JSON-RPC native)* | *(JSON REST native)* |
+
+### 5.1. F0 / F1 / F2 Cognitive & Capability Enforcement (`G8S_TIER=F1`)
+
+When **F0 (Supervisor)** dispatches an **F1 (Worker)** via `g8s worker`, the harness automatically injects:
+- **Process Environment (`internal/worker`)**: `G8S_TIER=F1`, `G8S_TASK_ID`, `G8S_PERMISSION`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT` (inherited automatically by any **F2** subagent spawned inside F1).
+- **Contract Prompt (`internal/harness`)**: Explicit `Native I/O & Containment Policy (F1/F2)` instructions directing F1/F2 to use `g8s search`, `g8s read`, `g8s edit`, and `--select`.
+- **Fail-Closed Receipt Verification (`internal/fsops`)**: Under `G8S_TIER=F1`, `g8s edit` automatically reads `G8S_RECEIPT_ID` and `G8S_SCOPE_ROOT`, verifies the receipt against the SQLite ControlPlane store, resolves symlinks via `filepath.EvalSymlinks`, and blocks any write outside `WriteReceipt.AllowedPaths`.
+

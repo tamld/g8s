@@ -61,7 +61,59 @@ func exitRuntime(cmd, sub, traceID, code string, err error, hint string, jsonl b
 	os.Exit(1)
 }
 
+func extractSelectorFromArgs() {
+	if len(os.Args) < 2 {
+		if envSel := os.Getenv("G8S_SELECT"); envSel != "" && cli.DefaultSelector() == "" {
+			cli.SetDefaultSelector(envSel)
+		}
+		return
+	}
+
+	var command string
+	for _, arg := range os.Args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			command = arg
+			break
+		}
+	}
+
+	if command != "select" {
+		var filtered []string
+		filtered = append(filtered, os.Args[0])
+		var expr string
+		for i := 1; i < len(os.Args); i++ {
+			arg := os.Args[i]
+			if arg == "--select" || arg == "-select" {
+				if i+1 < len(os.Args) {
+					expr = os.Args[i+1]
+					i++
+				}
+				continue
+			}
+			if strings.HasPrefix(arg, "--select=") {
+				expr = strings.TrimPrefix(arg, "--select=")
+				continue
+			}
+			if strings.HasPrefix(arg, "-select=") {
+				expr = strings.TrimPrefix(arg, "-select=")
+				continue
+			}
+			filtered = append(filtered, arg)
+		}
+		if expr != "" {
+			cli.SetDefaultSelector(expr)
+			os.Args = filtered
+		}
+	}
+
+	if envSel := os.Getenv("G8S_SELECT"); envSel != "" && cli.DefaultSelector() == "" {
+		cli.SetDefaultSelector(envSel)
+	}
+}
+
 func main() {
+	extractSelectorFromArgs()
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(2)
@@ -77,6 +129,12 @@ func main() {
 		runOffer(os.Args[2:])
 	case "search":
 		runSearch(os.Args[2:])
+	case "read":
+		runRead(os.Args[2:])
+	case "edit":
+		runEdit(os.Args[2:])
+	case "select":
+		runSelect(os.Args[2:])
 	case "watch":
 		runWatch(os.Args[2:])
 	case "reflex":
@@ -1449,6 +1507,10 @@ func printUsage() {
 	fmt.Println("  state        Show state and replay event logs (g8s state show|replay <id>)")
 	fmt.Println("  mcp          Serve the Stdio JSON-RPC MCP surface on stdin/stdout")
 	fmt.Println("  reflex       Run the System-1 reflex gate on a planned mutation (g8s reflex triage --summary ...)")
+	fmt.Println("  search       High-performance safe code search bounded by delegation context (g8s search <pattern>)")
+	fmt.Println("  read         Safe bounded file read with line slicing and DLP (g8s read <path>)")
+	fmt.Println("  edit         Atomic single/all string replacement with SHA-256 verification (g8s edit <path>)")
+	fmt.Println("  select       Extract values from JSON using dot/index path selector (g8s select <expr>)")
 	fmt.Println("  watch        Block until a watched condition is terminal (g8s watch --pr N / --task ID)")
 	fmt.Println("  eval         Adversarial probe harness: list or run the suite against a provider (#254)")
 	fmt.Println("  roles        List registered worker roles")

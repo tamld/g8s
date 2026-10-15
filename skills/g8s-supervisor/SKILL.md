@@ -71,11 +71,16 @@ Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 2. **Packet before worker.** No dispatch without the minimum packet below.
    Default result is `BLOCKED` — never a broader prompt, never a direct CLI
    fallback (`agy` shell), never provider shopping.
-3. **Read-only default.** Writes require separate explicit authorization
-   (`AGY_MCP_ALLOW_WORKSPACE_WRITE=1`), path-scoped single-use receipt proof
-   (`g8s receipt issue --path <glob>`), and worktree isolation (`RepoWorktreeIsolator`
-   for sibling repos via `--scope-root <repo> --add-dir <repo>`, harvested via
-   `g8s deliver <task-id> [--worktree <dir>]`).
+3. **Read-only default & Native Receipt-Bound I/O.** Writes require separate
+   explicit authorization (`AGY_MCP_ALLOW_WORKSPACE_WRITE=1`), path-scoped
+   single-use receipt proof (`g8s receipt issue --path <glob>`), and worktree
+   isolation (`RepoWorktreeIsolator` for sibling repos via `--scope-root <repo>
+   --add-dir <repo>`, harvested via `g8s deliver <task-id> [--worktree <dir>]`).
+   F1 workers automatically receive `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and
+   `G8S_SCOPE_ROOT` (inherited by F2 subagents) and should use native pure-Go
+   `g8s search`, `g8s read --lines M:N`, `g8s edit --old ... --new ...`, and
+   `--select <dot.path>` instead of unscoped shell utilities (`sed -i`, `awk`,
+   `grep -rn`, `find`, `jq`).
 4. **Verify before accept.** Cited output, task/receipt shape, oracle,
    baseline/status/diff, redaction. Worker output never promotes canonical
    knowledge or task authority. One packet per worker; workers never review

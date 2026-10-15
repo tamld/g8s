@@ -17,16 +17,32 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/fsops"
+	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/supervisor"
 )
 
+// ReceiptVerifier validates write receipts for filesystem endpoints.
+type ReceiptVerifier interface {
+	VerifyReceipt(receiptID string) (*receipt.WriteReceipt, error)
+}
+
 // Server is the HTTP API server for g8s daemon mode.
 type Server struct {
-	config  Config
-	store   *controlplane.Store
-	httpSrv *http.Server
-	mu      sync.RWMutex
-	running bool
+	config   Config
+	store    *controlplane.Store
+	receipts ReceiptVerifier
+	httpSrv  *http.Server
+	mu       sync.RWMutex
+	running  bool
+}
+
+// SetReceiptVerifier configures the write receipt verifier used by /api/v1/fs/* endpoints.
+func (s *Server) SetReceiptVerifier(v ReceiptVerifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.receipts = v
 }
 
 // maxRequestBodyBytes bounds JSON request bodies on the unauthenticated API
@@ -90,6 +106,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/system/metrics", s.handleSystemMetrics)
 	mux.HandleFunc("/api/v1/briefs", s.handleBriefs)
 	mux.HandleFunc("/api/v1/briefs/", s.handleBriefByID)
+	mux.HandleFunc("/api/v1/fs/search", s.handleFSSearch)
+	mux.HandleFunc("/api/v1/fs/read", s.handleFSRead)
+	mux.HandleFunc("/api/v1/fs/edit", s.handleFSEdit)
 }
 
 // authMiddleware enforces bearer-token auth on the API and OpenAPI surfaces
@@ -660,6 +679,178 @@ func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(metrics)
 }
 
+// resolveFSDelegation validates receipt_id and scope_root for /api/v1/fs/* endpoints.
+func (s *Server) resolveFSDelegation(flagReceiptID, flagScopeRoot string, isMutation bool) (string, []string, int, string) {
+	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
+	if err != nil {
+		return "", nil, http.StatusForbidden, err.Error()
+	}
+	if isMutation && receiptID == "" {
+		return "", nil, http.StatusForbidden, "receipt_id is required for /api/v1/fs/edit"
+	}
+	if receiptID != "" {
+		s.mu.RLock()
+		verifier := s.receipts
+		s.mu.RUnlock()
+		if verifier == nil {
+			return "", nil, http.StatusForbidden, "receipt verification is not configured on this server"
+		}
+		rc, err := verifier.VerifyReceipt(receiptID)
+		if err != nil {
+			return "", nil, http.StatusForbidden, fmt.Sprintf("verify receipt %s: %v", receiptID, err)
+		}
+		if rc.Consumed {
+			return "", nil, http.StatusForbidden, fmt.Sprintf("receipt %s already consumed", receiptID)
+		}
+		return scopeRoot, rc.AllowedPaths, 0, ""
+	}
+	return scopeRoot, nil, 0, ""
+}
+
+// handleFSSearch handles POST /api/v1/fs/search.
+func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	var req struct {
+		Pattern      string   `json:"pattern"`
+		Roots        []string `json:"roots"`
+		FixedStrings bool     `json:"fixed_strings"`
+		IgnoreCase   bool     `json:"ignore_case"`
+		Globs        []string `json:"globs"`
+		FilesOnly    bool     `json:"files_only"`
+		MaxResults   int      `json:"max_results"`
+		ScopeRoot    string   `json:"scope_root"`
+		ReceiptID    string   `json:"receipt_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apiError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if !req.FilesOnly && req.Pattern == "" {
+		apiError(w, http.StatusBadRequest, "pattern is required unless files_only is true")
+		return
+	}
+	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, false)
+	if status != 0 {
+		apiError(w, status, errMsg)
+		return
+	}
+	res, err := search.Execute(r.Context(), search.Options{
+		Pattern:      req.Pattern,
+		Roots:        req.Roots,
+		FixedStrings: req.FixedStrings,
+		IgnoreCase:   req.IgnoreCase,
+		Globs:        req.Globs,
+		FilesOnly:    req.FilesOnly,
+		MaxResults:   req.MaxResults,
+		ScopeRoot:    scopeRoot,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleFSRead handles POST /api/v1/fs/read.
+func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	var req struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+		MaxBytes  int    `json:"max_bytes"`
+		ScopeRoot string `json:"scope_root"`
+		ReceiptID string `json:"receipt_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apiError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		apiError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, false)
+	if status != 0 {
+		apiError(w, status, errMsg)
+		return
+	}
+	res, err := fsops.Read(r.Context(), fsops.ReadOptions{
+		Path:         req.Path,
+		ScopeRoot:    scopeRoot,
+		StartLine:    req.StartLine,
+		EndLine:      req.EndLine,
+		MaxBytes:     req.MaxBytes,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleFSEdit handles POST /api/v1/fs/edit.
+func (s *Server) handleFSEdit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		apiError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	var req struct {
+		Path       string `json:"path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll bool   `json:"replace_all"`
+		IfSHA256   string `json:"if_sha256"`
+		ScopeRoot  string `json:"scope_root"`
+		ReceiptID  string `json:"receipt_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apiError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" || req.OldString == "" {
+		apiError(w, http.StatusBadRequest, "path and old_string are required")
+		return
+	}
+	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, true)
+	if status != 0 {
+		apiError(w, status, errMsg)
+		return
+	}
+	res, err := fsops.Edit(r.Context(), fsops.EditOptions{
+		Path:         req.Path,
+		ScopeRoot:    scopeRoot,
+		OldString:    req.OldString,
+		NewString:    req.NewString,
+		ReplaceAll:   req.ReplaceAll,
+		IfSHA256:     req.IfSHA256,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "outside") {
+			apiError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		apiError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 // apiError writes the CLI-consistent JSON error envelope with a code derived
 // from the HTTP status. All handlers route errors through this for a uniform
 // machine-readable contract (#controlled-access upgrade).
@@ -670,6 +861,8 @@ func apiError(w http.ResponseWriter, status int, msg string) {
 		code = "E_BAD_REQUEST"
 	case http.StatusUnauthorized:
 		code = "E_UNAUTHORIZED"
+	case http.StatusForbidden:
+		code = "E_FORBIDDEN"
 	case http.StatusNotFound:
 		code = "E_NOT_FOUND"
 	case http.StatusMethodNotAllowed:

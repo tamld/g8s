@@ -15,11 +15,24 @@
 set -euo pipefail
 
 TARGET_DIR="${1:-.}"
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+G8S_BIN="${REPO_ROOT}/bin/g8s"
+
+list_non_test_go_files() {
+    local target="$1"
+    if [ -x "$G8S_BIN" ]; then
+        "$G8S_BIN" search --files -g "*.go" -g "!*_test.go" -g "!reference/**" "$target" 2>/dev/null || true
+    elif command -v rg >/dev/null 2>&1; then
+        rg --files -g "*.go" -g "!*_test.go" -g "!reference/**" "$target" 2>/dev/null || true
+    else
+        find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true
+    fi
+}
 
 check_no_panic() {
     local target="$1"
     local files
-    files=$(find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+    files=$(list_non_test_go_files "$target")
     if [ -z "$files" ]; then
         return 0
     fi
@@ -38,7 +51,7 @@ check_no_panic() {
 check_no_ignored_errors() {
     local target="$1"
     local files
-    files=$(find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+    files=$(list_non_test_go_files "$target")
     if [ -z "$files" ]; then
         return 0
     fi
@@ -62,7 +75,7 @@ check_no_type_assertion_in_library() {
     fi
 
     local files
-    files=$(find "$search_dir" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+    files=$(list_non_test_go_files "$search_dir")
     if [ -z "$files" ]; then
         return 0
     fi
@@ -85,7 +98,7 @@ check_no_type_assertion_in_library() {
 check_todo_owner() {
     local target="$1"
     local files
-    files=$(find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+    files=$(list_non_test_go_files "$target")
     if [ -z "$files" ]; then
         return 0
     fi
@@ -108,7 +121,7 @@ check_todo_owner() {
 check_no_ai_artifacts() {
     local target="$1"
     local files
-    files=$(find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" 2>/dev/null || true)
+    files=$(list_non_test_go_files "$target")
     if [ -z "$files" ]; then
         return 0
     fi
@@ -134,7 +147,9 @@ check_tdd_trap_fabricated_symbol() {
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"fabricated\" ]]; then
         echo "::error::[check_tdd_trap_fabricated_symbol] (test-pins-fabricated-symbol) Test references fabricated/undefined symbols (DEBT-49):"
-        if command -v jq >/dev/null 2>&1; then
+        if [ -x "$G8S_BIN" ]; then
+            echo "$doctor_out" | "$G8S_BIN" select .data 2>/dev/null || echo "$doctor_out"
+        elif command -v jq >/dev/null 2>&1; then
             echo "$doctor_out" | jq -r '.data[]? | select(.category == "fabricated") | "  \(.file):\(.line): symbol \(.symbol) undefined in package"'
         else
             echo "$doctor_out"
@@ -159,7 +174,9 @@ check_tdd_trap_impl_detail() {
 
     if [[ "$doctor_out" =~ \"category\":[[:space:]]*\"locks-impl-detail\" ]]; then
         echo "::error::[check_tdd_trap_impl_detail] (test-locks-impl-detail) Test asserts on private implementation details (DEBT-49):"
-        if command -v jq >/dev/null 2>&1; then
+        if [ -x "$G8S_BIN" ]; then
+            echo "$doctor_out" | "$G8S_BIN" select .data 2>/dev/null || echo "$doctor_out"
+        elif command -v jq >/dev/null 2>&1; then
             echo "$doctor_out" | jq -r '.data[]? | select(.category == "locks-impl-detail") | "  \(.file):\(.line): asserts on private field \(.symbol)"'
         else
             echo "$doctor_out"

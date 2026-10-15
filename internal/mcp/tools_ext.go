@@ -8,8 +8,17 @@ import (
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/search"
 )
+
+// ReceiptVerifier is an optional extension of ReceiptIssuer that allows the
+// MCP server to verify write receipts before executing g8s_edit/g8s_read/g8s_search.
+type ReceiptVerifier interface {
+	VerifyReceipt(receiptID string) (*receipt.WriteReceipt, error)
+}
 
 // defaultProtocolVersion answers initialize calls that omit a version.
 const defaultProtocolVersion = "2025-06-18"
@@ -305,4 +314,134 @@ func (s *Server) listPermissionsTool(_ context.Context, _ json.RawMessage) (any,
 		entries = append(entries, entry)
 	}
 	return map[string]any{"permissions": entries}, nil
+}
+
+// resolveMCPDelegation validates the delegation context and optional receipt_id.
+func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMutation bool) (string, []string, *jsonRPCError) {
+	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
+	if err != nil {
+		return "", nil, blockedStatus("blocked_by_policy", err.Error())
+	}
+	if isMutation && receiptID == "" {
+		return "", nil, blockedStatus("blocked_by_policy", "g8s_edit requires an explicit receipt_id or G8S_RECEIPT_ID environment binding")
+	}
+	if receiptID != "" && s.receipts != nil {
+		if v, ok := s.receipts.(ReceiptVerifier); ok {
+			rc, err := v.VerifyReceipt(receiptID)
+			if err != nil {
+				return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("verify receipt %s: %v", receiptID, err))
+			}
+			if rc.Consumed {
+				return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("receipt %s already consumed", receiptID))
+			}
+			return scopeRoot, rc.AllowedPaths, nil
+		}
+	}
+	return scopeRoot, nil, nil
+}
+
+// searchTool executes native pure-Go repository search (DELTA-22 / DELTA-23).
+func (s *Server) searchTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		Pattern      string   `json:"pattern"`
+		Roots        []string `json:"roots"`
+		FixedStrings bool     `json:"fixed_strings"`
+		IgnoreCase   bool     `json:"ignore_case"`
+		Globs        []string `json:"globs"`
+		FilesOnly    bool     `json:"files_only"`
+		MaxResults   int      `json:"max_results"`
+		ScopeRoot    string   `json:"scope_root"`
+		ReceiptID    string   `json:"receipt_id"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_search params must be an object"}
+		}
+	}
+	if !a.FilesOnly && a.Pattern == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_search requires pattern unless files_only is true"}
+	}
+	scopeRoot, allowedPaths, rpcErr := s.resolveMCPDelegation(a.ReceiptID, a.ScopeRoot, false)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	res, err := search.Execute(ctx, search.Options{
+		Pattern:      a.Pattern,
+		Roots:        a.Roots,
+		FixedStrings: a.FixedStrings,
+		IgnoreCase:   a.IgnoreCase,
+		Globs:        a.Globs,
+		FilesOnly:    a.FilesOnly,
+		MaxResults:   a.MaxResults,
+		ScopeRoot:    scopeRoot,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	return res, nil
+}
+
+// readTool executes native pure-Go bounded file reading (DELTA-23).
+func (s *Server) readTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+		MaxBytes  int    `json:"max_bytes"`
+		ScopeRoot string `json:"scope_root"`
+		ReceiptID string `json:"receipt_id"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Path) == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_read requires path"}
+	}
+	scopeRoot, allowedPaths, rpcErr := s.resolveMCPDelegation(a.ReceiptID, a.ScopeRoot, false)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	res, err := fsops.Read(ctx, fsops.ReadOptions{
+		Path:         a.Path,
+		ScopeRoot:    scopeRoot,
+		StartLine:    a.StartLine,
+		EndLine:      a.EndLine,
+		MaxBytes:     a.MaxBytes,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	return res, nil
+}
+
+// editTool executes native pure-Go atomic file editing with CAS SHA-256 and receipt enforcement (DELTA-23).
+func (s *Server) editTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		Path       string `json:"path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		ReplaceAll bool   `json:"replace_all"`
+		IfSHA256   string `json:"if_sha256"`
+		ScopeRoot  string `json:"scope_root"`
+		ReceiptID  string `json:"receipt_id"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Path) == "" || a.OldString == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_edit requires path and old_string"}
+	}
+	scopeRoot, allowedPaths, rpcErr := s.resolveMCPDelegation(a.ReceiptID, a.ScopeRoot, true)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	res, err := fsops.Edit(ctx, fsops.EditOptions{
+		Path:         a.Path,
+		ScopeRoot:    scopeRoot,
+		OldString:    a.OldString,
+		NewString:    a.NewString,
+		ReplaceAll:   a.ReplaceAll,
+		IfSHA256:     a.IfSHA256,
+		AllowedPaths: allowedPaths,
+	})
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	return res, nil
 }

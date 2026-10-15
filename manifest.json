@@ -182,13 +182,25 @@
       "id": "DELTA-20",
       "title": "Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius",
       "path": "spec/openspec/20-code-intel-adapter-spec.md",
-      "status": "PROPOSED"
+      "status": "APPLIED"
     },
     {
       "id": "DELTA-21",
       "title": "Unified Decoupled Memory Layer & Hybrid Retrieval Adapter",
       "path": "spec/openspec/21-unified-memory-adapter-spec.md",
-      "status": "ACCEPTED"
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-22",
+      "title": "Brief DoR Floor + Advisory Skill Routing",
+      "path": "spec/openspec/22-brief-dor-floor-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-23",
+      "title": "Native Cross-Platform Agent I/O (search, read, edit, --select)",
+      "path": "spec/openspec/23-native-agent-io-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

@@ -56,6 +56,9 @@ Do NOT randomly scan the entire repository or the `reference/` directory. Follow
 4. **System-1 Reflex (`Jev` / TypeSafe) & Cognitive Harness (`wiki.py`)**:
    - **Jev (TypeSafe SystemOne)**: Enforces **Sensor ≠ Decider** across 3 boundaries: (a) L1 Pre-Mutation Triage (`./bin/g8s reflex triage --summary "..." --files "..."` enriched with Context Broker `ContextPacket`), (b) Router Assist (`G8S_ROUTER_MODE=jev_assisted`), and (c) L3 Output Quality & Memory Promotion Gate. Never expose raw API keys in JSON envelopes, logs, or issue packets.
    - **LLM Wiki (`wiki.py`)**: Run `~/.local/bin/wiki.py orient` to align with Second Brain governance (`R-Second-Brain-Partitioning`, `R-Zero-Leakage-DLP-Protocol`, `R-Git-Worktree-Isolation`, `R-Git-Push-Cleanliness`).
+5. **Native Cross-Platform Agent I/O (`DELTA-23` / [`offer/SEARCH_GUIDE.md`](offer/SEARCH_GUIDE.md))**:
+   - Prefer native pure-Go `./bin/g8s search` (replaces `rg`/`grep`/`find`), `./bin/g8s read --lines M:N` (replaces `cat`/`head`/`tail`/`sed -n`), `./bin/g8s edit --old ... --new ... [--if-sha256 ...]` (replaces `sed -i`/`awk`), and `--select <dot.path>` (replaces `jq`) across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
+   - F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT` (passed down to F2 subagents), enforcing `WriteReceipt.AllowedPaths` in-process on every mutation.
 
 ---
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/server"
 )
 
@@ -49,6 +50,12 @@ func runServe(args []string) {
 	defer store.Close()
 
 	srv := server.NewServer(cfg, store)
+	if rcDbPath, rcErr := receiptDatabasePath(); rcErr == nil {
+		if receipts, rcOpenErr := receipt.NewReceiptManager(rcDbPath, nil); rcOpenErr == nil {
+			defer receipts.Close()
+			srv.SetReceiptVerifier(receipts)
+		}
+	}
 
 	if *daemon {
 		// Run in background, wait for signal

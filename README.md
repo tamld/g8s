@@ -59,8 +59,11 @@ g8s is a single static binary (pure Go, zero CGO) that lets a high-tier orchestr
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Shipped in v0.14.0
+## Shipped in v0.14.0 – v0.16.0+
 
+- **Native cross-platform Agent I/O (`DELTA-23`)**: pure-Go `g8s search` (replaces `rg`/`grep`/`find`), `g8s read` (bounded line-range reader with SHA-256 digest), `g8s edit` (atomic compare-and-swap editor preserving CRLF/LF and enforcing `WriteReceipt.AllowedPaths`), and `--select` / `g8s select` (zero-dependency JSON dot-path extractor replacing `jq`), with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
+- **F0 / F1 / F2 recursive containment (`ADR-0032`)**: F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT`, binding all F1 and F2 file mutations to the task's Write Receipt in-process.
+- **Provider-neutral effort optimization (`v0.16.0`)**: declarative model effort catalog (`.g8s/agent-models.yml`, `.g8s/effort-classes.yml`) with `named`, `budget`, `baked-name`, and `toggle` adapters and per-class cost telemetry.
 - **Event-driven supervision**: terminal transitions append to `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` wakes the supervisor with one sleeping process. Polling is the fallback, never the primary.
 - **Multi-provider queue**: `providers.json` is the manifest; per-provider claim affinity, `--provider` on submit and worker, no silent fallback.
 - **Budgeted retry**: failed tasks auto-resubmit under caps: 2 per task, 10/hour per state dir, exponential backoff, feature flag default OFF. Receipt-free tasks only for unattended ticks.
@@ -115,10 +118,18 @@ g8s get <task-id>
 Delegated writes need a single-use receipt (note `--ttl`: the default is short by design; size it to the task):
 
 ```bash
-g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600
+RID=$(g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600 --select .data.receipt_id)
 AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --role test-runner --permission workspace_write \
-  --receipt-id <receipt-id> --add-dir ./tests \
-  --prompt "Generate pytest tests. receipt_id=<receipt-id> allowed_paths=./tests/*.py"
+  --receipt-id "$RID" --add-dir ./tests \
+  --prompt "Generate pytest tests. receipt_id=$RID allowed_paths=./tests/*.py"
+```
+
+Use native cross-platform Agent I/O (zero external dependency on `rg`, `sed`, `head`, or `jq`):
+
+```bash
+g8s search -F "SubmitTask" -g "*.go" internal/         # concurrent gitignore-aware search
+g8s read --lines 1:40 internal/fsops/fsops.go --json   # bounded line slice + sha256 digest
+g8s edit --old "v1" --new "v2" --receipt-id "$RID" ./tests/sample.py
 ```
 
 Run a self-audit, reflex gate, and hygiene sweep:
@@ -171,18 +182,19 @@ Tool reference: [docs/user-guide/mcp-tools.md](docs/user-guide/mcp-tools.md).
 |---|---|
 | Zero to first delegated task | [docs/quickstart.md](docs/quickstart.md) |
 | Full command matrix & runbooks | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
+| Native cross-platform search & Agent I/O | [offer/SEARCH_GUIDE.md](offer/SEARCH_GUIDE.md), [spec/openspec/23-native-agent-io-spec.md](spec/openspec/23-native-agent-io-spec.md) |
 | Configuration & service lifecycle | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
 | Effort configuration & quality ladder | [docs/user-guide/effort.md](docs/user-guide/effort.md) |
 | Security & verification | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
 | Provider integrations | [docs/integrations/](docs/integrations/) (Antigravity, Claude Desktop, Cursor, Windsurf) |
 | Requirements & acceptance | [docs/PRD.md](docs/PRD.md), [docs/SRS.md](docs/SRS.md), [docs/DOD_DOR.md](docs/DOD_DOR.md) |
 | Governing rules | [spec/constitution.md](spec/constitution.md): Zero-CGO, two-tier governance, process containment |
-| Technical deltas | [spec/openspec/](spec/openspec/): DELTA-01..22 with lifecycle status |
+| Technical deltas | [spec/openspec/](spec/openspec/): DELTA-01..23 with lifecycle status |
 | Architecture decisions | [docs/decisions/](docs/decisions/): ADR-0001…0032 |
 | Campaign ledgers & history | [plans/](plans/), [docs/history/](docs/history/) |
 | Release history | [CHANGELOG.md](CHANGELOG.md) |
 
-Key ADRs: [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard operating model) · [ADR-0024](docs/decisions/0024-gate-lane-routing.md) (gate lane routing) · [ADR-0026](docs/decisions/0026-independent-verification-phases.md) (verification phases) · [ADR-0028](docs/decisions/0028-multi-project-tenancy.md) (multi-project tenancy) · [ADR-0029](docs/decisions/0029-budgeted-auto-retry.md) (budgeted auto-retry) · [ADR-0030](docs/decisions/0030-context-router.md) (context router).
+Key ADRs: [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard operating model) · [ADR-0024](docs/decisions/0024-gate-lane-routing.md) (gate lane routing) · [ADR-0026](docs/decisions/0026-independent-verification-phases.md) (verification phases) · [ADR-0028](docs/decisions/0028-multi-project-tenancy.md) (multi-project tenancy) · [ADR-0029](docs/decisions/0029-budgeted-auto-retry.md) (budgeted auto-retry) · [ADR-0030](docs/decisions/0030-context-router.md) (context router) · [ADR-0032](docs/decisions/0032-containment-levels.md) (F0/F1/F2 containment levels).
 
 ## Quality Gates
 

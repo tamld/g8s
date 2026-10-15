@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,6 +82,16 @@ func (f *fakeIssuer) IssueReceipt(issuer string, allowedPaths []string, ttl time
 	f.ttl = ttl
 	if f.err != nil {
 		return nil, f.err
+	}
+	return f.rc, nil
+}
+
+func (f *fakeIssuer) VerifyReceipt(receiptID string) (*receipt.WriteReceipt, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.rc == nil || f.rc.ReceiptID != receiptID {
+		return nil, fmt.Errorf("unknown receipt %s", receiptID)
 	}
 	return f.rc, nil
 }
@@ -177,6 +188,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 	want := []string{
 		"g8s_run", "g8s_submit", "g8s_get", "g8s_receipt_issue", "g8s_self_awareness", "g8s_blast_radius",
 		"g8s_dispatch", "g8s_list_tasks", "g8s_cancel_task", "g8s_list_roles", "g8s_list_permissions",
+		"g8s_search", "g8s_read", "g8s_edit",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))
@@ -873,5 +885,111 @@ func TestDurableRoundTripAgainstRealStoreOmitsPrompt(t *testing.T) {
 	}
 	if !strings.Contains(string(cancelled), `"state":"CANCELLED"`) {
 		t.Fatalf("cancel did not transition state: %s", cancelled)
+	}
+}
+
+func TestMCPSearchReadEditTools(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(target, []byte("line one\nline two\nline three\n"), 0o600); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	s, _, issuer, _ := newTestServer(t)
+	issuer.rc = &receipt.WriteReceipt{
+		ReceiptID:    "rc-mcp-edit",
+		Issuer:       "brain",
+		AllowedPaths: []string{"sample.txt"},
+	}
+
+	// 1. g8s_search
+	searchRes, rpcErr := callTool(t, s, "g8s_search", map[string]any{
+		"pattern":    "line two",
+		"roots":      []string{dir},
+		"scope_root": dir,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_search failed: %+v", rpcErr)
+	}
+	if !strings.Contains(string(searchRes), "line two") {
+		t.Fatalf("expected match in search output: %s", searchRes)
+	}
+
+	// 2. g8s_read
+	readRes, rpcErr := callTool(t, s, "g8s_read", map[string]any{
+		"path":       target,
+		"start_line": 2,
+		"end_line":   2,
+		"scope_root": dir,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_read failed: %+v", rpcErr)
+	}
+	var rOut struct {
+		SHA256 string `json:"sha256"`
+		Lines  []struct {
+			Line int    `json:"line"`
+			Text string `json:"text"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(readRes, &rOut); err != nil {
+		t.Fatalf("decode read result: %v", err)
+	}
+	if len(rOut.Lines) != 1 || rOut.Lines[0].Text != "line two" || rOut.SHA256 == "" {
+		t.Fatalf("unexpected read output: %+v", rOut)
+	}
+
+	// 3. g8s_edit with valid receipt and CAS SHA-256
+	editRes, rpcErr := callTool(t, s, "g8s_edit", map[string]any{
+		"path":       target,
+		"old_string": "line two",
+		"new_string": "line TWO updated",
+		"if_sha256":  rOut.SHA256,
+		"scope_root": dir,
+		"receipt_id": "rc-mcp-edit",
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_edit failed: %+v", rpcErr)
+	}
+	if !strings.Contains(string(editRes), `"replacements":1`) {
+		t.Fatalf("expected 1 replacement: %s", editRes)
+	}
+}
+
+func TestMCPEditRequiresReceiptAndEnforcesScope(t *testing.T) {
+	dir := t.TempDir()
+	allowedFile := filepath.Join(dir, "allowed.txt")
+	forbiddenFile := filepath.Join(dir, "forbidden.txt")
+	_ = os.WriteFile(allowedFile, []byte("hello\n"), 0o600)
+	_ = os.WriteFile(forbiddenFile, []byte("secret\n"), 0o600)
+
+	s, _, issuer, _ := newTestServer(t)
+	issuer.rc = &receipt.WriteReceipt{
+		ReceiptID:    "rc-scoped",
+		Issuer:       "brain",
+		AllowedPaths: []string{"allowed.txt"},
+	}
+
+	// Missing receipt_id is blocked by policy
+	_, rpcErr := callTool(t, s, "g8s_edit", map[string]any{
+		"path":       allowedFile,
+		"old_string": "hello",
+		"new_string": "world",
+		"scope_root": dir,
+	})
+	if rpcErr == nil {
+		t.Fatal("expected g8s_edit without receipt_id to fail")
+	}
+
+	// Out-of-scope file is rejected by receipt AllowedPaths
+	_, rpcErr = callTool(t, s, "g8s_edit", map[string]any{
+		"path":       forbiddenFile,
+		"old_string": "secret",
+		"new_string": "leaked",
+		"scope_root": dir,
+		"receipt_id": "rc-scoped",
+	})
+	if rpcErr == nil || !strings.Contains(rpcErr.Message, "outside receipt allowed_paths") {
+		t.Fatalf("expected out-of-scope rejection, got %+v", rpcErr)
 	}
 }
