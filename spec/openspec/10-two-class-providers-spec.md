@@ -1,6 +1,6 @@
 # OpenSpec DELTA-10: Two-Class Provider Architecture
 
-**Status**: `PROPOSED`
+**Status**: `APPLIED`
 
 **Milestone**: M4 — Provider Classes & Runtime Dogfooding
 

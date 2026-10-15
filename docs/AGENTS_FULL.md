@@ -96,7 +96,7 @@ Incoming Task:
 | **DELTA-04** | [`04-mcp-stdio-server-spec.md`](../spec/openspec/04-mcp-stdio-server-spec.md) | `internal/mcp` | APPLIED |
 | **DELTA-05** | [`05-provider-and-resource-pool-spec.md`](../spec/openspec/05-provider-and-resource-pool-spec.md) | `internal/provider` | APPLIED |
 | **DELTA-06** | [`06-os-daemon-service-spec.md`](../spec/openspec/06-os-daemon-service-spec.md) | `internal/service` | APPLIED |
-| **DELTA-07** | [`07-blast-radius-analyzer-spec.md`](../spec/openspec/07-blast-radius-analyzer-spec.md) | `internal/blastradius` | APPLIED |
+| **DELTA-07** | [`07-blast-radius-analyzer-spec.md`](../spec/openspec/07-blast-radius-analyzer-spec.md) | `internal/analyzer` | APPLIED |
 | **DELTA-08** | [`08-dispatch-wrapper-spec.md`](../spec/openspec/08-dispatch-wrapper-spec.md) | `internal/dispatch` | APPLIED |
 | **DELTA-09** | [`09-worker-supervisor-spec.md`](../spec/openspec/09-worker-supervisor-spec.md) | `internal/worker` | APPLIED |
 | **DELTA-10** | [`10-two-class-providers-spec.md`](../spec/openspec/10-two-class-providers-spec.md) | `internal/provider` | APPLIED |
@@ -104,8 +104,16 @@ Incoming Task:
 | **DELTA-11-ROADMAP** | [`11-orchestration-roadmap-spec.md`](../spec/openspec/11-orchestration-roadmap-spec.md) | `internal/supervisor` | APPLIED |
 | **DELTA-12** | [`12-lineage-cte-and-stream-pipe-spec.md`](../spec/openspec/12-lineage-cte-and-stream-pipe-spec.md) | `internal/controlplane` | APPLIED |
 | **DELTA-13** | [`13-dx-ax-init-and-autorepair-spec.md`](../spec/openspec/13-dx-ax-init-and-autorepair-spec.md) | `internal/initwiz` | APPLIED |
-| **DELTA-20** | [`20-code-intel-adapter-spec.md`](../spec/openspec/20-code-intel-adapter-spec.md) | `internal/codeintel` | PROPOSED |
-| **DELTA-21** | [`21-unified-memory-adapter-spec.md`](../spec/openspec/21-unified-memory-adapter-spec.md) | `internal/memory` | ACCEPTED |
+| **DELTA-14** | [`14-core-hardening-and-doctor-spec.md`](../spec/openspec/14-core-hardening-and-doctor-spec.md) | `internal/doctor`, `internal/autopilot`, `internal/server` | APPLIED |
+| **DELTA-15** | [`15-orchestrator-fsm-and-brief-spec.md`](../spec/openspec/15-orchestrator-fsm-and-brief-spec.md) | `internal/orchestrator`, `internal/state`, `internal/brief` | APPLIED |
+| **DELTA-16** | [`16-lifecycle-hygiene-and-envelope-spec.md`](../spec/openspec/16-lifecycle-hygiene-and-envelope-spec.md) | `internal/heartbeat`, `internal/process`, `internal/cleanup`, `internal/cli` | APPLIED |
+| **DELTA-17** | [`17-receipt-and-evidence-lake-spec.md`](../spec/openspec/17-receipt-and-evidence-lake-spec.md) | `internal/controlplane`, `internal/telemetry` | APPLIED |
+| **DELTA-18** | [`18-aic-and-diffintel-review-spec.md`](../spec/openspec/18-aic-and-diffintel-review-spec.md) | `cmd/g8s`, `internal/diffintel`, `internal/review` | APPLIED |
+| **DELTA-19** | [`19-lego-mounts-and-reflex-governance-spec.md`](../spec/openspec/19-lego-mounts-and-reflex-governance-spec.md) | `internal/orchestrator`, `internal/reflex`, `internal/routing`, `internal/verifier` | APPLIED |
+| **DELTA-20** | [`20-code-intel-adapter-spec.md`](../spec/openspec/20-code-intel-adapter-spec.md) | `internal/codeintel` | APPLIED |
+| **DELTA-21** | [`21-unified-memory-adapter-spec.md`](../spec/openspec/21-unified-memory-adapter-spec.md) | `internal/memory` | APPLIED |
+| **DELTA-22** | [`22-brief-dor-floor-spec.md`](../spec/openspec/22-brief-dor-floor-spec.md) | `internal/brief` | APPLIED |
+| **DELTA-23** | [`23-native-agent-io-spec.md`](../spec/openspec/23-native-agent-io-spec.md) | `internal/fsops`, `internal/search` | APPLIED |
 
 ---
 

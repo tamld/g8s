@@ -105,14 +105,31 @@ if [ -n "$UNOWNED_DOC_TODOS" ]; then
     FAILED=$((FAILED + 1))
 fi
 
-# 6. OpenSpec File Link Consistency
-echo "--> [6/10] Verifying OpenSpec registry file existence..."
+# 6. OpenSpec File Link & Registry Bi-Directional Consistency
+echo "--> [6/10] Verifying OpenSpec registry bi-directional consistency..."
 while IFS= read -r link; do
     if [ ! -f "spec/openspec/$link" ]; then
         echo "::error::spec/openspec/README.md references missing spec file: spec/openspec/$link"
         FAILED=$((FAILED + 1))
     fi
 done < <(grep -oE '\([0-9A-Za-z_-]+\.md\)' spec/openspec/README.md | tr -d '()')
+
+for spec_file in spec/openspec/[0-9]*.md; do
+    [ -e "$spec_file" ] || continue
+    base_spec=$(basename "$spec_file")
+    if ! grep -qF "($base_spec)" spec/openspec/README.md; then
+        echo "::error::$spec_file is not registered in spec/openspec/README.md"
+        FAILED=$((FAILED + 1))
+    fi
+    if ! grep -qF "\"$spec_file\"" manifest.json; then
+        echo "::error::$spec_file is not registered in manifest.json"
+        FAILED=$((FAILED + 1))
+    fi
+    if ! grep -qE '^(\* )?\*\*Status\*\*:' "$spec_file"; then
+        echo "::error::$spec_file is missing an explicit '**Status**:' header"
+        FAILED=$((FAILED + 1))
+    fi
+done
 
 # 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger
 #    declares which session type produced it — T1 (strategy) or T2 (execution).
@@ -127,10 +144,16 @@ for ledger in plans/*/plan.md plans/handoffs/*.md; do
 done
 
 # 8. Spec↔code sync contract (S6-1 G1, #420): every scenario in an
-#    APPLIED/ACCEPTED delta with a tests-pin must map to a real Go test;
-#    changed enforced deltas must pin their scenarios.
+#    APPLIED/ACCEPTED delta must be pinned to a real Go test with zero
+#    grandfathered warnings.
 echo "--> [8/10] Verifying spec↔code sync (ADR-0024 G1)..."
-if ! bash "$SCRIPT_DIR/ci_spec_code_sync.sh" 2>&1 | grep -vE '^\s+\[grandfathered\]'; then
+SYNC_OUT=$(bash "$SCRIPT_DIR/ci_spec_code_sync.sh" 2>&1) || {
+    echo "$SYNC_OUT"
+    FAILED=$((FAILED + 1))
+}
+echo "$SYNC_OUT"
+if printf '%s\n' "$SYNC_OUT" | grep -qF '[grandfathered]'; then
+    echo "::error::spec-code sync: unpinned scenarios detected (0 grandfathered warnings allowed)"
     FAILED=$((FAILED + 1))
 fi
 
@@ -147,7 +170,7 @@ fi
 #     committed junk fails this gate.
 echo "--> [10/10] Verifying root hygiene (no tracked build artifacts)..."
 HYGIENE_VIOLATIONS=$( { git ls-files '*.out' '*.test' '*.exe' 'g8s.exe' \
-    'go.work.bak' '.g8s-drain-*' 'worktrees/*' 'dist/*'; } 2>/dev/null)
+    '*.patch' '*.orig' '*.bak' 'go.work.bak' '.g8s-drain-*' 'worktrees/*' 'dist/*'; } 2>/dev/null)
 if [ -n "$HYGIENE_VIOLATIONS" ]; then
     echo "::error::root hygiene: tracked build artifacts / scratch at repo root:"
     echo "$HYGIENE_VIOLATIONS"

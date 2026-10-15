@@ -1,13 +1,13 @@
 # 11 — Orchestration Roadmap Spec (DELTA-11)
 
-**Status**: `ACCEPTED`
+**Status**: `APPLIED`
 **Owner**: tamld
 **Created**: 2026-08-28
 **Depends on**: DELTA-09 worker-supervisor (APPLIED)
 **Supersedes**: none
 
-**Promotion**: Concern B (B.1-B.3) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T021. Implementation status: IMPLEMENTING.
-**Promotion**: Concern C (C.1-C.2) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T022. Implementation status: IMPLEMENTING.
+**Promotion**: Concern B (B.1-B.3) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T021. Implementation status: IMPLEMENTED.
+**Promotion**: Concern C (C.1-C.2) promoted from DRAFT → ACCEPTED on 2026-09-12 as part of T022. Implementation status: IMPLEMENTED.
 
 Port of the orchestration strategy sketched in
 `docs/designs/supervisor-fix-loop.md` to the OpenSpec delta format. This
@@ -50,15 +50,17 @@ BuildContractPromptWithReceipt). It SHALL persist state to
 `internal/controlplane` (SQLite WAL) via the existing store contract.
 
 #### Scenario: supervisor dispatches one worker via FanOut
+<!-- tests: TestSupervisorRunHappy -->
 - A `RunRequest` with a single task description produces exactly one
   `FanOut` call with `len(plan) == 1` and `MaxParallel == 1`.
 - The worker subprocess exits with code 0 and a receipt is recorded.
 
 #### Scenario: supervisor never imports worker backends
+<!-- tests: TestSupervisorNeverImportsWorkerBinaries -->
 - `go list -deps ./internal/supervisor | grep -E 'codex|agy|gemini|claude'`
   returns no matches.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Each task envelope selects a measurable subset of SRS/PRD/DoR/DoD/DnD/Validateds/FSM
 
@@ -70,13 +72,15 @@ automatically. The chosen envelope SHALL be persisted as a JSON column
 on the supervisor row so Concern C can score it later.
 
 #### Scenario: minimal envelope for a single-file change
+<!-- tests: TestSelectEnvelopeNil, TestEnvelopeHintsNilVsSet -->
 - `EnvelopeHints` is nil. Chosen envelope: `{DoR, DoD, Validateds}`.
 
 #### Scenario: full envelope for a cross-package refactor
+<!-- tests: TestSelectEnvelopeHonorsHints, TestEnvelopeHintsNilVsSet -->
 - `EnvelopeHints = {"SRS": true, "PRD": true, "FSM": true}`. Chosen
   envelope: `{DoR, DoD, Validateds, SRS, PRD, FSM}`.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Iteration is bounded by 3 attempts × 3 approaches = 9 total, then HITL
 
@@ -94,6 +98,7 @@ These numbers SHALL be configurable via `SupervisorConfig` but SHALL
 default to the values above until Concern C tunes them.
 
 #### Scenario: third approach shift triggers escalation
+<!-- tests: TestSupervisorRunDeterministicFail, TestApproachShiftResetsAttempt -->
 - Approach 0 fails on attempts 0, 1, 2. Approach 1 fails on attempts 0,
   1, 2. Approach 2 fails on attempt 0. Total attempts = 7, but the
   supervisor enters Approach 2 with `attempt_idx == 0`; it does not
@@ -101,11 +106,12 @@ default to the values above until Concern C tunes them.
   attempts = 9) does the supervisor escalate.
 
 #### Scenario: configurable caps are honored
+<!-- tests: TestSupervisorRunEnforceIterationCap -->
 - `SupervisorConfig.MaxAttemptsPerApproach = 5`. Approach 0 runs 5
   attempts, then shifts. Escalation only after approach 2 also fails 5
   times.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Every approach shift produces an RCA + ADR pair
 
@@ -124,16 +130,18 @@ approach over HITL escalation), it SHALL:
    `NEEDS_INFO` event instead of shifting (safety valve).
 
 #### Scenario: RCA below confidence threshold pauses the loop
+<!-- tests: TestRCALowConfidencePauses -->
 - Approach 0 fails 3 times. RCA returns `confidence = 0.4`. Supervisor
   emits `NEEDS_INFO` with the RCA payload. No ADR is written, no
   approach shift happens.
 
 #### Scenario: RCA above threshold shifts approach and writes ADR
+<!-- tests: TestApproachShiftResetsAttempt, TestRCAThreeFailuresConfidenceSeven -->
 - Approach 0 fails 3 times. RCA returns `confidence = 0.85`. Supervisor
   writes `docs/decisions/0002-shift-to-rewrite.md` referencing the RCA,
   sets approach = 1, attempt = 0, and spawns the next worker.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Receipt (Concern B) is the supervisor's primary evidence
 
@@ -144,9 +152,11 @@ whether to accept or revise. The receipt's `OK` field, `CommitSHA`,
 authoritative inputs to the reviewer module.
 
 #### Scenario: clean receipt with passing Validateds
+<!-- tests: TestReviewerPass, TestSupervisorRunHappy -->
 - Worker emits `Receipt{OK: true, CommitSHA: "abc...", FilesModified: [...]}`. `Validateds` pass. Supervisor accepts.
 
 #### Scenario: scope violation is always a fail
+<!-- tests: TestReviewerScopeViolationFails, TestReviewerScopeViolationAlwaysFails -->
 - `Receipt.ScopeViolations` is non-empty. Supervisor rejects the
   receipt regardless of `OK` field. RCA notes the scope violation as
   the symptom.
@@ -154,7 +164,7 @@ authoritative inputs to the reviewer module.
 This requirement belongs to Concern B (receipt evolution). It is
 documented here because the supervisor's correctness depends on it.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Meta-optimizer (Concern C) consumes per-cycle metrics
 
@@ -165,14 +175,16 @@ new CLI subcommand `g8s supervisor metrics` (read-only). Concern C
 ingests these metrics via that subcommand.
 
 #### Scenario: metrics are queryable
+<!-- tests: TestSQLMetricsStore_Lifecycle, TestRunSupervisorMetricsSingleTaskID -->
 - After a cycle, `./bin/g8s supervisor metrics --task-id sup-X` returns
   JSON with all eight fields listed in §10.
 
 #### Scenario: metrics persist across supervisor restarts
+<!-- tests: TestMetricsPersistAcrossRestarts -->
 - A cycle runs, supervisor exits. Restart supervisor. Metrics for the
   prior cycle are still queryable.
 
-**Implementation Status**: IMPLEMENTING (T020)
+**Implementation Status**: IMPLEMENTED (T020)
 
 ### Requirement: Receipt schema extends with supervisor metadata (Concern B.1)
 
@@ -185,10 +197,11 @@ The receipt schema SHALL add four additive columns to the `write_receipts` table
 These columns SHALL be nullable so that receipts issued before the migration remain readable. The `SupervisorMeta` struct SHALL be added to `WriteReceipt` as an optional field.
 
 #### Scenario: receipt issued with supervisor metadata
+<!-- tests: TestReceiptSupervisorMetaRoundTrip -->
 - Supervisor calls `IssueReceipt` with `WithSupervisorMeta(&SupervisorMeta{ApproachIdx: 0, AttemptIdx: 1, RCAConfidence: 0.85, ADRPath: "docs/decisions/0002-shift.md"})`.
 - The returned `WriteReceipt` has `SupervisorMeta` populated and all four columns written to the row.
 
-**Implementation Status**: IMPLEMENTING (T021)
+**Implementation Status**: IMPLEMENTED (T021)
 
 ### Requirement: Backward-compatible migration via idempotent ALTER TABLE (Concern B.2)
 
@@ -199,12 +212,14 @@ The migration from schema version 1 to version 2 SHALL be idempotent:
 - The migration SHALL run inside the exclusive transaction in `Manager.initialize()`.
 
 #### Scenario: fresh database
+<!-- tests: TestReceiptMigrationIdempotent -->
 - `NewReceiptManager` creates the table with all columns present. Migration is a no-op.
 
 #### Scenario: legacy v1 database
+<!-- tests: TestReceiptBackwardCompatibility, TestLegacyReceiptsRemainReadableAfterMigration -->
 - Opening a v1 database (user_version = 1) triggers migration. All four columns are added. `user_version` is bumped to 2.
 
-**Implementation Status**: IMPLEMENTING (T021)
+**Implementation Status**: IMPLEMENTED (T021)
 
 ### Requirement: IssueReceipt signature extension with nil-safe SupervisorMeta (Concern B.3)
 
@@ -213,18 +228,21 @@ The migration from schema version 1 to version 2 SHALL be idempotent:
 `VerifyReceipt`, `ValidateAndConsume`, and `ListActiveReceipts` SHALL read the four new columns when present and populate `SupervisorMeta` if any column is non-NULL. If all four are NULL, `SupervisorMeta` SHALL be `nil`.
 
 #### Scenario: legacy caller
+<!-- tests: TestReceiptBackwardCompatibility -->
 - Old code calls `m.IssueReceipt("brain", []string{"src/**"}, time.Hour)` without `WithSupervisorMeta`.
 - Returns a valid receipt with `SupervisorMeta == nil`.
 
 #### Scenario: new caller with metadata
+<!-- tests: TestReceiptSupervisorMetaRoundTrip -->
 - New code calls `m.IssueReceipt("brain", []string{"src/**"}, time.Hour, WithSupervisorMeta(meta))`.
 - Returns a valid receipt with `SupervisorMeta` populated.
 
 #### Scenario: explicit NULL columns
+<!-- tests: TestReceiptNullHandling -->
 - A row has `approach_idx = NULL, attempt_idx = NULL, rca_confidence = NULL, adr_path = NULL`.
 - `VerifyReceipt` returns `SupervisorMeta == nil` (not zero values, not error).
 
-**Implementation Status**: IMPLEMENTING (T021)
+**Implementation Status**: IMPLEMENTED (T021)
 
 ### Requirement: Meta-optimizer read-only aggregate API (Concern C.1)
 
@@ -244,18 +262,22 @@ The supervisor SHALL expose a read-only aggregate API over `supervisor_tasks` an
 The aggregate SHALL be queryable via `g8s supervisor metrics --aggregate` (CLI) and `supervisor.Aggregate()` (Go API). The query SHALL be strictly read-only — no writes to any table.
 
 #### Scenario: aggregate over empty store
+<!-- tests: TestAggregate_ValidationAndContext, TestRunSupervisorMetricsAggregateEmpty -->
 - `Aggregate()` on an empty database returns zero-value `AggregateMetrics` with `TotalRuns = 0`, no error.
 
 #### Scenario: aggregate over N tasks
+<!-- tests: TestAggregate_CalculationsAndFiltering, TestAggregateSupervisorMetricsWithRows -->
 - `Aggregate()` computes all eight metrics correctly, matching the formulas in §10 of `docs/designs/supervisor-fix-loop.md`.
 
 #### Scenario: filter by time_range
+<!-- tests: TestAggregate_CalculationsAndFiltering, TestResolveTimeBounds -->
 - `AggregateOptions{TimeRange: 1*time.Hour}` restricts to tasks created in the last hour.
 
 #### Scenario: filter by worker_name
+<!-- tests: TestAggregate_CalculationsAndFiltering -->
 - `AggregateOptions{WorkerName: "agy"}` restricts to tasks attributed to the "agy" worker (via envelope JSON, task row, or decision row).
 
-**Implementation Status**: IMPLEMENTING (T022)
+**Implementation Status**: IMPLEMENTED (T022)
 
 ### Requirement: Meta-optimizer read-only streaming + flag collision guard (Concern C.2)
 
@@ -264,15 +286,18 @@ The supervisor SHALL expose a streaming API `StreamMetrics()` that emits one `Ta
 The CLI SHALL reject the combination `--task-id` + `--aggregate` (flag collision) with a typed usage error (exit code 2), because `--task-id` requests single-run mode while `--aggregate` requests cross-run aggregation. `--task-id` + `--json-stream` SHALL also be rejected.
 
 #### Scenario: streaming emits per-task items
+<!-- tests: TestStreamMetrics, TestRunSupervisorMetricsJSONStream -->
 - `StreamMetrics()` calls the callback once per matching task with `TaskMetricsItem` populated from the stored metrics.
 
 #### Scenario: flag collision --task-id + --aggregate
+<!-- tests: TestUnifiedEnvelopeCommands -->
 - `g8s supervisor metrics --task-id sup-1 --aggregate` exits with code 2 and prints usage error "cannot combine --task-id with --aggregate".
 
 #### Scenario: flag collision --task-id + --json-stream
+<!-- tests: TestUnifiedEnvelopeCommands -->
 - `g8s supervisor metrics --task-id sup-1 --json-stream` exits with code 2 and prints usage error "cannot combine --task-id with --json-stream".
 
-**Implementation Status**: IMPLEMENTING (T022)
+**Implementation Status**: IMPLEMENTED (T022)
 
 `g8s orchestrate` SHALL accept `--from-intent <text>` or `--from-file <path>` as
 alternative entry points to `--self-test`. The intent text SHALL be split into
@@ -288,13 +313,16 @@ containing:
 - `receipt_summary`: summary object with `{total_runs, succeeded, failed, total_duration_seconds, files_modified}`
 
 #### Scenario: multi-line intent splits into sub-tasks
+<!-- tests: TestOrchestrateIntentSplitMultiLine, TestRunOrchestrateCLIIntentJSON -->
 - Given an intent with 3 lines or comma-separated tasks, `g8s orchestrate --from-intent` constructs 3 `TaskSpec`s and runs them through the orchestrator.
 - Output JSON envelope contains `sub_tasks` with length 3 and matching receipt summary.
 
 #### Scenario: intent read from file
+<!-- tests: TestOrchestrateIntentFromFile, TestRunOrchestrateCLIFromFile -->
 - Given `--from-file <path>`, `g8s orchestrate` reads intent from `<path>` and executes the orchestration loop.
 
 #### Scenario: empty intent rejected
+<!-- tests: TestOrchestrateIntentEmptyReturnsUsageError -->
 - Empty string for `--from-intent` or empty file for `--from-file` exits with status 2 and usage error.
 
 **Implementation Status**: IMPLEMENTED (T022/DELTA-18)

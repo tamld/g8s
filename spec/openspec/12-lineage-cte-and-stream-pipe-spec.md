@@ -1,5 +1,9 @@
 # OpenSpec DELTA-12: Core Resilience, Recursive CTE Lineage & Unbuffered Streaming Pipe
 
+**Status**: `APPLIED`
+**Milestone**: M3 (OS Daemon & Core Resilience)
+**Package**: `internal/controlplane`, `internal/worker`, `internal/vault`
+
 ## 1. Context & Motivation
 - **Ancestry Traversal**: Task lineage lookup (`GetTaskLineage`) in SQLite WAL control plane previously executed iterative N round-trip queries. For deep subtask trees, this introduced database round-trip overhead.
 - **Windows Process Group Containment**: On Windows, process termination lacked recursive child process cancellation, risking orphaned background workers when subagents spawned CLI subprocesses.

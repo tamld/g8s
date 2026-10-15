@@ -22,6 +22,12 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-11-ROADMAP`](11-orchestration-roadmap-spec.md)** | Supervisor Fix Loop & Orchestration Roadmap | `internal/supervisor` | M4 (DX & AX) | `APPLIED` |
 | **[`DELTA-12`](12-lineage-cte-and-stream-pipe-spec.md)** | Recursive CTE Lineage & Stream Pipe | `internal/controlplane` | M3 (OS Daemon) | `APPLIED` |
 | **[`DELTA-13`](13-dx-ax-init-and-autorepair-spec.md)** | DX/AX Multi-IDE Init & Auto-Repair | `internal/initwiz` | M4 (DX & AX) | `APPLIED` |
+| **[`DELTA-14`](14-core-hardening-and-doctor-spec.md)** | Core Hardening, Doctor Security Guards, Autopilot & HTTP Daemon | `internal/doctor`, `internal/autopilot`, `internal/server` | M4 (Hardening & DX/AX) | `APPLIED` |
+| **[`DELTA-15`](15-orchestrator-fsm-and-brief-spec.md)** | Orchestrator 8-State FSM Lifecycle & Brief Dispatch Store | `internal/orchestrator`, `internal/state`, `internal/brief` | M4 (Orchestrator FSM) | `APPLIED` |
+| **[`DELTA-16`](16-lifecycle-hygiene-and-envelope-spec.md)** | Lifecycle Hygiene, Worker Heartbeats, Process Lister & Unified JSON Envelope v1 | `internal/heartbeat`, `internal/process`, `internal/cleanup`, `internal/cli` | M4 (Lifecycle Hygiene) | `APPLIED` |
+| **[`DELTA-17`](17-receipt-and-evidence-lake-spec.md)** | Receipt Lake Control-Plane Wiring & Closed-Loop Telemetry Ledger | `internal/controlplane`, `internal/telemetry` | M4 (Evidence Lake) | `APPLIED` |
+| **[`DELTA-18`](18-aic-and-diffintel-review-spec.md)** | AIC Automated PR Review, DiffDistiller & From-Intent FanOut | `cmd/g8s`, `internal/diffintel`, `internal/review` | M4 (AIC & Intent) | `APPLIED` |
+| **[`DELTA-19`](19-lego-mounts-and-reflex-governance-spec.md)** | Stateful Worker Lego Mounts, System-1 Reflex & Governance Registries | `internal/orchestrator`, `internal/reflex`, `internal/routing`, `internal/verifier` | M5 (Lego Mounts & Reflex) | `APPLIED` |
 | **[`DELTA-20`](20-code-intel-adapter-spec.md)** | Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius | `internal/codeintel` | M5 (Robustness & Evals) | `APPLIED` |
 | **[`DELTA-21`](21-unified-memory-adapter-spec.md)** | Unified Decoupled Memory Layer & Hybrid Retrieval Adapter | `internal/memory` | M5 (Robustness & Evals) | `APPLIED` |
 | **[`DELTA-22`](22-brief-dor-floor-spec.md)** | Brief DoR Floor + Advisory Skill Routing | `internal/brief` | M6 (Memory & Routing) | `APPLIED` |

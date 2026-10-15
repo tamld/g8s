@@ -179,6 +179,42 @@
       "status": "APPLIED"
     },
     {
+      "id": "DELTA-14",
+      "title": "Core Hardening, Doctor Security Guards, Autonomous Autopilot & HTTP Daemon",
+      "path": "spec/openspec/14-core-hardening-and-doctor-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-15",
+      "title": "Orchestrator 8-State FSM Lifecycle, Pure State Validator & Brief Dispatch Store",
+      "path": "spec/openspec/15-orchestrator-fsm-and-brief-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-16",
+      "title": "Lifecycle Hygiene, Worker Heartbeats, Cross-Platform Process Lister & Unified JSON Envelope v1",
+      "path": "spec/openspec/16-lifecycle-hygiene-and-envelope-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-17",
+      "title": "Receipt Lake Control-Plane Wiring & Closed-Loop Telemetry Ingestion Engine",
+      "path": "spec/openspec/17-receipt-and-evidence-lake-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-18",
+      "title": "AIC Automated PR Review (g8s orchestrate-aic), DiffDistiller & From-Intent Sub-Task FanOut",
+      "path": "spec/openspec/18-aic-and-diffintel-review-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-19",
+      "title": "Stateful Worker Lego Mounts, System-1 Reflex Triage & Declarative Governance Registries",
+      "path": "spec/openspec/19-lego-mounts-and-reflex-governance-spec.md",
+      "status": "APPLIED"
+    },
+    {
       "id": "DELTA-20",
       "title": "Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius",
       "path": "spec/openspec/20-code-intel-adapter-spec.md",

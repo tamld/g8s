@@ -2,7 +2,7 @@
 
 * **Specification ID**: `DELTA-20`
 * **Title**: Multi-Tier Code Intelligence Adapter & Dynamic Blast Radius
-* **Status**: `PROPOSED`
+* **Status**: `APPLIED`
 * **Milestone**: `M5` (Robustness & Evals)
 * **Target Package**: `internal/codeintel`
 * **Tracking Issue**: #256

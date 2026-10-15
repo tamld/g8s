@@ -1,6 +1,6 @@
 # OpenSpec DELTA-06: Cross-Platform Background Daemon Service Manager
 
-**Status**: `PROPOSED`  
+**Status**: `APPLIED`  
 **Milestone**: M3 (OS Daemon & Packaging)  
 **Package**: `internal/service`  
 

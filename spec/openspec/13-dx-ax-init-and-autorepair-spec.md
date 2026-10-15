@@ -1,5 +1,9 @@
 # OpenSpec DELTA-13: DX/AX Experience, Interactive Onboarding Wizard & Self-Healing Auto-Remediation
 
+**Status**: `APPLIED`
+**Milestone**: M4 (DX & AX)
+**Package**: `internal/initwiz`, `internal/doctor`, `internal/config`
+
 ## 1. Context & Objectives
 - **Zero-Friction Agent & Developer Onboarding**: Provide an interactive setup wizard (`g8s init`) that auto-detects installed AI IDEs (Claude Desktop, Cursor, Windsurf, Google Antigravity) and safely injects the Stdio MCP server configuration block without data loss.
 - **Headless Programmatic Setup**: Provide non-interactive flag mode (`g8s init --agent --ide=<ide> --json`) for automated Docker and CI container environments.

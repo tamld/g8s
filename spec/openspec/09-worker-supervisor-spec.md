@@ -15,10 +15,12 @@ compound durations (`250ms`, `1m2s`, `2h`) and reject zero, negative, empty,
 and malformed values, including wrong-case suffixes (`500MS`).
 
 #### Scenario: millisecond and compound forms parse exactly
+<!-- tests: TestParseDurationSecondsAcceptsBoundedExpressions -->
 - `ParseDurationSeconds("250ms")` returns `0.25`.
 - `ParseDurationSeconds("1m2s")` returns `62`.
 
 #### Scenario: invalid values are rejected
+<!-- tests: TestParseDurationSecondsRejectsUnboundedValues -->
 - `"0s"`, `""`, `"abc"`, `"-5s"`, and `"500MS"` all return errors.
 - A returned value is never `<= 0`.
 
@@ -33,14 +35,17 @@ the attempt ends — regardless of outcome. `result.json` produced by the worker
 is preserved; raw `worker.stdout` / `worker.stderr` files are NEVER persisted.
 
 #### Scenario: happy path leaves receipt but no prompt
+<!-- tests: TestRunOnceHappyPathSucceedsAndCleansUp -->
 - After a successful `RunOnce`, `attempt-1/receipt.json` exists,
   `prompt.txt` no longer exists, and the task state is `SUCCEEDED`.
 
 #### Scenario: failed attempts still clean up
+<!-- tests: TestRunOnceSpawnFailureRetriesAndCleansPrompt -->
 - When spawning or execution fails, `prompt.txt` is removed from the run
   directory before `RunOnce` returns.
 
 #### Scenario: oversized and non-UTF-8 output cannot wedge the loop
+<!-- tests: TestRunOnceCapturesLargeNonUTF8OutputWithoutDeadlock -->
 - A child emitting >200KB of mixed binary output is captured within
   `captureMaxBytes`; collection completes and no stdout/stderr file survives.
 
@@ -53,15 +58,18 @@ terminate through this path. The supervisor SHALL record `child.pid` in the
 run directory for cross-process coordination.
 
 #### Scenario: cancel while running kills the tree
+<!-- tests: TestRunOnceCancelWhileRunningTerminatesAndMarksCancelled -->
 - With `cancel_requested` observed during execution, the child process group
   receives SIGTERM, `FinishAttempt` records non-retryable failure with error
   "cancelled by orchestrator", and the task ends `CANCELLED`.
 
 #### Scenario: timeout terminates the attempt
+<!-- tests: TestRunOnceTimeoutFailsRetryable -->
 - When the injected clock passes the request timeout deadline, the tree is
   terminated and the attempt fails retryable with status `timeout`.
 
 #### Scenario: SIGTERM exit contract
+<!-- tests: TestExitCodeForSignalFollowsShellConvention -->
 - `ExitCodeForSignal(15)` returns `143` (`128 + signal`) for the CLI loop;
   any signal code maps identically.
 
@@ -77,10 +85,12 @@ spawned child whose start loses the race is terminated immediately and the
 attempt reports `lease_lost` without finishing.
 
 #### Scenario: NEEDS_INFO pauses and releases the lease
+<!-- tests: TestRunOnceNeedsInfoPausesAndReleasesLease -->
 - A worker result with `status: "NEEDS_INFO"` routes through `PauseTask`;
   the task state becomes `NEEDS_INFO` and `lease_owner` is NULL afterwards.
 
 #### Scenario: stale completion is refused
+<!-- tests: TestFinishAttemptRejectsStaleToken -->
 - Finishing after lease loss surfaces the control plane's stale-lease error
   instead of corrupting another owner's attempt.
 
@@ -92,9 +102,11 @@ state, attempt counters, timestamps). Export happens on success, failure,
 pause, cancellation, and timeout alike.
 
 #### Scenario: receipt parses with identity fields
+<!-- tests: TestRunOnceHappyPathSucceedsAndCleansUp -->
 - `receipt.json` decodes as JSON containing the task id and a state field.
 
 #### Scenario: retries get separate directories
+<!-- tests: TestRetryProducesPerAttemptEvidenceDirs -->
 - A retryable failure followed by re-claim produces `attempt-1` and
   `attempt-2` directories, each holding its own `receipt.json`.
 
@@ -106,10 +118,12 @@ Process creation sits behind a `Runner` interface (`Spawn` → `Child` with
 process groups; tests use fakes that complete, hang, or fail on demand.
 
 #### Scenario: orphan reap is best effort
+<!-- tests: TestReapOrphansRemovesStaleCoordinationFiles -->
 - `RunLoop` sweeps stale `child.pid` files at startup and kills leftover
   process groups best-effort without failing the run.
 
 #### Scenario: once-mode exit codes
+<!-- tests: TestRunLoopOnceModeExitCodes -->
 - Once-mode with no claimable task exits 0; a finished task exits 0 for
   `SUCCEEDED`/`CANCELLED`/`QUEUED` outcomes and 1 otherwise.
 
@@ -128,18 +142,22 @@ at worker exit); an isolation acquire failure stops the loop with exit 1 —
 concurrency without isolation must fail loudly, never degrade to sharing.
 
 #### Scenario: N=4 drains the queue under the race detector
+<!-- tests: TestRunLoopConcurrentDrainsAtN4 -->
 - Four tasks submitted; `RunLoop` with `Concurrency: 4` runs all four to a
   terminal state and returns 0; `go test -race` reports zero warnings.
 
 #### Scenario: concurrency is bounded
+<!-- tests: TestRunLoopConcurrentBoundedInFlight -->
 - With blocking children and more tasks than workers, the number of
   simultaneously spawned children never exceeds N.
 
 #### Scenario: cancellation exits 143
+<!-- tests: TestRunLoopConcurrentCancelReturns143 -->
 - Cancelling the context while attempts are in flight terminates the children
   and `RunLoop` returns 143.
 
 #### Scenario: isolation acquire failure fails the loop
+<!-- tests: TestRunLoopIsolationAcquireFailureFailsLoop -->
 - `Isolation.Acquire` returning an error stops the loop with exit 1 and the
   hook's `release` is never invoked for the failed acquire.
 
@@ -152,11 +170,13 @@ engine instead of silently dropping events. All engine access is
 mutex-guarded, so concurrent runs may ingest simultaneously without data races.
 
 #### Scenario: repeated serial runs all emit telemetry
+<!-- tests: TestTelemetrySurvivesRepeatedSerialRuns -->
 - Two consecutive `RunOnce` calls in one process with `G8S_TELEMETRY=1` both
   persist trace events; the second run is not silenced by the first run's
   close.
 
 #### Scenario: concurrent runs close the engine exactly once
+<!-- tests: TestTelemetryConcurrentRunsAllIngest -->
 - With N runs in flight, the engine closes only after the last run exits, and
   every run's events reach the ledger.
 
@@ -180,19 +200,23 @@ overwrites the file after the child exits) and is exempt. The result file is
 read exactly once — the same bytes feed parsing and validation.
 
 #### Scenario: stream response reaches the stored envelope
+<!-- tests: TestReadWorkerResultCarriesResponseFromStream, TestRunOnceStoresResponseInResultEnvelope -->
 - A captured stdout with a terminal `{"event":"result","result":{"status":
   "SUCCESS","response":"<text>"}}` event produces a succeeded result whose
   envelope includes a sanitized `response` equal to `<text>`.
 
 #### Scenario: degenerate stream response is rejected
+<!-- tests: TestReadWorkerResultRejectsDegenerateStreamResponse -->
 - A terminal `SUCCESS` event whose response is `{}` produces an `ok=false`
   envelope, `result_validation.valid=false`, and never counts as success.
 
 #### Scenario: raw result file outside the schema fails validation
+<!-- tests: TestRunOnceRejectsRawResultWithoutOkOrStatus, TestRawFileSchemaVariants -->
 - A worker-written result file `{"unexpected":1}` yields
   `result_validation.valid = false` with a schema error and an `ok=false`
   stored envelope — arbitrary worker JSON does not pass as a clean result.
 
 #### Scenario: wrapper synthetic envelope is exempt
+<!-- tests: TestRawFileSchemaVariants -->
 - A result file of exactly `{"ok":true,"exit_code":0}` (the wrap-exec
   adapter's own envelope) does not trigger schema errors.

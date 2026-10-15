@@ -1,6 +1,6 @@
 # 22 — Brief DoR Floor + Advisory Skill Routing Spec (DELTA-22, #398)
 
-**Status**: `PROPOSED` (implements the ratified 2026-09-26 strategy split)
+**Status**: `APPLIED` (implements the ratified 2026-09-26 strategy split)
 
 ## ADDED Requirements
 

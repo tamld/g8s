@@ -45,7 +45,7 @@ static_entry() {
         offer) echo "├── offer/                  # Pull-bundle for sibling projects (profiles, onboarding, seeds)" ;;
         plans) echo "├── plans/                  # Campaign ledgers (dated, session-type marked)" ;;
         reference) echo "├── reference/              # JIT-only Python baseline (read, never import)" ;;
-        spec) echo "├── spec/openspec/          # OpenSpec deltas (DELTA-01..22)" ;;
+        spec) echo "├── spec/openspec/          # OpenSpec deltas (DELTA-01..23)" ;;
         schemas) echo "├── schemas/                # JSON schemas (task, receipt, result)" ;;
         scripts) echo "├── scripts/                # Public installer (scripts/install.sh curl entrypoint)" ;;
         tools) echo "├── tools/                  # CI helper scripts (pre-push gates, release)" ;;

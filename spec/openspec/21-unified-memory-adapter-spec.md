@@ -2,11 +2,11 @@
 
 * **Specification ID**: `DELTA-21`
 * **Title**: Unified Decoupled Memory Layer & Hybrid Retrieval Adapter
-* **Status**: `ACCEPTED`
+* **Status**: `APPLIED`
 * **Milestone**: `M5` (Robustness & Evals)
 * **Target Package**: `internal/memory`
 * **Foundational Axiom**: Axiom 1 (Zero-CGO Pure-Go SQLite), Axiom 5 (Decoupled Memory & Cognitive Architecture)
-* **Architecture Decision**: [`docs/decisions/0019-unified-memory-facade.md`](../docs/decisions/0019-unified-memory-facade.md)
+* **Architecture Decision**: [`docs/decisions/0019-unified-memory-facade.md`](../../docs/decisions/0019-unified-memory-facade.md)
 
 ---
 

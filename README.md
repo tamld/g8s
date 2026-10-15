@@ -279,7 +279,7 @@ g8s/
 ├── schemas/                # JSON schemas (task, receipt, result)
 ├── scripts/                # Public installer (scripts/install.sh curl entrypoint)
 ├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)
-├── spec/openspec/          # OpenSpec deltas (DELTA-01..22)
+├── spec/openspec/          # OpenSpec deltas (DELTA-01..23)
 ├── tools/                  # CI helper scripts (pre-push gates, release)
 └── .github/workflows/      # CI/CD pipelines
 ```

@@ -20,20 +20,24 @@ resolve the AGY executable with injectable seams (`EnvLookup`, `Platform`,
    `<home>/AppData/Local/Programs/agy/agy`, `<home>/AppData/Roaming/npm/agy`.
 
 #### Scenario: explicit beats env beats PATH beats home
+<!-- tests: TestResolveExplicitBeatsEnvAndPath, TestResolveEnvOverrideUsedWithoutExplicit -->
 - Given an explicit reference that exists, resolution returns it even when
   `AGY_BIN` and PATH also contain a match.
 - When no explicit reference is set but `AGY_BIN` exists, `AGY_BIN` wins over PATH.
 
 #### Scenario: Windows suffix expansion
+<!-- tests: TestResolveWindowsSuffixExpansion, TestResolveWindowsSuffixOrderExePreferred -->
 - On platform `windows`, a suffix-less reference expands candidates
   `<ref>.exe`, `<ref>.cmd`, `<ref>.bat` before falling back to `Which`.
 - On non-Windows platforms no suffix candidates are probed.
 
 #### Scenario: home fallback on Windows npm layout
+<!-- tests: TestResolveHomeFallbackWindowsNPMCmd -->
 - With `Home` set and only `<home>/AppData/Roaming/npm/agy.cmd` existing,
   resolution returns that file after PATH lookup misses.
 
 #### Scenario: not found is an error
+<!-- tests: TestResolveNotFoundReturnsError, TestEnvelopeBinaryMissingErrors -->
 - When every seam misses, `ResolveBinary` returns a descriptive error; the
   envelope surfaces it before any process spawn.
 
@@ -46,10 +50,12 @@ no-sandbox is requested, then one `--add-dir <expanded>` pair per scope dir
 with `~` expansion.
 
 #### Scenario: skip-permissions keeps sandbox
+<!-- tests: TestBuildCommandSkipPermissionsKeepsSandbox -->
 - Requesting skip-permissions alone yields both `--dangerously-skip-permissions`
   and `--sandbox`.
 
 #### Scenario: no-sandbox omits sandbox flag
+<!-- tests: TestBuildCommandNoSandboxOmitsFlags -->
 - Requesting no-sandbox yields neither `--sandbox` nor any permission flag.
 
 ### Requirement: Read-only contract violation detection
@@ -66,9 +72,11 @@ through output sanitization. Negative instructions ("Do not run wiki.py
 reflect") MUST NOT match because mutation verbs require command/report shape.
 
 #### Scenario: negative instruction is ignored
+<!-- tests: TestDetectIgnoresNegativeInstruction -->
 - Output containing "Do not run wiki.py reflect" produces zero violations.
 
 #### Scenario: session-log side effect is flagged
+<!-- tests: TestDetectSessionLogSideEffectWithSnippetEscaping -->
 - Output containing "Session logged to log.md" yields exactly one violation
   of type `wiki_reflect_side_effect`.
 
@@ -82,6 +90,7 @@ fragment (≤160 trailing chars) keeping only the matched keyword plus
 `<REDACTED>`, case-insensitively.
 
 #### Scenario: postgres credential line is redacted
+<!-- tests: TestSanitizePostgresURL -->
 - `postgresql://user:password@host/db` becomes `postgresql://<REDACTED>`.
 
 ### Requirement: Bounded capture with lossless-enough degradation
@@ -92,10 +101,12 @@ the first half and last half of the budget joined by a `\n<OUTPUT_TRUNCATED>\n`
 marker instead of failing or deadlocking on huge streams.
 
 #### Scenario: oversize probe truncates with marker
+<!-- tests: TestCaptureOversizeTruncatesWithMarker -->
 - Feeding ~3 MiB through the bounded capture yields output containing
   `<OUTPUT_TRUNCATED>` and total length within `MaxCaptureBytes` + marker.
 
 #### Scenario: invalid UTF-8 is replaced
+<!-- tests: TestCaptureInvalidUTF8Replaced -->
 - Raw bytes containing `0xFF` decode to U+FFFD without error.
 
 ### Requirement: Dispatch envelope
@@ -112,15 +123,18 @@ stdout/stderr, and optional `contract_violation {policy, exit_code, violations}`
 Mutation-allowed profiles never run detection regardless of output content.
 
 #### Scenario: clean read-only success
+<!-- tests: TestEnvelopeCleanSuccess -->
 - Runner returns code 0 with benign output; result reports OK true,
   harness return code 0, no violation block.
 
 #### Scenario: side effect under read-only fails closed
+<!-- tests: TestEnvelopeSideEffectFailsClosedAndSanitizes -->
 - Runner returns code 0 whose stdout logs "Session logged to log.md";
   result reports returncode 0, harness returncode 3, OK false, and a
   contract_violation block with policy `read_only`.
 
 #### Scenario: workspace_write skips detection
+<!-- tests: TestEnvelopeMutationAllowedSkipsDetection -->
 - Same violating output under a mutation-allowed profile leaves
   harness returncode equal to the runner code with no violation block.
 
