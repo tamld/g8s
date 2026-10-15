@@ -91,6 +91,15 @@ func NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, cause string) Envelope
 
 // WriteJSON serializes an Envelope as formatted multi-line JSON with 2-space indentation.
 func WriteJSON(w io.Writer, env Envelope) error {
+	if sel := DefaultSelector(); sel != "" && env.Kind != "error" {
+		raw, err := json.Marshal(env)
+		if err == nil {
+			if selected, selErr := SelectPath(raw, sel); selErr == nil {
+				_, writeErr := fmt.Fprintln(w, selected)
+				return writeErr
+			}
+		}
+	}
 	if env.V == 0 {
 		env.V = CurrentEnvelopeVersion
 	}
@@ -107,6 +116,15 @@ func WriteJSON(w io.Writer, env Envelope) error {
 
 // WriteJSONL serializes an Envelope as a single JSON line without line breaks.
 func WriteJSONL(w io.Writer, env Envelope) error {
+	if sel := DefaultSelector(); sel != "" && env.Kind != "error" {
+		raw, err := json.Marshal(env)
+		if err == nil {
+			if selected, selErr := SelectPath(raw, sel); selErr == nil {
+				_, writeErr := fmt.Fprintln(w, selected)
+				return writeErr
+			}
+		}
+	}
 	if env.V == 0 {
 		env.V = CurrentEnvelopeVersion
 	}

@@ -1666,3 +1666,63 @@ func TestRunOnceWallClockDurationAndProviderDuration(t *testing.T) {
 		t.Fatalf("expected provider_duration_seconds=15.5, got %v (res=%+v)", provDur, res)
 	}
 }
+
+func TestWorkerChildEnvDelegation(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+
+	var capturedEnv []string
+	env.runner.factory = func(opts SpawnOptions) Child {
+		capturedEnv = opts.Env
+		child := newFakeChild(0)
+		agyStdout := `{"type":"result","result":{"status":"SUCCESS","response":"done"}}` + "\n"
+		if opts.Stdout != nil {
+			_, _ = opts.Stdout.Write([]byte(agyStdout))
+		}
+		close(child.done)
+		return child
+	}
+
+	task := submitTask(t, env, "idem-delegation-env-593", 1, map[string]any{
+		"prompt":      "test delegation env",
+		"role":        "collector",
+		"permission":  "workspace_write",
+		"receipt_id":  "rc-delegated-99",
+		"result_mode": "stdout",
+	})
+
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-593",
+		LeaseSeconds: 60,
+		Dir:          "/custom/scope/dir",
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected claimed task")
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range capturedEnv {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["G8S_TIER"] != "F1" {
+		t.Errorf("expected G8S_TIER=F1, got %q", envMap["G8S_TIER"])
+	}
+	if envMap["G8S_TASK_ID"] != task.TaskID {
+		t.Errorf("expected G8S_TASK_ID=%q, got %q", task.TaskID, envMap["G8S_TASK_ID"])
+	}
+	if envMap["G8S_PERMISSION"] != "workspace_write" {
+		t.Errorf("expected G8S_PERMISSION=workspace_write, got %q", envMap["G8S_PERMISSION"])
+	}
+	if envMap["G8S_RECEIPT_ID"] != "rc-delegated-99" {
+		t.Errorf("expected G8S_RECEIPT_ID=rc-delegated-99, got %q", envMap["G8S_RECEIPT_ID"])
+	}
+	if envMap["G8S_SCOPE_ROOT"] == "" {
+		t.Errorf("expected non-empty G8S_SCOPE_ROOT")
+	}
+}

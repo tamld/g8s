@@ -290,6 +290,10 @@ Mutation policy: %s%s
 Forbidden for this role:
 %s
 
+Native I/O & Containment Policy (F1/F2):
+- Worker operates at tier F1 (F2 ⊆ F1: any subagents spawned inherit G8S_RECEIPT_ID and G8S_PERMISSION).
+- Prefer native g8s search, g8s read, g8s edit, and g8s select (or --select) for cross-platform file discovery, bounded reading, atomic editing, and JSON field extraction.
+
 Output contract:
 - Return compact JSON or Markdown with exact paths inspected.
 - If required information is missing, return JSON with status NEEDS_INFO and required_inputs.

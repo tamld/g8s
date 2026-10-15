@@ -221,6 +221,7 @@ g8s/
 │   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning,
 │   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported
 │   ├── doctor/ — implements diagnostic sanity checks for g8s environment,
+│   ├── fsops/ — implements safe, receipt-bounded file system operations
 │   ├── harness/ — enforces worker execution boundaries, permission profiles, role constraints, and prompt safety scanning
 │   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness
 │   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers

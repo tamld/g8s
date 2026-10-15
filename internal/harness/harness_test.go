@@ -260,6 +260,22 @@ func TestLegacyPathOnlyPromptUnchangedByRefactor(t *testing.T) {
 	}
 }
 
+func TestNativeIOAndContainmentPolicyRendered(t *testing.T) {
+	prompt, err := BuildContractPrompt("task description", "scout", "read_only", nil)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	for _, want := range []string{
+		"Native I/O & Containment Policy (F1/F2):",
+		"Worker operates at tier F1 (F2 ⊆ F1: any subagents spawned inherit G8S_RECEIPT_ID and G8S_PERMISSION)",
+		"Prefer native g8s search, g8s read, g8s edit, and g8s select (or --select)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing expected containment text %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestValidateRequestRejectsSymlinksToDeniedPaths(t *testing.T) {
 	tempDir := t.TempDir()
 	fakeSSH := filepath.Join(tempDir, ".ssh")

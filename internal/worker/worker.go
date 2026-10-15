@@ -777,10 +777,22 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	marker := attemptMarker(task.TaskID, task.Attempts)
 	startTime := s.clock()
+	childEnv := []string{
+		runMarkerEnv + "=" + marker,
+		"G8S_TIER=F1",
+		"G8S_TASK_ID=" + task.TaskID,
+		"G8S_PERMISSION=" + req.Permission,
+	}
+	if req.ReceiptID != "" {
+		childEnv = append(childEnv, "G8S_RECEIPT_ID="+req.ReceiptID)
+	}
+	if spawnDir != "" {
+		childEnv = append(childEnv, "G8S_SCOPE_ROOT="+spawnDir)
+	}
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,
-		Env:        []string{runMarkerEnv + "=" + marker},
+		Env:        childEnv,
 		Stdout:     outWriter,
 		Stderr:     errWriter,
 		ResultPath: resultPath,
