@@ -131,3 +131,13 @@ Caller responsibility: schedule the purge (cron, ticker, supervisor loop). The m
 - Multi-platform Ed25519 signing (Phase 2)
 - Sharded DB by issuer/time (Phase 3)
 - Event-sourcing append-only log (Phase 3)
+
+---
+
+## Scenario Verification
+
+#### Scenario: Single-use write receipt issuance, path-scope validation, and consumption
+<!-- tests: TestIssueAndValidateFlow -->
+- **GIVEN** a freshly issued `WriteReceipt` with bounded TTL and explicit `AllowedPaths`
+- **WHEN** a worker validates and consumes the receipt
+- **THEN** the first consumption succeeds and any subsequent reuse or out-of-scope access is rejected

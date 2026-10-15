@@ -352,16 +352,9 @@ func TestRedtest_Guarantee4_EmptyCommit(t *testing.T) {
 // and resolves build lane (not docs).
 // -----------------------------------------------------------------------------
 
-// BUG(REDTEST): ci_lane_detect ignores staged code changes when origin/main...HEAD
-// has docs-only commits, skipping code gates with lane=docs during pre-push.
-// Repro:
-// 1. git checkout -b feature origin/main
-// 2. echo "# doc" > docs/guide.md && git add docs/guide.md && git commit -m "docs"
-// 3. echo "package main" > main.go && git add main.go  (staged code change)
-// 4. tools/ci_lane_detect.sh origin/main -> outputs lane=docs instead of lane=build!
+// Regression test: ci_lane_detect includes staged code changes when origin/main...HEAD
+// has docs-only commits, ensuring code gates are never skipped during pre-push.
 func TestRedtest_Guarantee5_PrePushStagedCodeBypass(t *testing.T) {
-	t.Skip("BUG(REDTEST): ci_lane_detect ignores staged code changes when origin/main...HEAD has docs commits")
-
 	script := findDetectScript(t)
 	repo := initFixtureRepo(t)
 

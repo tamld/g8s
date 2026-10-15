@@ -53,3 +53,13 @@ func BuildContractPrompt(
 - [x] `ValidateRequest` rejects sensitive path fragments (`.ssh`, `.aws`, `.env`, `id_rsa`).
 - [x] `ValidateRequest` blocks `workspace_write` when `receiptID` is empty.
 - [x] `BuildContractPrompt` injects exact allowed paths when receipt is present.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Core FSM state transitions and schema contracts hold
+<!-- tests: TestStateApplyTransitions -->
+- **GIVEN** a task lifecycle subject initialized in `QUEUED`
+- **WHEN** valid FSM events are applied through `internal/state`
+- **THEN** the transitions succeed deterministically and invalid transitions are rejected

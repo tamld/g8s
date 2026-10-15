@@ -540,12 +540,18 @@ func summarizeEvent(event TraceEvent) string {
 }
 
 func (e *TelemetryEngine) getPatternInTx(ctx context.Context, tx *sql.Tx, id string) (NegativePattern, error) {
-	row := tx.QueryRowContext(ctx, `
+	const query = `
 		SELECT id, pattern_type, title, description, root_cause, remediation,
 		       occurrence_count, first_seen, last_seen, affected_packages,
 		       example_contexts, confidence_score, status
 		FROM negative_patterns WHERE id = ?
-	`, id)
+	`
+	var row *sql.Row
+	if tx != nil {
+		row = tx.QueryRowContext(ctx, query, id)
+	} else {
+		row = e.db.QueryRowContext(ctx, query, id)
+	}
 
 	var p NegativePattern
 	var firstSeen, lastSeen int64
@@ -576,7 +582,7 @@ func (e *TelemetryEngine) upsertPattern(ctx context.Context, tx *sql.Tx, pattern
 	packages, _ := json.Marshal(pattern.AffectedPackages)
 	contexts, _ := json.Marshal(pattern.ExampleContexts)
 
-	_, err := tx.ExecContext(ctx, `
+	const query = `
 		INSERT INTO negative_patterns (
 			id, pattern_type, title, description, root_cause, remediation,
 			occurrence_count, first_seen, last_seen, affected_packages,
@@ -594,12 +600,19 @@ func (e *TelemetryEngine) upsertPattern(ctx context.Context, tx *sql.Tx, pattern
 			example_contexts=excluded.example_contexts,
 			confidence_score=excluded.confidence_score,
 			status=excluded.status
-	`,
+	`
+	args := []any{
 		pattern.ID, pattern.PatternType, pattern.Title, pattern.Description,
 		pattern.RootCause, pattern.Remediation, pattern.OccurrenceCount,
 		pattern.FirstSeen.UnixNano(), pattern.LastSeen.UnixNano(),
 		string(packages), string(contexts), pattern.ConfidenceScore, pattern.Status,
-	)
+	}
+	var err error
+	if tx != nil {
+		_, err = tx.ExecContext(ctx, query, args...)
+	} else {
+		_, err = e.db.ExecContext(ctx, query, args...)
+	}
 	return err
 }
 

@@ -100,13 +100,13 @@ detect_lane() {
         files=$(git diff --no-renames --name-only "$base"...HEAD 2>/dev/null || git diff --no-renames --name-only "$base" HEAD 2>/dev/null || true)
     fi
 
-    # 2. Fallback when the branch has no upstream diff: staged + unstaged files.
-    # Note: if a valid base_sha was specified and produced an empty diff, preserve deny-by-default (do not fall back).
-    if [ -z "$files" ] && [ "$used_base_sha" -eq 0 ]; then
+    # 2. Include staged + unstaged working-tree files whenever base_sha is not explicitly pinned,
+    #    preventing staged code changes from bypassing build-lane gates when origin/main...HEAD has docs commits.
+    if [ "$used_base_sha" -eq 0 ]; then
         local staged unstaged
         staged=$(git diff --no-renames --name-only --cached 2>/dev/null || true)
         unstaged=$(git diff --no-renames --name-only 2>/dev/null || true)
-        files=$(printf "%s\n%s\n" "$staged" "$unstaged" | sed '/^[[:space:]]*$/d' | sort -u)
+        files=$(printf "%s\n%s\n%s\n" "$files" "$staged" "$unstaged" | sed '/^[[:space:]]*$/d' | sort -u)
     fi
 
     local repo_root

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,11 +101,20 @@ func TestRunOrchestrateSelfTestSmoke(t *testing.T) {
 }
 
 func TestRunSubmitMissingArgs(t *testing.T) {
-	// runSubmit calls os.Exit(2) on missing flags; this test verifies
-	// the failure path without invoking the real submit (which would
-	// write to the shared DB). The function does not panic, so we
-	// only assert that we never reach a successful return.
-	t.Skip("runSubmit calls os.Exit(2); see TestRunSupervisorMetricsMissingArgs for the pattern")
+	if os.Getenv("G8S_TEST_RUN_SUBMIT_MISSING_ARGS") == "1" {
+		runSubmit(nil)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunSubmitMissingArgs$")
+	cmd.Env = append(os.Environ(), "G8S_TEST_RUN_SUBMIT_MISSING_ARGS=1")
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError from runSubmit(nil), got %v", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitErr.ExitCode())
+	}
 }
 
 func TestAggregateMetricsEmpty(t *testing.T) {

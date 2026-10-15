@@ -78,3 +78,13 @@ type Adapter interface {
 1. **Zero-CGO (`CGO_ENABLED=0`)**: Every adapter implementation must compile statically across Darwin, Linux, and Windows.
 2. **Zero-Orphan Process Guarantee**: Any subprocess spawned by an LSP adapter must be executed with `syscall.SysProcAttr{Setpgid: true}` and cleanly terminated on context cancellation.
 3. **Deterministic Fallback**: If a higher-tier adapter fails or is unconfigured, the system must seamlessly fall back to Tier 0 without returning unhandled errors to the caller.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Multi-tier code intelligence router cascades across AST and BlastRadius adapters
+<!-- tests: TestAnalyzerAdapterAndRouterBlastRadius -->
+- **GIVEN** a `MultiTierRouter` wired with Tier-0 Go AST and BlastRadius analyzer adapters
+- **WHEN** `References`, `CallHierarchy`, `Diagnostics`, and `BlastRadius` are queried
+- **THEN** symbol references, call trees, and blast radius reports are resolved deterministically

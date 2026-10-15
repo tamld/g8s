@@ -157,3 +157,13 @@ Then the supervisor acquires a slot from the api_call pool first.
 All implementation work behind the standing dual-pass gate
 (CGO_ENABLED=0 vet+test; CGO_ENABLED=1 race) plus a live dogfood demo:
 submit → worker claim → real agy execution → SUCCEEDED.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Two-class provider registry probes and executes subprocess and HTTP providers
+<!-- tests: TestOllamaProvider_Probing -->
+- **GIVEN** a provider registry configured with CLI subprocess and HTTP endpoint providers
+- **WHEN** `Available` and `Spawn` are invoked against registered providers
+- **THEN** availability probing and execution receipts conform to the unified `Provider` contract

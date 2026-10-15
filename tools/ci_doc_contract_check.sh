@@ -129,6 +129,10 @@ for spec_file in spec/openspec/[0-9]*.md; do
         echo "::error::$spec_file is missing an explicit '**Status**:' header"
         FAILED=$((FAILED + 1))
     fi
+    if ! grep -qE '^#### Scenario:' "$spec_file"; then
+        echo "::error::$spec_file is missing at least one '#### Scenario:' verification block"
+        FAILED=$((FAILED + 1))
+    fi
 done
 
 # 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger

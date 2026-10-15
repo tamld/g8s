@@ -257,14 +257,15 @@ pass "go vet clean"
 # 9. GolangCI-Lint Quality Gate
 step "9/12" "Running GolangCI-Lint Quality Gate..."
 LINTER_BIN=""
-if command -v golangci-lint >/dev/null 2>&1; then
-    LINTER_BIN="golangci-lint"
-elif [ -x "$GOPATH_BIN/golangci-lint" ]; then
+if [ -x "$GOPATH_BIN/golangci-lint" ]; then
     LINTER_BIN="$GOPATH_BIN/golangci-lint"
+elif command -v golangci-lint >/dev/null 2>&1; then
+    LINTER_BIN="golangci-lint"
 fi
 
 if [ -n "$LINTER_BIN" ]; then
-    if ! "$LINTER_BIN" run --timeout=10m; then
+    GO_MOD_TOOLCHAIN="go$(awk '/^go / {print $2}' go.mod)"
+    if ! GOTOOLCHAIN="$GO_MOD_TOOLCHAIN" "$LINTER_BIN" run --timeout=10m; then
         fail "golangci-lint reported issues."
     fi
     pass "golangci-lint clean (zero issues)"

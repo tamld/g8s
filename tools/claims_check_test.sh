@@ -180,7 +180,7 @@ run_test_with_output \
 # (g) committed docs/claims.yml registry passes cleanly
 run_test_with_output \
     "(g) committed docs/claims.yml passes cleanly" 0 \
-    "SCORECARD: 7 bound, 37 unbound, 0 broken (total 44 claims)" \
+    "SCORECARD: 50 bound, 0 unbound, 0 broken (total 50 claims)" \
     bash "$CHECK_SCRIPT"
 
 if [ "$FAILURES" -gt 0 ]; then

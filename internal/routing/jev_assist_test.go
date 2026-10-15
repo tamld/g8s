@@ -422,13 +422,13 @@ func TestModelCostRank(t *testing.T) {
 	}
 }
 
-// BUG(modelCostRank): substring "mini" matches inside "gemini", causing models like
-// "gemini-pro" (expected rank 70) and "gemini-3.8-flash-high" (expected rank 90) to be
-// misclassified into rank 20 ("mini").
+// Regression test for modelCostRank Gemini/mini substring collision.
 func TestModelCostRank_GeminiCollision_BUG(t *testing.T) {
-	t.Skip("BUG(modelCostRank): 'mini' matches inside 'gemini', misranking Gemini models into rank 20")
 	if got := modelCostRank("gemini-pro"); got != 70 {
 		t.Errorf("modelCostRank(gemini-pro) = %d, want 70", got)
+	}
+	if got := modelCostRank("gemini-3.8-flash-high"); got != 90 {
+		t.Errorf("modelCostRank(gemini-3.8-flash-high) = %d, want 90", got)
 	}
 }
 

@@ -402,11 +402,34 @@ func TestTelemetryEngine_ClassificationAndHelpers(t *testing.T) {
 	assert.Empty(t, RenderPreflightContext(nil))
 }
 
-// BUG(DistillFailure): DistillFailure and DistillBatch pass nil sql.Tx to extractPattern,
-// which unconditionally calls tx.QueryRowContext, resulting in a nil-pointer dereference panic
-// whenever an event with a recognized failure mode is distilled directly.
+// Regression test for DistillFailure / DistillBatch when tx == nil.
 func TestDistillFailure_NilTxPanic_BUG(t *testing.T) {
-	t.Skip("BUG(DistillFailure): DistillFailure and DistillBatch pass nil sql.Tx to extractPattern, causing nil pointer dereference on tx.QueryRowContext")
+	config := DefaultTelemetryConfig()
+	config.DBPath = filepath.Join(t.TempDir(), "distill_nil_tx.db")
+
+	engine, err := NewTelemetryEngine(config)
+	require.NoError(t, err)
+	defer engine.Close()
+
+	ctx := context.Background()
+	exitCode := 1
+	failureEvent := TraceEvent{
+		EventType: TraceEventWorkerFailed,
+		TaskID:    "task-crash-1",
+		ExitCode:  &exitCode,
+		Error:     "worker crashed in internal/telemetry/engine.go",
+	}
+
+	p, err := engine.DistillFailure(ctx, failureEvent)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	assert.Equal(t, FailureModeCrash, p.PatternType)
+	assert.Equal(t, 1, p.OccurrenceCount)
+
+	patterns, err := engine.DistillBatch(ctx, []TraceEvent{failureEvent})
+	require.NoError(t, err)
+	require.Len(t, patterns, 1)
+	assert.Equal(t, FailureModeCrash, patterns[0].PatternType)
 }
 
 func TestTelemetryEngine_DistillBatchUnknownEvents(t *testing.T) {

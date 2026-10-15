@@ -153,10 +153,11 @@ run_test_without_output \
     "DEBUG:" \
     bash "$CHECK_SCRIPT"
 
-# (b) 0.13.0-vs-0.13.0 match passes cleanly
+# (b) live VERSION matches git tag and passes cleanly
+LIVE_VER="$(grep -E '^\s*Version\s*=' "$REPO_ROOT/cmd/g8s/version.go" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')"
 run_test_with_output \
-    "(b) live 0.13.0 matches git tag and passes cleanly" 0 \
-    "VERSION (0.13.0) matches latest git tag" \
+    "(b) live $LIVE_VER matches git tag and passes cleanly" 0 \
+    "VERSION ($LIVE_VER) matches latest git tag" \
     bash "$CHECK_SCRIPT"
 
 # (c) fixture: rc.10 > rc.9 must not report drift (exit 0, warn ahead)

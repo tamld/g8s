@@ -35,3 +35,13 @@
 - Pass 1: `CGO_ENABLED=0 go test ./...`
 - Pass 2: `CGO_ENABLED=1 go test -race ./internal/...`
 - Multi-OS cross-compilation verified.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Interactive init wizard and doctor auto-repair configure IDE MCP integration
+<!-- tests: TestRunInitFullLifecycle -->
+- **GIVEN** a target workspace and user home directory with IDE configuration paths
+- **WHEN** the `initwiz` lifecycle runs detection, configuration, and verification
+- **THEN** valid config files and MCP registrations are written and verified

@@ -50,3 +50,13 @@ ORDER BY lt.depth DESC;
 - Pass 1: `CGO_ENABLED=0 go test ./...`
 - Pass 2: `CGO_ENABLED=1 go test -race ./internal/...`
 - Zero external CGO dependencies; 100% Pure-Go.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Recursive SQLite CTE lineage traversal and real-time worker stream piping
+<!-- tests: TestControlPlaneSegregatedInterfaces -->
+- **GIVEN** a parent-child task chain stored in the SQLite control plane
+- **WHEN** `GetTaskLineage` traverses the recursive CTE lineage graph
+- **THEN** the ordered ancestor-to-descendant task chain is returned without cycles

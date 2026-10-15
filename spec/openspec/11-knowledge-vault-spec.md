@@ -49,3 +49,13 @@ Every distilled record MUST adhere to the 3-anchor structure:
 
 * Unit tests in `internal/vault/vault_test.go` asserting CRUD operations, FTS5 BM25 search ranking, trigger updates, and concurrency.
 * Dual-pass verification: `CGO_ENABLED=0 go test ./...` and `CGO_ENABLED=1 go test -race ./...`.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Knowledge Vault stores documents and executes FTS5 BM25 full-text search
+<!-- tests: TestVaultFTS5BM25Search -->
+- **GIVEN** a SQLite FTS5 Knowledge Vault populated with indexed documents
+- **WHEN** a BM25 full-text search query is executed
+- **THEN** matching documents are ranked by relevance with highlighted snippets

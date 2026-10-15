@@ -97,3 +97,13 @@ type ProviderRegistry interface {
   1. External plugins introduce version drift, complex installation steps, and break single-binary portability.
   2. The Discovery Engine is lightweight (Pure Go `exec.LookPath`, HTTP `/api/tags` for Ollama, and in-memory Token Bucket rate limiters).
   3. Total code overhead is $< 500$ lines of Go, preserving the 15MB binary footprint.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Worktree pool fan-out preserves receipt-scoped deliverables across isolated workers
+<!-- tests: TestFanOutPreservesReceiptScopedDeliverable -->
+- **GIVEN** a bounded worktree pool and a task with receipt-scoped deliverable paths
+- **WHEN** a worker executes inside an isolated git worktree and releases the slot
+- **THEN** in-scope deliverables are preserved while clean temporary worktrees are reclaimed

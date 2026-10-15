@@ -116,3 +116,13 @@ $$\text{sim}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mat
 2. Vector math precision: Comprehensive table-driven tests in `internal/memory/vector_test.go`.
 3. Invariant gate: `CGO_ENABLED=0 go test -race ./internal/memory/...` passing with test coverage $\ge 90\%$.
 4. Benchmarks: `BenchmarkHybridRetrieve` and `BenchmarkCosineSimilarity` verifying sub-millisecond execution.
+
+---
+
+## Scenario Verification
+
+#### Scenario: Unified 5-tier memory adapter executes RRF hybrid retrieval across FTS5 and vector stores
+<!-- tests: TestHybridRetrieve -->
+- **GIVEN** a unified memory adapter with working, episodic, semantic, capability, and vector tiers
+- **WHEN** `HybridRetrieve` runs Reciprocal Rank Fusion across FTS5 BM25 and cosine vector similarity
+- **THEN** fused results are returned in descending relevance score order

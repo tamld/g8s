@@ -83,3 +83,13 @@ never invoke a real init system.
   surfaces `cannot inspect control-plane state`; status output never contains a
   `prompt` member.
 - **Restart guard**: restart without a loaded install fails (`not installed and loaded`).
+
+---
+
+## Scenario Verification
+
+#### Scenario: OS service manager installs hardened service definitions and gates active tasks
+<!-- tests: TestInstallIssuesBootstrapThenKickstartWithHardenedFiles -->
+- **GIVEN** a canonical `g8s` binary path and idle control plane
+- **WHEN** the service manager installs and starts the background daemon unit
+- **THEN** hardened unit files are written with `0600` permissions and bootstrapped cleanly

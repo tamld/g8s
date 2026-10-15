@@ -48,3 +48,13 @@ type BlastRadiusAnalyzer interface {
     VerifyPatchDiagnostics(file string, patchDiff string) ([]string, error)
 }
 ```
+
+---
+
+## Scenario Verification
+
+#### Scenario: AST blast radius analyzer computes direct callers and suggested allowed paths
+<!-- tests: TestAnalyzeSymbolImpact -->
+- **GIVEN** a Go package with exported symbols and caller files
+- **WHEN** `AnalyzeSymbolImpact` evaluates the blast radius of a target symbol
+- **THEN** direct callers, affected files, risk level, and suggested receipt paths are returned

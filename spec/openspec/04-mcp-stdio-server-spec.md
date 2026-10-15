@@ -92,3 +92,13 @@ On success `g8s_dispatch` returns `{ok, returncode, harness_returncode,
 duration_seconds, command_preview, permission, stdout, stderr}` where `stdout`/`stderr`
 are credential-sanitized by `dispatch.SanitizeOutput` and `command_preview` never
 contains prompt text.
+
+---
+
+## Scenario Verification
+
+#### Scenario: MCP JSON-RPC 2.0 stdio server round-trips initialize and tool calls
+<!-- tests: TestServeStdioRoundTripsTwoRequestsEndToEnd -->
+- **GIVEN** an MCP stdio server attached to a control-plane store and receipt manager
+- **WHEN** a client sends JSON-RPC 2.0 `initialize` and `tools/call` requests over stdio
+- **THEN** the server responds with valid JSON-RPC envelopes without leaking raw task prompts

@@ -38,3 +38,13 @@ type ControlPlane interface {
     ListTasks(ctx context.Context, filter TaskFilter) ([]Task, error)
 }
 ```
+
+---
+
+## Scenario Verification
+
+#### Scenario: SQLite control plane task submission, lineage, and segregated repository contracts
+<!-- tests: TestControlPlaneSegregatedInterfaces -->
+- **GIVEN** an initialized SQLite WAL control-plane store
+- **WHEN** tasks, briefs, events, and sessions are persisted through segregated repository interfaces
+- **THEN** all domain repository contracts and audit trails round-trip deterministically

@@ -108,19 +108,20 @@ func extractCandidates(manifest *config.File) []candidateModel {
 
 func modelCostRank(modelID string) int {
 	id := strings.ToLower(modelID)
+	noGemini := strings.ReplaceAll(id, "gemini", "")
 	switch {
 	case strings.Contains(id, "flash-lite") || strings.Contains(id, "flash_lite"):
 		return 10
-	case strings.Contains(id, "haiku") || strings.Contains(id, "mini") || strings.Contains(id, "nano"):
+	case strings.Contains(id, "haiku") || strings.Contains(noGemini, "mini") || strings.Contains(id, "nano"):
 		return 20
+	case strings.Contains(id, "opus") || strings.Contains(id, "large") || strings.Contains(id, "high"):
+		return 90
+	case strings.Contains(id, "pro") || strings.Contains(id, "sonnet"):
+		return 70
 	case strings.Contains(id, "flash") || strings.Contains(id, "small") || strings.Contains(id, "lite"):
 		return 30
 	case strings.Contains(id, "llama") || strings.Contains(id, "local"):
 		return 40
-	case strings.Contains(id, "pro") || strings.Contains(id, "sonnet"):
-		return 70
-	case strings.Contains(id, "opus") || strings.Contains(id, "large") || strings.Contains(id, "high"):
-		return 90
 	default:
 		return 50
 	}
