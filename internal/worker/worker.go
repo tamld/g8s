@@ -30,6 +30,7 @@ import (
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 // agyUsage carries token usage metrics reported by the agy tool wrapper.
@@ -1398,8 +1399,31 @@ func (s *Supervisor) collect(
 					}
 					return out, nil
 				},
-				VaultNotes: nil,
-				SomPhase:   nil,
+				VaultNotes: func(ctx context.Context) ([]string, error) {
+					maxK := vault.ResolveMaxActiveRules()
+					if maxK <= 0 {
+						return nil, nil
+					}
+					vdb := strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
+					if vdb == "" {
+						vdb = filepath.Join(pathutil.DefaultStateDir(), "vault.db")
+					}
+					if _, statErr := os.Stat(vdb); statErr != nil {
+						return nil, nil
+					}
+					v, verr := vault.NewVault(vdb, nil)
+					if verr != nil {
+						return nil, verr
+					}
+					defer v.Close()
+					applied := "APPLIED"
+					recs, lerr := v.List(ctx, vault.VaultFilter{Status: &applied, Limit: maxK})
+					if lerr != nil {
+						return nil, lerr
+					}
+					return vault.FormatJITWhisper(recs), nil
+				},
+				SomPhase: nil,
 			}, func(event, detail string) {
 				fmt.Fprintf(os.Stderr, "[warn] L3 context broker: %s: %s\n", event, detail)
 			})
