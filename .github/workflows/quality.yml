@@ -361,13 +361,15 @@ jobs:
 
       - name: Native fuzzing (external-input parsers)
         if: env.CI_LANE != 'docs'
-        # Note: deeper fuzzing runs are manual/quarterly.
+        # Note: deeper fuzzing runs are manual/quarterly. Use deterministic iteration
+        # counts (10000x) so Go's fuzz coordinator does not fail with context deadline
+        # exceeded if corpus minimization is in flight when a wall-clock timer expires.
         shell: bash
         run: |
-          go test -run '^$' -fuzz FuzzConfigLoad -fuzztime 30s ./internal/config/
-          go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 30s ./internal/receipt/
-          go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 30s ./internal/worker/
-          go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 30s ./internal/dispatch/
+          go test -run '^$' -fuzz FuzzConfigLoad -fuzztime 10000x ./internal/config/
+          go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 10000x ./internal/receipt/
+          go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 10000x ./internal/worker/
+          go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 10000x ./internal/dispatch/
 
       - name: Upload coverage artifact
         if: always() && env.CI_LANE != 'docs'

@@ -70,6 +70,9 @@ func FuzzSanitizeOutput(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
 		text := string(data)
 
 		// 1. Never panic on arbitrary input

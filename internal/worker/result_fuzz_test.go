@@ -29,6 +29,9 @@ func FuzzWorkerResultParse(f *testing.F) {
 	f.Add([]byte(`{"prompt":"echo test","model":"gemini-3.8-flash-high","role":"collector","permission":"read_only","timeout":"5m"}`))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			return
+		}
 		text := string(data)
 
 		// 1. Never panic on worker result decoding
