@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -446,5 +447,86 @@ func BenchmarkTokenizeCodeSymbols(b *testing.B) {
 		for _, c := range cases {
 			sink = TokenizeCodeSymbols(c)
 		}
+	}
+}
+
+func TestMatchSpatialAndCarryingCapacity(t *testing.T) {
+	v := newTestVault(t, nil)
+	ctx := context.Background()
+
+	// Store 4 APPLIED records for package "internal/worker" (1 exact file match, 3 package matches)
+	// plus 1 DEPRECATED (cold/dormant) record.
+	for i := 1; i <= 3; i++ {
+		rec := sampleRecord(fmt.Sprintf("PKG-%d", i), fmt.Sprintf("Worker Package Rule %d", i))
+		rec.Status = "APPLIED"
+		rec.SpatialCoordinates = SpatialAnchor{
+			Package:         "internal/worker",
+			File:            "",
+			DeniedFragments: []string{fmt.Sprintf("bad_pkg_call_%d()", i)},
+		}
+		if _, err := v.Store(ctx, rec); err != nil {
+			t.Fatalf("Store PKG-%d: %v", i, err)
+		}
+	}
+
+	exactRec := sampleRecord("EXACT-FILE", "Exact Worker File Rule")
+	exactRec.Status = "APPLIED"
+	exactRec.SpatialCoordinates = SpatialAnchor{
+		Package:         "internal/worker",
+		File:            "internal/worker/worker.go",
+		DeniedFragments: []string{"panic("},
+	}
+	if _, err := v.Store(ctx, exactRec); err != nil {
+		t.Fatalf("Store EXACT-FILE: %v", err)
+	}
+
+	coldRec := sampleRecord("COLD-DORMANT", "Dormant Worker Rule")
+	coldRec.Status = "DEPRECATED"
+	coldRec.SpatialCoordinates = SpatialAnchor{
+		Package:         "internal/worker",
+		File:            "internal/worker/worker.go",
+		DeniedFragments: []string{"legacy_sleep("},
+	}
+	if _, err := v.Store(ctx, coldRec); err != nil {
+		t.Fatalf("Store COLD-DORMANT: %v", err)
+	}
+
+	// Default K_max = 3 should return at most 3 active records, with EXACT-FILE ranked first
+	matched, err := v.MatchSpatial(ctx, "internal/worker/worker.go", -1)
+	if err != nil {
+		t.Fatalf("MatchSpatial: %v", err)
+	}
+	if len(matched) != DefaultMaxActiveRulesPerPkg {
+		t.Fatalf("expected %d records capped by DefaultMaxActiveRulesPerPkg, got %d", DefaultMaxActiveRulesPerPkg, len(matched))
+	}
+	if matched[0].ID != "EXACT-FILE" {
+		t.Fatalf("expected EXACT-FILE ranked first, got %s", matched[0].ID)
+	}
+
+	// G8S_JIT_MAX_RULES=1 should cap at 1
+	t.Setenv("G8S_JIT_MAX_RULES", "1")
+	if got := ResolveMaxActiveRules(); got != 1 {
+		t.Fatalf("expected ResolveMaxActiveRules=1, got %d", got)
+	}
+	matchedOne, err := v.MatchSpatial(ctx, "internal/worker/worker.go", -1)
+	if err != nil {
+		t.Fatalf("MatchSpatial(K=1): %v", err)
+	}
+	if len(matchedOne) != 1 {
+		t.Fatalf("expected 1 record under G8S_JIT_MAX_RULES=1, got %d", len(matchedOne))
+	}
+
+	// MatchSpatialAllStates should include COLD-DORMANT for Hypothesis H2 diff-guard
+	allStates, err := v.MatchSpatialAllStates(ctx, "internal/worker/worker.go")
+	if err != nil {
+		t.Fatalf("MatchSpatialAllStates: %v", err)
+	}
+	if len(allStates) != 5 {
+		t.Fatalf("expected 5 records (4 active + 1 cold), got %d", len(allStates))
+	}
+
+	whispers := FormatJITWhisper(matchedOne)
+	if len(whispers) != 1 || !strings.Contains(whispers[0], "[jit:EXACT-FILE]") || !strings.Contains(whispers[0], "avoid: panic(") {
+		t.Fatalf("unexpected whisper format: %+v", whispers)
 	}
 }

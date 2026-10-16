@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/vault"
 )
 
 func TestResolveDelegationContext(t *testing.T) {
@@ -524,4 +526,71 @@ func TestEdit(t *testing.T) {
 			t.Fatalf("expected permissions 0755, got %v", info.Mode().Perm())
 		}
 	})
+}
+
+func TestJITWhisperOnReadAndEdit(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	vdbPath := filepath.Join(tempDir, "vault.db")
+	v, err := vault.NewVault(vdbPath, nil)
+	if err != nil {
+		t.Fatalf("NewVault: %v", err)
+	}
+	_, err = v.Store(ctx, vault.DistillationRecord{
+		ID:        "JIT-RULE-01",
+		Title:     "Avoid raw sleep in worker loop",
+		Status:    "APPLIED",
+		Milestone: "v0.17.0",
+		Causality: vault.CausalityAnchor{
+			Problem:  "Flaky tests on slow CI runners",
+			TradeOff: "Use injectable clock instead of time.Sleep",
+		},
+		SpatialCoordinates: vault.SpatialAnchor{
+			Package:         "pkg/worker",
+			File:            "pkg/worker/loop.go",
+			DeniedFragments: []string{"time.Sleep("},
+		},
+	})
+	v.Close()
+	if err != nil {
+		t.Fatalf("Store vault record: %v", err)
+	}
+
+	t.Setenv("G8S_VAULT_DB", vdbPath)
+
+	pkgDir := filepath.Join(tempDir, "pkg", "worker")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetFile := filepath.Join(pkgDir, "loop.go")
+	if err := os.WriteFile(targetFile, []byte("package worker\nfunc run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readRes, err := Read(ctx, ReadOptions{
+		Path:      targetFile,
+		ScopeRoot: tempDir,
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if len(readRes.JITWhisper) != 1 || !strings.Contains(readRes.JITWhisper[0], "[jit:JIT-RULE-01]") {
+		t.Fatalf("expected non-blocking JITWhisper on Read, got %+v", readRes.JITWhisper)
+	}
+
+	// Edit must NOT block even if the edit touches the file or introduces denied fragments;
+	// instead it attaches the non-blocking JITWhisper so LLM intelligence is never strangled in-flight.
+	editRes, err := Edit(ctx, EditOptions{
+		Path:      targetFile,
+		ScopeRoot: tempDir,
+		OldString: "func run() {}",
+		NewString: "func run() { /* time.Sleep(1) */ }",
+	})
+	if err != nil {
+		t.Fatalf("Edit should never block in-flight on JITWhisper: %v", err)
+	}
+	if len(editRes.JITWhisper) != 1 || !strings.Contains(editRes.JITWhisper[0], "avoid: time.Sleep(") {
+		t.Fatalf("expected non-blocking JITWhisper on Edit, got %+v", editRes.JITWhisper)
+	}
 }

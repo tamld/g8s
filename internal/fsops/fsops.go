@@ -14,6 +14,7 @@ import (
 
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/search"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 // ReadOptions configures a bounded file read operation.
@@ -42,6 +43,7 @@ type ReadResult struct {
 	Truncated  bool        `json:"truncated,omitempty"`
 	Lines      []LineEntry `json:"lines"`
 	Content    string      `json:"content"`
+	JITWhisper []string    `json:"jit_whisper,omitempty"`
 }
 
 // EditOptions configures an atomic file edit operation.
@@ -57,10 +59,11 @@ type EditOptions struct {
 
 // EditResult represents the result of an atomic file edit operation.
 type EditResult struct {
-	File         string `json:"file"`
-	Replacements int    `json:"replacements"`
-	OldSHA256    string `json:"old_sha256"`
-	NewSHA256    string `json:"new_sha256"`
+	File         string   `json:"file"`
+	Replacements int      `json:"replacements"`
+	OldSHA256    string   `json:"old_sha256"`
+	NewSHA256    string   `json:"new_sha256"`
+	JITWhisper   []string `json:"jit_whisper,omitempty"`
 }
 
 // ResolveDelegationContext checks environment variables and flags to determine
@@ -132,7 +135,8 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if _, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+	relSlash, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
+	if err != nil {
 		return nil, err
 	}
 
@@ -233,6 +237,7 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 		Truncated:  truncated,
 		Lines:      lines,
 		Content:    contentBuilder.String(),
+		JITWhisper: lookupJITWhisper(ctx, relSlash),
 	}, nil
 }
 
@@ -243,7 +248,8 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if _, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+	relSlash, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
+	if err != nil {
 		return nil, err
 	}
 	if opts.OldString == "" {
@@ -344,5 +350,42 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		Replacements: replacedCount,
 		OldSHA256:    oldHex,
 		NewSHA256:    newHex,
+		JITWhisper:   lookupJITWhisper(ctx, relSlash),
 	}, nil
+}
+
+// lookupJITWhisper performs a non-blocking, fail-open spatial query against the
+// Knowledge Vault when G8S_VAULT_DB (or G8S_STATE_DIR/vault.db) exists on disk.
+// It never creates a new database file and never fails Read or Edit (#594).
+func lookupJITWhisper(ctx context.Context, relPath string) []string {
+	if os.Getenv("G8S_JIT_WHISPER") == "0" {
+		return nil
+	}
+	maxRules := vault.ResolveMaxActiveRules()
+	if maxRules <= 0 {
+		return nil
+	}
+	vdbPath := strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
+	if vdbPath == "" {
+		if stateDir := strings.TrimSpace(os.Getenv("G8S_STATE_DIR")); stateDir != "" {
+			vdbPath = filepath.Join(stateDir, "vault.db")
+		}
+	}
+	if vdbPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(vdbPath); err != nil {
+		return nil
+	}
+	v, err := vault.NewVault(vdbPath, nil)
+	if err != nil {
+		return nil
+	}
+	defer v.Close()
+
+	records, err := v.MatchSpatial(ctx, relPath, maxRules)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	return vault.FormatJITWhisper(records)
 }

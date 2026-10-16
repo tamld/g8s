@@ -14,6 +14,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/telemetry"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 func runBriefIssue(args []string) {
@@ -118,11 +119,11 @@ func executeBriefIssue(w io.Writer, store *controlplane.Store, title, payload, d
 		}
 	}
 
-	// #253 closed loop: when telemetry is enabled, surface the most frequent
-	// distilled negative patterns as pre-flight context on the brief —
-	// workers inherit the failure knowledge learned from past runs.
+	// #253 & #594 closed loop: when telemetry is enabled, surface spatially
+	// relevant distilled negative patterns (with fallback to top patterns)
+	// bounded by carrying capacity K_max (Hypothesis H1).
 	if os.Getenv("G8S_TELEMETRY") == "1" {
-		if section := preflightSection(); section != "" {
+		if section := preflightSection(title, payload); section != "" {
 			payload += section
 		}
 	}
@@ -164,10 +165,15 @@ func skillBankDir() string {
 }
 
 // preflightSection builds the negative-pattern pre-flight section from the
-// telemetry ledger (#253). Empty when telemetry is disabled, the ledger has
-// no distilled patterns yet, or the ledger cannot be opened — brief issuance
-// must never fail because of telemetry.
-func preflightSection() string {
+// telemetry ledger (#253, #594). Prioritizes path/prompt-scoped patterns via
+// GetRelevantPatterns and falls back to QueryTopPatterns, capped at K_max
+// (ResolveMaxActiveRules). Empty when telemetry is disabled, K_max == 0, or
+// the ledger cannot be opened — brief issuance must never fail because of telemetry.
+func preflightSection(title, payload string) string {
+	maxK := vault.ResolveMaxActiveRules()
+	if maxK <= 0 {
+		return ""
+	}
 	cfg := telemetry.DefaultTelemetryConfig()
 	if p := os.Getenv("G8S_TELEMETRY_DB"); p != "" {
 		cfg.DBPath = p
@@ -177,11 +183,19 @@ func preflightSection() string {
 		return ""
 	}
 	defer eng.Close()
-	patterns, err := eng.QueryTopPatterns(context.Background(), 3)
+
+	ctx := context.Background()
+	patterns, err := eng.GetRelevantPatterns(ctx, "worker", title, payload)
 	if err != nil || len(patterns) == 0 {
-		return ""
+		patterns, err = eng.QueryTopPatterns(ctx, maxK)
+		if err != nil || len(patterns) == 0 {
+			return ""
+		}
 	}
-	section, err := eng.InjectPreflightContext(context.Background(), &controlplane.BriefRow{}, patterns)
+	if len(patterns) > maxK {
+		patterns = patterns[:maxK]
+	}
+	section, err := eng.InjectPreflightContext(ctx, &controlplane.BriefRow{}, patterns)
 	if err != nil {
 		return ""
 	}

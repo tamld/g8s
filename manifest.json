@@ -237,6 +237,12 @@
       "title": "Native Cross-Platform Agent I/O (search, read, edit, --select)",
       "path": "spec/openspec/23-native-agent-io-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-24",
+      "title": "Differential Governance, Spatial JIT Whisper, Net-Delta Diff Guard & Sovereign HITL Calibration",
+      "path": "spec/openspec/24-differential-governance-hitl-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

@@ -131,6 +131,59 @@ func (e *TelemetryEngine) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_patterns_packages ON negative_patterns(affected_packages);
 	CREATE INDEX IF NOT EXISTS idx_patterns_confidence ON negative_patterns(confidence_score);
 	CREATE INDEX IF NOT EXISTS idx_patterns_last_seen ON negative_patterns(last_seen);
+
+	CREATE TABLE IF NOT EXISTS rule_weights (
+		rule_id TEXT PRIMARY KEY,
+		package_name TEXT NOT NULL DEFAULT '',
+		weight REAL NOT NULL DEFAULT 0.70,
+		thermal_state TEXT NOT NULL DEFAULT 'hot',
+		tp_count INTEGER NOT NULL DEFAULT 0,
+		fp_count INTEGER NOT NULL DEFAULT 0,
+		hitl_tp INTEGER NOT NULL DEFAULT 0,
+		hitl_fp INTEGER NOT NULL DEFAULT 0,
+		hitl_veto INTEGER NOT NULL DEFAULT 0,
+		dormant_triggers INTEGER NOT NULL DEFAULT 0,
+		dormant_escapes INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_rule_weights_pkg ON rule_weights(package_name, thermal_state, weight DESC);
+
+	CREATE TABLE IF NOT EXISTS override_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		rule_id TEXT NOT NULL,
+		actor TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		auto_outcome TEXT NOT NULL DEFAULT 'pending',
+		hitl_verdict TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_override_task ON override_receipts(task_id);
+	CREATE INDEX IF NOT EXISTS idx_override_rule ON override_receipts(rule_id);
+
+	CREATE TABLE IF NOT EXISTS hitl_feedback (
+		id TEXT PRIMARY KEY,
+		rule_id TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		package_name TEXT NOT NULL DEFAULT '',
+		verdict TEXT NOT NULL,
+		actor TEXT NOT NULL,
+		note TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_hitl_rule ON hitl_feedback(rule_id);
+
+	CREATE TABLE IF NOT EXISTS k_yield_samples (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		package_name TEXT NOT NULL,
+		active_k INTEGER NOT NULL,
+		first_pass_ok INTEGER NOT NULL,
+		created_at INTEGER NOT NULL
+	);
 	`
 	_, err := e.db.Exec(schema)
 	return err

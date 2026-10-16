@@ -32,6 +32,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-21`](21-unified-memory-adapter-spec.md)** | Unified Decoupled Memory Layer & Hybrid Retrieval Adapter | `internal/memory` | M5 (Robustness & Evals) | `APPLIED` |
 | **[`DELTA-22`](22-brief-dor-floor-spec.md)** | Brief DoR Floor + Advisory Skill Routing | `internal/brief` | M6 (Memory & Routing) | `APPLIED` |
 | **[`DELTA-23`](23-native-agent-io-spec.md)** | Native Cross-Platform Agent I/O (`search`, `read`, `edit`, `--select`) | `internal/fsops`, `internal/search` | M6 (Agent Ergonomics) | `APPLIED` |
+| **[`DELTA-24`](24-differential-governance-hitl-spec.md)** | Differential Governance, Spatial JIT Whisper, Net-Delta Diff Guard & Sovereign HITL Calibration | `internal/vault`, `internal/verifier`, `internal/telemetry` | M6 (Governance Hardening) | `APPLIED` |
 
 ---
 

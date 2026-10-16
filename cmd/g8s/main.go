@@ -228,6 +228,8 @@ func main() {
 		runVerify(os.Args[2:])
 	case "lesson":
 		runLesson(os.Args[2:])
+	case "feedback":
+		runFeedback(os.Args[2:])
 	case "ladder":
 		runLadder(os.Args[2:])
 	case "help", "-h", "--help":

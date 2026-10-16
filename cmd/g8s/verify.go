@@ -35,6 +35,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 
 	taskFlag := fs.String("task", "", "task ID to verify")
 	asTaskFlag := fs.String("as-task", "", "caller task ID (self-grade guard)")
+	overrideReasonFlag := fs.String("override-reason", "", "F0 override rationale for advisory diff-guard signals (#595)")
 
 	if err := fs.Parse(args); err != nil {
 		exitUsageWithWriter(stderr, "verify", "", *traceID, err.Error(), "", *jsonl)
@@ -79,7 +80,8 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	}
 
 	target := verifier.TaskRef{
-		ID: taskID,
+		ID:             taskID,
+		OverrideReason: strings.TrimSpace(*overrideReasonFlag),
 	}
 
 	caller := verifier.TaskRef{}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -497,4 +498,136 @@ func sanitizeFTSQuery(q string) string {
 		}
 	}
 	return strings.Join(sanitized, " OR ")
+}
+
+// DefaultMaxActiveRulesPerPkg is the default carrying capacity K_max for active
+// spatially-anchored JIT rules per package (Hypothesis H1, issue #594).
+const DefaultMaxActiveRulesPerPkg = 3
+
+// ResolveMaxActiveRules returns the configured carrying capacity K_max for JIT
+// spatial recall. Operators or shadow-mode experiments may override K_max via
+// G8S_JIT_MAX_RULES (including "0" to test the zero-rule baseline).
+func ResolveMaxActiveRules() int {
+	if raw := strings.TrimSpace(os.Getenv("G8S_JIT_MAX_RULES")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return DefaultMaxActiveRulesPerPkg
+}
+
+// MatchSpatial retrieves active (APPLIED or ACCEPTED) distillation records
+// whose SpatialCoordinates match filePath or its package directory, capped at
+// maxRules (carrying capacity K_max for Hypothesis H1). Exact file matches rank
+// ahead of package-level matches, ordered by UpdatedAt descending.
+func (v *Vault) MatchSpatial(ctx context.Context, filePath string, maxRules int) ([]DistillationRecord, error) {
+	if maxRules < 0 {
+		maxRules = ResolveMaxActiveRules()
+	}
+	if maxRules == 0 {
+		return nil, nil
+	}
+	all, err := v.matchSpatialInternal(ctx, filePath, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(all) > maxRules {
+		return all[:maxRules], nil
+	}
+	return all, nil
+}
+
+// MatchSpatialAllStates retrieves all distillation records (including COLD /
+// DORMANT / DEPRECATED records) whose SpatialCoordinates match filePath or its
+// package directory. Used by the Net-Delta Diff Guard (#595) to detect dormant
+// rule regressions and test Hypothesis H2 (Sine-Wave Dormant Re-Awakening).
+func (v *Vault) MatchSpatialAllStates(ctx context.Context, filePath string) ([]DistillationRecord, error) {
+	return v.matchSpatialInternal(ctx, filePath, false)
+}
+
+func (v *Vault) matchSpatialInternal(ctx context.Context, filePath string, activeOnly bool) ([]DistillationRecord, error) {
+	cleanFile := filepath.ToSlash(filepath.Clean(strings.TrimSpace(filePath)))
+	cleanFile = strings.TrimPrefix(cleanFile, "./")
+	if cleanFile == "" || cleanFile == "." {
+		return nil, nil
+	}
+	pkgDir := filepath.ToSlash(filepath.Dir(cleanFile))
+	pkgBase := filepath.Base(pkgDir)
+
+	statusFilter := ""
+	if activeOnly {
+		statusFilter = "AND status IN ('APPLIED', 'ACCEPTED') "
+	}
+
+	query := fmt.Sprintf(`
+		SELECT raw_json
+		FROM vault_records
+		WHERE 1=1 %s
+		ORDER BY updated_at DESC
+		LIMIT 200
+	`, statusFilter)
+
+	rows, err := v.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("match spatial records: %w", err)
+	}
+	defer rows.Close()
+
+	var exactFileMatches []DistillationRecord
+	var pkgMatches []DistillationRecord
+
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		var rec DistillationRecord
+		if err := json.Unmarshal([]byte(raw), &rec); err != nil {
+			continue
+		}
+		recFile := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(rec.SpatialCoordinates.File)), "./")
+		recPkg := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(rec.SpatialCoordinates.Package)), "./")
+
+		if recFile != "" && recFile != "." && (recFile == cleanFile || strings.HasSuffix(cleanFile, "/"+recFile)) {
+			exactFileMatches = append(exactFileMatches, rec)
+			continue
+		}
+		if recPkg != "" && recPkg != "." && (recPkg == pkgDir || recPkg == pkgBase || strings.HasSuffix(pkgDir, "/"+recPkg)) {
+			pkgMatches = append(pkgMatches, rec)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]DistillationRecord, 0, len(exactFileMatches)+len(pkgMatches))
+	out = append(out, exactFileMatches...)
+	out = append(out, pkgMatches...)
+	return out, nil
+}
+
+// FormatJITWhisper renders each matched DistillationRecord into a single
+// non-blocking 1-line hint (<= 200 chars) suitable for attaching to ReadResult
+// or EditResult metadata without interrupting agent flow (#594).
+func FormatJITWhisper(records []DistillationRecord) []string {
+	if len(records) == 0 {
+		return nil
+	}
+	whispers := make([]string, 0, len(records))
+	for _, r := range records {
+		line := fmt.Sprintf("[jit:%s] %s — %s", r.ID, strings.TrimSpace(r.Title), strings.TrimSpace(r.Causality.TradeOff))
+		if len(r.SpatialCoordinates.DeniedFragments) > 0 {
+			line += fmt.Sprintf(" (avoid: %s)", strings.Join(r.SpatialCoordinates.DeniedFragments, ", "))
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if len(line) > 200 {
+			cut := line[:197]
+			for !utf8.ValidString(cut) && len(cut) > 0 {
+				cut = cut[:len(cut)-1]
+			}
+			line = cut + "..."
+		}
+		whispers = append(whispers, line)
+	}
+	return whispers
 }

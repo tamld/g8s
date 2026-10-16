@@ -94,9 +94,10 @@ type Class struct {
 
 // TaskRef references a task and its write delegation scope.
 type TaskRef struct {
-	ID           string   `json:"id"`
-	ReceiptID    string   `json:"receipt_id,omitempty"`
-	AllowedPaths []string `json:"allowed_paths,omitempty"`
+	ID             string   `json:"id"`
+	ReceiptID      string   `json:"receipt_id,omitempty"`
+	AllowedPaths   []string `json:"allowed_paths,omitempty"`
+	OverrideReason string   `json:"override_reason,omitempty"`
 }
 
 // CheckResult represents the outcome of a single check execution.
@@ -109,13 +110,16 @@ type CheckResult struct {
 
 // Verdict encapsulates the complete machine acceptance decision.
 type Verdict struct {
-	Class      string        `json:"class"`
-	Registered bool          `json:"registered"`
-	Status     Status        `json:"status"`
-	Outcome    Outcome       `json:"outcome"`
-	Checks     []CheckResult `json:"checks"`
-	Scope      bool          `json:"scope"`
-	RecordedAt time.Time     `json:"recorded_at"`
+	Class             string         `json:"class"`
+	Registered        bool           `json:"registered"`
+	Status            Status         `json:"status"`
+	Outcome           Outcome        `json:"outcome"`
+	Checks            []CheckResult  `json:"checks"`
+	Advisories        []DiffAdvisory `json:"advisories,omitempty"`
+	DormantReawakened []string       `json:"dormant_reawakened,omitempty"`
+	OverrideReason    string         `json:"override_reason,omitempty"`
+	Scope             bool           `json:"scope"`
+	RecordedAt        time.Time      `json:"recorded_at"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.
@@ -447,6 +451,8 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 
 	// Registered class: execute checks
 	var checkResults []CheckResult
+	var allAdvisories []DiffAdvisory
+	var allDormantReawakened []string
 	hasRunnerError := false
 	hasCheckFailure := false
 
@@ -489,6 +495,17 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 					hasCheckFailure = true
 				}
 			}
+
+		case CheckTypeDiffGuard:
+			res, advs, reawakened := v.runDiffGuardCheck(ctx, runner, target)
+			checkResults = append(checkResults, res)
+			allAdvisories = append(allAdvisories, advs...)
+			allDormantReawakened = append(allDormantReawakened, reawakened...)
+			if strings.HasPrefix(res.Detail, "runner error:") {
+				hasRunnerError = true
+			} else if !res.OK {
+				hasCheckFailure = true
+			}
 		}
 	}
 
@@ -505,13 +522,16 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	}
 
 	verdict := Verdict{
-		Class:      class.Name,
-		Registered: true,
-		Status:     class.Status,
-		Outcome:    outcome,
-		Checks:     checkResults,
-		Scope:      true,
-		RecordedAt: now,
+		Class:             class.Name,
+		Registered:        true,
+		Status:            class.Status,
+		Outcome:           outcome,
+		Checks:            checkResults,
+		Advisories:        allAdvisories,
+		DormantReawakened: allDormantReawakened,
+		OverrideReason:    strings.TrimSpace(target.OverrideReason),
+		Scope:             true,
+		RecordedAt:        now,
 	}
 
 	v.emitTelemetry(target.ID, verdict)
@@ -993,7 +1013,7 @@ func ParseRegistry(data []byte) (*Registry, error) {
 		var checks []Check
 		for _, chk := range rc.checks {
 			cType := CheckType(chk.typ)
-			if cType != CheckTypeScript && cType != CheckTypeGoTest {
+			if cType != CheckTypeScript && cType != CheckTypeGoTest && cType != CheckTypeDiffGuard {
 				unknownCheckFound = true
 				break
 			}
