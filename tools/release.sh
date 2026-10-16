@@ -311,8 +311,7 @@ if [ "$NO_PUSH" -eq 1 ]; then
     echo -e "${YELLOW}Skipping push (--no-push)${NC}"
 else
     echo -e "${BLUE}Pushing to origin...${NC}"
-    git push origin main
-    git push origin "v${NEW_VERSION}"
+    git push --atomic origin main "v${NEW_VERSION}"
 fi
 
 echo -e "${GREEN}✓ Release ${NEW_VERSION} created and pushed!${NC}"

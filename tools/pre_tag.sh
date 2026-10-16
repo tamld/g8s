@@ -159,14 +159,14 @@ check_go_version() {
 }
 
 check_ci_passes() {
-    log_info "Checking recent CI status (last run per workflow)..."
+    log_info "Checking recent CI status (last completed run per workflow)..."
     if ! command -v gh >/dev/null 2>&1; then
         log_warn "gh CLI not available, skipping CI check"
         return 0
     fi
     
     local failed_workflows=0
-    local required_workflows=("Crash-Survival E2E")
+    local required_workflows=("Crash-Survival E2E" "Windows E2E" "Quality" "CI")
     
     for workflow in "${required_workflows[@]}"; do
         local status
@@ -174,47 +174,8 @@ check_ci_passes() {
         if [ "$status" = "success" ]; then
             log_info "Workflow '$workflow': success"
         else
-            log_error "Workflow '$workflow' last run: $status (expected success)"
+            log_error "Workflow '$workflow' last completed run: $status (expected success)"
             failed_workflows=$((failed_workflows + 1))
-        fi
-    done
-    
-    # Check Quality and CI — inspect job details if windows-latest had transient runner failures
-    for wf in "Quality" "CI"; do
-        local wf_status
-        wf_status=$(gh run list --workflow="$wf" --branch=main --status=completed --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
-        if [ "$wf_status" = "success" ]; then
-            log_info "Workflow '$wf': success"
-        else
-            local run_id
-            run_id=$(gh run list --workflow="$wf" --branch=main --status=completed --limit=1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
-            if [ -n "$run_id" ] && [ "$run_id" != "null" ]; then
-                local jobs_file
-                jobs_file=$(mktemp)
-                gh run view "$run_id" --json jobs > "$jobs_file" 2>/dev/null
-                
-                local windows_failed=0
-                local non_windows_failed=0
-                
-                if [ -s "$jobs_file" ]; then
-                    local job_data
-                    job_data=$(jq -r '.jobs[] | "\(.name)|\(.conclusion)"' "$jobs_file" 2>/dev/null)
-                    if [ -n "$job_data" ]; then
-                        windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) ~ /windows/ && $2 != "success" {count++} END {print count+0}')
-                        non_windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) !~ /windows/ && tolower($1) !~ /verify gate/ && $2 != "success" && $2 != "skipped" {count++} END {print count+0}')
-                    fi
-                fi
-                rm -f "$jobs_file"
-                
-                if [ "$windows_failed" -gt 0 ] && [ "$non_windows_failed" -eq 0 ]; then
-                    log_warn "Workflow '$wf': failure appears to be Windows-only flakiness (known issue)"
-                else
-                    log_error "Workflow '$wf' last run: $wf_status (non-Windows failures detected: non_windows_failed=$non_windows_failed)"
-                    failed_workflows=$((failed_workflows + 1))
-                fi
-            else
-                log_warn "Workflow '$wf': could not determine failure details, assuming Windows flakiness"
-            fi
         fi
     done
     

@@ -45,8 +45,9 @@ func TestSearchJSONAndFixedStrings(t *testing.T) {
 	if match.Column != 1 {
 		t.Errorf("expected column 1, got %d", match.Column)
 	}
-	if match.File != file1 {
-		t.Errorf("expected file %q, got %q", file1, match.File)
+	wantFile1 := filepath.ToSlash(file1)
+	if filepath.ToSlash(match.File) != wantFile1 {
+		t.Errorf("expected file %q, got %q", wantFile1, match.File)
 	}
 	if match.Text != "func Target() {" {
 		t.Errorf("expected text %q, got %q", "func Target() {", match.Text)
@@ -79,8 +80,9 @@ func TestSearchFilesModeAndQuiet(t *testing.T) {
 	if err := json.Unmarshal(out, &env); err != nil {
 		t.Fatalf("unmarshal files mode output: %v\nOutput: %s", err, string(out))
 	}
-	if len(env.Data.Files) != 1 || env.Data.Files[0] != docFile {
-		t.Fatalf("expected [README.md], got %+v", env.Data.Files)
+	wantDocFile := filepath.ToSlash(docFile)
+	if len(env.Data.Files) != 1 || filepath.ToSlash(env.Data.Files[0]) != wantDocFile {
+		t.Fatalf("expected [%s], got %+v", wantDocFile, env.Data.Files)
 	}
 
 	// 2. Quiet mode: match found -> exit 0
@@ -146,8 +148,9 @@ func TestSearchReceiptScopeFilter(t *testing.T) {
 	if len(env.Data.Files) != 1 {
 		t.Fatalf("expected exactly 1 allowed file, got %d: %+v", len(env.Data.Files), env.Data.Files)
 	}
-	if env.Data.Files[0] != fileAllowed {
-		t.Errorf("expected allowed file %q, got %q", fileAllowed, env.Data.Files[0])
+	wantAllowed := filepath.ToSlash(fileAllowed)
+	if filepath.ToSlash(env.Data.Files[0]) != wantAllowed {
+		t.Errorf("expected allowed file %q, got %q", wantAllowed, env.Data.Files[0])
 	}
 }
 
