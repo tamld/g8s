@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-16
+
+### Added
+
+- Native Cross-Platform Agent I/O (`DELTA-23`, #591, #593): pure-Go `internal/search` (`g8s search` replacing `rg`/`grep`/`find`) and `internal/fsops` (`g8s read --lines M:N` with SHA-256 digest, `g8s edit --old --new [--if-sha256]` atomic compare-and-swap editor preserving CRLF/LF, and `--select` / `g8s select` zero-dependency JSON dot-path extractor replacing `jq`) with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/search`, `/api/v1/fs/read`, `/api/v1/fs/edit`).
+- F0 / F1 / F2 Recursive Subagent Containment (`ADR-0032`, #587, #593): F1 workers automatically propagate `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT` to child processes and F2 subagents, enforcing `WriteReceipt.AllowedPaths` in-process on every file mutation and audited by probe `sa-005` (`f2-recursive-containment`).
+- Cross-Repo Offer Bundle Rollout & Delivery v2 (#442, #567, #569): completed Wave 1–4 rollout across `tamld-llm-wiki`, `defense-in-depth`, `aegis`, `homelab-proxmox`, and `tuneflow` with 13 Mode-3 return packets (`RepoWorktreeIsolator` for cross-repo `add_dirs[0]` worktree branching, `g8s deliver --worktree --prune-worktree` with worker-deleted file propagation, `g8s offer init --gates-only`, embedded gate fallback, polyglot `ci_spec_code_sync.sh`, and non-Go `docs/README.md` taxonomy verification in `ci_structure_sync.sh`).
+- Domain-Driven Design & OpenSpec `DELTA-01..23` Standardization: segregated `controlplane.Store` into 6 consumer-focused repository interfaces (`internal/controlplane/interfaces.go`), bridged `internal/analyzer` (`DELTA-07`) with `internal/codeintel` (`DELTA-20`) (`internal/codeintel/analyzer_bridge.go`), completed all 23 OpenSpec specifications (`DELTA-01..23`) with `0` grandfathered scenario warnings, and bound 100% of quantitative claims (`50/50 bound, 0 unbound`) in `docs/claims.yml`.
+
+### Fixed
+
+- Security DLP & Sanitizer Hardening (#574, #586, #590): masked `KeyUsed` (`key_used`) in `internal/reflex` so `g8s reflex triage --json` never emits plaintext API keys (#586); escaped SQLite DSN paths to prevent connection-string parameter injection (#574); preserved unquoted Python credential-parser call and subscript expressions during prompt sanitization (#590).
+- Worker Telemetry, Ghost Cleanup & Quality Ladder Integrity (#566, #570, #575, #588): reported wall-clock elapsed time alongside `provider_duration_seconds` and summed `step_update.usage` on partial streams (#575); fixed subshell ancestor PID skip and pruned stale `.heartbeat/agy/*.json` files during `g8s cleanup` (#588); enforced `--out` path confinement on `g8s ladder advance` and provider-less baked-name model resolution (#566, #570).
+- Telemetry Nil-Tx & Router Cost-Rank Regressions: fixed nil `*sql.Tx` dereference in `TelemetryEngine.DistillFailure` / `DistillBatch`, resolved `"mini"` substring collision against `"gemini"` models in `modelCostRank`, fixed staged-code bypass in `tools/ci_lane_detect.sh`, and resolved Windows 4 KB anonymous pipe deadlock in `cmd/g8s/main_test.go`.
+
 ## [0.16.0] - 2026-10-07
 
 ### Added

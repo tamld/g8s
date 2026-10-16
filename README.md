@@ -59,10 +59,11 @@ g8s is a single static binary (pure Go, zero CGO) that lets a high-tier orchestr
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Shipped in v0.14.0 – v0.16.0+
+## Shipped in v0.14.0 – v0.17.0
 
-- **Native cross-platform Agent I/O (`DELTA-23`)**: pure-Go `g8s search` (replaces `rg`/`grep`/`find`), `g8s read` (bounded line-range reader with SHA-256 digest), `g8s edit` (atomic compare-and-swap editor preserving CRLF/LF and enforcing `WriteReceipt.AllowedPaths`), and `--select` / `g8s select` (zero-dependency JSON dot-path extractor replacing `jq`), with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
-- **F0 / F1 / F2 recursive containment (`ADR-0032`)**: F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT`, binding all F1 and F2 file mutations to the task's Write Receipt in-process.
+- **Native cross-platform Agent I/O (`DELTA-23`, `v0.17.0`)**: pure-Go `g8s search` (replaces `rg`/`grep`/`find`), `g8s read` (bounded line-range reader with SHA-256 digest), `g8s edit` (atomic compare-and-swap editor preserving CRLF/LF and enforcing `WriteReceipt.AllowedPaths`), and `--select` / `g8s select` (zero-dependency JSON dot-path extractor replacing `jq`), with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
+- **F0 / F1 / F2 recursive containment (`ADR-0032`, `v0.17.0`)**: F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT`, binding all F1 and F2 file mutations to the task's Write Receipt in-process.
+- **Cross-repo Offer Bundle rollout (`v0.17.0`, `#442`)**: 4 domain profiles (`knowledge`, `security`, `infra`, `utility`), `RepoWorktreeIsolator` for sibling repositories, `g8s deliver --worktree --prune-worktree` with deletion propagation (`#569`), and polyglot spec/structure CI gates.
 - **Provider-neutral effort optimization (`v0.16.0`)**: declarative model effort catalog (`.g8s/agent-models.yml`, `.g8s/effort-classes.yml`) with `named`, `budget`, `baked-name`, and `toggle` adapters and per-class cost telemetry.
 - **Event-driven supervision**: terminal transitions append to `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` wakes the supervisor with one sleeping process. Polling is the fallback, never the primary.
 - **Multi-provider queue**: `providers.json` is the manifest; per-provider claim affinity, `--provider` on submit and worker, no silent fallback.
@@ -207,8 +208,9 @@ Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and 
 | v0.12.0 (2026-09-27) | Concurrent dispatch, sessions isolation, memory promotion gate, Context Broker, live eval | **Done** |
 | v0.13.0 (2026-09-30) | Multi-provider queue, hardening waves B–E, event-driven signals (signals/tasks.jsonl + `watch --failed`), release gates 7–8 | **Done** |
 | v0.14.0 (2026-10-03) | AI-factory loop, stage 1: budgeted auto-retry ✅ (#501/#502), router in user hands — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), first unattended closed round — [#516](https://github.com/tamld/g8s/issues/516); cut = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Done** |
-| v0.15.0 (target) | Retrospective-as-task — the self-maturity organ — [#519](https://github.com/tamld/g8s/issues/519) | Planned |
-| v0.16.0 (target) | Effort optimization: provider-neutral effort manifest (named/budget/baked-name adapters), task-class→effort mapping, per-class cost telemetry — [#550](https://github.com/tamld/g8s/issues/550), plans/261004-effort-optimization | **Done** |
+| v0.15.0 (2026-10-05) | Retrospective-as-task (`g8s lesson`), agent-models catalog v1, live Jev SystemOne benchmark, quantitative claims gate (#519, #543, #547) | **Done** |
+| v0.16.0 (2026-10-07) | Effort optimization: provider-neutral effort manifest (`named`/`budget`/`baked-name` adapters), task-class→effort mapping, quality ladder & per-class cost telemetry (#550, #568, #570) | **Done** |
+| v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), F0/F1/F2 recursive containment (#587, #593), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims | **Done** |
 | v1.0.0 (2026-12-15) | GA: 6-month homelab stability, enterprise security signoff, distributed fleet mTLS | Planned |
 
 ## Project Structure

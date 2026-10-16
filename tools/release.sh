@@ -166,7 +166,7 @@ if [ -f "tools/pre_tag.sh" ]; then
         echo -e "${YELLOW}Would run pre-tag gates: bash tools/pre_tag.sh${NC}"
     else
         echo -e "${BLUE}Running pre-tag gates (tools/pre_tag.sh)...${NC}"
-        if ! bash tools/pre_tag.sh; then
+        if ! G8S_TARGET_VERSION="$NEW_VERSION" bash tools/pre_tag.sh; then
             echo -e "${RED}Error: Pre-tag gates failed. Aborting release.${NC}" >&2
             exit 1
         fi

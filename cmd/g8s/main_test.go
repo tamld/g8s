@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,6 +123,12 @@ func captureUsage(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
+	done := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- b
+	}()
+
 	orig := os.Stdout
 	os.Stdout = w
 	printUsage()
@@ -130,9 +137,9 @@ func captureUsage(t *testing.T) string {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	buf := make([]byte, 4096)
-	n, _ := r.Read(buf)
-	return string(buf[:n])
+	out := <-done
+	_ = r.Close()
+	return string(out)
 }
 
 func TestSubmitHelp(t *testing.T) {

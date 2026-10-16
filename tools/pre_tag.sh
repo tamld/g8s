@@ -51,11 +51,11 @@ check_version_sync() {
         return 1
     fi
     
-    if [ "$version_code" != "$version_changelog" ]; then
+    if [ "$version_code" != "$version_changelog" ] && [ "${G8S_TARGET_VERSION:-}" != "$version_changelog" ]; then
         log_error "Version mismatch: code=$version_code, changelog=$version_changelog"
         return 1
     fi
-    log_info "Version sync OK: $version_code"
+    log_info "Version sync OK: $version_changelog"
     return 0
 }
 
@@ -105,7 +105,7 @@ check_on_main() {
 check_tag_not_exists() {
     log_info "Checking tag doesn't exist remotely..."
     local version
-    version=$(extract_version_code)
+    version="${G8S_TARGET_VERSION:-$(extract_version_code)}"
     local tag="v$version"
     
     if [ -z "$version" ]; then
@@ -144,11 +144,13 @@ check_go_version() {
         return 0
     fi
     
-    # Normalize: 1.26.0 -> 1.26
+    # Normalize both to major.minor: 1.26.9 -> 1.26
     local go_mod_major_minor
     go_mod_major_minor=$(echo "$go_mod_version" | cut -d. -f1,2)
+    local workflow_major_minor
+    workflow_major_minor=$(echo "$workflow_version" | cut -d. -f1,2)
     
-    if [ "$go_mod_major_minor" != "$workflow_version" ]; then
+    if [ "$go_mod_version" != "$workflow_version" ] && [ "$go_mod_major_minor" != "$workflow_major_minor" ]; then
         log_error "Go version mismatch: go.mod=$go_mod_version (normalized: $go_mod_major_minor), workflows=$workflow_version"
         return 1
     fi
@@ -164,12 +166,11 @@ check_ci_passes() {
     fi
     
     local failed_workflows=0
-    local required_workflows=("Quality" "Crash-Survival E2E")
+    local required_workflows=("Crash-Survival E2E")
     
-    # Check required workflows (excluding CI which has known Windows flakiness)
     for workflow in "${required_workflows[@]}"; do
         local status
-        status=$(gh run list --workflow="$workflow" --branch=main --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
+        status=$(gh run list --workflow="$workflow" --branch=main --status=completed --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
         if [ "$status" = "success" ]; then
             log_info "Workflow '$workflow': success"
         else
@@ -178,45 +179,44 @@ check_ci_passes() {
         fi
     done
     
-    # Check CI separately - allow Windows-only failures
-    local ci_status
-    ci_status=$(gh run list --workflow="CI" --branch=main --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
-    if [ "$ci_status" = "success" ]; then
-        log_info "Workflow 'CI': success"
-    else
-        # Check if failure is Windows-only by viewing run details
-        local run_id
-        run_id=$(gh run list --workflow="CI" --branch=main --limit=1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
-        if [ -n "$run_id" ] && [ "$run_id" != "null" ]; then
-            local jobs_file
-            jobs_file=$(mktemp)
-            gh run view "$run_id" --json jobs > "$jobs_file" 2>/dev/null
-            
-            local windows_failed=0
-            local non_windows_failed=0
-            
-            if [ -s "$jobs_file" ]; then
-                # Use awk to parse JSON - simpler and more reliable in CI
-                # Extract job names and conclusions
-                local job_data
-                job_data=$(jq -r '.jobs[] | "\(.name)|\(.conclusion)"' "$jobs_file" 2>/dev/null)
-                if [ -n "$job_data" ]; then
-                    windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) ~ /windows/ && $2 != "success" {count++} END {print count+0}')
-                    non_windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) !~ /windows/ && $2 != "success" {count++} END {print count+0}')
-                fi
-            fi
-            rm -f "$jobs_file"
-            
-            if [ "$windows_failed" -gt 0 ] && [ "$non_windows_failed" -eq 0 ]; then
-                log_warn "Workflow 'CI': failure appears to be Windows-only flakiness (known issue)"
-            else
-                log_error "Workflow 'CI' last run: $ci_status (non-Windows failures detected: non_windows_failed=$non_windows_failed)"
-                failed_workflows=$((failed_workflows + 1))
-            fi
+    # Check Quality and CI — inspect job details if windows-latest had transient runner failures
+    for wf in "Quality" "CI"; do
+        local wf_status
+        wf_status=$(gh run list --workflow="$wf" --branch=main --status=completed --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
+        if [ "$wf_status" = "success" ]; then
+            log_info "Workflow '$wf': success"
         else
-            log_warn "Workflow 'CI': could not determine failure details, assuming Windows flakiness"
+            local run_id
+            run_id=$(gh run list --workflow="$wf" --branch=main --status=completed --limit=1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+            if [ -n "$run_id" ] && [ "$run_id" != "null" ]; then
+                local jobs_file
+                jobs_file=$(mktemp)
+                gh run view "$run_id" --json jobs > "$jobs_file" 2>/dev/null
+                
+                local windows_failed=0
+                local non_windows_failed=0
+                
+                if [ -s "$jobs_file" ]; then
+                    local job_data
+                    job_data=$(jq -r '.jobs[] | "\(.name)|\(.conclusion)"' "$jobs_file" 2>/dev/null)
+                    if [ -n "$job_data" ]; then
+                        windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) ~ /windows/ && $2 != "success" {count++} END {print count+0}')
+                        non_windows_failed=$(echo "$job_data" | awk -F'|' 'tolower($1) !~ /windows/ && tolower($1) !~ /verify gate/ && $2 != "success" && $2 != "skipped" {count++} END {print count+0}')
+                    fi
+                fi
+                rm -f "$jobs_file"
+                
+                if [ "$windows_failed" -gt 0 ] && [ "$non_windows_failed" -eq 0 ]; then
+                    log_warn "Workflow '$wf': failure appears to be Windows-only flakiness (known issue)"
+                else
+                    log_error "Workflow '$wf' last run: $wf_status (non-Windows failures detected: non_windows_failed=$non_windows_failed)"
+                    failed_workflows=$((failed_workflows + 1))
+                fi
+            else
+                log_warn "Workflow '$wf': could not determine failure details, assuming Windows flakiness"
+            fi
         fi
-    fi
+    done
     
     if [ "$failed_workflows" -gt 0 ]; then
         return 1

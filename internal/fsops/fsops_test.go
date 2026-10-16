@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -497,6 +498,9 @@ func TestEdit(t *testing.T) {
 	})
 
 	t.Run("atomic write preserves file permissions", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("windows stat modes do not carry POSIX 0755 execute bits")
+		}
 		filePath := filepath.Join(tempDir, "executable.sh")
 		if err := os.WriteFile(filePath, []byte("#!/bin/sh\necho hello\n"), 0o755); err != nil {
 			t.Fatal(err)

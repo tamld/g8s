@@ -167,20 +167,26 @@ All shipped, tagged, and verified on GitHub Releases:
 
 ---
 
-### v0.17.0 — Security DLP, Delivery Integrity, Telemetry & Effort Ergonomics (Completed 2026-10-14)
-**Delivered**: 2026-10-14
+### v0.17.0 — Native Cross-Platform Agent I/O, Offer Bundle Rollout, Security DLP & SDD/DDD/TDD Standardization (Completed 2026-10-16)
+**Delivered**: 2026-10-16
 
 | Issue / Item | Description | Priority | Status |
 |--------------|-------------|----------|--------|
+| [x] #593 | Native Cross-Platform Agent I/O (`DELTA-23`): `internal/fsops` (`g8s read`, `g8s edit`, `g8s select`, `--select`) across CLI, MCP (`g8s_search`/`g8s_read`/`g8s_edit`), and HTTP (`/api/v1/fs/*`) with F0/F1/F2 `WriteReceipt` enforcement | P0 | ✅ Complete |
+| [x] #591 | Native Pure-Go `internal/search` & `g8s search` CLI (`rg`/`grep`/`find` replacement) with `--receipt-id` scope gate and `doctor` probe | P0 | ✅ Complete |
+| [x] #590 | Preserve unquoted Python credential-parser call and subscript expressions in `internal/sanitizer` / `internal/dispatch` | P0 | ✅ Complete |
+| [x] #574 | Fix SQLite connection string (DSN) parameter injection via URI path escaping | P0 | ✅ Complete |
 | [x] #586 | Mask/redact `KeyUsed` (`key_used`) in `internal/reflex` (`ReflexSignal` / `TriageVerdict`) so `g8s reflex triage --json` never emits plaintext `TYPESAFE_API_KEY` | P0 | ✅ Complete |
 | [x] #588 | Fix `FindGhostProcesses` subshell ancestor PID skip and prune dead `.heartbeat/agy/*.json` files on `g8s cleanup --target ghost-process --force` | P0 | ✅ Complete |
 | [x] #575 | Fix AGY `result.duration` and `result.duration_seconds` reporting wall-clock elapsed time + `provider_duration_seconds` and populate `usage` on timeout/error/cancel | P0 | ✅ Complete |
-| [x] #569 | `g8s deliver` copy-apply v2: propagate worker-deleted files (`git rm` inside worktree) with receipt scope enforcement and `deleted` list in envelope | P0 | ✅ Complete |
+| [x] #569 | `g8s deliver` copy-apply v2: propagate worker-deleted files (`git rm` inside worktree), cross-repo delivery, `--worktree`, and `--prune-worktree` | P0 | ✅ Complete |
+| [x] #442 | Complete Offer Bundle Wave 1–4 rollout (`tamld-llm-wiki`, `defense-in-depth`, `aegis`, `homelab-proxmox`, `tuneflow`) and merge 13 Mode-3 return packets | P1 | ✅ Complete |
 | [x] #570 (R4-1, R4-2) | Validate `g8s ladder advance --out` path against scope/denied fragments (R4-1); emit typed JSON error envelope on unreadable `submit --prompt-file` (R4-2) | P1 | ✅ Complete |
 | [x] #567 & #570 (R1-1) | Effort-class registry glob matching (`docs/**` nested + root files, slash-normalized `path.Match` for Windows R1-1), `--class` flag, and receipt `allowed_paths` fallback | P1 | ✅ Complete |
 | [x] #566 | Provider-less manual submit baked-name resolution against stale manifests and `doctor` stale provider model ID diagnostic warning | P1 | ✅ Complete |
 | [x] #570 (R3-2/4/5/8) | Quality Ladder continuity, monotonic rung order, exit-code-127 vs brief marker precedence, and duplicate task ID deduplication in evidence history | P1 | ✅ Complete |
 | [x] #587 | ADR-0032 `F1->F2` recursive subagent containment self-audit probe (`sa-005` `f2-recursive-containment`) | P2 | ✅ Complete |
+| [x] SDD/DDD/TDD | Complete `DELTA-01..23` OpenSpec registry (0 grandfathered warnings), bind 50/50 claims in `docs/claims.yml`, segregate `controlplane.Store` domain interfaces, bridge `codeintel`↔`analyzer`, and unskip all bug tests | P1 | ✅ Complete |
 
 ---
 

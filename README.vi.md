@@ -42,6 +42,8 @@ g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng c
 
 ## Đã ship trong v0.14.0
 
+- **Native Agent I/O đa nền tảng (`DELTA-23`, `v0.17.0`)**: `g8s search` (thay `rg`/`grep`/`find`), `g8s read` (đọc dòng giới hạn kèm SHA-256), `g8s edit` (chỉnh sửa nguyên tử compare-and-swap bảo toàn CRLF/LF và kiểm soát `WriteReceipt.AllowedPaths`), và `--select` / `g8s select` (trích xuất JSON dot-path thay `jq`), đồng nhất trên CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), và HTTP (`/api/v1/fs/*`).
+- **Containment đệ quy F0 / F1 / F2 (`ADR-0032`, `v0.17.0`)**: F1 worker tự động kế thừa `G8S_TIER=F1`, `G8S_RECEIPT_ID`, và `G8S_SCOPE_ROOT`, khóa mọi thao tác ghi file của F1 và F2 vào phạm vi Write Receipt ngay trong tiến trình.
 - **Giám sát theo sự kiện**: khi task kết thúc (thành công hay thất bại), g8s ghi một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` giữ đúng một process chờ và đánh thức supervisor khi có tín hiệu. Vòng lặp hỏi-đáp (polling) chỉ là phương án dự phòng.
 - **Queue đa provider**: `providers.json` là manifest; claim affinity theo provider, `--provider` trên submit lẫn worker, không fallback thầm lặng.
 - **Retry có ngân sách**: task FAILED tự resubmit trong giới hạn: 2 lần mỗi task, 10 lần/giờ mỗi state dir, backoff luỹ thừa, flag mặc định OFF. Tick tự động chỉ đụng task không cần receipt.
@@ -94,10 +96,10 @@ g8s get <task-id>
 Ghi ghi-delegation cần receipt single-use (chú ý `--ttl`: mặc định ngắn có chủ đích — hãy cấp đủ cho thời lượng task):
 
 ```bash
-g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600
+RID=$(g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600 --select .data.receipt_id)
 AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --role test-runner --permission workspace_write \
-  --receipt-id <receipt-id> --add-dir ./tests \
-  --prompt "Generate pytest tests. receipt_id=<receipt-id> allowed_paths=./tests/*.py"
+  --receipt-id "$RID" --add-dir ./tests \
+  --prompt "Generate pytest tests. receipt_id=$RID allowed_paths=./tests/*.py"
 ```
 
 Các lệnh kiểm tra và dọn dẹp hằng ngày:
@@ -136,6 +138,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 |---|---|
 | Từ 0 đến task ủy quyền đầu tiên | [docs/quickstart.md](docs/quickstart.md) |
 | Ma trận lệnh đầy đủ & runbook | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
+| Native Agent I/O & tìm kiếm đa nền tảng | [offer/SEARCH_GUIDE.md](offer/SEARCH_GUIDE.md), [spec/openspec/23-native-agent-io-spec.md](spec/openspec/23-native-agent-io-spec.md) |
 | Cấu hình & vòng đời service | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
 | Cấu hình effort & thang chất lượng | [docs/user-guide/effort.md](docs/user-guide/effort.md) |
 | Bảo mật & kiểm chứng | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
@@ -157,8 +160,9 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 |--------|-----------|:---:|
 | v0.13.0 (2026-09-30) | Queue đa provider, sóng hardening B–E, tín hiệu event-driven (`signals/tasks.jsonl` + `watch --failed`), release gate 7–8 | **Xong** |
 | v0.14.0 (2026-10-03) | Vòng AI-factory: auto-retry ✅ (#501/#502), router tới tay người dùng — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), vòng tự-đóng đầu tiên — [#516](https://github.com/tamld/g8s/issues/516); cắt bản = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Xong** |
-| v0.15.0 (mục tiêu) | Retrospective-as-task — cơ quan tự trưởng thành — [#519](https://github.com/tamld/g8s/issues/519) | Kế hoạch |
-| v0.16.0 (mục tiêu) | Tối ưu effort: manifest effort trung hòa provider (adapter named/budget/baked-name), ánh xạ lớp việc→effort, telemetry chi phí theo lớp — [#550](https://github.com/tamld/g8s/issues/550) | **Xong** |
+| v0.15.0 (2026-10-05) | Retrospective-as-task (`g8s lesson`), catalog agent-models v1, benchmark Jev SystemOne, cổng kiểm chứng 50 claims (#519, #543, #547) | **Xong** |
+| v0.16.0 (2026-10-07) | Tối ưu effort: manifest effort trung hòa provider (adapter `named`/`budget`/`baked-name`), ánh xạ lớp việc→effort, thang chất lượng & telemetry chi phí theo lớp (#550, #568, #570) | **Xong** |
+| v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), containment đệ quy F0/F1/F2 (#587, #593), triển khai Offer Bundle Wave 1–4 & giao nhận liên repo (#442, #569), chuẩn hóa OpenSpec DELTA-01..23 & 50/50 claims | **Xong** |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép
