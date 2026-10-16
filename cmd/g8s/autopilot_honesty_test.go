@@ -273,9 +273,10 @@ func TestAutopilotStart_DeadLockfileProceedsAndSIGTERM(t *testing.T) {
 		t.Fatalf("failed to send SIGTERM: %v", err)
 	}
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- startCmd.Wait()
+		_ = startCmd.Wait()
+		close(done)
 	}()
 
 	select {

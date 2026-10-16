@@ -222,12 +222,17 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 		defer cancel()
 	}
 
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- h.cmd.Wait() }()
+	var waitErr error
+	waitCh := make(chan struct{})
+	go func() {
+		waitErr = h.cmd.Wait()
+		close(waitCh)
+	}()
 
 	var runErr error
 	select {
-	case runErr = <-waitCh:
+	case <-waitCh:
+		runErr = waitErr
 	case <-ctx.Done():
 		_ = h.Cancel(context.Background())
 		<-waitCh
