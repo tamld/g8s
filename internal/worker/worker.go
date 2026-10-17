@@ -562,8 +562,10 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	_ = os.WriteFile(filepath.Join(opts.RunDir, "child.pid"),
-		[]byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+	pidPath := filepath.Join(opts.RunDir, "child.pid")
+	if werr := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); werr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", pidPath, werr)
+	}
 	// #415 PR-2 (Windows): contain the whole tree in a Job Object with
 	// KILL_ON_JOB_CLOSE — the kernel kills every process (including
 	// detached grandchildren) the moment the handle closes. POSIX returns
@@ -2250,15 +2252,24 @@ func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(runDir, "receipt.json"), data, 0o600)
+	receiptPath := filepath.Join(runDir, "receipt.json")
+	if werr := os.WriteFile(receiptPath, data, 0o600); werr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", receiptPath, werr)
+	}
 
 	// Centralized Evidence Lake export
 	if s.evidenceDir != "" {
 		taskEvidenceDir := filepath.Join(s.evidenceDir, taskID)
 		if err := os.MkdirAll(taskEvidenceDir, 0o700); err == nil {
-			_ = os.WriteFile(filepath.Join(taskEvidenceDir, "receipt.json"), data, 0o600)
+			evReceiptPath := filepath.Join(taskEvidenceDir, "receipt.json")
+			if werr := os.WriteFile(evReceiptPath, data, 0o600); werr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", evReceiptPath, werr)
+			}
 			if snap.Attempts > 0 {
-				_ = os.WriteFile(filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts)), data, 0o600)
+				attemptPath := filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts))
+				if werr := os.WriteFile(attemptPath, data, 0o600); werr != nil {
+					fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", attemptPath, werr)
+				}
 			}
 		}
 	}

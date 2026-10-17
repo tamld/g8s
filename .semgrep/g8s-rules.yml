@@ -60,6 +60,13 @@ rules:
         - "**/internal/receipt/**"
         - "**/internal/fsops/**"
         - "**/internal/controlplane/**"
+        - "**/internal/service/**"
+        - "**/internal/worker/**"
+        - "**/internal/harness/**"
+        - "**/internal/server/**"
+        - "**/internal/mcp/**"
+        - "**/internal/search/**"
+        - "**/internal/cli/**"
       exclude:
         - "*_test.go"
         - "**/*_test.go"

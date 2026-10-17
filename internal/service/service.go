@@ -324,10 +324,14 @@ func (m *Manager) Install() error {
 	previous, _ := os.ReadFile(m.cfg.PlistPath)
 	restore := func() {
 		if previous == nil {
-			_ = os.Remove(m.cfg.PlistPath)
+			if rmErr := os.Remove(m.cfg.PlistPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				fmt.Fprintf(os.Stderr, "[warn] service: remove plist %s: %v\n", m.cfg.PlistPath, rmErr)
+			}
 			return
 		}
-		_ = os.WriteFile(m.cfg.PlistPath, previous, 0o600)
+		if writeErr := os.WriteFile(m.cfg.PlistPath, previous, 0o600); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] service: restore plist %s: %v\n", m.cfg.PlistPath, writeErr)
+		}
 	}
 	if m.guard != nil {
 		if _, err := m.guard.BeginMaintenance("g8s-service", DefaultTTL); err != nil {
