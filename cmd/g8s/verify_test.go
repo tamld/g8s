@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -361,5 +363,148 @@ func TestVerifyCLI_MixedCodePathUnregistered(t *testing.T) {
 	}
 	if v.Outcome != verifier.OutcomeUnregistered {
 		t.Errorf("verdict.Outcome = %q, want unregistered", v.Outcome)
+	}
+}
+
+// TestVerifyCLI_CrossRepoTargetResolution verifies that a task targeting a sibling repo directory
+// resolves its verifier classes configuration and script checks from the sibling repo root.
+func TestVerifyCLI_CrossRepoTargetResolution(t *testing.T) {
+	siblingDir := t.TempDir()
+
+	// Create sibling repo's .g8s/verifier-classes.yml
+	g8sDir := filepath.Join(siblingDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatalf("mkdir .g8s: %v", err)
+	}
+	classesYAML := `classes:
+  - name: sibling-class
+    status: hard
+    founding_catch: "#100 sibling check"
+    priority: 10
+    paths:
+      - "src/**"
+    checks:
+      - type: script
+        run: tools/check_ok.sh
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "verifier-classes.yml"), []byte(classesYAML), 0o644); err != nil {
+		t.Fatalf("write verifier-classes.yml: %v", err)
+	}
+
+	// Create passing check script tools/check_ok.sh
+	toolsDir := filepath.Join(siblingDir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+	scriptContent := "#!/usr/bin/env bash\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(toolsDir, "check_ok.sh"), []byte(scriptContent), 0o755); err != nil {
+		t.Fatalf("write check_ok.sh: %v", err)
+	}
+
+	dbPath, store := setupTestDB(t)
+	defer store.Close()
+
+	rawDB := openReceiptsDB(t, dbPath)
+	pathsJSON := `["src/feature.go"]`
+	_, err := rawDB.Exec(`
+		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
+		VALUES ('rcpt-cross-1', 'brain', ?, 9999999999, 100)
+	`, pathsJSON)
+	if err != nil {
+		t.Fatalf("insert receipt: %v", err)
+	}
+
+	ctx := context.Background()
+	task, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey:  "k-cross-task",
+		Model:           "test-model",
+		Role:            "scout",
+		Permission:      "workspace_write",
+		AddDirs:         []string{siblingDir},
+		SkipPermissions: true,
+		Payload:         json.RawMessage(fmt.Sprintf(`{"prompt":"cross repo task","receipt_id":"rcpt-cross-1","add_dirs":[%q]}`, siblingDir)),
+	})
+	if err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &stdout, &stderr, dbPath)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v", err)
+	}
+
+	payloadBytes, _ := json.Marshal(env.Data)
+	var v verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v.Class != "sibling-class" {
+		t.Errorf("verdict.Class = %q, want sibling-class", v.Class)
+	}
+	if v.Registered != true {
+		t.Errorf("verdict.Registered = %v, want true", v.Registered)
+	}
+	if v.Outcome != verifier.OutcomePass {
+		t.Errorf("verdict.Outcome = %q, want pass", v.Outcome)
+	}
+	if len(v.Checks) != 1 || !v.Checks[0].OK {
+		t.Errorf("verdict.Checks = %+v, want 1 passing check", v.Checks)
+	}
+
+	// Verify scope_root field in payload also resolves sibling repo correctly
+	pathsJSON2 := `["src/sub/feature2.go"]`
+	_, err = rawDB.Exec(`
+		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
+		VALUES ('rcpt-cross-2', 'brain', ?, 9999999999, 100)
+	`, pathsJSON2)
+	if err != nil {
+		t.Fatalf("insert receipt 2: %v", err)
+	}
+
+	task2, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey:  "k-cross-task-scoperoot",
+		Model:           "test-model",
+		Role:            "scout",
+		Permission:      "workspace_write",
+		AddDirs:         []string{"."},
+		SkipPermissions: true,
+		Payload:         json.RawMessage(fmt.Sprintf(`{"prompt":"cross repo task scope_root","receipt_id":"rcpt-cross-2","scope_root":%q}`, siblingDir)),
+	})
+	if err != nil {
+		t.Fatalf("submit task 2: %v", err)
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	code2 := runVerifyWithIO([]string{"--task", task2.TaskID, "--json"}, &stdout2, &stderr2, dbPath)
+	if code2 != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code2, stderr2.String())
+	}
+
+	var env2 cli.Envelope
+	if err := json.Unmarshal(stdout2.Bytes(), &env2); err != nil {
+		t.Fatalf("failed to parse envelope: %v", err)
+	}
+
+	payloadBytes2, _ := json.Marshal(env2.Data)
+	var v2 verifier.Verdict
+	if err := json.Unmarshal(payloadBytes2, &v2); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v2.Class != "sibling-class" {
+		t.Errorf("verdict2.Class = %q, want sibling-class", v2.Class)
+	}
+	if v2.Registered != true {
+		t.Errorf("verdict2.Registered = %v, want true", v2.Registered)
+	}
+	if v2.Outcome != verifier.OutcomePass {
+		t.Errorf("verdict2.Outcome = %q, want pass", v2.Outcome)
 	}
 }

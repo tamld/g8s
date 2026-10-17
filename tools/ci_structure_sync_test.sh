@@ -161,6 +161,31 @@ run_test "non-Go repo with undocumented docs/ subdir fails" fail \
     "$SYNC_SCRIPT" --repo-root "$NON_GO_ROOT" --readme "$NON_GO_ROOT/README.md"
 rm -rf "$NON_GO_ROOT"
 
+# 9. Non-Go polyglot repo with package.json + src/ subdirs passes when README.md documents them.
+POLYGLOT_ROOT="$(mktemp -d)"
+mkdir -p "$POLYGLOT_ROOT/src/engine" "$POLYGLOT_ROOT/src/security"
+cat > "$POLYGLOT_ROOT/package.json" <<'EOF'
+{
+  "name": "fake-polyglot",
+  "version": "1.0.0"
+}
+EOF
+cat > "$POLYGLOT_ROOT/README.md" <<'EOF'
+# Polyglot Repo
+
+Modules:
+- `engine`: core runtime
+- `security`: boundaries and checks
+EOF
+run_test "polyglot repo with documented src/ subdirs passes" pass \
+    "$SYNC_SCRIPT" --repo-root "$POLYGLOT_ROOT" --readme "$POLYGLOT_ROOT/README.md"
+
+# 10. Non-Go polyglot repo fails when an undocumented src/ directory is added.
+mkdir -p "$POLYGLOT_ROOT/src/undocumented_mod"
+run_test "polyglot repo with undocumented src/ subdir fails" fail \
+    "$SYNC_SCRIPT" --repo-root "$POLYGLOT_ROOT" --readme "$POLYGLOT_ROOT/README.md"
+rm -rf "$POLYGLOT_ROOT"
+
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
     echo "STRUCTURE SYNC GATE TEST SUITE: $FAILURES failure(s)."
