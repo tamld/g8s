@@ -49,9 +49,15 @@ that returns un-cited impressions failed its role, even if the text is useful.
 4. CONCURRENT DRAIN (same role, queue of tasks)
      g8s worker --once=false --concurrency N   (requires git checkout; per-attempt worktrees)
      join: queue semantics; per-task receipts; N>1 hard-gated on isolation
+
+5. MANIFEST-LOCKED MULTI-PHASE PIPELINE (creative / multimodal / multi-component builds)
+     Phase 0 (F0 exclusive): freeze SSoT contract (facts + continuity/interface manifest) in trust_boundaries
+     Phase 1..K (parallel F1 builders): disjoint WriteReceipts (e.g. data/script vs assets/audio vs scenes/ui)
+     Phase K+1 (independent F1 verifier, Author != Reviewer): multi-gate check (Gate A content/spec, Gate B visual/structural, Gate C runtime/output)
+     join: supervisor verifies all gate stamps + SHA-256 chain before HITL acceptance
 ```
 
-Shapes 1–3 are supervisor-side N submits (default). Shape 4 uses the worker
+Shapes 1–3 and 5 are supervisor-side N submits (default). Shape 4 uses the worker
 loop's own bounded pool (#394) — one process, N isolated attempts.
 
 ## Join protocol
