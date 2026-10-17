@@ -44,4 +44,5 @@ lanes:
       - G6
       - doc-contract
       - redaction-scan
+      - sast-triad
       - review

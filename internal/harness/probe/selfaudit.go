@@ -137,7 +137,7 @@ func AuditWorktreeDiscard(ctx context.Context) (string, error) {
 	defer os.RemoveAll(tmpDir)
 
 	repoDir := filepath.Join(tmpDir, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+	if err := os.MkdirAll(repoDir, 0o700); err != nil {
 		return "", err
 	}
 
@@ -170,7 +170,7 @@ func AuditWorktreeDiscard(ctx context.Context) (string, error) {
 	}
 
 	dirtyFile := filepath.Join(wt.Path, "dirty.txt")
-	if err := os.WriteFile(dirtyFile, []byte("uncommitted deliverable"), 0o644); err != nil {
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted deliverable"), 0o600); err != nil {
 		return "", fmt.Errorf("write uncommitted file: %w", err)
 	}
 

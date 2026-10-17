@@ -152,7 +152,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 
 ## Chất lượng
 
-Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race`. Push phải qua hệ gate pre-push: doc-contract sync, layer ownership, version sync, coverage ratchet, dogfood roundtrip, build đa nền tảng, root hygiene.
+Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race`, kết hợp **Bộ 3 SAST Triad**: `Gosec` (quét Go AST trong `golangci-lint`), `Semgrep` (luật AST cục bộ tại `.semgrep/g8s-rules.yml`), và `CodeQL` (phân tích luồng dữ liệu & taint liên hàm tại `.github/workflows/codeql.yml`). Push phải qua hệ gate pre-push: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfood roundtrip, build đa nền tảng, root hygiene.
 
 ## Lộ trình
 

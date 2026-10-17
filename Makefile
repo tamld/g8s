@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: all build local test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check pre-push pre-push-fast lint setup-hooks
+.PHONY: all build local test dogfood clean-branches clean-worktrees spawn-worktree verify-cross-platform ci-layer-check pre-push pre-push-fast lint sast setup-hooks
 
 all: build
 
@@ -14,7 +14,11 @@ pre-push-fast:
 	@bash tools/pre_push.sh --fast
 
 lint:
-	@GOWORK=off GOTOOLCHAIN=go1.26.0 golangci-lint run
+	@GOWORK=off GOTOOLCHAIN=go1.26.9 golangci-lint run ./...
+	@bash tools/ci_semgrep_check.sh
+
+sast:
+	@bash tools/ci_semgrep_check.sh
 
 setup-hooks:
 	@bash tools/setup_hooks.sh

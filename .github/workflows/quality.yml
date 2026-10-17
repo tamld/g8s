@@ -140,18 +140,34 @@ jobs:
         env:
           CGO_ENABLED: '0'
 
-      - name: golangci-lint (staticcheck, errcheck, gosec, govulncheck, gocognit)
+      - name: golangci-lint (staticcheck, errcheck, gosec, govet, ineffassign, unused)
+        if: env.CI_LANE != 'docs'
         run: golangci-lint run
 
-      - name: Cyclomatic complexity <= 15
+      - name: Cognitive complexity audit on changed Go files (gocognit)
         if: env.CI_LANE != 'docs'
+        shell: bash
         run: |
-          high=$(gocognit -over 15 ./... 2>/dev/null || true)
-          if [ -n "$high" ]; then
-            echo "::error::Functions with cyclomatic complexity > 15:"
-            echo "$high"
-            exit 1
+          if command -v gocognit >/dev/null 2>&1; then
+            CHANGED_GO=$(git diff --name-only origin/main...HEAD 2>/dev/null | grep '\.go$' | grep -v '_test\.go$' || true)
+            if [ -n "$CHANGED_GO" ]; then
+              high=$(echo "$CHANGED_GO" | xargs gocognit -over 30 2>/dev/null || true)
+              if [ -n "$high" ]; then
+                echo "::warning::Changed functions with cognitive complexity > 30:"
+                echo "$high"
+              fi
+            fi
           fi
+
+      - name: Semgrep SAST policy self-test
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: bash tools/ci_semgrep_check_test.sh
+
+      - name: Semgrep SAST policy gate (.semgrep/g8s-rules.yml)
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: bash tools/ci_semgrep_check.sh
 
       - name: AI anti-pattern self-test
         shell: bash

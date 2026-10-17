@@ -152,7 +152,10 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 				if content == "" {
 					content = fmt.Sprintf("# Proposal by %s\n\n## Architecture Overview\n\nDual-blind proposal for brief.\n\n## Implementation\n\nImplemented per specification.", workerID)
 				}
-				_ = os.WriteFile(solutionPath, []byte(content), 0o644)
+				if writeErr := os.WriteFile(solutionPath, []byte(content), 0o600); writeErr != nil {
+					errCh <- fmt.Errorf("worker %s: write solution file %s: %w", workerID, solutionPath, writeErr)
+					return
+				}
 			}
 			res.Solutions[idx] = solutionPath
 		}(i)
@@ -171,7 +174,9 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	if len(validSolutions) > 0 {
-		_, _ = ConvergeFiles(validSolutions, convergedPath)
+		if _, convErr := ConvergeFiles(validSolutions, convergedPath); convErr != nil {
+			return nil, fmt.Errorf("conv: synthesize converged report %s: %w", convergedPath, convErr)
+		}
 		res.Converged = convergedPath
 	}
 
@@ -180,8 +185,13 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 
 func writeFallbackSolution(path, workerID, prompt string) {
 	content := fmt.Sprintf("# Solution Proposal (%s)\n\n## Architecture\n- Zero-CGO pure Go implementation\n- Strict process isolation\n\n## Trade-offs\n- Standard library over third-party dependencies\n", workerID)
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, []byte(content), 0o644)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] conv: create fallback solution dir %s: %v\n", filepath.Dir(path), err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] conv: write fallback solution %s: %v\n", path, err)
+	}
 }
 
 func runnerRandomHex(n int) string {

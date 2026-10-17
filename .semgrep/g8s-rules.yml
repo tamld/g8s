@@ -1,0 +1,98 @@
+# .semgrep/g8s-rules.yml — Deterministic Offline AST Security & Governance Rules for g8s
+#
+# Enforces g8s Project Constitution (spec/constitution.md) and CI/CD security invariants
+# without requiring external network access or cloud telemetry (--metrics=off).
+
+rules:
+  - id: g8s-zero-cgo-import
+    languages: [go]
+    severity: ERROR
+    message: >-
+      [Constitution Axiom 3] CGO and C-linked SQLite drivers (import "C" or
+      github.com/mattn/go-sqlite3) are forbidden in g8s.
+      Hint: Use pure-Go implementations (modernc.org/sqlite) so CGO_ENABLED=0 builds cleanly.
+    pattern-either:
+      - pattern: import "C"
+      - pattern: import "github.com/mattn/go-sqlite3"
+    paths:
+      exclude:
+        - "**/reference/**"
+
+  - id: g8s-writefile-perm-0600
+    languages: [go]
+    severity: ERROR
+    message: >-
+      [Constitution Axiom 4 / G306] Production os.WriteFile calls must use
+      POSIX 0600 (0o600) or stricter permissions. Found world/group-readable file mode.
+      Hint: Change file mode to 0o600 (and parent os.MkdirAll mode to 0o700).
+    pattern-either:
+      - pattern: os.WriteFile($PATH, $DATA, 0o644)
+      - pattern: os.WriteFile($PATH, $DATA, 0644)
+      - pattern: os.WriteFile($PATH, $DATA, 0o666)
+      - pattern: os.WriteFile($PATH, $DATA, 0666)
+      - pattern: os.WriteFile($PATH, $DATA, 0o755)
+      - pattern: os.WriteFile($PATH, $DATA, 0755)
+    paths:
+      exclude:
+        - "*_test.go"
+        - "**/*_test.go"
+        - "**/reference/**"
+
+  - id: g8s-no-silent-fs-error-swallow
+    languages: [go]
+    severity: ERROR
+    message: >-
+      [Explicit Error Contract] Do not silently swallow filesystem mutation
+      errors with '_ = os.WriteFile(...)' or '_ = os.Rename(...)'. Silent error
+      swallowing hides disk/permission failures and forces AI agents to guess.
+      Hint: Return a wrapped error (fmt.Errorf("context %s: %w", path, err)) or
+      log an explicit diagnostic to os.Stderr (fmt.Fprintf(os.Stderr, "[warn] pkg: action %s: %v\n", path, err)).
+    pattern-either:
+      - pattern: _ = os.WriteFile($PATH, $DATA, $PERM)
+      - pattern: _ = os.Rename($OLD, $NEW)
+      - pattern: _, _ = os.OpenFile($PATH, $FLAG, $PERM)
+    paths:
+      include:
+        - "**/cmd/g8s/**"
+        - "**/internal/conv/**"
+        - "**/internal/sleep/**"
+        - "**/internal/initwiz/**"
+        - "**/internal/receipt/**"
+        - "**/internal/fsops/**"
+        - "**/internal/controlplane/**"
+      exclude:
+        - "*_test.go"
+        - "**/*_test.go"
+        - "**/reference/**"
+
+  - id: g8s-http-listenandserve-no-timeout
+    languages: [go]
+    severity: ERROR
+    message: >-
+      [Security / Slowloris] Do not call http.ListenAndServe directly in
+      production code.
+      Hint: Construct an *http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second} and call srv.ListenAndServe().
+    pattern: http.ListenAndServe($ADDR, $HANDLER)
+    paths:
+      exclude:
+        - "*_test.go"
+        - "**/*_test.go"
+        - "**/reference/**"
+
+  - id: g8s-github-actions-untrusted-input
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      [CI Security] Untrusted GitHub event context interpolated directly inside
+      a workflow 'run:' script block enables command injection.
+      Hint: Bind the expression to a step 'env:' variable first and reference "$ENV_VAR" in bash.
+    patterns:
+      - pattern: |
+          run: $SCRIPT
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: '\$\{\{\s*github\.(head_ref|event\.(issue\.(title|body)|pull_request\.(title|body)|comment\.body|review\.body|commits\[[^\]]*\]\.message))\s*\}\}'
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"

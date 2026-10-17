@@ -89,3 +89,23 @@ cosign verify-blob \
   --signature checksums.txt.sig \
   checksums.txt
 ```
+
+---
+
+## 5. Source-Level SAST Triad (`Gosec` + `Semgrep` + `CodeQL`)
+
+Every commit and pull request is verified against a 3-layer static application security testing (SAST) pipeline:
+
+1. **Layer 1A — Go AST Security (`Gosec` via `golangci-lint`)**:
+   Enforces POSIX `0600`/`0700` file permissions (`G306`/`G301`/`G302`, Constitution Axiom 4), cryptographic strength (`G401`–`G505`), and HTTP server hardening (`G112`/`G114`).
+   ```sh
+   golangci-lint run ./...
+   ```
+2. **Layer 1B — Custom Offline AST Policy (`Semgrep`)**:
+   Enforces `g8s`-specific structural invariants defined in [`.semgrep/g8s-rules.yml`](../../.semgrep/g8s-rules.yml) (`g8s-zero-cgo-import`, `g8s-writefile-perm-0600`, `g8s-http-listenandserve-no-timeout`, `g8s-github-actions-untrusted-input`).
+   ```sh
+   bash tools/ci_semgrep_check_test.sh && bash tools/ci_semgrep_check.sh
+   ```
+3. **Layer 2 — Inter-Procedural Dataflow & Taint Analysis (`CodeQL`)**:
+   Executed automatically in [`.github/workflows/codeql.yml`](../../.github/workflows/codeql.yml) across `go` (`CGO_ENABLED=0`) and `actions` using the `security-extended` query suite, publishing SARIF reports to GitHub Code Scanning.
+
