@@ -482,14 +482,14 @@ func runDeliver(args []string) {
 
 	pruned := false
 	if *pruneWorktree && !*dryRun {
-		rmCmd := exec.Command("git", "worktree", "remove", "--force", deliverableDir)
+		rmCmd := exec.Command("git", "worktree", "remove", "--force", "--", deliverableDir)
 		rmCmd.Dir = cwd
 		if out, rmErr := rmCmd.CombinedOutput(); rmErr == nil {
 			pruned = true
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove worktree %s: %v (%s)\n", deliverableDir, rmErr, strings.TrimSpace(string(out)))
 		}
-		brCmd := exec.Command("git", "branch", "-D", "wt/"+taskID)
+		brCmd := exec.Command("git", "branch", "-D", "--", "wt/"+taskID)
 		brCmd.Dir = cwd
 		_, _ = brCmd.CombinedOutput()
 	}
