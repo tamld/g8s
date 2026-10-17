@@ -751,7 +751,15 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	// shared checkout (warn, never fail the task). read_only attempts are
 	// untouched. opts.Dir (concurrent-loop per-worker worktree) wins over
 	// the request default; the isolator wins over both for writes.
-	spawnDir := firstNonEmpty(opts.Dir, firstOf(req.AddDirs), s.runRoot)
+	// #610: when req.AddDirs specifies an explicit target repository
+	// (cross-repo dispatch), it takes precedence over pool worktree opts.Dir.
+	explicitAddDir := strings.TrimSpace(firstOf(req.AddDirs))
+	var spawnDir string
+	if explicitAddDir != "" && explicitAddDir != "." && (s.runRoot == "" || filepath.Clean(explicitAddDir) != filepath.Clean(s.runRoot)) {
+		spawnDir = explicitAddDir
+	} else {
+		spawnDir = firstNonEmpty(opts.Dir, explicitAddDir, s.runRoot)
+	}
 	var releaseWorktree func(keep bool)
 	var isolatedWorktreeDir string
 	if req.Permission == "workspace_write" && s.isolator != nil {
