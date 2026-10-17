@@ -121,23 +121,65 @@ fi
 
 # --- gate mode -------------------------------------------------------------
 if [ ! -f "go.mod" ]; then
+    missing=0
+    checked_any=0
     if [ -f "docs/README.md" ]; then
-        missing=0
-        count=0
+        checked_any=1
         for d in docs/*/; do
             [ -d "$d" ] || continue
             sub=$(basename "$d")
-            count=$((count + 1))
             if ! grep -qF "$sub" "docs/README.md"; then
                 echo "::error::structure sync: docs/$sub/ is not documented in docs/README.md (#420 G2)"
                 missing=$((missing + 1))
             fi
         done
-        if [ "$missing" -gt 0 ]; then
-            echo "STRUCTURE SYNC GATE: $missing undocumented docs/ subdirectory(ies)."
-            exit 1
+    fi
+    if [ -d "src" ] || [ -d "rust" ]; then
+        if [ -f "package.json" ] || [ -f "Cargo.toml" ] || [ -f "dist-workspace.toml" ]; then
+            if [ -d "src" ]; then
+                for d in src/*/; do
+                    [ -d "$d" ] || continue
+                    sub=$(basename "$d")
+                    checked_any=1
+                    found=0
+                    for doc in "$README" "AGENTS.md" "docs/README.md"; do
+                        if [ -f "$doc" ] && grep -qF "$sub" "$doc"; then
+                            found=1
+                            break
+                        fi
+                    done
+                    if [ "$found" -eq 0 ]; then
+                        echo "::error::structure sync: src/$sub/ is not documented in $README or AGENTS.md (#420 G2)"
+                        missing=$((missing + 1))
+                    fi
+                done
+            fi
+            if [ -d "rust" ]; then
+                for d in rust/*/; do
+                    [ -d "$d" ] || continue
+                    sub=$(basename "$d")
+                    checked_any=1
+                    found=0
+                    for doc in "$README" "AGENTS.md" "docs/README.md"; do
+                        if [ -f "$doc" ] && grep -qF "$sub" "$doc"; then
+                            found=1
+                            break
+                        fi
+                    done
+                    if [ "$found" -eq 0 ]; then
+                        echo "::error::structure sync: rust/$sub/ is not documented in $README or AGENTS.md (#420 G2)"
+                        missing=$((missing + 1))
+                    fi
+                done
+            fi
         fi
-        echo "STRUCTURE SYNC GATE: OK — docs/README.md covers all $count first-level docs/ directories."
+    fi
+    if [ "$missing" -gt 0 ]; then
+        echo "STRUCTURE SYNC GATE: $missing undocumented subdirectory(ies)."
+        exit 1
+    fi
+    if [ "$checked_any" -eq 1 ]; then
+        echo "STRUCTURE SYNC GATE: OK — polyglot structure verified."
         exit 0
     fi
     echo "STRUCTURE SYNC GATE: SKIP — no go.mod found (Go-project structure gate)."
