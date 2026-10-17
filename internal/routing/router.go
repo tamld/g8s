@@ -3,6 +3,7 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -330,8 +331,13 @@ func Route(ctx context.Context, req RouteRequest) (Decision, error) {
 	if manifest == nil {
 		manifest = DefaultManifest()
 	}
-	if cat, err := config.LoadDefaultCatalog(); err == nil && cat != nil {
-		_ = cat.MergeInto(manifest)
+	cat, catErr := config.LoadDefaultCatalog()
+	if catErr != nil {
+		if !errors.Is(catErr, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "[warn] routing: load agent-models catalog: %v\n", catErr)
+		}
+	} else if cat != nil {
+		cat.MergeInto(manifest)
 	}
 	req.Manifest = manifest
 

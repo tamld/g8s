@@ -45,11 +45,13 @@ static_entry() {
         offer) echo "├── offer/                  # Pull-bundle for sibling projects (profiles, onboarding, seeds)" ;;
         plans) echo "├── plans/                  # Campaign ledgers (dated, session-type marked)" ;;
         reference) echo "├── reference/              # JIT-only Python baseline (read, never import)" ;;
-        spec) echo "├── spec/openspec/          # OpenSpec deltas (DELTA-01..23)" ;;
+        spec) echo "├── spec/openspec/          # OpenSpec deltas (DELTA-01..24)" ;;
         schemas) echo "├── schemas/                # JSON schemas (task, receipt, result)" ;;
         scripts) echo "├── scripts/                # Public installer (scripts/install.sh curl entrypoint)" ;;
-        tools) echo "├── tools/                  # CI helper scripts (pre-push gates, release)" ;;
-        workflows) echo "└── .github/workflows/      # CI/CD pipelines" ;;
+        tools) echo "├── tools/                  # CI helper scripts (pre-push gates, SAST, release)" ;;
+        g8s_dir) echo "├── .g8s/                   # Declarative governance registries (models, effort, lanes, trust)" ;;
+        semgrep) echo "├── .semgrep/               # Offline AST security & explicit-error rules (g8s-rules.yml)" ;;
+        workflows) echo "└── .github/workflows/      # CI/CD pipelines (ci, quality, codeql, govulncheck, fuzz, release)" ;;
         *) return 1 ;;
     esac
 }
@@ -88,8 +90,10 @@ render() {
     done
     echo "│   └── ...                 # supporting packages"
     static_entry offer_go
-    for entry in assets offer docs examples packaging plans reference schemas scripts skills spec tools workflows; do
+    for entry in assets offer docs examples packaging plans reference schemas scripts skills spec tools g8s_dir semgrep workflows; do
         case "$entry" in
+            g8s_dir) [ -d ".g8s" ] && static_entry g8s_dir ;;
+            semgrep) [ -d ".semgrep" ] && static_entry semgrep ;;
             workflows) [ -d ".github/workflows" ] && static_entry workflows ;;
             *) [ -d "$entry" ] && static_entry "$entry" ;;
         esac

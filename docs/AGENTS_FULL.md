@@ -83,6 +83,7 @@ Incoming Task:
 5. **Spec-First**: Never write code before verifying or updating the corresponding OpenSpec delta in `spec/openspec/`.
 6. **Test Parity & Race Detector**: Every feature must pass `CGO_ENABLED=0 go test -v -race ./...`.
 7. **Unified JSON Envelope**: All CLI commands must support standard JSON envelopes (`--json`, `--jsonl`, `--actor`, `--trace-id`) with Feynman error hints on failure.
+8. **Zero Silent Error Swallowing & SAST Triad**: Never discard filesystem or state errors via `_ = os.WriteFile(...)` / `_ = os.Rename(...)`; return wrapped errors or log structured `[warn]` diagnostics to `os.Stderr`. All production file/dir writes must use `0o600`/`0o700` permissions and pass the SAST Triad (`Gosec` in `.golangci.yml`, offline `Semgrep` in `.semgrep/g8s-rules.yml`, and `CodeQL` in `.github/workflows/codeql.yml`).
 
 ---
 
@@ -114,6 +115,7 @@ Incoming Task:
 | **DELTA-21** | [`21-unified-memory-adapter-spec.md`](../spec/openspec/21-unified-memory-adapter-spec.md) | `internal/memory` | APPLIED |
 | **DELTA-22** | [`22-brief-dor-floor-spec.md`](../spec/openspec/22-brief-dor-floor-spec.md) | `internal/brief` | APPLIED |
 | **DELTA-23** | [`23-native-agent-io-spec.md`](../spec/openspec/23-native-agent-io-spec.md) | `internal/fsops`, `internal/search` | APPLIED |
+| **DELTA-24** | [`24-differential-governance-hitl-spec.md`](../spec/openspec/24-differential-governance-hitl-spec.md) | `internal/vault`, `internal/verifier`, `internal/telemetry` | APPLIED |
 
 ---
 
@@ -139,28 +141,33 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
 
 ---
 
-## 7. Verification & CI Quality Gates
+## 7. Verification & CI Quality Gates (Including SAST Triad)
 
-All pull requests and code modifications must pass the following local and CI quality gates (`./tools/pre_push.sh`):
+All pull requests and code modifications must pass the local and CI quality & security gates (`./tools/pre_push.sh`, `.github/workflows/quality.yml`, `.github/workflows/codeql.yml`):
 
 ```bash
 # 1. Run full test suite with race detector (Zero-CGO + Race)
 CGO_ENABLED=0 go test -v ./...
 CGO_ENABLED=1 go test -v -race ./...
 
-# 2. Run static analysis, formatting, and doc-code contracts
-go vet ./...
+# 2. Run SAST Triad (Gosec in golangci-lint + Semgrep AST rules) & vulnerability check
+golangci-lint run ./...
+bash tools/ci_semgrep_check_test.sh && bash tools/ci_semgrep_check.sh
+govulncheck ./...
+
+# 3. Run static analysis, formatting, and doc-code anti-stale contracts
+CGO_ENABLED=0 go vet ./...
 test -z "$(gofmt -l .)"
 bash tools/ci_doc_contract_check.sh
 bash tools/ci_link_integrity.sh
 bash tools/claims_check.sh
 
-# 3. Verify cross-platform compilation
+# 4. Verify cross-platform compilation
 GOOS=linux GOARCH=amd64 go build ./cmd/g8s
 GOOS=windows GOARCH=amd64 go build ./cmd/g8s
 GOOS=darwin GOARCH=arm64 go build ./cmd/g8s
 
-# 4. Check AI & Brief anti-pattern linting
+# 5. Check AI & Brief anti-pattern linting
 bash tools/ai_lint.sh
 bash tools/brief_lint.sh
 ```

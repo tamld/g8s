@@ -1,0 +1,97 @@
+# g8s CodeQL Deep Semantic SAST & Taint Analysis Workflow
+#
+# Performs inter-procedural dataflow and taint analysis across Go packages
+# (trust boundaries: internal/receipt, internal/worker, internal/server,
+# internal/harness, internal/memory, internal/dispatch) and GitHub Actions
+# workflows. Honors ADR-0031 two-lane routing (early-exits on docs-only PRs).
+
+name: CodeQL
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * 1' # Weekly Monday 03:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect CI Lane (ADR-0031)
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            CI_LANE="build"
+          else
+            BEFORE_SHA="${{ github.event.before }}"
+            lane=$(bash tools/ci_lane_detect.sh origin/main "$BEFORE_SHA" || true)
+            if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
+              CI_LANE="docs"
+            else
+              CI_LANE="build"
+            fi
+          fi
+          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
+          echo "Detected lane: $CI_LANE"
+
+      - name: Early exit for docs lane
+        if: env.CI_LANE == 'docs'
+        shell: bash
+        run: |
+          echo "::notice::docs lane: CodeQL (${{ matrix.language }}) skipped (not applicable)"
+          exit 0
+
+      - name: Setup Go
+        if: env.CI_LANE != 'docs' && matrix.language == 'go'
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.9'
+
+      - name: Initialize CodeQL
+        if: env.CI_LANE != 'docs'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - name: Autobuild (Zero-CGO)
+        if: env.CI_LANE != 'docs' && matrix.build-mode == 'autobuild'
+        env:
+          CGO_ENABLED: '0'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        if: env.CI_LANE != 'docs'
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

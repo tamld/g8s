@@ -190,7 +190,7 @@ Tool reference: [docs/user-guide/mcp-tools.md](docs/user-guide/mcp-tools.md).
 | Provider integrations | [docs/integrations/](docs/integrations/) (Antigravity, Claude Desktop, Cursor, Windsurf) |
 | Requirements & acceptance | [docs/PRD.md](docs/PRD.md), [docs/SRS.md](docs/SRS.md), [docs/DOD_DOR.md](docs/DOD_DOR.md) |
 | Governing rules | [spec/constitution.md](spec/constitution.md): Zero-CGO, two-tier governance, process containment |
-| Technical deltas | [spec/openspec/](spec/openspec/): DELTA-01..23 with lifecycle status |
+| Technical deltas | [spec/openspec/](spec/openspec/): DELTA-01..24 with lifecycle status |
 | Architecture decisions | [docs/decisions/](docs/decisions/): ADR-0001…0032 |
 | Campaign ledgers & history | [plans/](plans/), [docs/history/](docs/history/) |
 | Release history | [CHANGELOG.md](CHANGELOG.md) |
@@ -199,7 +199,7 @@ Key ADRs: [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard 
 
 ## Quality Gates
 
-Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector). Pushes clear the pre-push gate battery: doc-contract sync, layer ownership, version sync, coverage ratchet, dogfooding roundtrip, cross-platform build, root hygiene.
+Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector), plus the **SAST Triad**: `Gosec` (Go AST security via `golangci-lint`), `Semgrep` (offline AST policy rules in `.semgrep/g8s-rules.yml`), and `CodeQL` (inter-procedural taint & dataflow analysis in `.github/workflows/codeql.yml`). Pushes clear the pre-push gate battery: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfooding roundtrip, cross-platform build, root hygiene.
 
 ## Roadmap
 
@@ -281,9 +281,11 @@ g8s/
 ├── schemas/                # JSON schemas (task, receipt, result)
 ├── scripts/                # Public installer (scripts/install.sh curl entrypoint)
 ├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)
-├── spec/openspec/          # OpenSpec deltas (DELTA-01..23)
-├── tools/                  # CI helper scripts (pre-push gates, release)
-└── .github/workflows/      # CI/CD pipelines
+├── spec/openspec/          # OpenSpec deltas (DELTA-01..24)
+├── tools/                  # CI helper scripts (pre-push gates, SAST, release)
+├── .g8s/                   # Declarative governance registries (models, effort, lanes, trust)
+├── .semgrep/               # Offline AST security & explicit-error rules (g8s-rules.yml)
+└── .github/workflows/      # CI/CD pipelines (ci, quality, codeql, govulncheck, fuzz, release)
 ```
 <!-- structure:end -->
 

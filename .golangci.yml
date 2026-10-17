@@ -5,6 +5,7 @@ linters:
   default: none
   enable:
     - errcheck
+    - gosec
     - govet
     - ineffassign
     - staticcheck
@@ -24,6 +25,18 @@ linters:
         - (*golang.org/x/sys/windows/registry.Key).Close
         - (io.ReadCloser).Close
         - os.Remove
+    gosec:
+      excludes:
+        - G115 # Safe bounded integer conversions in telemetry/supervisor
+        - G118 # Async child process handle context cancelled on Wait/Kill
+        - G122 # AST/scanner filepath.WalkDir callbacks on local workspace
+        - G202 # Parameterized SQL WHERE clause assembly in controlplane
+        - G204 # Subprocess execution is the core responsibility of g8s
+        - G304 # File path inputs are validated via WriteReceipt & fsops
+        - G404 # math/rand/v2 used strictly for non-crypto SQLite backoff jitter
+        - G702 # Command execution with configured provider/worker argv
+        - G703 # Path arguments in CLI and onboarding wizard
+        - G704 # Configured HTTP provider endpoint requests
   exclusions:
     generated: lax
     presets:
@@ -31,6 +44,14 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+      - path: internal/harness/probe/selfaudit\.go
+        linters:
+          - gosec
+        text: "G101:"
     paths:
       - third_party$
       - builtin$

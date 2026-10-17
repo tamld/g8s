@@ -63,10 +63,10 @@ func ConvergeFiles(files []string, outPath string) (*ConvergedReport, error) {
 	report := Converge(solutions)
 
 	if outPath != "" {
-		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil && filepath.Dir(outPath) != "." {
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil && filepath.Dir(outPath) != "." {
 			return nil, fmt.Errorf("conv: create out dir: %w", err)
 		}
-		if err := os.WriteFile(outPath, []byte(report.MarkdownContent), 0o644); err != nil {
+		if err := os.WriteFile(outPath, []byte(report.MarkdownContent), 0o600); err != nil {
 			return nil, fmt.Errorf("conv: write output %s: %w", outPath, err)
 		}
 	}

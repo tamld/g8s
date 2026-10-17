@@ -74,7 +74,7 @@ func (r *FileRouter) Route(_ context.Context, event Event, isSleeping bool) erro
 		return nil
 	}
 
-	f, err := os.OpenFile(r.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(r.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("file router: open %s: %w", r.filePath, err)
 	}

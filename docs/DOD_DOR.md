@@ -26,8 +26,8 @@ A dispatched agent task is **Ready** when:
 A code/feature task is **Done** when:
 1. **Test Coverage**: Core business logic ≥ 90% coverage, zero races (`go test -race ./...`).
 2. **Pure-Go Build**: Clean compilation Darwin/Linux/Windows with `CGO_ENABLED=0`.
-3. **Lint Clean**: Passes `gofmt -l`, `gofumpt -d` (strict), `golangci-lint`, zero errors/warnings.
-4. **Security**: Zero secrets in history (`gitleaks`), path normalization handles symlinks and `..` traversal.
+3. **Lint & SAST Clean**: Passes `gofmt -l`, `gofumpt -d` (strict), `golangci-lint` (including `gosec`), `tools/ci_semgrep_check.sh` (`.semgrep/g8s-rules.yml`), and `CodeQL`, zero errors/warnings.
+4. **Security**: Zero secrets in history (`gitleaks`), `0600`/`0700` POSIX permissions enforced by `G306`/Semgrep, `govulncheck` clean, path normalization handles symlinks and `..` traversal.
 5. **Error Contracts**: All error paths return Feynman diagnostic + standard exit code (0-5).
 6. **Documentation**: CLI subcommands have `--help` descriptions, ADRs up to date.
 

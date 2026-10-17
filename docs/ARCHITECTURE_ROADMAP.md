@@ -31,7 +31,7 @@ The following table defines the non-negotiable architectural boundaries, runtime
 | **Memory & Indexing** | SQLite FTS5 + BM25 | Pure Go FTS Tokenizer | Decoupled knowledge vault indexing code symbols, identifiers, CamelCase, and snake_case tokens. |
 | **Process Containment** | OS Process Groups (`Setpgid`) | POSIX / Win32 JobObjects | Guarantees clean subtree process termination (`SIGTERM` / `SIGKILL` to `-pgid`) without orphan processes. |
 | **Packaging & Release** | GoReleaser & NFPM | GoReleaser `v2.10+` | Static single-binary builds for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, and `windows/amd64`. |
-| **Quality Gates** | Go Test, Staticcheck, Gosec, AI Lint, Receipt Verifier, Cross-Platform Build | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), strict formatting (`gofumpt`), cross-platform compilation (Linux, Darwin, Windows), receipt verification gate, and zero AI anti-patterns. |
+| **Quality Gates** | Go Test, Staticcheck, SAST Triad (`Gosec`, `Semgrep`, `CodeQL`), AI Lint, Receipt Verifier, Cross-Platform Build | Multi-layer CI | Enforces `-race` detector, zero unchecked errors (`errcheck`), strict formatting (`gofumpt`), Go AST security (`gosec`), custom AST policy (`.semgrep/g8s-rules.yml`), inter-procedural taint analysis (`codeql.yml`), `govulncheck`, cross-platform compilation (Linux, Darwin, Windows), receipt verification gate, and zero AI anti-patterns. |
 
 ---
 

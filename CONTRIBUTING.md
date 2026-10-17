@@ -37,13 +37,19 @@ Thank you for your interest in contributing to **g8s (The Gatekeepers)**!
    - Implement tests in `internal/<pkg>/<pkg>_test.go`.
 4. **Step 4: Implement Pure-Go Logic**:
    - Ensure all SQLite operations use `modernc.org/sqlite`.
-5. **Step 5: Run Verification**:
+5. **Step 5: Run Verification & SAST Gates**:
    ```bash
    # Format code
    gofmt -s -w .
 
    # Run tests with race detector
-   CGO_ENABLED=0 go test -v -race ./...
+   CGO_ENABLED=0 go test -v ./...
+   CGO_ENABLED=1 go test -v -race ./...
+
+   # Run SAST (Gosec + Semgrep) and full pre-push verification harness
+   golangci-lint run ./...
+   bash tools/ci_semgrep_check.sh
+   ./tools/pre_push.sh --fast
    ```
 6. **Step 6: Submit Pull Request**:
    - Commit using Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).

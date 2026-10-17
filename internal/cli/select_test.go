@@ -150,10 +150,10 @@ func TestSelectPath(t *testing.T) {
 	})
 
 	t.Run("error cases", func(t *testing.T) {
-		// Missing field
+		// Missing field includes available keys so AI agents never have to guess
 		_, err := SelectPath(jsonDoc, "data.missing")
-		if err == nil || !strings.Contains(err.Error(), "field \"missing\" not found") {
-			t.Fatalf("expected missing field error, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "field \"missing\" not found") || !strings.Contains(err.Error(), "available keys: [active, count, empty_val, items, receipt_id]") {
+			t.Fatalf("expected missing field error with available keys, got %v", err)
 		}
 
 		// Field on non-object

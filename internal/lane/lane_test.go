@@ -514,7 +514,7 @@ func TestBundleConfig_TrackedFileVerification(t *testing.T) {
 		{
 			id:            lane.LaneSecurity,
 			name:          "security",
-			expectedGates: []string{"G1", "G2", "G3", "G4", "G5", "G6", "doc-contract", "redaction-scan", "review"},
+			expectedGates: []string{"G1", "G2", "G3", "G4", "G5", "G6", "doc-contract", "redaction-scan", "sast-triad", "review"},
 		},
 	}
 

@@ -63,7 +63,7 @@ func readAutopilotLock(path string) (*autopilotLockData, error) {
 }
 
 func writeAutopilotLock(path string, pid int, startTime time.Time) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(autopilotLockData{
@@ -73,7 +73,7 @@ func writeAutopilotLock(path string, pid int, startTime time.Time) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func removeAutopilotLock(path string) {
@@ -813,17 +813,19 @@ func installLaunchAgentSchedule(binPath string, dur time.Duration) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o700); err != nil {
 		return fmt.Errorf("create LaunchAgents directory: %w", err)
 	}
 	if _, err := os.Stat(plistPath); err == nil {
 		if os.Getenv("G8S_LAUNCH_AGENTS_NO_LOAD") != "1" {
-			_ = exec.Command("launchctl", "unload", plistPath).Run()
+			if out, unloadErr := exec.Command("launchctl", "unload", plistPath).CombinedOutput(); unloadErr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] autopilot: launchctl unload %s: %v (%s)\n", plistPath, unloadErr, strings.TrimSpace(string(out)))
+			}
 		}
 	}
 
 	content := generateLaunchAgentPlist(binPath, dur)
-	if err := os.WriteFile(plistPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(plistPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write LaunchAgent plist: %w", err)
 	}
 

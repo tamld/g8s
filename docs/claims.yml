@@ -390,3 +390,11 @@
     eval: ""
     demo: "bin/g8s ladder gauges"
     source: cmd/g8s/ladder.go
+
+- id: claim-sast-triad-gate
+  claim: "SAST Triad (Gosec AST, Semgrep custom policy, and CodeQL taint analysis) enforces zero-trust and Constitution invariants in CI"
+  evidence:
+    test: TestSASTTriadConfigContract
+    eval: ""
+    demo: "bash tools/ci_semgrep_check.sh"
+    source: .semgrep/g8s-rules.yml

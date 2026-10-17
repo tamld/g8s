@@ -254,8 +254,8 @@ if ! CGO_ENABLED=0 go vet ./...; then
 fi
 pass "go vet clean"
 
-# 9. GolangCI-Lint Quality Gate
-step "9/12" "Running GolangCI-Lint Quality Gate..."
+# 9. GolangCI-Lint & Gosec SAST Quality Gate
+step "9/12" "Running GolangCI-Lint & Gosec SAST Quality Gate..."
 LINTER_BIN=""
 if [ -x "$GOPATH_BIN/golangci-lint" ]; then
     LINTER_BIN="$GOPATH_BIN/golangci-lint"
@@ -266,19 +266,34 @@ fi
 if [ -n "$LINTER_BIN" ]; then
     GO_MOD_TOOLCHAIN="go$(awk '/^go / {print $2}' go.mod)"
     if ! GOTOOLCHAIN="$GO_MOD_TOOLCHAIN" "$LINTER_BIN" run --timeout=10m; then
-        fail "golangci-lint reported issues."
+        fail "golangci-lint (including gosec) reported issues."
     fi
-    pass "golangci-lint clean (zero issues)"
+    pass "golangci-lint + gosec clean (zero issues)"
 else
-    echo -e "  ${YELLOW}⚠ golangci-lint not installed, skipping staticcheck/errcheck linter pass${NC}"
+    echo -e "  ${YELLOW}⚠ golangci-lint not installed, skipping staticcheck/errcheck/gosec linter pass${NC}"
 fi
+
+# 9b. Semgrep Offline AST SAST Gate
+step "SAST" "Running Semgrep AST Security Policy Gate (.semgrep/g8s-rules.yml)..."
+bash tools/ci_semgrep_check_test.sh >/dev/null
+pass "Semgrep SAST self-tests passed"
+if ! bash tools/ci_semgrep_check.sh; then
+    fail "Semgrep AST security policy check failed."
+fi
+pass "Semgrep AST security policy clean"
 
 # 10. Dual-Pass Test Suite & Coverage Verification
 step "10/12" "Running Dual-Pass Test Suite & Coverage Verification..."
 echo "  -> Pass 1: Pure-Go (Zero-CGO) with coverage..."
 COV_FILE=$(mktemp)
 trap 'rm -f "$COV_FILE"' EXIT
-if ! CGO_ENABLED=0 go test -count=1 -v -cover ./... 2>&1 | tee "$COV_FILE" >/dev/null; then
+set +e
+CGO_ENABLED=0 go test -count=1 -v -cover ./... >"$COV_FILE" 2>&1
+TEST_EXIT=$?
+set -e
+if [ "$TEST_EXIT" -ne 0 ]; then
+    echo "  --- Failing Test Diagnostics ---" >&2
+    grep -E "(--- FAIL:|^FAIL[[:space:]]|panic:)" -B 1 -A 6 "$COV_FILE" >&2 || tail -n 40 "$COV_FILE" >&2
     fail "CGO_ENABLED=0 tests failed."
 fi
 pass "Pure-Go tests passed"

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,7 +130,12 @@ func evalPath(curr any, expr string) (string, error) {
 		}
 		val, exists := obj[fieldName]
 		if !exists {
-			return "", fmt.Errorf("field %q not found", fieldName)
+			keys := make([]string, 0, len(obj))
+			for k := range obj {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			return "", fmt.Errorf("field %q not found (available keys: [%s])", fieldName, strings.Join(keys, ", "))
 		}
 		curr = val
 	}

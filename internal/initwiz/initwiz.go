@@ -315,7 +315,9 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 			configDir = filepath.Join(xdg, "g8s")
 		}
 	}
-	_ = os.MkdirAll(configDir, 0o700)
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] initwiz: create config dir %s: %v\n", configDir, err)
+	}
 	providersPath := filepath.Join(configDir, "providers.json")
 	if _, err := os.Stat(providersPath); os.IsNotExist(err) {
 		defaultConfig := map[string]any{
@@ -361,8 +363,11 @@ func RunInit(targetIDEs []string, homeDir, binaryPath string) (*InitResult, erro
 			},
 		}
 		if data, err := json.MarshalIndent(defaultConfig, "", "  "); err == nil {
-			_ = os.WriteFile(providersPath, data, 0o600)
-			result.ProvidersConfig = providersPath
+			if writeErr := os.WriteFile(providersPath, data, 0o600); writeErr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] initwiz: write default providers config %s: %v\n", providersPath, writeErr)
+			} else {
+				result.ProvidersConfig = providersPath
+			}
 		}
 	}
 

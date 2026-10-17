@@ -69,7 +69,7 @@ func (s *FileStore) RecordSleep(_ context.Context, state *SleepState) error {
 	}
 
 	tmpFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
 		return fmt.Errorf("sleep: write temp state: %w", err)
 	}
 	if err := os.Rename(tmpFile, s.filePath); err != nil {
@@ -97,8 +97,11 @@ func (s *FileStore) RecordWake(_ context.Context) (*SleepState, error) {
 	state.WakeTime = time.Now().UTC()
 
 	data, err := json.MarshalIndent(state, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(s.filePath, data, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("sleep: marshal wake state: %w", err)
+	}
+	if err := os.WriteFile(s.filePath, data, 0o600); err != nil {
+		return nil, fmt.Errorf("sleep: write wake state %s: %w", s.filePath, err)
 	}
 	return state, nil
 }
