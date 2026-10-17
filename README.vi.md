@@ -152,7 +152,7 @@ Cài bằng cách copy hoặc symlink vào thư mục skill của platform bạn
 
 ## Chất lượng
 
-Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race`, kết hợp **Bộ 3 SAST Triad**: `Gosec` (quét Go AST trong `golangci-lint`), `Semgrep` (luật AST cục bộ tại `.semgrep/g8s-rules.yml`), và `CodeQL` (phân tích luồng dữ liệu & taint liên hàm tại `.github/workflows/codeql.yml`). Push phải qua hệ gate pre-push: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfood roundtrip, build đa nền tảng, root hygiene.
+Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_ENABLED=1 -race`, kết hợp **4 trụ cột kiểm thử bảo mật (AppSec 4-Pillar)**: (1) **Bộ 3 SAST Triad** (`Gosec` trong `golangci-lint`, `Semgrep` tại `.semgrep/g8s-rules.yml`, `CodeQL` tại `.github/workflows/codeql.yml`), (2) **Black-Box DAST** (`internal/server/dast_test.go`, `internal/mcp/dast_test.go` trên `/api/v1/fs/*` và MCP stdio), (3) **In-Process IAST & Swarm Red-Team Probes** (`RuntimeSensor` và `sa-006`..`sa-008` tại `internal/harness/probe/iast_dast.go`), và (4) **Grey-Box Fuzzing** (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`). Push phải qua hệ gate pre-push: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfood roundtrip, build đa nền tảng, root hygiene.
 
 ## Lộ trình
 

@@ -11,11 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/vault"
 )
+
+var editMu sync.Mutex
 
 // ReadOptions configures a bounded file read operation.
 type ReadOptions struct {
@@ -66,12 +69,106 @@ type EditResult struct {
 	JITWhisper   []string `json:"jit_whisper,omitempty"`
 }
 
+// evalCanonicalPath resolves symlinks for existing paths or the deepest existing
+// ancestor directory for non-existent paths, including dangling symlinks.
+func evalCanonicalPath(p string) (string, error) {
+	return evalCanonicalPathDepth(p, 0)
+}
+
+func evalCanonicalPathDepth(p string, depth int) (string, error) {
+	if depth > 32 {
+		return "", fmt.Errorf("too many symlink levels resolving %q", p)
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved), nil
+	}
+
+	cur := abs
+	var tail []string
+	for {
+		if linfo, lerr := os.Lstat(cur); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+			target, rerr := os.Readlink(cur)
+			if rerr != nil {
+				return "", rerr
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(cur), target)
+			}
+			resolvedTarget, terr := evalCanonicalPathDepth(target, depth+1)
+			if terr != nil {
+				return "", terr
+			}
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolvedTarget = filepath.Join(resolvedTarget, tail[i])
+			}
+			return filepath.Clean(resolvedTarget), nil
+		}
+
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return filepath.Clean(abs), nil
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
+}
+
+func isEscapingRel(rel string) bool {
+	relSlash := filepath.ToSlash(filepath.Clean(rel))
+	return relSlash == ".." || strings.HasPrefix(relSlash, "../") || strings.HasPrefix(relSlash, "/")
+}
+
+func verifySubScope(childScope, ceilingScope string) error {
+	absCeiling, err := filepath.Abs(ceilingScope)
+	if err != nil {
+		return err
+	}
+	absChild, err := filepath.Abs(childScope)
+	if err != nil {
+		return err
+	}
+	canonCeiling, err := evalCanonicalPath(absCeiling)
+	if err != nil {
+		return err
+	}
+	canonChild, err := evalCanonicalPath(absChild)
+	if err != nil {
+		return err
+	}
+	relLex, errLex := filepath.Rel(absCeiling, absChild)
+	relToCanon, errToCanon := filepath.Rel(canonCeiling, absChild)
+	if (errLex != nil || isEscapingRel(relLex)) && (errToCanon != nil || isEscapingRel(relToCanon)) {
+		return fmt.Errorf("path %q escapes ceiling %q", childScope, ceilingScope)
+	}
+	canonRel, err := filepath.Rel(canonCeiling, canonChild)
+	if err != nil || isEscapingRel(canonRel) {
+		return fmt.Errorf("resolved path %q escapes ceiling %q via symlink", childScope, ceilingScope)
+	}
+	return nil
+}
+
 // ResolveDelegationContext checks environment variables and flags to determine
 // the active receipt ID and scope root, preventing privilege escalation.
+// When G8S_SCOPE_ROOT (or G8S_TIER=F1/F2) is set, the environment scope acts
+// as an immutable ceiling: flagScopeRoot may preserve or narrow it, but never
+// expand beyond it (#598).
 func ResolveDelegationContext(flagReceiptID, flagScopeRoot string, isMutation bool) (receiptID string, scopeRoot string, err error) {
+	envTier := strings.TrimSpace(os.Getenv("G8S_TIER"))
 	envPerm := strings.TrimSpace(os.Getenv("G8S_PERMISSION"))
 	envReceipt := strings.TrimSpace(os.Getenv("G8S_RECEIPT_ID"))
 	envScope := strings.TrimSpace(os.Getenv("G8S_SCOPE_ROOT"))
+	isDelegatedTier := strings.EqualFold(envTier, "F1") || strings.EqualFold(envTier, "F2")
 
 	if isMutation && (envPerm == "read_only" || envPerm == "automation_read") {
 		return "", "", fmt.Errorf("permission=%s environment forbids file mutation", envPerm)
@@ -85,24 +182,47 @@ func ResolveDelegationContext(flagReceiptID, flagScopeRoot string, isMutation bo
 	if receiptID == "" {
 		receiptID = envReceipt
 	}
-
-	scopeRoot = flagScopeRoot
-	if scopeRoot == "" {
-		scopeRoot = envScope
+	if isMutation && isDelegatedTier && receiptID == "" {
+		return "", "", fmt.Errorf("tier=%s environment requires a write receipt for file mutation", envTier)
 	}
-	if scopeRoot == "" {
-		scopeRoot = "."
+
+	if envScope != "" {
+		if flagScopeRoot == "" {
+			scopeRoot = envScope
+		} else {
+			if err := verifySubScope(flagScopeRoot, envScope); err != nil {
+				return "", "", fmt.Errorf("scope_root mismatch: flag %q escapes delegated worker environment scope root %q (%v)", flagScopeRoot, envScope, err)
+			}
+			scopeRoot = flagScopeRoot
+		}
+	} else if isDelegatedTier {
+		if flagScopeRoot == "" {
+			scopeRoot = "."
+		} else {
+			if err := verifySubScope(flagScopeRoot, "."); err != nil {
+				return "", "", fmt.Errorf("scope_root mismatch: flag %q escapes delegated worker cwd ceiling (%v)", flagScopeRoot, err)
+			}
+			scopeRoot = flagScopeRoot
+		}
+	} else {
+		scopeRoot = flagScopeRoot
+		if scopeRoot == "" {
+			scopeRoot = "."
+		}
 	}
 
 	return receiptID, scopeRoot, nil
 }
 
-// VerifyScope checks that filePath resides within scopeRoot without path traversal,
-// and satisfies allowedPaths if any are specified.
+// VerifyScope checks that filePath resides within scopeRoot without path traversal
+// or symlink escape (#598), and satisfies allowedPaths if any are specified.
 // Returns normalized relative path with forward slashes on success.
 func VerifyScope(filePath, scopeRoot string, allowedPaths []string) (string, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return "", fmt.Errorf("path must not be empty")
+	}
+	if strings.ContainsRune(filePath, 0) || strings.ContainsRune(scopeRoot, 0) {
+		return "", fmt.Errorf("path must not contain NUL bytes")
 	}
 	if scopeRoot == "" {
 		scopeRoot = "."
@@ -115,18 +235,40 @@ func VerifyScope(filePath, scopeRoot string, allowedPaths []string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("resolve abs file path %q: %w", filePath, err)
 	}
-	rel, err := filepath.Rel(absScope, absFile)
+	canonScope, err := evalCanonicalPath(absScope)
 	if err != nil {
-		return "", fmt.Errorf("compute relative path: %w", err)
+		return "", fmt.Errorf("resolve canonical scope root %q: %w", scopeRoot, err)
 	}
+	canonFile, err := evalCanonicalPath(absFile)
+	if err != nil {
+		return "", fmt.Errorf("resolve canonical file path %q: %w", filePath, err)
+	}
+
+	rel, errRel := filepath.Rel(absScope, absFile)
+	relToCanon, errRelCanon := filepath.Rel(canonScope, absFile)
 	relSlash := filepath.ToSlash(filepath.Clean(rel))
-	if relSlash == ".." || strings.HasPrefix(relSlash, "../") || strings.HasPrefix(relSlash, "/") {
-		return "", fmt.Errorf("path %q escapes scope root %q", filePath, scopeRoot)
+	if errRel != nil || isEscapingRel(relSlash) {
+		if errRelCanon != nil || isEscapingRel(relToCanon) {
+			return "", fmt.Errorf("path %q escapes scope root %q", filePath, scopeRoot)
+		}
+		relSlash = filepath.ToSlash(filepath.Clean(relToCanon))
 	}
-	if len(allowedPaths) > 0 && !search.MatchesAllowedPaths(relSlash, allowedPaths) {
-		return "", fmt.Errorf("path %q (relative %q) is outside receipt allowed_paths", filePath, relSlash)
+
+	canonRel, err := filepath.Rel(canonScope, canonFile)
+	if err != nil {
+		return "", fmt.Errorf("compute canonical relative path: %w", err)
 	}
-	return relSlash, nil
+	canonRelSlash := filepath.ToSlash(filepath.Clean(canonRel))
+	if isEscapingRel(canonRelSlash) {
+		return "", fmt.Errorf("path %q escapes scope root %q via symlink", filePath, scopeRoot)
+	}
+
+	if len(allowedPaths) > 0 {
+		if !search.MatchesAllowedPaths(relSlash, allowedPaths) || !search.MatchesAllowedPaths(canonRelSlash, allowedPaths) {
+			return "", fmt.Errorf("path %q (relative %q) is outside receipt allowed_paths", filePath, relSlash)
+		}
+	}
+	return canonRelSlash, nil
 }
 
 // Read safely reads and bounds text file content, validating scope, checking for binary
@@ -139,8 +281,15 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	canonTarget, err := evalCanonicalPath(opts.Path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+		return nil, err
+	}
 
-	raw, err := os.ReadFile(opts.Path)
+	raw, err := os.ReadFile(canonTarget)
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +397,9 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	editMu.Lock()
+	defer editMu.Unlock()
+
 	relSlash, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
 	if err != nil {
 		return nil, err
@@ -256,12 +408,20 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		return nil, fmt.Errorf("old_string must not be empty")
 	}
 
-	info, err := os.Stat(opts.Path)
+	canonTarget, err := evalCanonicalPath(opts.Path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(canonTarget)
 	if err != nil {
 		return nil, err
 	}
 
-	raw, err := os.ReadFile(opts.Path)
+	raw, err := os.ReadFile(canonTarget)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +468,7 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		replaced = strings.ReplaceAll(replaced, "\n", "\r\n")
 	}
 
-	dir := filepath.Dir(opts.Path)
+	dir := filepath.Dir(canonTarget)
 	tmpFile, err := os.CreateTemp(dir, ".g8s-edit-*")
 	if err != nil {
 		return nil, err
@@ -337,7 +497,7 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		return nil, err
 	}
 
-	if err := os.Rename(tmpName, opts.Path); err != nil {
+	if err := os.Rename(tmpName, canonTarget); err != nil {
 		return nil, err
 	}
 	cleaned = true

@@ -679,6 +679,13 @@ func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(metrics)
 }
 
+// ReceiptConsumer is an optional extension of ReceiptVerifier (satisfied by
+// *receipt.Manager) that atomically validates and marks a single-use write
+// receipt as consumed during HTTP mutation requests.
+type ReceiptConsumer interface {
+	ValidateAndConsume(receiptID string, consumerTaskID string) (*receipt.WriteReceipt, error)
+}
+
 // resolveFSDelegation validates receipt_id and scope_root for /api/v1/fs/* endpoints.
 func (s *Server) resolveFSDelegation(flagReceiptID, flagScopeRoot string, isMutation bool) (string, []string, int, string) {
 	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
@@ -694,6 +701,15 @@ func (s *Server) resolveFSDelegation(flagReceiptID, flagScopeRoot string, isMuta
 		s.mu.RUnlock()
 		if verifier == nil {
 			return "", nil, http.StatusForbidden, "receipt verification is not configured on this server"
+		}
+		if isMutation {
+			if consumer, ok := verifier.(ReceiptConsumer); ok {
+				rc, consumeErr := consumer.ValidateAndConsume(receiptID, "http-fs-edit")
+				if consumeErr != nil {
+					return "", nil, http.StatusForbidden, fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr)
+				}
+				return scopeRoot, rc.AllowedPaths, 0, ""
+			}
 		}
 		rc, err := verifier.VerifyReceipt(receiptID)
 		if err != nil {
