@@ -65,6 +65,24 @@ func TestSASTTriadConfigContract(t *testing.T) {
 		}
 	}
 
+	codeqlBytes, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "codeql.yml"))
+	if err != nil {
+		t.Fatalf("read .github/workflows/codeql.yml: %v", err)
+	}
+	codeqlText := string(codeqlBytes)
+	if strings.Contains(codeqlText, "github/codeql-action/") && strings.Contains(codeqlText, "@v3") {
+		t.Errorf(".github/workflows/codeql.yml still uses deprecated CodeQL Action @v3; must use @v4")
+	}
+	for _, action := range []string{
+		"github/codeql-action/init@v4",
+		"github/codeql-action/autobuild@v4",
+		"github/codeql-action/analyze@v4",
+	} {
+		if !strings.Contains(codeqlText, action) {
+			t.Errorf(".github/workflows/codeql.yml missing required action %q", action)
+		}
+	}
+
 	// 3. Verify Lane S (security) in .g8s/lane-bundles.yml includes sast-triad
 	lanesBytes, err := os.ReadFile(filepath.Join(root, ".g8s", "lane-bundles.yml"))
 	if err != nil {

@@ -333,15 +333,6 @@ func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMut
 		return "", nil, blockedStatus("blocked_by_policy", "g8s_edit requires an explicit receipt_id or G8S_RECEIPT_ID environment binding")
 	}
 	if receiptID != "" && s.receipts != nil {
-		if isMutation {
-			if c, ok := s.receipts.(ReceiptConsumer); ok {
-				rc, consumeErr := c.ValidateAndConsume(receiptID, "mcp-fs-edit")
-				if consumeErr != nil {
-					return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr))
-				}
-				return scopeRoot, rc.AllowedPaths, nil
-			}
-		}
 		if v, ok := s.receipts.(ReceiptVerifier); ok {
 			rc, err := v.VerifyReceipt(receiptID)
 			if err != nil {
@@ -354,6 +345,44 @@ func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMut
 		}
 	}
 	return scopeRoot, nil, nil
+}
+
+func preflightMCPEdit(ctx context.Context, path, scopeRoot string, allowedPaths []string, ifSHA256 string) *jsonRPCError {
+	if _, err := fsops.VerifyScope(path, scopeRoot, allowedPaths); err != nil {
+		return blockedStatus("blocked_by_policy", err.Error())
+	}
+	if ifSHA256 != "" {
+		readRes, err := fsops.Read(ctx, fsops.ReadOptions{
+			Path:         path,
+			ScopeRoot:    scopeRoot,
+			AllowedPaths: allowedPaths,
+			StartLine:    1,
+			EndLine:      1,
+			MaxBytes:     64,
+		})
+		if err != nil {
+			return &jsonRPCError{Code: codeInternal, Message: err.Error()}
+		}
+		if !strings.EqualFold(ifSHA256, readRes.SHA256) {
+			return &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("sha256 conflict on %s: expected %s, got %s", path, ifSHA256, readRes.SHA256)}
+		}
+	}
+	return nil
+}
+
+func (s *Server) consumeMCPReceipt(flagReceiptID, flagScopeRoot string) *jsonRPCError {
+	receiptID, _, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, true)
+	if err != nil {
+		return blockedStatus("blocked_by_policy", err.Error())
+	}
+	if receiptID != "" && s.receipts != nil {
+		if c, ok := s.receipts.(ReceiptConsumer); ok {
+			if _, consumeErr := c.ValidateAndConsume(receiptID, "mcp-fs-edit"); consumeErr != nil {
+				return blockedStatus("blocked_by_policy", fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr))
+			}
+		}
+	}
+	return nil
 }
 
 // searchTool executes native pure-Go repository search (DELTA-22 / DELTA-23).
@@ -445,6 +474,12 @@ func (s *Server) editTool(ctx context.Context, args json.RawMessage) (any, *json
 	}
 	scopeRoot, allowedPaths, rpcErr := s.resolveMCPDelegation(a.ReceiptID, a.ScopeRoot, true)
 	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if rpcErr := preflightMCPEdit(ctx, a.Path, scopeRoot, allowedPaths, a.IfSHA256); rpcErr != nil {
+		return nil, rpcErr
+	}
+	if rpcErr := s.consumeMCPReceipt(a.ReceiptID, a.ScopeRoot); rpcErr != nil {
 		return nil, rpcErr
 	}
 	res, err := fsops.Edit(ctx, fsops.EditOptions{

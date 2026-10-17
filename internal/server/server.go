@@ -702,15 +702,6 @@ func (s *Server) resolveFSDelegation(flagReceiptID, flagScopeRoot string, isMuta
 		if verifier == nil {
 			return "", nil, http.StatusForbidden, "receipt verification is not configured on this server"
 		}
-		if isMutation {
-			if consumer, ok := verifier.(ReceiptConsumer); ok {
-				rc, consumeErr := consumer.ValidateAndConsume(receiptID, "http-fs-edit")
-				if consumeErr != nil {
-					return "", nil, http.StatusForbidden, fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr)
-				}
-				return scopeRoot, rc.AllowedPaths, 0, ""
-			}
-		}
 		rc, err := verifier.VerifyReceipt(receiptID)
 		if err != nil {
 			return "", nil, http.StatusForbidden, fmt.Sprintf("verify receipt %s: %v", receiptID, err)
@@ -721,6 +712,51 @@ func (s *Server) resolveFSDelegation(flagReceiptID, flagScopeRoot string, isMuta
 		return scopeRoot, rc.AllowedPaths, 0, ""
 	}
 	return scopeRoot, nil, 0, ""
+}
+
+func preflightFSEdit(ctx context.Context, path, scopeRoot string, allowedPaths []string, ifSHA256 string) (int, string) {
+	if _, err := fsops.VerifyScope(path, scopeRoot, allowedPaths); err != nil {
+		if strings.Contains(err.Error(), "outside") || strings.Contains(err.Error(), "escapes") {
+			return http.StatusForbidden, err.Error()
+		}
+		return http.StatusBadRequest, err.Error()
+	}
+	if ifSHA256 != "" {
+		readRes, err := fsops.Read(ctx, fsops.ReadOptions{
+			Path:         path,
+			ScopeRoot:    scopeRoot,
+			AllowedPaths: allowedPaths,
+			StartLine:    1,
+			EndLine:      1,
+			MaxBytes:     64,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "outside") || strings.Contains(err.Error(), "escapes") {
+				return http.StatusForbidden, err.Error()
+			}
+			return http.StatusBadRequest, err.Error()
+		}
+		if !strings.EqualFold(ifSHA256, readRes.SHA256) {
+			return http.StatusBadRequest, fmt.Sprintf("sha256 conflict on %s: expected %s, got %s", path, ifSHA256, readRes.SHA256)
+		}
+	}
+	return 0, ""
+}
+
+func (s *Server) consumeFSReceipt(flagReceiptID, flagScopeRoot string) (int, string) {
+	receiptID, _, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, true)
+	if err != nil {
+		return http.StatusForbidden, err.Error()
+	}
+	s.mu.RLock()
+	verifier := s.receipts
+	s.mu.RUnlock()
+	if consumer, ok := verifier.(ReceiptConsumer); ok {
+		if _, consumeErr := consumer.ValidateAndConsume(receiptID, "http-fs-edit"); consumeErr != nil {
+			return http.StatusForbidden, fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr)
+		}
+	}
+	return 0, ""
 }
 
 // handleFSSearch handles POST /api/v1/fs/search.
@@ -843,6 +879,14 @@ func (s *Server) handleFSEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, true)
 	if status != 0 {
+		apiError(w, status, errMsg)
+		return
+	}
+	if status, errMsg := preflightFSEdit(r.Context(), req.Path, scopeRoot, allowedPaths, req.IfSHA256); status != 0 {
+		apiError(w, status, errMsg)
+		return
+	}
+	if status, errMsg := s.consumeFSReceipt(req.ReceiptID, req.ScopeRoot); status != 0 {
 		apiError(w, status, errMsg)
 		return
 	}

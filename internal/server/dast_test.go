@@ -303,4 +303,103 @@ func TestHTTPDaemon_DAST_FSAdversarialSuite(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("precheck_failure_preserves_unconsumed_receipt", func(t *testing.T) {
+		precheckFile := filepath.Join(scopeDir, "allowed_precheck.txt")
+		if err := os.WriteFile(precheckFile, []byte("precheck version 1"), 0o600); err != nil {
+			t.Fatalf("write allowed_precheck.txt: %v", err)
+		}
+
+		rc := issueTestReceipt([]string{"allowed_precheck.txt"})
+
+		// Attempt 1: /api/v1/fs/edit targeting outside.txt with receipt -> fails VerifyScope (403 Forbidden)
+		editReq1, _ := json.Marshal(map[string]any{
+			"path":       outsideFile,
+			"old_string": "outside content sensitive",
+			"new_string": "tampered",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		resp1, err := http.Post(ts.URL+"/api/v1/fs/edit", "application/json", bytes.NewReader(editReq1))
+		if err != nil {
+			t.Fatalf("attempt 1 post failed: %v", err)
+		}
+		resp1.Body.Close()
+		if resp1.StatusCode != http.StatusForbidden {
+			t.Fatalf("attempt 1: expected 403 Forbidden on out-of-scope edit, got %d", resp1.StatusCode)
+		}
+		rcCheck1, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 1: %v", err)
+		}
+		if rcCheck1.Consumed {
+			t.Fatalf("attempt 1: receipt should NOT be consumed on scope precheck failure")
+		}
+
+		// Attempt 2: /api/v1/fs/edit targeting allowed_precheck.txt with stale if_sha256 -> fails IfSHA256 (400 Bad Request)
+		editReq2, _ := json.Marshal(map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 1",
+			"new_string": "precheck version 2",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+			"if_sha256":  "0000000000000000000000000000000000000000000000000000000000000000",
+		})
+		resp2, err := http.Post(ts.URL+"/api/v1/fs/edit", "application/json", bytes.NewReader(editReq2))
+		if err != nil {
+			t.Fatalf("attempt 2 post failed: %v", err)
+		}
+		resp2.Body.Close()
+		if resp2.StatusCode != http.StatusBadRequest {
+			t.Fatalf("attempt 2: expected 400 Bad Request on sha256 mismatch, got %d", resp2.StatusCode)
+		}
+		rcCheck2, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 2: %v", err)
+		}
+		if rcCheck2.Consumed {
+			t.Fatalf("attempt 2: receipt should NOT be consumed on sha256 precheck failure")
+		}
+
+		// Attempt 3: /api/v1/fs/edit targeting allowed_precheck.txt with valid parameters -> 200 OK
+		editReq3, _ := json.Marshal(map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 1",
+			"new_string": "precheck version 2",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		resp3, err := http.Post(ts.URL+"/api/v1/fs/edit", "application/json", bytes.NewReader(editReq3))
+		if err != nil {
+			t.Fatalf("attempt 3 post failed: %v", err)
+		}
+		resp3.Body.Close()
+		if resp3.StatusCode != http.StatusOK {
+			t.Fatalf("attempt 3: expected 200 OK on valid edit, got %d", resp3.StatusCode)
+		}
+		rcCheck3, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 3: %v", err)
+		}
+		if !rcCheck3.Consumed {
+			t.Fatalf("attempt 3: receipt MUST be consumed after successful edit")
+		}
+
+		// Attempt 4: Replay with same receipt -> 403 Forbidden
+		editReq4, _ := json.Marshal(map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 2",
+			"new_string": "precheck version 3",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		resp4, err := http.Post(ts.URL+"/api/v1/fs/edit", "application/json", bytes.NewReader(editReq4))
+		if err != nil {
+			t.Fatalf("attempt 4 post failed: %v", err)
+		}
+		resp4.Body.Close()
+		if resp4.StatusCode != http.StatusForbidden {
+			t.Fatalf("attempt 4: expected 403 Forbidden on replay, got %d", resp4.StatusCode)
+		}
+	})
 }

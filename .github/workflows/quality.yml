@@ -105,15 +105,12 @@ jobs:
           go-version: '1.26.9'
 
       - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+        if: env.CI_LANE != 'docs'
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: --timeout=10m
-      - name: Cache modules
-        uses: actions/cache@v6
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-gomod-${{ hashFiles('go.sum') }}
+          skip-pkg-cache: true
 
       - name: gofumpt strict
         if: env.CI_LANE != 'docs'
@@ -437,17 +434,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.26.9'
-
-      - name: Cache modules
-        if: env.CI_LANE != 'docs'
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: go vet (Windows)
         if: env.CI_LANE != 'docs'

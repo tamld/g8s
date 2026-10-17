@@ -146,4 +146,86 @@ func TestMCPServer_DAST_AdversarialSuite(t *testing.T) {
 			t.Fatal("expected g8s_search with widened scope_root under G8S_TIER=F1 to fail")
 		}
 	})
+
+	t.Run("precheck_failure_preserves_unconsumed_receipt", func(t *testing.T) {
+		precheckFile := filepath.Join(scopeDir, "allowed_precheck.txt")
+		if err := os.WriteFile(precheckFile, []byte("precheck version 1"), 0o600); err != nil {
+			t.Fatalf("write allowed_precheck.txt: %v", err)
+		}
+
+		rc := issueTestReceipt([]string{"allowed_precheck.txt"})
+
+		// Attempt 1: g8s_edit targeting outsideFile with receipt -> fails VerifyScope
+		_, rpcErr1 := callTool(t, srv, "g8s_edit", map[string]any{
+			"path":       outsideFile,
+			"old_string": "secret-outside",
+			"new_string": "tampered",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		if rpcErr1 == nil {
+			t.Fatal("attempt 1: expected g8s_edit on outsideFile to fail")
+		}
+		rcCheck1, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 1: %v", err)
+		}
+		if rcCheck1.Consumed {
+			t.Fatal("attempt 1: receipt should NOT be consumed on scope precheck failure")
+		}
+
+		// Attempt 2: g8s_edit targeting allowed_precheck.txt with stale if_sha256 -> fails IfSHA256
+		_, rpcErr2 := callTool(t, srv, "g8s_edit", map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 1",
+			"new_string": "precheck version 2",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+			"if_sha256":  "0000000000000000000000000000000000000000000000000000000000000000",
+		})
+		if rpcErr2 == nil {
+			t.Fatal("attempt 2: expected g8s_edit with stale if_sha256 to fail")
+		}
+		rcCheck2, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 2: %v", err)
+		}
+		if rcCheck2.Consumed {
+			t.Fatal("attempt 2: receipt should NOT be consumed on sha256 precheck failure")
+		}
+
+		// Attempt 3: g8s_edit targeting allowed_precheck.txt with valid parameters -> succeeds
+		_, rpcErr3 := callTool(t, srv, "g8s_edit", map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 1",
+			"new_string": "precheck version 2",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		if rpcErr3 != nil {
+			t.Fatalf("attempt 3: expected g8s_edit to succeed, got %v", rpcErr3)
+		}
+		rcCheck3, err := mgr.VerifyReceipt(rc.ReceiptID)
+		if err != nil {
+			t.Fatalf("verify receipt after attempt 3: %v", err)
+		}
+		if !rcCheck3.Consumed {
+			t.Fatal("attempt 3: receipt MUST be consumed after successful edit")
+		}
+
+		// Attempt 4: Replay with same receipt -> fails
+		_, rpcErr4 := callTool(t, srv, "g8s_edit", map[string]any{
+			"path":       precheckFile,
+			"old_string": "precheck version 2",
+			"new_string": "precheck version 3",
+			"scope_root": scopeDir,
+			"receipt_id": rc.ReceiptID,
+		})
+		if rpcErr4 == nil {
+			t.Fatal("attempt 4: expected g8s_edit replay to fail")
+		}
+		if !strings.Contains(rpcErr4.Message, "already consumed") {
+			t.Fatalf("attempt 4: expected 'already consumed' in error, got: %s", rpcErr4.Message)
+		}
+	})
 }
