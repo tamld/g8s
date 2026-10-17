@@ -652,10 +652,15 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("close inW: %w", err)
 	}
 	select {
-	case <-mcpDone:
+	case serveErr := <-mcpDone:
+		if serveErr != nil && !errors.Is(serveErr, context.Canceled) {
+			return "", fmt.Errorf("mcp ServeStdio failed: %w", serveErr)
+		}
 	case <-time.After(500 * time.Millisecond):
 		cancelMCP()
-		<-mcpDone
+		if serveErr := <-mcpDone; serveErr != nil && !errors.Is(serveErr, context.Canceled) {
+			return "", fmt.Errorf("mcp ServeStdio failed after cancel: %w", serveErr)
+		}
 	}
 	if err := outR.Close(); err != nil {
 		return "", fmt.Errorf("close outR: %w", err)
