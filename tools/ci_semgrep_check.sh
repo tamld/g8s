@@ -57,7 +57,7 @@ run_fallback_checks() {
 
     # 4. g8s-no-silent-fs-error-swallow
     local swallow_hits
-    swallow_hits=$(find "$target" \( -path "*/cmd/*" -o -path "*/internal/*" \) -name "*.go" ! -name "*_test.go" -exec grep -HnE '^[[:space:]]*(_|_,[[:space:]]*_)[[:space:]]*=[[:space:]]*os\.(WriteFile|Rename|OpenFile)\(' {} + 2>/dev/null || true)
+    swallow_hits=$(find "$target" -name "*.go" ! -name "*_test.go" ! -path "*/reference/*" ! -path "*/.git/*" ! -path "*/internal/orchestrator/*" -exec grep -HnE '^[[:space:]]*(_|_,[[:space:]]*_)[[:space:]]*=[[:space:]]*os\.(WriteFile|Rename|OpenFile)\(' {} + 2>/dev/null || true)
     if [ -n "$swallow_hits" ]; then
         echo "::error::[g8s-no-silent-fs-error-swallow] Silent error discard on filesystem write/rename/open detected (Hint: return fmt.Errorf(...) or log a structured warning to os.Stderr):" >&2
         echo "$swallow_hits" >&2

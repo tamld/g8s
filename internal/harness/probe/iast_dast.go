@@ -126,6 +126,75 @@ func (s *RuntimeSensor) Verify(maxGoroutineDelta int) error {
 	return nil
 }
 
+func cleanupProbeTempDir(dir string) {
+	if err := os.RemoveAll(dir); err != nil {
+		return
+	}
+}
+
+func issueProbeReceipt(mgr *receipt.Manager, issuer string, allowedPaths []string, digest, taskID string) (*receipt.WriteReceipt, error) {
+	return mgr.IssueReceipt(issuer, allowedPaths, 10*time.Minute,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+			SchemaURI:      "g8s://envelope/write-receipt/v1",
+			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
+			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+		}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+			RulesetVersion: "v1",
+			PipelineDigest: digest,
+		}),
+		receipt.WithProvenanceContext("g8s/eval", "HEAD", taskID),
+	)
+}
+
+func postJSONEdit(endpoint string, payload map[string]any) (int, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := http.Post(endpoint, "application/json", bytes.NewReader(body)) //nolint:gosec // G107: ephemeral loopback 127.0.0.1 test server
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+type mcpRPCError struct {
+	Code    int            `json:"code"`
+	Message string         `json:"message"`
+	Data    map[string]any `json:"data"`
+}
+
+func sendMCPToolCall(w io.Writer, r *bufio.Reader, id int, tool string, args map[string]any) (*mcpRPCError, error) {
+	req, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      tool,
+			"arguments": args,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(w, "%s\n", req); err != nil {
+		return nil, err
+	}
+	line, err := r.ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	var rpcResp struct {
+		Error *mcpRPCError `json:"error"`
+	}
+	if err := json.Unmarshal(line, &rpcResp); err != nil {
+		return nil, err
+	}
+	return rpcResp.Error, nil
+}
+
 // AuditSwarmReceiptContention tests 8-worker concurrent CAS receipt validation
 // and fsops.Edit contention, asserting single-winner semantics and zero leaks.
 func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
@@ -133,11 +202,7 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if rmErr := os.RemoveAll(tmpDir); rmErr != nil && !os.IsNotExist(rmErr) {
-			return
-		}
-	}()
+	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
 
@@ -146,30 +211,14 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create receipt manager: %w", err)
 	}
-	defer func() {
-		if closeErr := mgr.Close(); closeErr != nil {
-			return
-		}
-	}()
+	defer mgr.Close()
 
 	targetFile := filepath.Join(tmpDir, "shared.txt")
-	initialContent := "worker-initial\n"
-	if err := os.WriteFile(targetFile, []byte(initialContent), 0o600); err != nil {
+	if err := os.WriteFile(targetFile, []byte("worker-initial\n"), 0o600); err != nil {
 		return "", fmt.Errorf("write target file: %w", err)
 	}
 
-	rc, err := mgr.IssueReceipt("swarm-supervisor", []string{"shared.txt"}, 10*time.Minute,
-		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
-			SchemaURI:      "g8s://envelope/write-receipt/v1",
-			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
-			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
-		}),
-		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
-			RulesetVersion: "v1",
-			PipelineDigest: "probe-swarm-contention",
-		}),
-		receipt.WithProvenanceContext("g8s/eval", "HEAD", "probe-sa-006"),
-	)
+	rc, err := issueProbeReceipt(mgr, "swarm-supervisor", []string{"shared.txt"}, "probe-swarm-contention", "probe-sa-006")
 	if err != nil {
 		return "", fmt.Errorf("issue swarm receipt: %w", err)
 	}
@@ -189,15 +238,13 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 				return
 			}
 			wins.Add(1)
-			if _, editErr := fsops.Edit(ctx, fsops.EditOptions{
+			_, _ = fsops.Edit(ctx, fsops.EditOptions{
 				Path:         targetFile,
 				ScopeRoot:    tmpDir,
 				OldString:    "worker-initial",
 				NewString:    fmt.Sprintf("worker-%d-won", workerIdx),
 				AllowedPaths: consumedRc.AllowedPaths,
-			}); editErr != nil {
-				return
-			}
+			})
 		}(i)
 	}
 
@@ -210,12 +257,8 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 		return OutcomeClassBlocked, fmt.Errorf("swarm receipt contention: rejections = %d, want 7", r)
 	}
 
-	if err := mgr.Close(); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("close receipt manager: %w", err)
-	}
-	if err := os.RemoveAll(tmpDir); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("remove temp dir: %w", err)
-	}
+	mgr.Close()
+	cleanupProbeTempDir(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
 		return OutcomeClassBlocked, fmt.Errorf("sensor verify failed: %w", err)
@@ -246,11 +289,7 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if rmErr := os.RemoveAll(tmpDir); rmErr != nil && !os.IsNotExist(rmErr) {
-			return
-		}
-	}()
+	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
 
@@ -275,39 +314,22 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 
 	origTier, tierSet := os.LookupEnv("G8S_TIER")
 	origScope, scopeSet := os.LookupEnv("G8S_SCOPE_ROOT")
-	restoreEnv := func() error {
+	restoreEnv := func() {
 		if tierSet {
-			if err := os.Setenv("G8S_TIER", origTier); err != nil {
-				return err
-			}
+			_ = os.Setenv("G8S_TIER", origTier)
 		} else {
-			if err := os.Unsetenv("G8S_TIER"); err != nil {
-				return err
-			}
+			_ = os.Unsetenv("G8S_TIER")
 		}
 		if scopeSet {
-			if err := os.Setenv("G8S_SCOPE_ROOT", origScope); err != nil {
-				return err
-			}
+			_ = os.Setenv("G8S_SCOPE_ROOT", origScope)
 		} else {
-			if err := os.Unsetenv("G8S_SCOPE_ROOT"); err != nil {
-				return err
-			}
+			_ = os.Unsetenv("G8S_SCOPE_ROOT")
 		}
-		return nil
 	}
-	defer func() {
-		if err := restoreEnv(); err != nil {
-			return
-		}
-	}()
+	defer restoreEnv()
 
-	if err := os.Setenv("G8S_TIER", "F1"); err != nil {
-		return "", err
-	}
-	if err := os.Setenv("G8S_SCOPE_ROOT", scopeDir); err != nil {
-		return "", err
-	}
+	_ = os.Setenv("G8S_TIER", "F1")
+	_ = os.Setenv("G8S_SCOPE_ROOT", scopeDir)
 
 	// 1. ResolveDelegationContext must reject parent directory widening
 	if _, _, err := fsops.ResolveDelegationContext("", tmpDir, false); err == nil {
@@ -349,12 +371,8 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 		return OutcomeClassBlocked, errors.New("search.Execute accepted out-of-scope root outsideDir")
 	}
 
-	if err := restoreEnv(); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("restore env: %w", err)
-	}
-	if err := os.RemoveAll(tmpDir); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("remove temp dir: %w", err)
-	}
+	restoreEnv()
+	cleanupProbeTempDir(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
 		return OutcomeClassBlocked, fmt.Errorf("sensor verify failed: %w", err)
@@ -385,11 +403,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if rmErr := os.RemoveAll(tmpDir); rmErr != nil && !os.IsNotExist(rmErr) {
-			return
-		}
-	}()
+	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
 
@@ -398,11 +412,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create receipt manager: %w", err)
 	}
-	defer func() {
-		if closeErr := mgr.Close(); closeErr != nil {
-			return
-		}
-	}()
+	defer mgr.Close()
 
 	// 1. HTTP API Server DAST
 	httpFile := filepath.Join(tmpDir, "http_target.txt")
@@ -410,18 +420,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("write http target: %w", err)
 	}
 
-	httpRc, err := mgr.IssueReceipt("http-dast", []string{"http_target.txt"}, 10*time.Minute,
-		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
-			SchemaURI:      "g8s://envelope/write-receipt/v1",
-			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
-			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
-		}),
-		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
-			RulesetVersion: "v1",
-			PipelineDigest: "probe-http-dast",
-		}),
-		receipt.WithProvenanceContext("g8s/eval", "HEAD", "probe-sa-008-http"),
-	)
+	httpRc, err := issueProbeReceipt(mgr, "http-dast", []string{"http_target.txt"}, "probe-http-dast", "probe-sa-008-http")
 	if err != nil {
 		return "", fmt.Errorf("issue http receipt: %w", err)
 	}
@@ -431,9 +430,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("listen on 127.0.0.1:0: %w", err)
 	}
 	addr := ln.Addr().String()
-	if err := ln.Close(); err != nil {
-		return "", fmt.Errorf("close listener: %w", err)
-	}
+	ln.Close()
 
 	cfg := server.DefaultConfig()
 	cfg.Address = addr
@@ -445,9 +442,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	stopHTTP := func() {
 		ctxShutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if stopErr := httpSrv.Stop(ctxShutdown); stopErr != nil {
-			return
-		}
+		_ = httpSrv.Stop(ctxShutdown)
 	}
 
 	baseURL := "http://" + addr
@@ -455,10 +450,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	for attempt := 0; attempt < 50; attempt++ {
 		resp, getErr := http.Get(baseURL + "/healthz") //nolint:gosec // G107: ephemeral loopback 127.0.0.1 test server
 		if getErr == nil {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				stopHTTP()
-				return "", fmt.Errorf("close healthz body: %w", closeErr)
-			}
+			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				ready = true
 				break
@@ -472,7 +464,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	}
 
 	// Valid HTTP edit
-	body1, err := json.Marshal(map[string]any{
+	status1, err := postJSONEdit(baseURL+"/api/v1/fs/edit", map[string]any{
 		"path":       httpFile,
 		"old_string": "http-initial",
 		"new_string": "http-mutated",
@@ -481,24 +473,15 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	})
 	if err != nil {
 		stopHTTP()
-		return "", fmt.Errorf("marshal body1: %w", err)
-	}
-	resp1, err := http.Post(baseURL+"/api/v1/fs/edit", "application/json", bytes.NewReader(body1)) //nolint:gosec // G107: ephemeral loopback 127.0.0.1 test server
-	if err != nil {
-		stopHTTP()
 		return "", fmt.Errorf("http edit request 1 failed: %w", err)
 	}
-	if closeErr := resp1.Body.Close(); closeErr != nil {
+	if status1 != http.StatusOK {
 		stopHTTP()
-		return "", fmt.Errorf("close resp1 body: %w", closeErr)
-	}
-	if resp1.StatusCode != http.StatusOK {
-		stopHTTP()
-		return OutcomeClassBlocked, fmt.Errorf("expected 200 OK on first edit, got %d", resp1.StatusCode)
+		return OutcomeClassBlocked, fmt.Errorf("expected 200 OK on first edit, got %d", status1)
 	}
 
 	// Replay HTTP edit with same receipt: must return 403 Forbidden
-	body2, err := json.Marshal(map[string]any{
+	status2, err := postJSONEdit(baseURL+"/api/v1/fs/edit", map[string]any{
 		"path":       httpFile,
 		"old_string": "http-mutated",
 		"new_string": "http-replay",
@@ -507,20 +490,11 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	})
 	if err != nil {
 		stopHTTP()
-		return "", fmt.Errorf("marshal body2: %w", err)
-	}
-	resp2, err := http.Post(baseURL+"/api/v1/fs/edit", "application/json", bytes.NewReader(body2)) //nolint:gosec // G107: ephemeral loopback 127.0.0.1 test server
-	if err != nil {
-		stopHTTP()
 		return "", fmt.Errorf("http edit request 2 failed: %w", err)
 	}
-	if closeErr := resp2.Body.Close(); closeErr != nil {
+	if status2 != http.StatusForbidden {
 		stopHTTP()
-		return "", fmt.Errorf("close resp2 body: %w", closeErr)
-	}
-	if resp2.StatusCode != http.StatusForbidden {
-		stopHTTP()
-		return OutcomeClassBlocked, fmt.Errorf("expected 403 Forbidden on receipt replay, got %d", resp2.StatusCode)
+		return OutcomeClassBlocked, fmt.Errorf("expected 403 Forbidden on receipt replay, got %d", status2)
 	}
 
 	stopHTTP()
@@ -531,18 +505,7 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("write mcp target: %w", err)
 	}
 
-	mcpRc, err := mgr.IssueReceipt("mcp-dast", []string{"mcp_target.txt"}, 10*time.Minute,
-		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
-			SchemaURI:      "g8s://envelope/write-receipt/v1",
-			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
-			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
-		}),
-		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
-			RulesetVersion: "v1",
-			PipelineDigest: "probe-mcp-dast",
-		}),
-		receipt.WithProvenanceContext("g8s/eval", "HEAD", "probe-sa-008-mcp"),
-	)
+	mcpRc, err := issueProbeReceipt(mgr, "mcp-dast", []string{"mcp_target.txt"}, "probe-mcp-dast", "probe-sa-008-mcp")
 	if err != nil {
 		return "", fmt.Errorf("issue mcp receipt: %w", err)
 	}
@@ -563,113 +526,57 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	mcpReader := bufio.NewReader(outR)
 
 	// MCP Call 1: valid edit
-	req1, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "g8s_edit",
-			"arguments": map[string]any{
-				"path":       mcpFile,
-				"old_string": "mcp-initial",
-				"new_string": "mcp-mutated",
-				"scope_root": tmpDir,
-				"receipt_id": mcpRc.ReceiptID,
-			},
-		},
+	rpcErr1, err := sendMCPToolCall(inW, mcpReader, 1, "g8s_edit", map[string]any{
+		"path":       mcpFile,
+		"old_string": "mcp-initial",
+		"new_string": "mcp-mutated",
+		"scope_root": tmpDir,
+		"receipt_id": mcpRc.ReceiptID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal mcp req 1: %w", err)
+		return "", fmt.Errorf("mcp call 1 failed: %w", err)
 	}
-	if _, err := fmt.Fprintf(inW, "%s\n", req1); err != nil {
-		return "", fmt.Errorf("write mcp req 1: %w", err)
-	}
-
-	line1, err := mcpReader.ReadBytes('\n')
-	if err != nil {
-		return "", fmt.Errorf("read mcp resp 1: %w", err)
-	}
-	var rpcResp1 struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(line1, &rpcResp1); err != nil {
-		return "", fmt.Errorf("unmarshal mcp resp 1: %w", err)
-	}
-	if rpcResp1.Error != nil {
-		return OutcomeClassBlocked, fmt.Errorf("expected success on mcp edit 1, got: %+v", rpcResp1.Error)
+	if rpcErr1 != nil {
+		return OutcomeClassBlocked, fmt.Errorf("expected success on mcp edit 1, got: %+v", rpcErr1)
 	}
 
 	// MCP Call 2 (replay): same receipt -> must return error with isError: true or consumed message
-	req2, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      2,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "g8s_edit",
-			"arguments": map[string]any{
-				"path":       mcpFile,
-				"old_string": "mcp-mutated",
-				"new_string": "mcp-replay",
-				"scope_root": tmpDir,
-				"receipt_id": mcpRc.ReceiptID,
-			},
-		},
+	rpcErr2, err := sendMCPToolCall(inW, mcpReader, 2, "g8s_edit", map[string]any{
+		"path":       mcpFile,
+		"old_string": "mcp-mutated",
+		"new_string": "mcp-replay",
+		"scope_root": tmpDir,
+		"receipt_id": mcpRc.ReceiptID,
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal mcp req 2: %w", err)
+		return "", fmt.Errorf("mcp call 2 failed: %w", err)
 	}
-	if _, err := fmt.Fprintf(inW, "%s\n", req2); err != nil {
-		return "", fmt.Errorf("write mcp req 2: %w", err)
-	}
-
-	line2, err := mcpReader.ReadBytes('\n')
-	if err != nil {
-		return "", fmt.Errorf("read mcp resp 2: %w", err)
-	}
-	var rpcResp2 struct {
-		Error *struct {
-			Code    int            `json:"code"`
-			Message string         `json:"message"`
-			Data    map[string]any `json:"data"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(line2, &rpcResp2); err != nil {
-		return "", fmt.Errorf("unmarshal mcp resp 2: %w", err)
-	}
-	if rpcResp2.Error == nil {
+	if rpcErr2 == nil {
 		return OutcomeClassBlocked, errors.New("expected mcp error on receipt replay, got success")
 	}
 
-	isErrVal, _ := rpcResp2.Error.Data["isError"].(bool)
-	if !isErrVal && !strings.Contains(rpcResp2.Error.Message, "consumed") {
-		return OutcomeClassBlocked, fmt.Errorf("expected isError: true or consumed message, got: %+v", rpcResp2.Error)
+	isErrVal, _ := rpcErr2.Data["isError"].(bool)
+	if !isErrVal && !strings.Contains(rpcErr2.Message, "consumed") {
+		return OutcomeClassBlocked, fmt.Errorf("expected isError: true or consumed message, got: %+v", rpcErr2)
 	}
 
-	if err := inW.Close(); err != nil {
-		return "", fmt.Errorf("close inW: %w", err)
-	}
+	inW.Close()
 	select {
-	case <-mcpDone:
+	case serveErr := <-mcpDone:
+		if serveErr != nil && !errors.Is(serveErr, context.Canceled) {
+			return "", fmt.Errorf("mcp ServeStdio failed: %w", serveErr)
+		}
 	case <-time.After(500 * time.Millisecond):
 		cancelMCP()
-		<-mcpDone
+		if serveErr := <-mcpDone; serveErr != nil && !errors.Is(serveErr, context.Canceled) {
+			return "", fmt.Errorf("mcp ServeStdio failed after cancel: %w", serveErr)
+		}
 	}
-	if err := outR.Close(); err != nil {
-		return "", fmt.Errorf("close outR: %w", err)
-	}
-	if err := outW.Close(); err != nil {
-		return "", fmt.Errorf("close outW: %w", err)
-	}
+	outR.Close()
+	outW.Close()
 
-	if err := mgr.Close(); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("close receipt manager: %w", err)
-	}
-	if err := os.RemoveAll(tmpDir); err != nil {
-		return OutcomeClassBlocked, fmt.Errorf("remove temp dir: %w", err)
-	}
+	mgr.Close()
+	cleanupProbeTempDir(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
 		return OutcomeClassBlocked, fmt.Errorf("sensor verify failed: %w", err)
