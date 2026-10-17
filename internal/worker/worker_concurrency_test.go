@@ -7,6 +7,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -343,6 +344,55 @@ func TestRunLoopIsolationAcquireFailureFailsLoop(t *testing.T) {
 		if !found {
 			t.Fatalf("released dir %q was never acquired", d)
 		}
+	}
+}
+
+// #610: regression test verifying that explicit target repository in AddDirs
+// is preserved over concurrent pool worktree isolation.
+func TestRunLoopConcurrentPreservesExplicitAddDir(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	customTargetDir := filepath.Join(t.TempDir(), "target-repo")
+	if err := os.MkdirAll(customTargetDir, 0o755); err != nil {
+		t.Fatalf("mkdir customTargetDir: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"prompt":   "inspect target repo",
+		"timeout":  "30s",
+		"add_dirs": []string{customTargetDir},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	if _, err := env.store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
+		IdempotencyKey: "cross-repo-1",
+		Payload:        payload,
+		Model:          "gemini-3.8-flash-high",
+		Role:           "collector",
+		Permission:     "read_only",
+		Timeout:        "30s",
+		AddDirs:        []string{customTargetDir},
+		MaxAttempts:    1,
+	}); err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+
+	iso := &fakeIsolation{}
+	code := env.sup.RunLoop(context.Background(), LoopOptions{
+		WorkerID: "w-target", LeaseSeconds: 60, Concurrency: 2, Isolation: iso,
+	})
+	if code != 0 {
+		t.Fatalf("expected drain exit 0, got %d", code)
+	}
+
+	env.runner.mu.Lock()
+	defer env.runner.mu.Unlock()
+	if len(env.runner.spawned) != 1 {
+		t.Fatalf("expected 1 spawned attempt, got %d", len(env.runner.spawned))
+	}
+	if got := env.runner.spawned[0].Dir; got != customTargetDir {
+		t.Fatalf("spawned worker received Dir %q, want %q", got, customTargetDir)
 	}
 }
 
