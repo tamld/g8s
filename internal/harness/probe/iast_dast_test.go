@@ -1,6 +1,8 @@
 package probe
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -9,11 +11,24 @@ import (
 )
 
 func TestIASTRuntimeHygieneSensor(t *testing.T) {
+	if got := countEntries(""); got != 0 {
+		t.Fatalf("countEntries(\"\") = %d, want 0", got)
+	}
+	if got := countEntries(filepath.Join(t.TempDir(), "nonexistent")); got != 0 {
+		t.Fatalf("countEntries(nonexistent) = %d, want 0", got)
+	}
+
+	t.Setenv("G8S_TIER", "F1-BASELINE")
 	tmpDir := t.TempDir()
 	sensor := CaptureRuntimeSensor(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
 		t.Fatalf("clean baseline sensor verify failed: %v", err)
+	}
+
+	// Goroutine delta exceeding negative threshold must trigger goroutine leak error after polling
+	if err := sensor.Verify(-1000); err == nil || !strings.Contains(err.Error(), "goroutine leak") {
+		t.Fatalf("expected sensor to detect goroutine leak for impossible threshold, got %v", err)
 	}
 
 	// Leaked file inside tmpDir must be caught by Verify
@@ -29,18 +44,6 @@ func TestIASTRuntimeHygieneSensor(t *testing.T) {
 	}
 
 	// Mutated tracked environment variable must be caught by Verify
-	origTier, hadTier := os.LookupEnv("G8S_TIER")
-	t.Cleanup(func() {
-		if hadTier {
-			if err := os.Setenv("G8S_TIER", origTier); err != nil {
-				t.Errorf("restore G8S_TIER: %v", err)
-			}
-		} else {
-			if err := os.Unsetenv("G8S_TIER"); err != nil {
-				t.Errorf("unset G8S_TIER: %v", err)
-			}
-		}
-	})
 	if err := os.Setenv("G8S_TIER", "F2-MUTATED"); err != nil {
 		t.Fatalf("setenv G8S_TIER: %v", err)
 	}
@@ -49,8 +52,39 @@ func TestIASTRuntimeHygieneSensor(t *testing.T) {
 	}
 }
 
+func TestIASTDASTHelpers_ErrorPaths(t *testing.T) {
+	if _, err := postJSONEdit("http://127.0.0.1:0/invalid", map[string]any{"bad": make(chan int)}); err == nil {
+		t.Fatal("expected marshal error in postJSONEdit")
+	}
+	if _, err := postJSONEdit("http://127.0.0.1:1/unreachable", map[string]any{"ok": "val"}); err == nil {
+		t.Fatal("expected connection error in postJSONEdit")
+	}
+
+	var buf bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("not-json\n"))
+	if _, err := sendMCPToolCall(&buf, reader, 1, "g8s_edit", map[string]any{"bad": make(chan int)}); err == nil {
+		t.Fatal("expected marshal error in sendMCPToolCall")
+	}
+	if _, err := sendMCPToolCall(&buf, reader, 1, "g8s_edit", map[string]any{"ok": "val"}); err == nil {
+		t.Fatal("expected unmarshal error in sendMCPToolCall for invalid JSON line")
+	}
+	emptyReader := bufio.NewReader(strings.NewReader(""))
+	if _, err := sendMCPToolCall(&buf, emptyReader, 1, "g8s_edit", map[string]any{"ok": "val"}); err == nil {
+		t.Fatal("expected EOF error in sendMCPToolCall for empty reader")
+	}
+}
+
 func TestIASTDASTProbes_AllPass(t *testing.T) {
 	ctx := context.Background()
+
+	// Ensure AuditSymlinkScopeEscape covers both set and unset G8S_TIER / G8S_SCOPE_ROOT restoration
+	t.Setenv("G8S_TIER", "F0")
+	t.Setenv("G8S_SCOPE_ROOT", t.TempDir())
+	if outcome, err := AuditSymlinkScopeEscape(ctx); err != nil || outcome != OutcomeClassCompleted {
+		t.Fatalf("AuditSymlinkScopeEscape with preset env failed: outcome=%q err=%v", outcome, err)
+	}
+	_ = os.Unsetenv("G8S_TIER")
+	_ = os.Unsetenv("G8S_SCOPE_ROOT")
 
 	suite := &ProbeSuite{
 		Name:        "IAST/DAST Red-Team Suite",

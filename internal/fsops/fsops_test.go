@@ -717,5 +717,36 @@ func TestDelegatedScopeContainment_Issue598(t *testing.T) {
 		if string(gotContent) != "secret" {
 			t.Fatalf("outsideSecret was modified! got %q, want %q", string(gotContent), "secret")
 		}
+
+		// Dangling symlink pointing outside scope must also be rejected by VerifyScope
+		danglingLink := filepath.Join(scopeDir, "dangling_escape.txt")
+		if err := os.Symlink(filepath.Join(tmpDir, "nonexistent_outside.txt"), danglingLink); err == nil {
+			if _, err := VerifyScope(danglingLink, scopeDir, nil); err == nil {
+				t.Fatalf("expected dangling symlink escaping scope to fail VerifyScope")
+			}
+		}
+
+		// Symlink depth > 32 must be rejected
+		if _, err := evalCanonicalPathDepth(scopeDir, 33); err == nil || !strings.Contains(err.Error(), "too many symlink levels") {
+			t.Fatalf("expected too many symlink levels error, got %v", err)
+		}
+
+		// NUL byte in path or scope root must be rejected
+		if _, err := VerifyScope("bad\x00path.txt", scopeDir, nil); err == nil || !strings.Contains(err.Error(), "NUL") {
+			t.Fatalf("expected NUL byte rejection in VerifyScope, got %v", err)
+		}
+	})
+
+	t.Run("ResolveDelegationContext_F1WithoutEnvScopeUsesCwdCeiling", func(t *testing.T) {
+		t.Setenv("G8S_TIER", "F1")
+		t.Setenv("G8S_SCOPE_ROOT", "")
+		t.Setenv("G8S_RECEIPT_ID", "rc-cwd")
+
+		if _, scope, err := ResolveDelegationContext("", "", false); err != nil || scope != "." {
+			t.Fatalf("expected default scope '.' for F1 without G8S_SCOPE_ROOT, got scope=%q err=%v", scope, err)
+		}
+		if _, _, err := ResolveDelegationContext("", "..", false); err == nil || !strings.Contains(err.Error(), "scope_root mismatch") {
+			t.Fatalf("expected F1 cwd ceiling to reject '..', got %v", err)
+		}
 	})
 }
