@@ -316,6 +316,13 @@ func (s *Server) listPermissionsTool(_ context.Context, _ json.RawMessage) (any,
 	return map[string]any{"permissions": entries}, nil
 }
 
+// ReceiptConsumer is an optional extension of ReceiptVerifier (satisfied by
+// *receipt.Manager) that atomically validates and marks a single-use write
+// receipt as consumed during MCP mutation requests.
+type ReceiptConsumer interface {
+	ValidateAndConsume(receiptID string, consumerTaskID string) (*receipt.WriteReceipt, error)
+}
+
 // resolveMCPDelegation validates the delegation context and optional receipt_id.
 func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMutation bool) (string, []string, *jsonRPCError) {
 	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
@@ -326,6 +333,15 @@ func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMut
 		return "", nil, blockedStatus("blocked_by_policy", "g8s_edit requires an explicit receipt_id or G8S_RECEIPT_ID environment binding")
 	}
 	if receiptID != "" && s.receipts != nil {
+		if isMutation {
+			if c, ok := s.receipts.(ReceiptConsumer); ok {
+				rc, consumeErr := c.ValidateAndConsume(receiptID, "mcp-fs-edit")
+				if consumeErr != nil {
+					return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr))
+				}
+				return scopeRoot, rc.AllowedPaths, nil
+			}
+		}
 		if v, ok := s.receipts.(ReceiptVerifier); ok {
 			rc, err := v.VerifyReceipt(receiptID)
 			if err != nil {

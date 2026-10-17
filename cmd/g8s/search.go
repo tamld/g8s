@@ -112,7 +112,7 @@ func runSearch(args []string) {
 		exitRuntime("search", "", *traceID, cli.CodeHarness, err, "Delegation boundary violation", *jsonl)
 	}
 	*receiptID = resReceiptID
-	if *scopeRoot == "" && resScopeRoot != "." {
+	if *scopeRoot == "" && resScopeRoot != "" {
 		*scopeRoot = resScopeRoot
 	}
 

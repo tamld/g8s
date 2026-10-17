@@ -104,6 +104,9 @@ func Execute(ctx context.Context, opts Options) (*Result, error) {
 		scopeBase := root
 		if opts.ScopeRoot != "" {
 			scopeBase = opts.ScopeRoot
+			if err := verifySearchRootInScope(root, opts.ScopeRoot); err != nil {
+				return nil, err
+			}
 		}
 
 		var ignorePatterns []string
@@ -487,4 +490,89 @@ func isIgnored(relPath, base string, ignorePatterns []string) bool {
 		}
 	}
 	return false
+}
+
+func verifySearchRootInScope(root, scopeRoot string) error {
+	if strings.ContainsRune(root, 0) || strings.ContainsRune(scopeRoot, 0) {
+		return fmt.Errorf("search path must not contain NUL bytes")
+	}
+	absScope, err := filepath.Abs(scopeRoot)
+	if err != nil {
+		return fmt.Errorf("resolve abs scope root %q: %w", scopeRoot, err)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve abs search root %q: %w", root, err)
+	}
+	canonScope, err := evalSearchCanonicalPath(absScope, 0)
+	if err != nil {
+		return fmt.Errorf("resolve canonical scope root %q: %w", scopeRoot, err)
+	}
+	canonRoot, err := evalSearchCanonicalPath(absRoot, 0)
+	if err != nil {
+		return fmt.Errorf("resolve canonical search root %q: %w", root, err)
+	}
+	rel, errRel := filepath.Rel(absScope, absRoot)
+	relToCanon, errRelCanon := filepath.Rel(canonScope, absRoot)
+	relSlash := filepath.ToSlash(filepath.Clean(rel))
+	relToCanonSlash := filepath.ToSlash(filepath.Clean(relToCanon))
+	if (errRel != nil || relSlash == ".." || strings.HasPrefix(relSlash, "../") || strings.HasPrefix(relSlash, "/")) &&
+		(errRelCanon != nil || relToCanonSlash == ".." || strings.HasPrefix(relToCanonSlash, "../") || strings.HasPrefix(relToCanonSlash, "/")) {
+		return fmt.Errorf("search root %q escapes scope root %q", root, scopeRoot)
+	}
+	canonRel, err := filepath.Rel(canonScope, canonRoot)
+	if err != nil {
+		return fmt.Errorf("compute canonical relative search root: %w", err)
+	}
+	canonRelSlash := filepath.ToSlash(filepath.Clean(canonRel))
+	if canonRelSlash == ".." || strings.HasPrefix(canonRelSlash, "../") || strings.HasPrefix(canonRelSlash, "/") {
+		return fmt.Errorf("search root %q escapes scope root %q via symlink", root, scopeRoot)
+	}
+	return nil
+}
+
+func evalSearchCanonicalPath(p string, depth int) (string, error) {
+	if depth > 32 {
+		return "", fmt.Errorf("too many symlink levels resolving %q", p)
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved), nil
+	}
+	cur := abs
+	var tail []string
+	for {
+		if linfo, lerr := os.Lstat(cur); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+			target, rerr := os.Readlink(cur)
+			if rerr != nil {
+				return "", rerr
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(cur), target)
+			}
+			resolvedTarget, terr := evalSearchCanonicalPath(target, depth+1)
+			if terr != nil {
+				return "", terr
+			}
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolvedTarget = filepath.Join(resolvedTarget, tail[i])
+			}
+			return filepath.Clean(resolvedTarget), nil
+		}
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return filepath.Clean(abs), nil
+		}
+		tail = append(tail, filepath.Base(cur))
+		cur = parent
+	}
 }

@@ -58,13 +58,18 @@ func TestResolveDelegationContext(t *testing.T) {
 		t.Setenv("G8S_RECEIPT_ID", "rc-worker")
 		t.Setenv("G8S_SCOPE_ROOT", "worker/dir")
 
-		// Flag matches env receipt
-		rcpt, scope, err := ResolveDelegationContext("rc-worker", "flag/dir", true)
+		// Narrower flag scope inside env scope ceiling succeeds
+		rcpt, scope, err := ResolveDelegationContext("rc-worker", "worker/dir/sub", true)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if rcpt != "rc-worker" || scope != "flag/dir" {
+		if rcpt != "rc-worker" || scope != "worker/dir/sub" {
 			t.Fatalf("unexpected values: rcpt=%s scope=%s", rcpt, scope)
+		}
+
+		// Sibling/broader flag scope outside env scope ceiling is rejected (#598)
+		if _, _, err := ResolveDelegationContext("rc-worker", "flag/dir", true); err == nil || !strings.Contains(err.Error(), "scope_root mismatch") {
+			t.Fatalf("expected scope_root mismatch for broader flag/dir, got %v", err)
 		}
 
 		// Empty flags inherit from env
