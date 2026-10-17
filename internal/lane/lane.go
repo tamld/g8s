@@ -429,8 +429,8 @@ func isDocsOnly(paths []string) bool {
 // isHotfixSummary reports whether the summary declares an explicit hotfix marker.
 func isHotfixSummary(summary string) bool {
 	s := strings.TrimSpace(summary)
-	lower := strings.ToLower(s)
-	if lower == "0" || lower == "hotfix" || lower == "lane:0" || lower == "lane: 0" || lower == "lane:hotfix" {
+	// ⚡ Bolt Optimization: Use bounded EqualFold for zero-allocation prefix matching
+	if strings.EqualFold(s, "0") || strings.EqualFold(s, "hotfix") || strings.EqualFold(s, "lane:0") || strings.EqualFold(s, "lane: 0") || strings.EqualFold(s, "lane:hotfix") {
 		return true
 	}
 	prefixes := []string{
@@ -442,7 +442,7 @@ func isHotfixSummary(summary string) bool {
 		"hotfix ",
 	}
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(lower, prefix) {
+		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
 			return true
 		}
 	}
@@ -456,9 +456,9 @@ func isHotfixSummary(summary string) bool {
 //  3. Paths explicitly located under a refactor/ directory
 func isRefactor(paths []string, summary string) bool {
 	s := strings.TrimSpace(summary)
-	lower := strings.ToLower(s)
 
-	if lower == "r" || lower == "refactor" || lower == "lane:r" || lower == "lane: r" || lower == "lane:refactor" {
+	// ⚡ Bolt Optimization: Use bounded EqualFold for zero-allocation prefix matching
+	if strings.EqualFold(s, "r") || strings.EqualFold(s, "refactor") || strings.EqualFold(s, "lane:r") || strings.EqualFold(s, "lane: r") || strings.EqualFold(s, "lane:refactor") {
 		return true
 	}
 
@@ -473,13 +473,13 @@ func isRefactor(paths []string, summary string) bool {
 		"chore(refactor):",
 	}
 	for _, prefix := range refactorPrefixes {
-		if strings.HasPrefix(lower, prefix) {
+		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
 			return true
 		}
 	}
 
 	// Conventional commit scope: refactor(component): ...
-	if strings.HasPrefix(lower, "refactor(") && strings.Contains(lower, "):") {
+	if len(s) >= 9 && strings.EqualFold(s[:9], "refactor(") && strings.Contains(s, "):") {
 		return true
 	}
 
