@@ -5,12 +5,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tamld/g8s/internal/search"
 )
 
+func cleanTestEnv(t *testing.T) {
+	t.Setenv("G8S_TIER", "")
+	t.Setenv("G8S_SCOPE_ROOT", "")
+	t.Setenv("G8S_RECEIPT_ID", "")
+	t.Setenv("G8S_PERMISSION", "")
+}
+
 func TestSearchJSONAndFixedStrings(t *testing.T) {
+	cleanTestEnv(t)
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
@@ -55,6 +64,7 @@ func TestSearchJSONAndFixedStrings(t *testing.T) {
 }
 
 func TestSearchFilesModeAndQuiet(t *testing.T) {
+	cleanTestEnv(t)
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
@@ -103,6 +113,7 @@ func TestSearchFilesModeAndQuiet(t *testing.T) {
 }
 
 func TestSearchReceiptScopeFilter(t *testing.T) {
+	cleanTestEnv(t)
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
@@ -155,6 +166,7 @@ func TestSearchReceiptScopeFilter(t *testing.T) {
 }
 
 func TestSearchInvalidRegexExitUsage(t *testing.T) {
+	cleanTestEnv(t)
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
@@ -169,6 +181,116 @@ func TestSearchInvalidRegexExitUsage(t *testing.T) {
 	}
 	if exitErr.ExitCode() != 2 {
 		t.Fatalf("expected exit code 2 (E_USAGE), got %d\nOutput: %s", exitErr.ExitCode(), string(out))
+	}
+}
+
+func TestSearchErgonomicFlags(t *testing.T) {
+	cleanTestEnv(t)
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+
+	file1 := filepath.Join(tempDir, "file1.txt")
+	file2 := filepath.Join(tempDir, "file2.txt")
+	file3 := filepath.Join(tempDir, "file3.txt")
+
+	content1 := "hello world\nalpha\nhello again\n"
+	content2 := "beta\nhello third\n"
+	content3 := "gamma\ndelta\n"
+
+	if err := os.WriteFile(file1, []byte(content1), 0o600); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte(content2), 0o600); err != nil {
+		t.Fatalf("write file2: %v", err)
+	}
+	if err := os.WriteFile(file3, []byte(content3), 0o600); err != nil {
+		t.Fatalf("write file3: %v", err)
+	}
+
+	// 1. Verify -n and --line-number work cleanly
+	for _, flag := range []string{"-n", "--line-number"} {
+		cmd := exec.Command(binPath, "search", flag, "hello", tempDir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("search %s failed: %v\nOutput: %s", flag, err, string(out))
+		}
+		outStr := string(out)
+		if !strings.Contains(outStr, "hello world") || !strings.Contains(outStr, ":1:") {
+			t.Errorf("expected line number output for %s, got: %s", flag, outStr)
+		}
+	}
+
+	// 2. Verify -l and --files-with-matches work cleanly
+	for _, flag := range []string{"-l", "--files-with-matches"} {
+		cmd := exec.Command(binPath, "search", flag, "hello", tempDir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("search %s failed: %v\nOutput: %s", flag, err, string(out))
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 files with matches for %s, got %d: %q", flag, len(lines), lines)
+		}
+		if filepath.ToSlash(lines[0]) != filepath.ToSlash(file1) || filepath.ToSlash(lines[1]) != filepath.ToSlash(file2) {
+			t.Errorf("expected [%s, %s], got %v", file1, file2, lines)
+		}
+	}
+
+	// Test -l with --json mode
+	{
+		cmd := exec.Command(binPath, "search", "-l", "hello", tempDir, "--json")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("search -l --json failed: %v\nOutput: %s", err, string(out))
+		}
+		var env struct {
+			Data searchData `json:"data"`
+		}
+		if err := json.Unmarshal(out, &env); err != nil {
+			t.Fatalf("unmarshal search -l output: %v\nOutput: %s", err, string(out))
+		}
+		if len(env.Data.Files) != 2 {
+			t.Fatalf("expected 2 files in json data.files, got %d: %+v", len(env.Data.Files), env.Data.Files)
+		}
+		if filepath.ToSlash(env.Data.Files[0]) != filepath.ToSlash(file1) || filepath.ToSlash(env.Data.Files[1]) != filepath.ToSlash(file2) {
+			t.Errorf("expected [%s, %s], got %v", file1, file2, env.Data.Files)
+		}
+	}
+
+	// 3. Verify -c and --count work cleanly
+	for _, flag := range []string{"-c", "--count"} {
+		cmd := exec.Command(binPath, "search", flag, "hello", tempDir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("search %s failed: %v\nOutput: %s", flag, err, string(out))
+		}
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 count lines for %s, got %d: %q", flag, len(lines), lines)
+		}
+		want1 := filepath.ToSlash(file1) + ":2"
+		want2 := filepath.ToSlash(file2) + ":1"
+		if filepath.ToSlash(lines[0]) != want1 || filepath.ToSlash(lines[1]) != want2 {
+			t.Errorf("expected [%s, %s], got %v", want1, want2, lines)
+		}
+	}
+
+	// 4. Verify context flags (-C 2, -A 1, -B 1, --C 2, -C=2) parse cleanly without flag errors
+	for _, args := range [][]string{
+		{"-C", "2", "hello", tempDir},
+		{"-A", "1", "hello", tempDir},
+		{"-B", "1", "hello", tempDir},
+		{"--C", "2", "hello", tempDir},
+		{"-C=2", "hello", tempDir},
+	} {
+		cmd := exec.Command(binPath, append([]string{"search"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("search with args %v failed: %v\nOutput: %s", args, err, string(out))
+		}
+		if !strings.Contains(string(out), "hello world") {
+			t.Errorf("expected match in output for args %v, got: %s", args, string(out))
+		}
 	}
 }
 

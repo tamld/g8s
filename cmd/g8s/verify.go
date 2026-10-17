@@ -101,6 +101,8 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	var reqPayload struct {
 		ReceiptID    string   `json:"receipt_id"`
 		AllowedPaths []string `json:"allowed_paths"`
+		ScopeRoot    string   `json:"scope_root"`
+		AddDirs      []string `json:"add_dirs"`
 	}
 	if len(task.Request) > 0 {
 		_ = json.Unmarshal(task.Request, &reqPayload)
@@ -128,8 +130,21 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		}
 	}
 
+	targetRepoDir := strings.TrimSpace(reqPayload.ScopeRoot)
+	if targetRepoDir == "" && len(reqPayload.AddDirs) > 0 {
+		targetRepoDir = strings.TrimSpace(reqPayload.AddDirs[0])
+	}
+
 	// Run Verify
-	v := verifier.NewVerifier(verifierOpts...)
+	finalOpts := make([]verifier.Option, 0, len(verifierOpts)+2)
+	if targetRepoDir != "" && targetRepoDir != "." {
+		finalOpts = append(finalOpts, verifier.WithRepoRoot(targetRepoDir))
+		if regPath := filepath.Join(targetRepoDir, verifier.DefaultRegistryPath); fileExists(regPath) {
+			finalOpts = append(finalOpts, verifier.WithRegistryPath(regPath))
+		}
+	}
+	finalOpts = append(finalOpts, verifierOpts...)
+	v := verifier.NewVerifier(finalOpts...)
 	verdict, err := v.Verify(target, caller)
 	if err != nil {
 		// Self-grade refusal or typed error
@@ -173,4 +188,9 @@ func exitRuntimeWithWriter(w io.Writer, cmd, sub, traceID, code string, err erro
 	}
 	env := cli.NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, "")
 	_ = cli.WriteResponse(w, env, jsonl)
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
 }

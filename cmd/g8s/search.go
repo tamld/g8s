@@ -44,6 +44,21 @@ func runSearch(args []string) {
 	fs.Var(&globs, "g", "include or exclude files matching glob")
 	fs.Var(&globs, "glob", "include or exclude files matching glob")
 
+	lineNumber := fs.Bool("n", true, "print 1-based line numbers (enabled by default)")
+	lineNumberLong := fs.Bool("line-number", true, "print 1-based line numbers (enabled by default)")
+	filesWithMatches := fs.Bool("l", false, "print only unique paths of files with matches")
+	filesWithMatchesLong := fs.Bool("files-with-matches", false, "print only unique paths of files with matches")
+	countMode := fs.Bool("c", false, "print count of matching lines per file")
+	countModeLong := fs.Bool("count", false, "print count of matching lines per file")
+	contextLines := fs.Int("C", 0, "context lines (accepted for rg/grep compatibility)")
+	afterLines := fs.Int("A", 0, "context lines (accepted for rg/grep compatibility)")
+	beforeLines := fs.Int("B", 0, "context lines (accepted for rg/grep compatibility)")
+	_ = lineNumber
+	_ = lineNumberLong
+	_ = contextLines
+	_ = afterLines
+	_ = beforeLines
+
 	valueFlags := map[string]bool{
 		"-g":            true,
 		"--g":           true,
@@ -59,6 +74,12 @@ func runSearch(args []string) {
 		"--actor":       true,
 		"-trace-id":     true,
 		"--trace-id":    true,
+		"-C":            true,
+		"--C":           true,
+		"-A":            true,
+		"--A":           true,
+		"-B":            true,
+		"--B":           true,
 	}
 
 	var flagArgs []string
@@ -168,6 +189,21 @@ func runSearch(args []string) {
 		exitUsage("search", "", *traceID, err.Error(), "", *jsonl)
 	}
 
+	isFilesWithMatches := *filesWithMatches || *filesWithMatchesLong
+	isCountMode := *countMode || *countModeLong
+
+	if isFilesWithMatches && !*filesOnly {
+		var uniqueFiles []string
+		seen := make(map[string]bool)
+		for _, m := range res.Matches {
+			if !seen[m.File] {
+				seen[m.File] = true
+				uniqueFiles = append(uniqueFiles, m.File)
+			}
+		}
+		res.Files = uniqueFiles
+	}
+
 	isQuiet := *quiet || *quietLong
 	if isQuiet {
 		if (*filesOnly && len(res.Files) > 0) || (!*filesOnly && len(res.Matches) > 0) {
@@ -196,6 +232,34 @@ func runSearch(args []string) {
 			fmt.Println(f)
 		}
 		if len(res.Files) == 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if isFilesWithMatches {
+		for _, f := range res.Files {
+			fmt.Println(f)
+		}
+		if len(res.Files) == 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if isCountMode {
+		var fileOrder []string
+		counts := make(map[string]int)
+		for _, m := range res.Matches {
+			if _, exists := counts[m.File]; !exists {
+				fileOrder = append(fileOrder, m.File)
+			}
+			counts[m.File]++
+		}
+		for _, f := range fileOrder {
+			fmt.Printf("%s:%d\n", f, counts[f])
+		}
+		if len(fileOrder) == 0 {
 			os.Exit(1)
 		}
 		return

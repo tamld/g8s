@@ -179,10 +179,11 @@ func runOffer(args []string) {
 func printOfferUsage() {
 	fmt.Println("Usage: g8s offer <init|check|version> [flags]")
 	fmt.Println("\nSubcommands:")
-	fmt.Println("  init --profile <knowledge|security|infra|utility> [--dir <target>] [--force] [--gates-only]")
+	fmt.Println("  init --profile <knowledge|security|infra|utility> [--dir <target>] [--force] [--gates-only] [--gates-dir <dir>]")
 	fmt.Println("                                Scaffold .g8s/ + gate scripts from the embedded profile")
-	fmt.Println("  check [--dir <target>] [--gates <list>]   Run the copied gates (first audit)")
-	fmt.Println("  version                                   Print the offer bundle version")
+	fmt.Println("  check [--dir <target>] [--gates <list>] [--gates-dir <dir>]")
+	fmt.Println("                                Run the copied gates (first audit)")
+	fmt.Println("  version                       Print the offer bundle version")
 }
 
 func runOfferInit(args []string) {
@@ -192,6 +193,7 @@ func runOfferInit(args []string) {
 	dir := fs.String("dir", ".", "target project directory")
 	force := fs.Bool("force", false, "overwrite an existing scaffold")
 	gatesOnly := fs.Bool("gates-only", false, "install/refresh tools/ci_*.sh gate scripts without modifying .g8s/ registries")
+	gatesDir := fs.String("gates-dir", "tools", "relative directory to install gate scripts")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("offer", "init", *traceID, err.Error(), "", *jsonl)
 	}
@@ -247,8 +249,8 @@ func runOfferInit(args []string) {
 		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"}
 	}
 
-	toolsDir := filepath.Join(*dir, "tools")
-	if mkErr := os.MkdirAll(toolsDir, 0o700); mkErr != nil {
+	targetGatesDir := filepath.Join(*dir, *gatesDir)
+	if mkErr := os.MkdirAll(targetGatesDir, 0o700); mkErr != nil {
 		exitRuntime("offer", "init", *traceID, cli.CodeIO, mkErr, "", *jsonl)
 		return
 	}
@@ -261,7 +263,7 @@ func runOfferInit(args []string) {
 		if strings.HasSuffix(name, ".sh") {
 			mode = 0o755
 		}
-		if werr := os.WriteFile(filepath.Join(toolsDir, name), []byte(raw), mode); werr != nil {
+		if werr := os.WriteFile(filepath.Join(targetGatesDir, name), []byte(raw), mode); werr != nil {
 			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
 			return
 		}
@@ -282,10 +284,25 @@ func runOfferInit(args []string) {
 		return
 	}
 	if *gatesOnly {
-		fmt.Printf("offer: refreshed gate scripts into %s/tools\n", *dir)
+		fmt.Printf("offer: refreshed gate scripts into %s\n", targetGatesDir)
 		return
 	}
 	fmt.Printf("offer: scaffolded %s profile into %s\nnext: wire the gates into CI, then run 'g8s offer check'\n", *profile, *dir)
+}
+
+func resolveGateScriptPath(dir, gatesDir, scriptName string) string {
+	if gatesDir != "" {
+		return filepath.Join(dir, gatesDir, scriptName)
+	}
+	toolsPath := filepath.Join(dir, "tools", scriptName)
+	if _, err := os.Stat(toolsPath); err == nil {
+		return toolsPath
+	}
+	opsPath := filepath.Join(dir, "ops", "gates", scriptName)
+	if _, err := os.Stat(opsPath); err == nil {
+		return opsPath
+	}
+	return toolsPath
 }
 
 func runOfferCheck(args []string) {
@@ -293,12 +310,22 @@ func runOfferCheck(args []string) {
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	dir := fs.String("dir", ".", "target project directory")
 	gates := fs.String("gates", "spec,structure,links", "comma list: spec,structure,links")
+	gatesDir := fs.String("gates-dir", "", "relative directory containing gate scripts")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("offer", "check", *traceID, err.Error(), "", *jsonl)
 	}
 	var results []map[string]any
 	overall := 0
-	run := func(name, script string) {
+	run := func(name, scriptName string) {
+		script := resolveGateScriptPath(*dir, *gatesDir, scriptName)
+		isStale := false
+		if rawDisk, err := os.ReadFile(script); err == nil {
+			if embedded, ok := offer.GateScript(scriptName); ok {
+				if string(rawDisk) != embedded {
+					isStale = true
+				}
+			}
+		}
 		out, err := runCapture(script, *dir)
 		code := 0
 		if err != nil {
@@ -308,7 +335,11 @@ func runOfferCheck(args []string) {
 				code = -1
 			}
 		}
-		results = append(results, map[string]any{"gate": name, "script": script, "exit": code, "output": out})
+		r := map[string]any{"gate": name, "script": script, "exit": code, "output": out}
+		if isStale {
+			r["stale"] = true
+		}
+		results = append(results, r)
 		if code != 0 {
 			overall = 1
 		}
@@ -316,11 +347,11 @@ func runOfferCheck(args []string) {
 	for _, g := range strings.Split(*gates, ",") {
 		switch strings.TrimSpace(g) {
 		case "spec":
-			run("spec", filepath.Join(*dir, "tools", "ci_spec_code_sync.sh"))
+			run("spec", "ci_spec_code_sync.sh")
 		case "structure":
-			run("structure", filepath.Join(*dir, "tools", "ci_structure_sync.sh"))
+			run("structure", "ci_structure_sync.sh")
 		case "links":
-			run("links", filepath.Join(*dir, "tools", "ci_link_integrity.sh"))
+			run("links", "ci_link_integrity.sh")
 		default:
 			exitUsage("offer", "check", *traceID, fmt.Sprintf("unknown gate %q (valid: spec, structure, links)", g), "", *jsonl)
 			return
@@ -330,12 +361,26 @@ func runOfferCheck(args []string) {
 	env.TraceID = *traceID
 	if *jsonMode || *jsonl {
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
-		return
+	} else {
+		for _, r := range results {
+			fmt.Printf("%-10s exit=%v (%s)\n", r["gate"], r["exit"], r["script"])
+			if stale, _ := r["stale"].(bool); stale {
+				fmt.Printf("  [warn] stale gate script %s differs from embedded bundle (run 'g8s offer init --gates-only --dir %s')\n", r["script"], *dir)
+			}
+			if code, _ := r["exit"].(int); code != 0 {
+				if out, _ := r["output"].(string); strings.TrimSpace(out) != "" {
+					trimmed := strings.ReplaceAll(strings.TrimSpace(out), "\r\n", "\n")
+					for _, line := range strings.Split(trimmed, "\n") {
+						fmt.Printf("    %s\n", line)
+					}
+				}
+			}
+		}
+		fmt.Printf("overall: %s\n", overallStatus(overall))
 	}
-	for _, r := range results {
-		fmt.Printf("%-10s exit=%v (%s)\n", r["gate"], r["exit"], r["script"])
+	if overall != 0 {
+		os.Exit(1)
 	}
-	fmt.Printf("overall: %s\n", overallStatus(overall))
 }
 
 func overallStatus(fail int) string {
