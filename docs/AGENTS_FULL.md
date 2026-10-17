@@ -150,9 +150,13 @@ All pull requests and code modifications must pass the local and CI quality & se
 CGO_ENABLED=0 go test -v ./...
 CGO_ENABLED=1 go test -v -race ./...
 
-# 2. Run SAST Triad (Gosec in golangci-lint + Semgrep AST rules) & vulnerability check
+# 2. Run SAST Triad (Gosec in golangci-lint + Semgrep AST rules), DAST, IAST, Fuzzing & vulnerability check
 golangci-lint run ./...
 bash tools/ci_semgrep_check_test.sh && bash tools/ci_semgrep_check.sh
+go test -race ./internal/server/... ./internal/mcp/... -run DAST
+go test -race ./internal/harness/probe/... -run TestIAST
+go test -run '^$' -fuzz FuzzVerifyScope -fuzztime 2000x ./internal/fsops/
+go test -run '^$' -fuzz FuzzSelectPath -fuzztime 5000x ./internal/cli/
 govulncheck ./...
 
 # 3. Run static analysis, formatting, and doc-code anti-stale contracts

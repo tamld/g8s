@@ -296,6 +296,11 @@ func DefaultSuite() *ProbeSuite {
 			NewSanitizerFidelityProbe(),
 			NewReceiptBypassProbe(),
 			NewF2RecursiveContainmentProbe(),
+
+			// Category: IAST/DAST Red-Team Probes (3 probes) — Issue #601
+			NewSwarmReceiptContentionProbe(),
+			NewSymlinkScopeEscapeProbe(),
+			NewHTTPMCPDASTBoundaryProbe(),
 		},
 	}
 }

@@ -386,6 +386,9 @@ jobs:
           go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 10000x ./internal/receipt/
           go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 10000x ./internal/worker/
           go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 10000x ./internal/dispatch/
+          go test -run '^$' -fuzz FuzzVerifyScope -fuzztime 2000x ./internal/fsops/
+          go test -run '^$' -fuzz FuzzReadAndEdit -fuzztime 1000x ./internal/fsops/
+          go test -run '^$' -fuzz FuzzSelectPath -fuzztime 5000x ./internal/cli/
 
       - name: Upload coverage artifact
         if: always() && env.CI_LANE != 'docs'

@@ -199,7 +199,7 @@ Key ADRs: [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard 
 
 ## Quality Gates
 
-Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector), plus the **SAST Triad**: `Gosec` (Go AST security via `golangci-lint`), `Semgrep` (offline AST policy rules in `.semgrep/g8s-rules.yml`), and `CodeQL` (inter-procedural taint & dataflow analysis in `.github/workflows/codeql.yml`). Pushes clear the pre-push gate battery: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfooding roundtrip, cross-platform build, root hygiene.
+Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector), plus a **4-pillar application security battery**: (1) **SAST Triad** (`Gosec` via `golangci-lint`, `Semgrep` offline AST policy rules in `.semgrep/g8s-rules.yml`, and `CodeQL` inter-procedural taint & dataflow analysis in `.github/workflows/codeql.yml`), (2) **Live Black-Box DAST** (`internal/server/dast_test.go`, `internal/mcp/dast_test.go` exercising `/api/v1/fs/*` and MCP stdio boundaries), (3) **In-Process IAST & Swarm Red-Team Probes** (`RuntimeSensor` and `sa-006`..`sa-008` in `internal/harness/probe/iast_dast.go`), and (4) **Grey-Box Fuzzing** (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`, plus parser fuzz targets). Pushes clear the pre-push gate battery: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfooding roundtrip, cross-platform build, root hygiene.
 
 ## Roadmap
 

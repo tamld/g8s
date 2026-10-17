@@ -112,7 +112,9 @@ func runSearch(args []string) {
 		exitRuntime("search", "", *traceID, cli.CodeHarness, err, "Delegation boundary violation", *jsonl)
 	}
 	*receiptID = resReceiptID
-	if *scopeRoot == "" && resScopeRoot != "" {
+	envTier := strings.TrimSpace(os.Getenv("G8S_TIER"))
+	isDelegatedTier := strings.EqualFold(envTier, "F1") || strings.EqualFold(envTier, "F2")
+	if *scopeRoot == "" && (resScopeRoot != "." || isDelegatedTier || strings.TrimSpace(os.Getenv("G8S_SCOPE_ROOT")) != "") {
 		*scopeRoot = resScopeRoot
 	}
 

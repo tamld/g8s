@@ -599,3 +599,123 @@ func TestJITWhisperOnReadAndEdit(t *testing.T) {
 		t.Fatalf("expected non-blocking JITWhisper on Edit, got %+v", editRes.JITWhisper)
 	}
 }
+
+func TestDelegatedScopeContainment_Issue598(t *testing.T) {
+	t.Run("ResolveDelegationContext_CannotWidenScopeRoot", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subScope := filepath.Join(tmpDir, "sub")
+		if err := os.MkdirAll(subScope, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Setenv("G8S_TIER", "F1")
+		t.Setenv("G8S_SCOPE_ROOT", subScope)
+
+		// Scope widening to parent tmpDir must be rejected
+		_, _, err := ResolveDelegationContext("", tmpDir, false)
+		if err == nil || (!strings.Contains(err.Error(), "escapes delegated worker environment scope root") &&
+			!strings.Contains(err.Error(), "outside delegated G8S_SCOPE_ROOT") &&
+			!strings.Contains(err.Error(), "scope_root mismatch")) {
+			t.Fatalf("expected scope widening rejection for tmpDir, got %v", err)
+		}
+
+		// Scope widening to /etc must be rejected
+		_, _, err = ResolveDelegationContext("", "/etc", false)
+		if err == nil || (!strings.Contains(err.Error(), "escapes delegated worker environment scope root") &&
+			!strings.Contains(err.Error(), "outside delegated G8S_SCOPE_ROOT") &&
+			!strings.Contains(err.Error(), "scope_root mismatch")) {
+			t.Fatalf("expected scope widening rejection for /etc, got %v", err)
+		}
+
+		// Exact subScope matches the ceiling and must succeed
+		_, scope, err := ResolveDelegationContext("", subScope, false)
+		if err != nil {
+			t.Fatalf("unexpected error for subScope: %v", err)
+		}
+		if scope != subScope {
+			t.Fatalf("expected scope %q, got %q", subScope, scope)
+		}
+
+		// Narrower child directory must succeed
+		innerDir := filepath.Join(subScope, "inner")
+		if err := os.MkdirAll(innerDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, scope, err = ResolveDelegationContext("", innerDir, false)
+		if err != nil {
+			t.Fatalf("unexpected error for innerDir: %v", err)
+		}
+		if scope != innerDir {
+			t.Fatalf("expected scope %q, got %q", innerDir, scope)
+		}
+	})
+
+	t.Run("ResolveDelegationContext_F1MutationWithoutReceiptBlocked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("G8S_TIER", "F1")
+		t.Setenv("G8S_SCOPE_ROOT", tmpDir)
+		t.Setenv("G8S_RECEIPT_ID", "")
+
+		_, _, err := ResolveDelegationContext("", "", true)
+		if err == nil || (!strings.Contains(err.Error(), "requires a write receipt") &&
+			!strings.Contains(err.Error(), "requires a valid WriteReceipt")) {
+			t.Fatalf("expected write receipt requirement error, got %v", err)
+		}
+	})
+
+	t.Run("SymlinkEscapeBlockedInReadEditAndVerifyScope", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		scopeDir := filepath.Join(tmpDir, "scope")
+		if err := os.MkdirAll(scopeDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		outsideSecret := filepath.Join(tmpDir, "outside_secret.txt")
+		if err := os.WriteFile(outsideSecret, []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		escapeLink := filepath.Join(scopeDir, "escape.txt")
+		if err := os.Symlink(outsideSecret, escapeLink); err != nil {
+			t.Skipf("symlink not supported: %v", err)
+		}
+
+		// VerifyScope returns error containing symlink escape
+		_, err := VerifyScope(escapeLink, scopeDir, []string{"*"})
+		if err == nil || (!strings.Contains(err.Error(), "escapes scope root") &&
+			!strings.Contains(err.Error(), "symlink target escapes scope root")) ||
+			!strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("expected symlink escape error in VerifyScope, got %v", err)
+		}
+
+		// Read returns an error
+		_, err = Read(context.Background(), ReadOptions{
+			Path:         escapeLink,
+			ScopeRoot:    scopeDir,
+			AllowedPaths: []string{"*"},
+		})
+		if err == nil {
+			t.Fatalf("expected Read on escaping symlink to fail, got nil")
+		}
+
+		// Edit returns an error and does NOT modify outsideSecret
+		_, err = Edit(context.Background(), EditOptions{
+			Path:         escapeLink,
+			OldString:    "secret",
+			NewString:    "hacked",
+			ScopeRoot:    scopeDir,
+			AllowedPaths: []string{"*"},
+		})
+		if err == nil {
+			t.Fatalf("expected Edit on escaping symlink to fail, got nil")
+		}
+
+		gotContent, err := os.ReadFile(outsideSecret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gotContent) != "secret" {
+			t.Fatalf("outsideSecret was modified! got %q, want %q", string(gotContent), "secret")
+		}
+	})
+}

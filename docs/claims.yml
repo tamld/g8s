@@ -398,3 +398,28 @@
     eval: ""
     demo: "bash tools/ci_semgrep_check.sh"
     source: .semgrep/g8s-rules.yml
+
+- id: claim-dast-http-mcp-adversarial
+  claim: "Live black-box DAST adversarial suites verify single-use receipt consumption, symlink containment, and payload boundaries across HTTP (/api/v1/fs/*) and MCP stdio server"
+  evidence:
+    test: TestHTTPDaemon_DAST_FSAdversarialSuite
+    eval: ""
+    demo: "go test ./internal/server/... ./internal/mcp/... -run DAST"
+    source: docs/ENTERPRISE_LEDGER.md
+
+- id: claim-iast-runtime-hygiene-sensor
+  claim: "In-process IAST RuntimeSensor and multi-worker swarm red-team probes (sa-006..sa-008) verify CAS contention, symlink confinement, and zero goroutine/temp leaks"
+  evidence:
+    test: TestIASTDASTProbes_AllPass
+    eval: "sa-006"
+    demo: "bin/g8s eval --list"
+    source: docs/ENTERPRISE_LEDGER.md
+
+- id: claim-greybox-fuzzing-fsops-select
+  claim: "Coverage-guided grey-box fuzzing targets (FuzzVerifyScope, FuzzReadAndEdit, FuzzSelectPath) verify path confinement, atomic edit rollback, and selector resilience"
+  evidence:
+    test: TestGreyBoxFuzzingBindings
+    eval: ""
+    demo: "go test -run '^$' -fuzz FuzzVerifyScope -fuzztime 100x ./internal/fsops/"
+    source: docs/ENTERPRISE_LEDGER.md
+
