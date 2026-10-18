@@ -225,6 +225,9 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 
 	var wins atomic.Int32
 	var rejections atomic.Int32
+	var winningWorker atomic.Int32
+	winningWorker.Store(-1)
+	var editErrors atomic.Int32
 	var wg sync.WaitGroup
 
 	for i := 0; i < 8; i++ {
@@ -238,13 +241,17 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 				return
 			}
 			wins.Add(1)
-			_, _ = fsops.Edit(ctx, fsops.EditOptions{
+			winningWorker.Store(int32(workerIdx))
+			_, editErr := fsops.Edit(ctx, fsops.EditOptions{
 				Path:         targetFile,
 				ScopeRoot:    tmpDir,
 				OldString:    "worker-initial",
 				NewString:    fmt.Sprintf("worker-%d-won", workerIdx),
 				AllowedPaths: consumedRc.AllowedPaths,
 			})
+			if editErr != nil {
+				editErrors.Add(1)
+			}
 		}(i)
 	}
 
@@ -255,6 +262,18 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 	}
 	if r := rejections.Load(); r != 7 {
 		return OutcomeClassBlocked, fmt.Errorf("swarm receipt contention: rejections = %d, want 7", r)
+	}
+	if e := editErrors.Load(); e != 0 {
+		return OutcomeClassBlocked, fmt.Errorf("swarm receipt contention: winning worker fsops.Edit failed (%d errors)", e)
+	}
+
+	content, readErr := os.ReadFile(targetFile)
+	if readErr != nil {
+		return OutcomeClassBlocked, fmt.Errorf("swarm receipt contention: read target file: %w", readErr)
+	}
+	expectedContent := fmt.Sprintf("worker-%d-won\n", winningWorker.Load())
+	if string(content) != expectedContent {
+		return OutcomeClassBlocked, fmt.Errorf("swarm receipt contention: content mismatch: got %q, want %q", string(content), expectedContent)
 	}
 
 	mgr.Close()

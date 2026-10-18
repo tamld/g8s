@@ -1188,3 +1188,54 @@ func TestDeliverPreservedWorktreeOverrideAndCrossRepo(t *testing.T) {
 		t.Fatalf("unexpected recovered.txt content: %q", string(got))
 	}
 }
+
+func TestDeliverConsumedReceiptAfterWallClockExpiry(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+	wtDir := createWorktree(t, repoDir, "case-consumed-expired")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	fPath := filepath.Join(wtDir, "overnight.txt")
+	if err := os.WriteFile(fPath, []byte("overnight result"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"overnight.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	mgr, err := receipt.NewReceiptManager(rcDbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	if _, err := mgr.ValidateAndConsume(rcID, taskID); err != nil {
+		mgr.Close()
+		t.Fatalf("ValidateAndConsume: %v", err)
+	}
+	mgr.Close()
+
+	rcDB, err := sql.Open("sqlite", rcDbPath)
+	if err != nil {
+		t.Fatalf("open receipts db: %v", err)
+	}
+	if _, err := rcDB.Exec("UPDATE write_receipts SET expires_at = 1 WHERE receipt_id = ?", rcID); err != nil {
+		rcDB.Close()
+		t.Fatalf("update expires_at: %v", err)
+	}
+	rcDB.Close()
+
+	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
+	if res.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	}
+
+	got, err := os.ReadFile(filepath.Join(repoDir, "overnight.txt"))
+	if err != nil {
+		t.Fatalf("overnight.txt not delivered to repoDir: %v", err)
+	}
+	if string(got) != "overnight result" {
+		t.Fatalf("unexpected overnight.txt content: %q", string(got))
+	}
+}

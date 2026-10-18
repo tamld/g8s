@@ -90,8 +90,21 @@ func TestRunSpawnsNWorktrees(t *testing.T) {
 		if solPath == "" {
 			t.Errorf("solution %d path is empty", i)
 		}
+		expectedPath := filepath.Join(tempDir, fmt.Sprintf("solution-%d.md", i+1))
+		if solPath != expectedPath {
+			t.Errorf("solution %d path mismatch: got %s, want %s", i, solPath, expectedPath)
+		}
 		if _, err := os.Stat(solPath); err != nil {
 			t.Errorf("solution file %s does not exist: %v", solPath, err)
+		}
+	}
+
+	for i, wt := range res.Worktrees {
+		if wt == "" {
+			t.Errorf("worktree %d path is empty", i)
+		}
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("worktree %d at %s was not cleaned up: %v", i, wt, err)
 		}
 	}
 

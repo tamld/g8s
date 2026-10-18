@@ -67,6 +67,7 @@ func TestOrchestrateBlindConvergeCLI(t *testing.T) {
 	_ = os.WriteFile(briefPath, []byte("# Brief: Dual Blind Architecture\n\nDesign a pure Go convergence harness.\n\n## DoD\n- [ ] 3 solutions synthesized\n"), 0o644)
 
 	cmd := exec.Command(binPath, "orchestrate", "--blind-converge", "2", "--brief-file", briefPath, "--timeout", "2s", "--json")
+	cmd.Dir = tempDir
 	cmd.Env = append(cmd.Environ(), "G8S_DB="+dbPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

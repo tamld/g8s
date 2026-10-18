@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,10 +96,16 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 				errCh <- fmt.Errorf("worker %d: worktree: %w", workerNum, err)
 				return
 			}
+			defer func() {
+				if cleanErr := bw.Cleanup(); cleanErr != nil {
+					fmt.Fprintf(os.Stderr, "[warn] conv: cleanup worktree %s: %v\n", bw.Path, cleanErr)
+				}
+			}()
 			res.Worktrees[idx] = bw.Path
 
 			// 2. Prepare task specification for the worker
 			solutionPath := filepath.Join(bw.Path, "solution.md")
+			persistedPath := filepath.Join(req.BaseDir, fmt.Sprintf("solution-%d.md", workerNum))
 			prompt := fmt.Sprintf("Dual-Blind Architecture Task (Worker %d/%d):\n\n"+
 				"You are executing in an isolated worktree with NO shared context from other workers.\n"+
 				"Design an architectural solution for the following brief.\n"+
@@ -132,8 +139,8 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 					Stderr:     err.Error(),
 				}
 				// Write fallback stub solution file
-				writeFallbackSolution(solutionPath, workerID, prompt)
-				res.Solutions[idx] = solutionPath
+				writeFallbackSolution(persistedPath, workerID, prompt)
+				res.Solutions[idx] = persistedPath
 				return
 			}
 
@@ -146,18 +153,20 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 			res.Workers[idx] = receipt
 
 			// 4. Ensure solution.md exists
-			if _, statErr := os.Stat(solutionPath); statErr != nil {
-				// If worker did not write solution.md, write output or fallback
-				content := receipt.Stdout
+			var content string
+			if data, readErr := os.ReadFile(solutionPath); readErr == nil && len(strings.TrimSpace(string(data))) > 0 {
+				content = string(data)
+			} else {
+				content = receipt.Stdout
 				if content == "" {
 					content = fmt.Sprintf("# Proposal by %s\n\n## Architecture Overview\n\nDual-blind proposal for brief.\n\n## Implementation\n\nImplemented per specification.", workerID)
 				}
-				if writeErr := os.WriteFile(solutionPath, []byte(content), 0o600); writeErr != nil {
-					errCh <- fmt.Errorf("worker %s: write solution file %s: %w", workerID, solutionPath, writeErr)
-					return
-				}
 			}
-			res.Solutions[idx] = solutionPath
+			if writeErr := os.WriteFile(persistedPath, []byte(content), 0o600); writeErr != nil {
+				errCh <- fmt.Errorf("worker %s: write solution file %s: %w", workerID, persistedPath, writeErr)
+				return
+			}
+			res.Solutions[idx] = persistedPath
 		}(i)
 	}
 
