@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -43,6 +45,7 @@ func runDeliver(args []string) {
 	pruneWorktree := fs.Bool("prune-worktree", false, "remove the isolated git worktree and wt/<task-id> branch after successful delivery")
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
 	worktreeFlag := fs.String("worktree", "", "explicit preserved worktree directory (#427 deliverable survival)")
+	receiptIDFlag := fs.String("receipt-id", "", "explicit receipt ID override for delivering preserved worktrees")
 
 	// Allow flags to appear before or after positional task-id
 	var positional []string
@@ -51,7 +54,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -270,6 +273,9 @@ func runDeliver(args []string) {
 	if receiptID == "" {
 		receiptID = strings.TrimSpace(wrapper.Payload.ReceiptID)
 	}
+	if strings.TrimSpace(*receiptIDFlag) != "" {
+		receiptID = strings.TrimSpace(*receiptIDFlag)
+	}
 	if receiptID == "" {
 		exitRuntime("deliver", "", *traceID, cli.CodeDenied,
 			fmt.Errorf("task %s has missing or empty receipt_id in payload", taskID),
@@ -287,6 +293,21 @@ func runDeliver(args []string) {
 	defer receipts.Close()
 
 	rc, err := receipts.VerifyReceipt(receiptID)
+	if err != nil {
+		var expErr *receipt.ExpiredError
+		if errors.As(err, &expErr) {
+			consumedList, listErr := receipts.ListReceipts(taskID, time.Time{}, "consumed")
+			if listErr == nil {
+				for _, item := range consumedList {
+					if item != nil && item.ReceiptID == receiptID && item.Consumed && item.ConsumerTaskID != nil && *item.ConsumerTaskID == taskID {
+						rc = item
+						err = nil
+						break
+					}
+				}
+			}
+		}
+	}
 	if err != nil {
 		exitRuntime("deliver", "", *traceID, cli.CodeDenied,
 			fmt.Errorf("load receipt %s: %w", receiptID, err),

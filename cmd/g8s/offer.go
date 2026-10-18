@@ -143,6 +143,24 @@ classes:
       - "**/*.spec.*"
 `
 
+const defaultVerifierClassesSeed = `# Verifier Classes Configuration (scaffolded by g8s offer init)
+# Maps task write-scope paths to machine verification check bundles.
+
+classes:
+  - name: ci-gates
+    status: advisory
+    priority: 10
+    paths:
+      - "**"
+    checks:
+      - type: script
+        run: tools/ci_link_integrity.sh
+      - type: script
+        run: tools/ci_structure_sync.sh
+      - type: script
+        run: tools/ci_spec_code_sync.sh
+`
+
 func effortClassesSeedForProfile(profile string) string {
 	switch profile {
 	case "security":
@@ -246,7 +264,11 @@ func runOfferInit(args []string) {
 			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
 			return
 		}
-		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"}
+		if werr := os.WriteFile(filepath.Join(g8sDir, "verifier-classes.yml"), []byte(defaultVerifierClassesSeed), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml", ".g8s/verifier-classes.yml"}
 	}
 
 	targetGatesDir := filepath.Join(*dir, *gatesDir)

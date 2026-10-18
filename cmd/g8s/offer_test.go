@@ -24,7 +24,7 @@ func TestOfferInitScaffoldsFromProfile(t *testing.T) {
 	if cmd.exitCode != 0 {
 		t.Fatalf("offer init exit = %d, output:\n%s", cmd.exitCode, cmd.output)
 	}
-	for _, f := range []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml"} {
+	for _, f := range []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml", ".g8s/verifier-classes.yml"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("scaffold missing %s: %v", f, err)
 		}

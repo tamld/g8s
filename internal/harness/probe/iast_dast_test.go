@@ -114,3 +114,13 @@ func TestIASTDASTProbes_AllPass(t *testing.T) {
 		t.Fatalf("FilterSuite(%q) returned %d probes, want 3", CategoryIASTDAST, len(filtered.Probes))
 	}
 }
+
+func TestAuditSwarmReceiptContention_VerifiesWinnerEdit(t *testing.T) {
+	outcome, err := AuditSwarmReceiptContention(context.Background())
+	if err != nil {
+		t.Fatalf("AuditSwarmReceiptContention failed: %v", err)
+	}
+	if outcome != OutcomeClassCompleted {
+		t.Fatalf("outcome = %q, want %q", outcome, OutcomeClassCompleted)
+	}
+}
