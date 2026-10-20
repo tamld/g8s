@@ -471,8 +471,8 @@ func CheckMandate(repoPath, action string, paths []string) (MandateCheckResult, 
 	repoName = matchedRepo.Name
 	requiredTier := ClassifyActionTier(absRepoPath, repoName, action, paths, m.ExcludedPaths)
 
-	// Budget check
-	spent, err := MandateBudgetSpent(m)
+	// Circuit breaker check
+	bs, err := EvaluateCircuitBreaker(m, absRepoPath, DefaultUpgradeCleanStreak)
 	if err != nil {
 		return MandateCheckResult{
 			RequiredTier: requiredTier,
@@ -481,7 +481,7 @@ func CheckMandate(repoPath, action string, paths []string) (MandateCheckResult, 
 			Reason:       fmt.Sprintf("checking error budget: %v", err),
 		}, err
 	}
-	if spent >= m.ErrorBudget.Limit {
+	if bs.Tripped {
 		return MandateCheckResult{
 			RequiredTier: requiredTier,
 			MaxTier:      "T0",

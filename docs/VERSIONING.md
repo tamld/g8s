@@ -16,7 +16,7 @@ $$\mathbf{v\text{MAJOR}.\text{MINOR}.\text{PATCH}[-\text{PRERELEASE}]}$$
 ## 2. Release Cadence & Phases
 
 ```
-v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-07) ──► v0.17.0 (2026-10-16, Current) ──► v1.0.0 (Production Stable)
+v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-07) ──► v0.17.0 (2026-10-16) ──► v0.18.0 (2026-10-21, Current) ──► v1.0.0 (Production Stable)
 ```
 
 | Version Milestone | Target Scope | Stability Level |
@@ -27,7 +27,8 @@ v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-0
 | **`v0.14.0`** | Feature wave release (2026-10-03). | Delivered |
 | **`v0.15.0`** | Integrity hardening release (2026-10-05). | Delivered |
 | **`v0.16.0`** | Self-measuring effort telemetry release (2026-10-07): effort manifest + adapter + `submit --effort`, class registry + signal demotion, token telemetry, quality ladder + gauges, baked-name realignment (#568), ladder hardening (#570). | Delivered |
-| **`v0.17.0`** | Native Cross-Platform Agent I/O & Cross-Repo Offer Rollout release (2026-10-16): `DELTA-23` pure-Go `search`/`read`/`edit`/`--select` (#591, #593), F0/F1/F2 recursive containment (#587), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), DLP & SQLite DSN hardening (#574, #586, #590), OpenSpec `DELTA-01..23` & 50/50 bound claims. | Delivered (Current) |
+| **`v0.17.0`** | Native Cross-Platform Agent I/O & Cross-Repo Offer Rollout release (2026-10-16): `DELTA-23` pure-Go `search`/`read`/`edit`/`--select` (#591, #593), F0/F1/F2 recursive containment (#587), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), DLP & SQLite DSN hardening (#574, #586, #590), OpenSpec `DELTA-01..23` & 50/50 bound claims. | Delivered |
+| **`v0.18.0`** | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630, 2026-10-21): append-only hash-chained evidence ledger (`f0 run`, `f0 status`), signed operator mandates (`T0`–`T4`), merge/commit gates `G0`–`G7` (`f0 gate check`), agent hooks (`f0 hook pre-tool|stop`), portable ground-truth bundles, gate-appeasement detection (G4), issue-closure gate (G7), error-budget circuit breaker, and lossless verify firewall. | Delivered (Current) |
 | **`v1.0.0`** | 100% Test Parity, Formal Security Audit, Stable MCP & CLI Interface guarantee. | Production GA |
 
 ---

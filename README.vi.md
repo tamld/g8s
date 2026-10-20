@@ -40,8 +40,9 @@ g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng c
 | **attempt** | một lần chạy cụ thể của task |
 | **signal** | dòng sự kiện báo "task đã kết thúc" trong `signals/tasks.jsonl` |
 
-## Đã ship trong v0.14.0
+## Đã ship trong v0.14.0 – v0.18.0
 
+- **F0 Verified Delegation & Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), `v0.18.0`, Epic #620)**: sổ cái bằng chứng hash-chain (`f0 run`, `f0 status`), ủy quyền mandate ký số (`T0`–`T4`), cổng cam kết merge/commit `G0`–`G7` (`f0 gate check`), hook agent (`f0 hook pre-tool|stop`), gói PR bundle độc lập môi trường, phát hiện né gate (G4), cổng tiêu chí đóng issue (G7), và circuit breaker ngắt lỗi.
 - **Native Agent I/O đa nền tảng (`DELTA-23`, `v0.17.0`)**: `g8s search` (thay `rg`/`grep`/`find`), `g8s read` (đọc dòng giới hạn kèm SHA-256), `g8s edit` (chỉnh sửa nguyên tử compare-and-swap bảo toàn CRLF/LF và kiểm soát `WriteReceipt.AllowedPaths`), và `--select` / `g8s select` (trích xuất JSON dot-path thay `jq`), đồng nhất trên CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), và HTTP (`/api/v1/fs/*`).
 - **Containment đệ quy F0 / F1 / F2 (`ADR-0032`, `v0.17.0`)**: F1 worker tự động kế thừa `G8S_TIER=F1`, `G8S_RECEIPT_ID`, và `G8S_SCOPE_ROOT`, khóa mọi thao tác ghi file của F1 và F2 vào phạm vi Write Receipt ngay trong tiến trình.
 - **Giám sát theo sự kiện**: khi task kết thúc (thành công hay thất bại), g8s ghi một dòng vào `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` giữ đúng một process chờ và đánh thức supervisor khi có tín hiệu. Vòng lặp hỏi-đáp (polling) chỉ là phương án dự phòng.
@@ -163,6 +164,7 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 | v0.15.0 (2026-10-05) | Retrospective-as-task (`g8s lesson`), catalog agent-models v1, benchmark Jev SystemOne, cổng kiểm chứng 50 claims (#519, #543, #547) | **Xong** |
 | v0.16.0 (2026-10-07) | Tối ưu effort: manifest effort trung hòa provider (adapter `named`/`budget`/`baked-name`), ánh xạ lớp việc→effort, thang chất lượng & telemetry chi phí theo lớp (#550, #568, #570) | **Xong** |
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), containment đệ quy F0/F1/F2 (#587, #593), triển khai Offer Bundle Wave 1–4 & giao nhận liên repo (#442, #569), chuẩn hóa OpenSpec DELTA-01..23 & 50/50 claims | **Xong** |
+| v0.18.0 (2026-10-21) | F0 Verified Delegation ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), Epic #620): sổ cái bằng chứng, mandate T0–T4, gates G0–G7, hook agent, circuit breaker, lossless verify firewall | **Xong** |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép

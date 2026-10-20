@@ -444,16 +444,27 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateGate error: %v", err)
 		}
-		if out.Overall != "PASS" {
-			t.Fatalf("expected overall PASS in Wave A, got %s", out.Overall)
+		if out.Overall != "FAIL" {
+			t.Fatalf("expected overall FAIL for C3 appeasement, got %s", out.Overall)
+		}
+
+		var g4Check GateCheckResult
+		for _, c := range out.Checks {
+			if c.ID == "G4" {
+				g4Check = c
+				break
+			}
+		}
+		if g4Check.Status != "FAIL" || !strings.Contains(g4Check.Detail, "token-rewrite") {
+			t.Fatalf("expected G4 FAIL with token-rewrite, got %+v", g4Check)
 		}
 
 		results = append(results, ReplayCaseResult{
 			CaseID:     "C3",
 			Name:       "sed rewrite TODO -> To-Do (hollowArtifact appeasement)",
-			WaveACheck: "EvaluateGate (G4 in Wave B #625)",
-			Category:   "NOT_COVERED",
-			Detail:     "overall=PASS: appeasement detection deferred to Wave B G4",
+			WaveACheck: "EvaluateGate -> G4 (#625)",
+			Category:   "BLOCK",
+			Detail:     "overall=FAIL: G4 (token-rewrite To-Do detected)",
 		})
 	})
 
@@ -528,16 +539,27 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateGate error: %v", err)
 		}
-		if out.Overall != "PASS" {
-			t.Fatalf("expected overall PASS in Wave A, got %s", out.Overall)
+		if out.Overall != "FAIL" {
+			t.Fatalf("expected overall FAIL for C4 unread YAML keys, got %s", out.Overall)
+		}
+
+		var g4Check GateCheckResult
+		for _, c := range out.Checks {
+			if c.ID == "G4" {
+				g4Check = c
+				break
+			}
+		}
+		if g4Check.Status != "FAIL" || !strings.Contains(g4Check.Detail, "unread-config-key") {
+			t.Fatalf("expected G4 FAIL with unread-config-key, got %+v", g4Check)
 		}
 
 		results = append(results, ReplayCaseResult{
 			CaseID:     "C4",
 			Name:       "invented unread YAML keys in .g8s/trust-boundaries.yml",
-			WaveACheck: "EvaluateGate (G4 in Wave B #625)",
-			Category:   "NOT_COVERED",
-			Detail:     "overall=PASS: unread YAML keys detector deferred to Wave B G4",
+			WaveACheck: "EvaluateGate -> G4 (#625)",
+			Category:   "BLOCK",
+			Detail:     "overall=FAIL: G4 (unread YAML keys detected)",
 		})
 	})
 
@@ -743,16 +765,27 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateGate error: %v", err)
 		}
-		if out.Overall != "PASS" {
-			t.Fatalf("expected overall PASS in Wave A, got %s", out.Overall)
+		if out.Overall != "FAIL" {
+			t.Fatalf("expected overall FAIL for C7 unmet issue criterion, got %s", out.Overall)
+		}
+
+		var g7Check GateCheckResult
+		for _, c := range out.Checks {
+			if c.ID == "G7" {
+				g7Check = c
+				break
+			}
+		}
+		if g7Check.Status != "FAIL" {
+			t.Fatalf("expected G7 FAIL, got %+v", g7Check)
 		}
 
 		results = append(results, ReplayCaseResult{
 			CaseID:     "C7",
 			Name:       "Closes #617 while criterion 1 was unmet",
-			WaveACheck: "evaluatePreToolHook & EvaluateGate (G7 in Wave B #626)",
-			Category:   "NOT_COVERED",
-			Detail:     "overall=PASS; hook emits [jit_whisper]; criteria verification deferred to Wave B G7",
+			WaveACheck: "evaluatePreToolHook & EvaluateGate -> G7 (#626)",
+			Category:   "BLOCK",
+			Detail:     "overall=FAIL: G7 (issue #617 has unmet/uncited acceptance criteria)",
 		})
 	})
 
@@ -1049,21 +1082,86 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		t.Logf("%-5s | %-40s | %-32s | %-12s", r.CaseID, r.Name, r.WaveACheck, r.Category)
 	}
 	t.Logf("==========================================================================================")
-	t.Logf("Counts: BLOCK = %d (expected 5), FLAG = %d (expected 2), NOT_COVERED = %d (expected 3), Total = %d",
+	t.Logf("Counts: BLOCK = %d (expected 8), FLAG = %d (expected 2), NOT_COVERED = %d (expected 0), Total = %d",
 		blockCount, flagCount, notCoveredCount, len(results))
 	t.Logf("==========================================================================================\n")
 
-	if blockCount != 5 {
-		t.Errorf("summary count mismatch: expected 5 BLOCK cases, got %d", blockCount)
+	if blockCount != 8 {
+		t.Errorf("summary count mismatch: expected 8 BLOCK cases, got %d", blockCount)
 	}
 	if flagCount != 2 {
 		t.Errorf("summary count mismatch: expected 2 FLAG cases, got %d", flagCount)
 	}
-	if notCoveredCount != 3 {
-		t.Errorf("summary count mismatch: expected 3 NOT_COVERED cases, got %d", notCoveredCount)
+	if notCoveredCount != 0 {
+		t.Errorf("summary count mismatch: expected 0 NOT_COVERED cases, got %d", notCoveredCount)
 	}
 	if len(results) != 10 {
 		t.Errorf("expected 10 total cases replayed, got %d", len(results))
+	}
+}
+
+func TestWaveBCircuitBreakerTripsOnReplay(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir, _, _ := setupReplayRepo(t, "breaker-replay-repo")
+
+	m := &Mandate{
+		Version:     1,
+		ID:          "md-breaker-replay",
+		Issuer:      "test-pic",
+		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+		Campaign:    "breaker-replay",
+		Repos:       []MandateRepo{{Name: "breaker-replay-repo", Path: repoDir, MaxTier: "T2"}},
+		ErrorBudget: ErrorBudget{Limit: 3},
+	}
+	if err := IssueMandate(m); err != nil {
+		t.Fatalf("IssueMandate failed: %v", err)
+	}
+
+	for i := 1; i <= 3; i++ {
+		if err := RecordDebit(repoDir, fmt.Sprintf("violation %d", i), m.ID); err != nil {
+			t.Fatalf("RecordDebit %d failed: %v", i, err)
+		}
+	}
+
+	bs, err := EvaluateCircuitBreaker(m, repoDir, DefaultUpgradeCleanStreak)
+	if err != nil {
+		t.Fatalf("EvaluateCircuitBreaker failed: %v", err)
+	}
+	if !bs.Tripped {
+		t.Fatalf("expected breaker to be tripped, got %+v", bs)
+	}
+	if bs.EffectiveMaxTier != "T0" {
+		t.Fatalf("expected EffectiveMaxTier T0, got %s", bs.EffectiveMaxTier)
+	}
+
+	res, err := CheckMandate(repoDir, "merge", []string{"main.go"})
+	if err != nil {
+		t.Fatalf("CheckMandate error: %v", err)
+	}
+	if res.Allowed {
+		t.Fatalf("expected Allowed == false when breaker tripped, got %+v", res)
+	}
+	if res.MaxTier != "T0" {
+		t.Fatalf("expected MaxTier T0, got %s", res.MaxTier)
+	}
+	if res.Reason != "error budget exhausted" {
+		t.Fatalf("expected Reason 'error budget exhausted', got %q", res.Reason)
+	}
+
+	if err := ResetCircuitBreaker(m.ID, "operator reset"); err != nil {
+		t.Fatalf("ResetCircuitBreaker failed: %v", err)
+	}
+
+	res2, err := CheckMandate(repoDir, "merge", []string{"main.go"})
+	if err != nil {
+		t.Fatalf("CheckMandate after reset error: %v", err)
+	}
+	if !res2.Allowed {
+		t.Fatalf("expected Allowed == true after reset, got %+v", res2)
+	}
+	if res2.MaxTier != "T2" {
+		t.Fatalf("expected MaxTier T2, got %s", res2.MaxTier)
 	}
 }
 

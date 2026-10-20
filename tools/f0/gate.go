@@ -716,6 +716,12 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 	}
 
 	// -------------------------------------------------------------------------
+	// G4: Gate Appeasement
+	// -------------------------------------------------------------------------
+	g4Res, _ := CheckGateAppeasement(absRepo, baseRef, headSHA, "", ledgerEntries)
+	checks = append(checks, g4Res)
+
+	// -------------------------------------------------------------------------
 	// G6: Claim Citations
 	// -------------------------------------------------------------------------
 	violations, err := LintClaims(fullText, "gate", absRepo, headSHA, cfg.CI, repoLedger, forge)
@@ -742,6 +748,12 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 			Detail: "all claims cited and verified",
 		})
 	}
+
+	// -------------------------------------------------------------------------
+	// G7: Issue Closure Criteria
+	// -------------------------------------------------------------------------
+	g7Res, _ := CheckIssueClosureGate(absRepo, fullText, forge, ledgerEntries)
+	checks = append(checks, g7Res)
 
 	// -------------------------------------------------------------------------
 	// Compute Overall Result & Append Gate Entry

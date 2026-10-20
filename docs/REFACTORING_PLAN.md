@@ -164,6 +164,8 @@ All shipped, tagged, and verified on GitHub Releases:
 | v0.14.0 (2026-10-03) | AI-factory stage 1: budgeted auto-retry (ADR-0029), context router (ADR-0030), gate-lane router (ADR-0024), verifier registry (#515), unattended closed round (#534), F0/F1/F2 containment vocabulary (ADR-0032) |
 | v0.15.0 (2026-10-05) | Lessons pipeline (`g8s lesson create|verify|list`), agent-models catalog v1 (`.g8s/agent-models.yml`), live Jev SystemOne benchmark (#543), claims-integrity gate (50 claims) |
 | v0.16.0 (2026-10-07) | Provider-neutral effort optimization (#550/#556/#557), effort-class registry (#558), signal-based effort demotion (#564), Quality Ladder CLI & diagnosis dispatch (#561/#563), baked-name realignment (#568) |
+| v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (DELTA-23: search, read, edit, --select), F0/F1/F2 recursive containment (ADR-0032), Offer Bundle Wave 1–4 rollout (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims |
+| v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): append-only evidence ledger, signed operator mandates (T0–T4), commit/merge gates G0–G7, agent hooks, circuit breaker, lossless verify firewall |
 
 ---
 
@@ -187,6 +189,32 @@ All shipped, tagged, and verified on GitHub Releases:
 | [x] #570 (R3-2/4/5/8) | Quality Ladder continuity, monotonic rung order, exit-code-127 vs brief marker precedence, and duplicate task ID deduplication in evidence history | P1 | ✅ Complete |
 | [x] #587 | ADR-0032 `F1->F2` recursive subagent containment self-audit probe (`sa-005` `f2-recursive-containment`) | P2 | ✅ Complete |
 | [x] SDD/DDD/TDD | Complete `DELTA-01..23` OpenSpec registry (0 grandfathered warnings), bind 50/50 claims in `docs/claims.yml`, segregate `controlplane.Store` domain interfaces, bridge `codeintel`↔`analyzer`, and unskip all bug tests | P1 | ✅ Complete |
+
+---
+
+### v0.18.0 — F0 Verified Delegation, Zero-Trust Control Plane & Evidence-Gated Autonomy (Completed 2026-10-21)
+**Delivered**: 2026-10-21
+
+| Issue / Item | Description | Priority | Status |
+|--------------|-------------|----------|--------|
+| [x] #620 | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), `DELTA-24`): evidence-gated autonomy instead of synchronous HITL | P0 | ✅ Complete |
+| [x] #621 | ADR-0033 Ratification & supervisor skill alignment (`skills/g8s-supervisor/SKILL.md`) | P0 | ✅ Complete |
+| [x] #622 | Append-only hash-chained evidence ledger (per-repo + global, anchored) + `f0 run` + G5 vacuous-pass guard | P0 | ✅ Complete |
+| [x] #623 | Signed campaign operator mandates (`f0 mandate issue|show|check`) with action tier classification (`T0`–`T4`) | P0 | ✅ Complete |
+| [x] #624 | Merge/commit gates `G0`–`G6` (`f0 gate check`), merger Gate e, and agent hooks (`f0 hook pre-tool|stop`) | P0 | ✅ Complete |
+| [x] #625 | Gate-appeasement detector `G4` (token rewrites, unread YAML config keys, test-skip evasions) | P1 | ✅ Complete |
+| [x] #626 | Per-criterion issue-closure gate `G7` (`Closes #NNN` verified against acceptance criteria and evidence) | P1 | ✅ Complete |
+| [x] #627 | Autonomous `T2` merge executor with post-merge verification and automated rollback | P1 | ✅ Complete |
+| [x] #628 | `T3` independent worktree second verifier with disparate model validation | P1 | ✅ Complete |
+| [x] #629 | Error-budget circuit breaker (`f0 breaker`) with automatic tier demotion and clean-streak restoration | P1 | ✅ Complete |
+| [x] #630 | Pluggable read-only auditor, session digest (`f0 digest`), and Jev SystemOne advisory integration | P1 | ✅ Complete |
+| [x] #631 | Supervisor skill update: tier classification, `f0` toolkit integration, and C1–C10 empirical operational lessons | P1 | ✅ Complete |
+| [x] Slice 06b-1 | Lossless-Signal Information Firewall: worktree-targeted `g8s verify`, failure log persistence, and `g8s watch --pr` repo fix | P0 | ✅ Complete |
+| [x] Slice 06b-2 | Portable Ground Truth (`<!-- f0:bundle:v1 -->`), `TreeSHA` equivalence, declarative `.g8s/f0.yml` parsers, and G6 claim linter precision | P0 | ✅ Complete |
+| [x] #615 | Unicode & Vietnamese diacritic hotfix/refactor detection in `internal/lane` | P1 | ✅ Complete |
+| [x] #616 | Runtime `--tool-policy none` and `supplied_text` permission profile boundary | P1 | ✅ Complete |
+| [x] #617 | Worker pool worktree and temporary branch cleanup on pool termination | P1 | ✅ Complete |
+| [x] #632 & #633 | Telemetry preflight eligibility filter (`occurrences >= 2`) and pattern lowercasing | P1 | ✅ Complete |
 
 ---
 
