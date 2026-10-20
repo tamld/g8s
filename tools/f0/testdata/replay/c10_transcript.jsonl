@@ -1,0 +1,2 @@
+{"step_index":1,"type":"USER_INPUT","content":"Please provide final campaign status."}
+{"step_index":2,"type":"PLANNER_RESPONSE","content":"All PRs merged and CI GREEN across all repos."}

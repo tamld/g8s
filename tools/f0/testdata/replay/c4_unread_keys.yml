@@ -1,0 +1,5 @@
+schema_version: 1
+profile: custom-v1
+rules:
+  - name: allow-internal
+    tier: T2

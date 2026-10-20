@@ -1,0 +1,18 @@
+{
+  "task_id": "task-c6-fixtures",
+  "applied": [
+    "tests/fixtures/case01.json",
+    "tests/fixtures/case02.json",
+    "tests/fixtures/case03.json",
+    "tests/fixtures/case04.json",
+    "tests/fixtures/case05.json",
+    "tests/fixtures/case06.json",
+    "tests/fixtures/case07.json",
+    "tests/fixtures/case08.json",
+    "tests/fixtures/case09.json",
+    "tests/fixtures/case10.json",
+    "tests/fixtures/case11.json",
+    "tests/fixtures/case12.json"
+  ],
+  "deleted": []
+}
