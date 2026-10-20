@@ -699,15 +699,21 @@ printf '{"decision":"deny","reason":"model tool calls disabled by supplied_text 
 		if err := os.WriteFile(denyShPath, []byte(denyShScript), 0o600); err != nil {
 			return Result{}, fmt.Errorf("failed to write deny hook script: %w", err)
 		}
-		_ = os.WriteFile(filepath.Join(hookDir, "deny.sh"), []byte(denyShScript), 0o600)
+		if err := os.WriteFile(filepath.Join(hookDir, "deny.sh"), []byte(denyShScript), 0o600); err != nil {
+			return Result{}, fmt.Errorf("failed to write deny hook script: %w", err)
+		}
 
 		denyBatScript := fmt.Sprintf(`@echo off
 setlocal
 echo model_tool >> %q
 echo {"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}
 `, evidenceLogPath)
-		_ = os.WriteFile(filepath.Join(agentsDir, "deny.bat"), []byte(denyBatScript), 0o600)
-		_ = os.WriteFile(filepath.Join(hookDir, "deny.bat"), []byte(denyBatScript), 0o600)
+		if err := os.WriteFile(filepath.Join(agentsDir, "deny.bat"), []byte(denyBatScript), 0o600); err != nil {
+			return Result{}, fmt.Errorf("failed to write deny.bat hook script: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(hookDir, "deny.bat"), []byte(denyBatScript), 0o600); err != nil {
+			return Result{}, fmt.Errorf("failed to write deny.bat hook script: %w", err)
+		}
 
 		cmdHook := "sh ./deny.sh"
 		if runtime.GOOS == "windows" {

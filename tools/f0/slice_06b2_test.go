@@ -300,6 +300,8 @@ func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git clone failed: %v\n%s", err, string(gitCloneOut))
 	}
+	_ = exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run()
+	_ = exec.Command("git", "-C", cloneDir, "config", "user.name", "Test").Run()
 
 	// Ensure no local ledger in clone
 	if lPath, _ := RepoLedgerPath(cloneDir); lPath != "" {
@@ -344,7 +346,9 @@ func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
 
 	// Tamper: modify delivered file in clone and commit it (changing blob)
 	_ = os.WriteFile(filepath.Join(cloneDir, "src", "feature.go"), []byte("package src\n// tampered code\n"), 0o644)
-	_ = exec.Command("git", "-C", cloneDir, "commit", "-am", "tamper feature").Run()
+	if out, err := exec.Command("git", "-C", cloneDir, "commit", "-am", "tamper feature").CombinedOutput(); err != nil {
+		t.Fatalf("git commit tamper feature failed: %v\n%s", err, string(out))
+	}
 	tamperHeadOut, _ := exec.Command("git", "-C", cloneDir, "rev-parse", "HEAD").Output()
 	tamperHeadSHA := strings.TrimSpace(string(tamperHeadOut))
 
