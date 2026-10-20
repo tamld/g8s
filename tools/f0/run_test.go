@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -155,6 +157,25 @@ func TestReal(t *testing.T) {}
 	}
 }
 
+func buildMockHelper(t *testing.T, dir, baseName, stdoutText string) string {
+	t.Helper()
+	srcDir := t.TempDir()
+	srcFile := filepath.Join(srcDir, "main.go")
+	src := fmt.Sprintf("package main\nimport \"fmt\"\nfunc main() { fmt.Print(%q) }\n", stdoutText)
+	if err := os.WriteFile(srcFile, []byte(src), 0o600); err != nil {
+		t.Fatalf("write mock helper src: %v", err)
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(baseName, ".exe") {
+		baseName += ".exe"
+	}
+	binPath := filepath.Join(dir, baseName)
+	cmd := exec.Command("go", "build", "-o", binPath, srcFile)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build mock helper %s: %v (%s)", baseName, err, string(out))
+	}
+	return binPath
+}
+
 func TestRunDidVerify(t *testing.T) {
 	repoDir := initTestGitRepo(t)
 	oldDir, _ := os.Getwd()
@@ -163,12 +184,7 @@ func TestRunDidVerify(t *testing.T) {
 	}()
 	_ = os.Chdir(repoDir)
 
-	// Create mock script for did-verify
-	mockScript := filepath.Join(repoDir, "did-verify.sh")
-	scriptContent := "#!/bin/sh\nexit 0\n"
-	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
-		t.Fatalf("write mock script: %v", err)
-	}
+	mockScript := buildMockHelper(t, t.TempDir(), "did-verify", "")
 
 	// 1. Empty --files => VACUOUS
 	code := runCommand([]string{"--", mockScript, "--files"})
@@ -201,10 +217,7 @@ func TestRunDidVerify(t *testing.T) {
 	}
 
 	// 3. node ./dist/cli/index.js verify --files with 0 files => VACUOUS
-	mockNode := filepath.Join(repoDir, "node")
-	if err := os.WriteFile(mockNode, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write mock node: %v", err)
-	}
+	mockNode := buildMockHelper(t, t.TempDir(), "node", "")
 	code = runCommand([]string{"--", mockNode, "./dist/cli/index.js", "verify", "--files"})
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
@@ -235,8 +248,6 @@ func TestRunDeliverDryRun(t *testing.T) {
 		t.Fatalf("write applied.go: %v", err)
 	}
 
-	// Create mock deliver binary/script
-	mockDeliver := filepath.Join(repoDir, "g8s")
 	jsonEnvelope := `{
   "v": 1,
   "kind": "deliver",
@@ -248,10 +259,7 @@ func TestRunDeliverDryRun(t *testing.T) {
     "receipt_id": "rc-test-456"
   }
 }`
-	scriptContent := fmt.Sprintf("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\nexit 0\n", jsonEnvelope)
-	if err := os.WriteFile(mockDeliver, []byte(scriptContent), 0o755); err != nil {
-		t.Fatalf("write mock deliver: %v", err)
-	}
+	mockDeliver := buildMockHelper(t, t.TempDir(), "g8s", jsonEnvelope+"\n")
 
 	// Run with --dry-run
 	code := runCommand([]string{"--", mockDeliver, "deliver", "--dry-run"})

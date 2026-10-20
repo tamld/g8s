@@ -159,10 +159,17 @@ func RepoLedgerPath(repoDir string) (string, error) {
 	return filepath.Join(absCommonDir, "f0", "ledger.jsonl"), nil
 }
 
+func resolveHomeDir() (string, error) {
+	if h := strings.TrimSpace(os.Getenv("HOME")); h != "" {
+		return h, nil
+	}
+	return os.UserHomeDir()
+}
+
 // GlobalLedgerPath returns ~/.local/state/g8s/f0/global-ledger.jsonl.
 // This deliberately ignores G8S_STATE_DIR.
 func GlobalLedgerPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := resolveHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home dir: %w", err)
 	}

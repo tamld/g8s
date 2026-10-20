@@ -62,7 +62,7 @@ func newMandateID() string {
 // MandateCachePath returns the path to the mandate cache file:
 // ~/.local/state/g8s/f0/mandate.json
 func MandateCachePath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := resolveHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home dir: %w", err)
 	}
