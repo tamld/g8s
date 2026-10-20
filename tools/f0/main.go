@@ -17,8 +17,7 @@ var commands = map[string]commandFunc{
 	"manual":  manualCommand,
 	"anchor":  anchorCommand,
 	"audit":   auditCommand,
-	// Later phases will extend:
-	// "hook":    hookCommand,
+	"hook":    hookCommand,
 }
 
 func printUsage() {
@@ -37,6 +36,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  f0 manual --repo <path> --file <rel> --reason <text>\n")
 	fmt.Fprintf(os.Stderr, "  f0 anchor [--repo <path>]\n")
 	fmt.Fprintf(os.Stderr, "  f0 audit [--repo <path>] [--since 30d] [--strict] [--json]\n")
+	fmt.Fprintf(os.Stderr, "  f0 hook pre-tool\n")
+	fmt.Fprintf(os.Stderr, "  f0 hook stop\n")
 }
 
 func main() {

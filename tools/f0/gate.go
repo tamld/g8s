@@ -41,61 +41,101 @@ func gateCommand(args []string) int {
 	}
 }
 
+// GateOptions configures the inputs to EvaluateGate.
+type GateOptions struct {
+	RepoDir    string
+	Action     string
+	PR         int
+	HeadSHA    string
+	BaseRef    string
+	ReportFile string
+	PRBody     string
+}
+
 var f0TasksRegex = regexp.MustCompile(`(?i)F0-Tasks:\s*([^\r\n]+)`)
 
 func runGateCheck(args []string) int {
-	var repoDir string
-	var action string
-	var pr int
-	var headSHA string
-	var baseRef string
-	var reportFile string
-	var prBodyArg string
+	var opts GateOptions
 	var jsonOutput bool
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--repo":
 			if i+1 < len(args) {
-				repoDir = args[i+1]
+				opts.RepoDir = args[i+1]
 				i++
 			}
 		case "--action":
 			if i+1 < len(args) {
-				action = args[i+1]
+				opts.Action = args[i+1]
 				i++
 			}
 		case "--pr":
 			if i+1 < len(args) {
 				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					pr = n
+					opts.PR = n
 				}
 				i++
 			}
 		case "--head-sha":
 			if i+1 < len(args) {
-				headSHA = args[i+1]
+				opts.HeadSHA = args[i+1]
 				i++
 			}
 		case "--base":
 			if i+1 < len(args) {
-				baseRef = args[i+1]
+				opts.BaseRef = args[i+1]
 				i++
 			}
 		case "--report":
 			if i+1 < len(args) {
-				reportFile = args[i+1]
+				opts.ReportFile = args[i+1]
 				i++
 			}
 		case "--pr-body":
 			if i+1 < len(args) {
-				prBodyArg = args[i+1]
+				opts.PRBody = args[i+1]
 				i++
 			}
 		case "--json":
 			jsonOutput = true
 		}
 	}
+
+	if opts.Action == "" {
+		fmt.Fprintf(os.Stderr, "f0 gate check: --action is required\n")
+		return 1
+	}
+
+	output, err := EvaluateGate(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "f0 gate check: %v\n", err)
+		return 1
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(output); err != nil {
+		fmt.Fprintf(os.Stderr, "f0 gate check: encoding json: %v\n", err)
+	}
+
+	_ = jsonOutput // Output is always JSON as required
+
+	if output.Overall == "PASS" {
+		return 0
+	}
+	return 1
+}
+
+// EvaluateGate runs all evidence, forge, provenance, drift, and claim checks.
+func EvaluateGate(opts GateOptions) (*GateOutput, error) {
+	repoDir := opts.RepoDir
+	action := opts.Action
+	pr := opts.PR
+	headSHA := opts.HeadSHA
+	baseRef := opts.BaseRef
+	reportFile := opts.ReportFile
+	prBodyArg := opts.PRBody
 
 	if repoDir == "" {
 		repoDir = "."
@@ -106,8 +146,7 @@ func runGateCheck(args []string) int {
 	}
 
 	if action == "" {
-		fmt.Fprintf(os.Stderr, "f0 gate check: --action is required\n")
-		return 1
+		action = "merge"
 	}
 
 	forge, _ := GetForgeAdapter(absRepo)
@@ -592,24 +631,12 @@ func runGateCheck(args []string) int {
 		_ = repoLedger.Append(entry)
 	}
 
-	output := GateOutput{
+	output := &GateOutput{
 		Overall: overall,
 		HeadSHA: headSHA,
 		Checks:  checks,
 	}
-
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "f0 gate check: encoding json: %v\n", err)
-	}
-
-	_ = jsonOutput // Output is always JSON as required
-
-	if overall == "PASS" {
-		return 0
-	}
-	return 1
+	return output, nil
 }
 
 func matchVerifyCommand(entryCmd []string, verifyCmds [][]string) bool {
