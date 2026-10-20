@@ -350,12 +350,12 @@ func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
 
 	// Recreate bundle matching tamperHeadSHA but containing the original featureBlob
 	bundleTamperedFile := &PortableBundle{
-		Version:      1,
-		HeadSHA:      tamperHeadSHA,
-		MandateID:    m.ID,
-		MandateTier:  "T2",
-		Evidence:     bundle.Evidence,
-		Blobs:        map[string]string{"src/feature.go": featureBlob},
+		Version:     1,
+		HeadSHA:     tamperHeadSHA,
+		MandateID:   m.ID,
+		MandateTier: "T2",
+		Evidence:    bundle.Evidence,
+		Blobs:       map[string]string{"src/feature.go": featureBlob},
 	}
 	bHash, _ := ComputeBundleHash(bundleTamperedFile)
 	bundleTamperedFile.BundleSHA256 = bHash

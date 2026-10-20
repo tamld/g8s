@@ -31,7 +31,7 @@ type Pool struct {
 	mu        sync.Mutex
 	allocated map[string]Worktree // active leases
 	created   []Worktree          // all worktrees created by this pool
-	preserved map[string]bool      // worktrees intentionally preserved via Release(keep=true)
+	preserved map[string]bool     // worktrees intentionally preserved via Release(keep=true)
 }
 
 // PoolOptions configures a Pool. Repo is required; Root + Base + Prefix

@@ -559,8 +559,8 @@ type RunOptions struct {
 
 // ToolPolicyEvidence captures enforcement details and counts for model tool calls.
 type ToolPolicyEvidence struct {
-	Policy       string   `json:"policy"`         // "none"
-	Adapter      string   `json:"adapter"`        // e.g. "agy"
+	Policy       string   `json:"policy"`  // "none"
+	Adapter      string   `json:"adapter"` // e.g. "agy"
 	Enforced     bool     `json:"enforced"`
 	OfferedCount int      `json:"offered_count"`
 	DeniedCount  int      `json:"denied_count"`
