@@ -347,3 +347,46 @@ func TestWatchCLIIntegration(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildCheckPRArgs verifies L2 fix: gh pr checks omits --repo when empty, includes when provided.
+func TestBuildCheckPRArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		pr       int
+		repo     string
+		wantArgs []string
+	}{
+		{
+			name:     "empty repo omits --repo flag (defaults to current dir remote)",
+			pr:       356,
+			repo:     "",
+			wantArgs: []string{"pr", "checks", "356", "--json", "name,state"},
+		},
+		{
+			name:     "whitespace repo omits --repo flag",
+			pr:       356,
+			repo:     "   ",
+			wantArgs: []string{"pr", "checks", "356", "--json", "name,state"},
+		},
+		{
+			name:     "provided repo includes --repo flag",
+			pr:       356,
+			repo:     "owner/custom-repo",
+			wantArgs: []string{"pr", "checks", "356", "--repo", "owner/custom-repo", "--json", "name,state"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildCheckPRArgs(tt.pr, tt.repo)
+			if len(got) != len(tt.wantArgs) {
+				t.Fatalf("buildCheckPRArgs(%d, %q) returned %v, want %v", tt.pr, tt.repo, got, tt.wantArgs)
+			}
+			for i := range got {
+				if got[i] != tt.wantArgs[i] {
+					t.Errorf("arg[%d] = %q, want %q", i, got[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}

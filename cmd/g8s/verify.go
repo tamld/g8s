@@ -36,6 +36,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	taskFlag := fs.String("task", "", "task ID to verify")
 	asTaskFlag := fs.String("as-task", "", "caller task ID (self-grade guard)")
 	overrideReasonFlag := fs.String("override-reason", "", "F0 override rationale for advisory diff-guard signals (#595)")
+	briefFlag := fs.String("brief", "", "brief ID to load Definition of Done items from")
 
 	if err := fs.Parse(args); err != nil {
 		exitUsageWithWriter(stderr, "verify", "", *traceID, err.Error(), "", *jsonl)
@@ -47,7 +48,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		taskID = fs.Arg(0)
 	}
 	if taskID == "" {
-		exitUsageWithWriter(stderr, "verify", "", *traceID, "usage: g8s verify --task <id> [--as-task <id>]", "Provide a task ID", *jsonl)
+		exitUsageWithWriter(stderr, "verify", "", *traceID, "usage: g8s verify --task <id> [--as-task <id>] [--brief <brief-id>] [--override-reason <text>]", "Provide a task ID", *jsonl)
 		return 2
 	}
 
@@ -133,6 +134,37 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	targetRepoDir := strings.TrimSpace(reqPayload.ScopeRoot)
 	if targetRepoDir == "" && len(reqPayload.AddDirs) > 0 {
 		targetRepoDir = strings.TrimSpace(reqPayload.AddDirs[0])
+	}
+
+	// Fix L3: Inspect task.Result for deliverable pointer or dod_matrix
+	var taskRes struct {
+		Deliverable *struct {
+			Mode string `json:"mode"`
+			Dir  string `json:"dir"`
+		} `json:"deliverable"`
+		DoDMatrix []verifier.DoDItemStatus `json:"dod_matrix"`
+	}
+	if len(task.Result) > 0 {
+		_ = json.Unmarshal(task.Result, &taskRes)
+	}
+	if len(taskRes.DoDMatrix) > 0 {
+		target.ReportedDoD = taskRes.DoDMatrix
+	}
+	if taskRes.Deliverable != nil && taskRes.Deliverable.Mode == "worktree" && strings.TrimSpace(taskRes.Deliverable.Dir) != "" {
+		wtDir := strings.TrimSpace(taskRes.Deliverable.Dir)
+		if fi, err := os.Stat(wtDir); err == nil && fi.IsDir() {
+			target.WorktreeDir = wtDir
+			targetRepoDir = wtDir
+		}
+	}
+
+	if *briefFlag != "" {
+		b, err := store.GetBrief(ctx, *briefFlag)
+		if err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("brief %q not found: %w", *briefFlag, err), "Check brief ID with 'g8s brief show'", *jsonl)
+			return 1
+		}
+		target.DoDItems = verifier.ParseBriefDoDItems(b.DodMD)
 	}
 
 	// Run Verify

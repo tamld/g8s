@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -506,5 +507,190 @@ func TestVerifyCLI_CrossRepoTargetResolution(t *testing.T) {
 	}
 	if v2.Outcome != verifier.OutcomePass {
 		t.Errorf("verdict2.Outcome = %q, want pass", v2.Outcome)
+	}
+}
+
+// TestVerifyCLI_WorktreeTargetResolution tests L3 fix: task.Result with deliverable.mode="worktree"
+// routes verifier to execute inside the F1 worktree directory.
+func TestVerifyCLI_WorktreeTargetResolution(t *testing.T) {
+	dbPath, store := setupTestDB(t)
+	defer store.Close()
+	rawDB := openReceiptsDB(t, dbPath)
+
+	wtDir := t.TempDir()
+	regDir := filepath.Join(wtDir, ".g8s")
+	if err := os.MkdirAll(regDir, 0o755); err != nil {
+		t.Fatalf("mkdir .g8s: %v", err)
+	}
+	classYAML := `
+classes:
+  - name: wt-class
+    status: advisory
+    founding_catch: "#510"
+    priority: 10
+    paths:
+      - "pkg/foo/**"
+    checks:
+      - type: go-test
+        packages: ["pkg/foo"]
+`
+	if err := os.WriteFile(filepath.Join(regDir, "verifier-classes.yml"), []byte(classYAML), 0o644); err != nil {
+		t.Fatalf("write verifier-classes.yml: %v", err)
+	}
+
+	pathsJSON := `["pkg/foo/bar.go"]`
+	_, err := rawDB.Exec(`
+		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
+		VALUES ('rcpt-wt-1', 'brain', ?, 9999999999, 100)
+	`, pathsJSON)
+	if err != nil {
+		t.Fatalf("insert receipt: %v", err)
+	}
+
+	ctx := context.Background()
+	task, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey:  "k-wt-task",
+		Model:           "test-model",
+		Role:            "scout",
+		Permission:      "workspace_write",
+		AddDirs:         []string{"/unmodified/main/checkout"},
+		SkipPermissions: true,
+		Payload:         json.RawMessage(`{"prompt":"wt task","receipt_id":"rcpt-wt-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+
+	// Update task result with deliverable pointer
+	g8sDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=rw"))
+	if err != nil {
+		t.Fatalf("open g8s db: %v", err)
+	}
+	defer g8sDB.Close()
+
+	resultJSON := fmt.Sprintf(`{"deliverable":{"mode":"worktree","dir":%q},"dod_matrix":[{"id":"D1","status":"MET","evidence":"unit tests passed"}]}`, wtDir)
+	if _, err := g8sDB.Exec("UPDATE tasks SET state = 'SUCCEEDED', result_json = ? WHERE task_id = ?", resultJSON, task.TaskID); err != nil {
+		t.Fatalf("update task result: %v", err)
+	}
+
+	mockRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		return []byte("ok"), nil, 0, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &stdout, &stderr, dbPath, mockRunner)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v", err)
+	}
+
+	payloadBytes, _ := json.Marshal(env.Data)
+	var v verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v.WorktreeDir != wtDir {
+		t.Errorf("verdict.WorktreeDir = %q, want %q", v.WorktreeDir, wtDir)
+	}
+	if v.Class != "wt-class" {
+		t.Errorf("verdict.Class = %q, want wt-class", v.Class)
+	}
+	if !v.Registered {
+		t.Errorf("verdict.Registered = %v, want true", v.Registered)
+	}
+	if v.Outcome != verifier.OutcomePass {
+		t.Errorf("verdict.Outcome = %q, want pass", v.Outcome)
+	}
+	if len(v.DoDMatrix) != 1 || v.DoDMatrix[0].ID != "D1" || v.DoDMatrix[0].Status != "MET" {
+		t.Errorf("verdict.DoDMatrix = %+v", v.DoDMatrix)
+	}
+}
+
+// TestVerifyCLI_BriefFlag tests --brief flag integration with DoD completeness checking.
+func TestVerifyCLI_BriefFlag(t *testing.T) {
+	dbPath, store := setupTestDB(t)
+	defer store.Close()
+	rawDB := openReceiptsDB(t, dbPath)
+
+	ctx := context.Background()
+	briefID := "brief-test-cli"
+	if err := store.CreateBrief(ctx, controlplane.BriefRow{
+		ID:        briefID,
+		Title:     "Test Brief",
+		PayloadMD: "Goal",
+		DodMD:     "- [ ] D1: Core logic\n- [ ] D2: Additional tests",
+		IssuedBy:  "operator",
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("create brief: %v", err)
+	}
+
+	pathsJSON := `["pkg/foo/bar.go"]`
+	_, err := rawDB.Exec(`
+		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
+		VALUES ('rcpt-brief-1', 'brain', ?, 9999999999, 100)
+	`, pathsJSON)
+	if err != nil {
+		t.Fatalf("insert receipt: %v", err)
+	}
+
+	task, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey:  "k-brief-task",
+		Model:           "test-model",
+		Role:            "scout",
+		Permission:      "workspace_write",
+		AddDirs:         []string{"."},
+		SkipPermissions: true,
+		Payload:         json.RawMessage(`{"prompt":"brief task","receipt_id":"rcpt-brief-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+
+	// Update task with only D1 reported (D2 missing!)
+	g8sDB, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=rw"))
+	if err != nil {
+		t.Fatalf("open g8s db: %v", err)
+	}
+	defer g8sDB.Close()
+
+	resultJSON := `{"dod_matrix":[{"id":"D1","status":"MET","evidence":"logic implemented"}]}`
+	if _, err := g8sDB.Exec("UPDATE tasks SET state = 'SUCCEEDED', result_json = ? WHERE task_id = ?", resultJSON, task.TaskID); err != nil {
+		t.Fatalf("update task result: %v", err)
+	}
+
+	mockRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		return []byte("ok"), nil, 0, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{"--task", task.TaskID, "--brief", briefID, "--json"}, &stdout, &stderr, dbPath, mockRunner)
+	// Missing D2 forces OutcomeFail. If status is advisory, exit code is 0, but verdict.Outcome is fail
+	_ = code
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v", err)
+	}
+
+	payloadBytes, _ := json.Marshal(env.Data)
+	var v verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v.Outcome != verifier.OutcomeFail {
+		t.Errorf("verdict.Outcome = %q, want fail due to missing D2", v.Outcome)
+	}
+	if len(v.DoDMatrix) != 2 {
+		t.Fatalf("expected 2 items in DoDMatrix, got %d: %+v", len(v.DoDMatrix), v.DoDMatrix)
+	}
+	if v.DoDMatrix[1].ID != "D2" || v.DoDMatrix[1].Status != "UNMET" {
+		t.Errorf("D2 should be UNMET, got %+v", v.DoDMatrix[1])
 	}
 }
