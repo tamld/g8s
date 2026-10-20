@@ -22,6 +22,13 @@ func TestRewriteArgv(t *testing.T) {
 		if len(rewrittenSame) != 4 {
 			t.Fatalf("expected no extra injection, got: %v", rewrittenSame)
 		}
+
+		// With leading env and KEY=VALUE
+		argsWithEnv := []string{"env", "CGO_ENABLED=0", "go", "test", "./..."}
+		rewrittenEnv := rewriteArgv("go-test", argsWithEnv)
+		if len(rewrittenEnv) != 6 || rewrittenEnv[4] != "-json" {
+			t.Fatalf("expected -json injected after test with env, got: %v", rewrittenEnv)
+		}
 	})
 
 	t.Run("g8s-deliver injects --json", func(t *testing.T) {
@@ -37,7 +44,44 @@ func TestRewriteArgv(t *testing.T) {
 		if len(rewrittenSame) != 5 {
 			t.Fatalf("expected no extra injection, got: %v", rewrittenSame)
 		}
+
+		// With leading env
+		argsWithEnv := []string{"env", "FOO=1", "g8s", "deliver", "--task-id", "123"}
+		rewrittenEnv := rewriteArgv("g8s-deliver", argsWithEnv)
+		if len(rewrittenEnv) != 7 || rewrittenEnv[4] != "--json" {
+			t.Fatalf("expected --json injected after deliver with env, got: %v", rewrittenEnv)
+		}
 	})
+}
+
+func TestDetectKind(t *testing.T) {
+	tests := []struct {
+		argv     []string
+		expected string
+	}{
+		{[]string{"go", "test", "./..."}, "go-test"},
+		{[]string{"env", "CGO_ENABLED=0", "go", "test", "./..."}, "go-test"},
+		{[]string{"env", "FOO=bar", "BAR=baz", "go", "test", "./..."}, "go-test"},
+		{[]string{"CGO_ENABLED=0", "go", "test", "./..."}, "go-test"},
+		{[]string{"node", "--test", "foo.test.js"}, "node-test"},
+		{[]string{"npm", "test"}, "npm-test"},
+		{[]string{"cargo", "test"}, "cargo-test"},
+		{[]string{"did-verify", "--files"}, "did-verify"},
+		{[]string{"defense-in-depth", "verify"}, "did-verify"},
+		{[]string{"node", "./dist/cli/index.js", "verify", "--files"}, "did-verify"},
+		{[]string{"env", "node", "./dist/cli/index.js", "verify", "--files"}, "did-verify"},
+		{[]string{"g8s", "verify", "--files"}, "g8s-verify"},
+		{[]string{"g8s", "offer", "check"}, "g8s-offer-check"},
+		{[]string{"g8s", "deliver"}, "g8s-deliver"},
+		{[]string{"ls", "-la"}, "generic"},
+	}
+
+	for _, tc := range tests {
+		got := detectKind(tc.argv)
+		if got != tc.expected {
+			t.Errorf("detectKind(%v) = %q, expected %q", tc.argv, got, tc.expected)
+		}
+	}
 }
 
 func TestRunGoTestVacuous(t *testing.T) {
@@ -154,6 +198,26 @@ func TestRunDidVerify(t *testing.T) {
 	}
 	if last.ItemsChecked != 2 {
 		t.Errorf("expected items_checked 2, got %d", last.ItemsChecked)
+	}
+
+	// 3. node ./dist/cli/index.js verify --files with 0 files => VACUOUS
+	mockNode := filepath.Join(repoDir, "node")
+	if err := os.WriteFile(mockNode, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write mock node: %v", err)
+	}
+	code = runCommand([]string{"--", mockNode, "./dist/cli/index.js", "verify", "--files"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	last, _ = ledger.LastEntry()
+	if last.Kind != "did-verify" {
+		t.Errorf("expected kind did-verify, got %s", last.Kind)
+	}
+	if last.Status != "VACUOUS" {
+		t.Errorf("expected status VACUOUS for node verify --files with 0 files, got %s", last.Status)
+	}
+	if last.ItemsChecked != 0 {
+		t.Errorf("expected items_checked 0, got %d", last.ItemsChecked)
 	}
 }
 

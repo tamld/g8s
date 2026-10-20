@@ -200,21 +200,55 @@ func newEvidenceID() string {
 	return "ev-" + hex.EncodeToString(b)
 }
 
+func stripEnv(argv []string) []string {
+	start := 0
+	if start < len(argv) && filepath.Base(argv[start]) == "env" {
+		start++
+		for start < len(argv) {
+			if argv[start] == "-i" || argv[start] == "-0" || argv[start] == "--" {
+				start++
+			} else if argv[start] == "-u" && start+1 < len(argv) {
+				start += 2
+			} else {
+				break
+			}
+		}
+	}
+	for start < len(argv) {
+		arg := argv[start]
+		if strings.Index(arg, "=") > 0 && !strings.HasPrefix(arg, "-") {
+			start++
+		} else {
+			break
+		}
+	}
+	return argv[start:]
+}
+
 func detectKind(argv []string) string {
-	if len(argv) == 0 {
+	cleanArgv := stripEnv(argv)
+	if len(cleanArgv) == 0 {
 		return "generic"
 	}
-	base0 := filepath.Base(argv[0])
+	base0 := filepath.Base(cleanArgv[0])
 	hasArg := func(val string) bool {
-		for _, a := range argv {
+		for _, a := range cleanArgv {
 			if a == val {
 				return true
 			}
 		}
 		return false
 	}
+	hasSubstr := func(args []string, substr string) bool {
+		for _, a := range args {
+			if strings.Contains(a, substr) {
+				return true
+			}
+		}
+		return false
+	}
 
-	if (base0 == "go" || strings.HasSuffix(argv[0], "/go") || strings.HasSuffix(argv[0], `\go`)) && len(argv) >= 2 && argv[1] == "test" {
+	if (base0 == "go" || strings.HasSuffix(cleanArgv[0], "/go") || strings.HasSuffix(cleanArgv[0], `\go`)) && len(cleanArgv) >= 2 && cleanArgv[1] == "test" {
 		return "go-test"
 	}
 	if strings.Contains(base0, "node") && hasArg("--test") {
@@ -223,10 +257,16 @@ func detectKind(argv []string) string {
 	if (base0 == "npm" || base0 == "pnpm" || base0 == "yarn" || base0 == "bun") && hasArg("test") {
 		return "npm-test"
 	}
-	if strings.Contains(base0, "cargo") && len(argv) >= 2 && argv[1] == "test" {
+	if strings.Contains(base0, "cargo") && len(cleanArgv) >= 2 && cleanArgv[1] == "test" {
 		return "cargo-test"
 	}
 	if strings.Contains(base0, "did-verify") || strings.Contains(base0, "did_verify") || hasArg("did-verify") {
+		return "did-verify"
+	}
+	if strings.Contains(base0, "defense-in-depth") && hasArg("verify") {
+		return "did-verify"
+	}
+	if !strings.Contains(base0, "g8s") && hasArg("verify") && (hasArg("--files") || hasArg("-files") || hasSubstr(argv, "defense-in-depth") || hasSubstr(argv, "dist/cli/index.js")) {
 		return "did-verify"
 	}
 	if strings.Contains(base0, "g8s") {
@@ -258,18 +298,20 @@ func rewriteArgv(kind string, argv []string) []string {
 		}
 		if !hasJSON {
 			fmt.Fprintln(os.Stderr, "[f0] injecting -json flag into go test invocation")
-			testIdx := 1
+			testIdx := -1
 			for i, a := range argv {
 				if a == "test" {
 					testIdx = i
 					break
 				}
 			}
-			newArgv := make([]string, 0, len(argv)+1)
-			newArgv = append(newArgv, argv[:testIdx+1]...)
-			newArgv = append(newArgv, "-json")
-			newArgv = append(newArgv, argv[testIdx+1:]...)
-			return newArgv
+			if testIdx >= 0 {
+				newArgv := make([]string, 0, len(argv)+1)
+				newArgv = append(newArgv, argv[:testIdx+1]...)
+				newArgv = append(newArgv, "-json")
+				newArgv = append(newArgv, argv[testIdx+1:]...)
+				return newArgv
+			}
 		}
 	} else if kind == "g8s-deliver" {
 		hasJSON := false
@@ -280,18 +322,20 @@ func rewriteArgv(kind string, argv []string) []string {
 			}
 		}
 		if !hasJSON {
-			deliverIdx := 1
+			deliverIdx := -1
 			for i, a := range argv {
 				if a == "deliver" {
 					deliverIdx = i
 					break
 				}
 			}
-			newArgv := make([]string, 0, len(argv)+1)
-			newArgv = append(newArgv, argv[:deliverIdx+1]...)
-			newArgv = append(newArgv, "--json")
-			newArgv = append(newArgv, argv[deliverIdx+1:]...)
-			return newArgv
+			if deliverIdx >= 0 {
+				newArgv := make([]string, 0, len(argv)+1)
+				newArgv = append(newArgv, argv[:deliverIdx+1]...)
+				newArgv = append(newArgv, "--json")
+				newArgv = append(newArgv, argv[deliverIdx+1:]...)
+				return newArgv
+			}
 		}
 	}
 	return argv
