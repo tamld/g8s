@@ -304,7 +304,8 @@ func TestBuildSessionDigest_AuditorFail_DebitsBudget(t *testing.T) {
 	entries, _ := gLedger.ReadEntries()
 	foundDebit := false
 	for _, e := range entries {
-		if e.Kind == "debit" && strings.Contains(e.Extra["reason"].(string), "auditor FAIL: strict-auditor") {
+		rStr, _ := e.Extra["reason"].(string)
+		if e.Kind == "debit" && strings.Contains(rStr, "auditor FAIL: strict-auditor") {
 			foundDebit = true
 			break
 		}

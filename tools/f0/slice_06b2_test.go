@@ -187,7 +187,7 @@ func TestSlice06b2_TreeSHAEquivalence_CommitAmend(t *testing.T) {
 // 4. Tampering with bundle JSON fails G1 and G3.
 func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	repoDir, _, headSHA := setupTestGitRepo(t)
+	repoDir, _, _ := setupTestGitRepo(t)
 
 	// Create and commit a file delivered by worker
 	filePath := filepath.Join(repoDir, "src", "feature.go")
@@ -197,7 +197,7 @@ func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
 	_ = exec.Command("git", "-C", repoDir, "commit", "-m", "add feature").Run()
 
 	headOut, _ := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
-	headSHA = strings.TrimSpace(string(headOut))
+	headSHA := strings.TrimSpace(string(headOut))
 
 	featureBlob, _ := gitBlobAt(repoDir, headSHA, "src/feature.go")
 

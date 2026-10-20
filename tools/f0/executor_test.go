@@ -223,7 +223,7 @@ func TestExecuteT2Merge_PassingGateMergesWithAttestationTrailer(t *testing.T) {
 	code := auditCommand([]string{"--repo", repoDir, "--json"})
 	w.Close()
 	os.Stdout = oldStdout
-	io.Copy(auditBuf, r)
+	_, _ = io.Copy(auditBuf, r)
 
 	if code != 0 {
 		t.Fatalf("auditCommand failed with exit code %d", code)

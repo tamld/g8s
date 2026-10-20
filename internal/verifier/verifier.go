@@ -884,9 +884,10 @@ func countGoTests(stdout []byte, exitCode int) (ran int, failed int, isVacuous b
 				Test   string `json:"Test"`
 			}
 			if err := json.Unmarshal([]byte(trimmed), &event); err == nil && event.Test != "" {
-				if event.Action == "pass" {
+				switch event.Action {
+				case "pass":
 					passCount++
-				} else if event.Action == "fail" {
+				case "fail":
 					failCount++
 				}
 				continue

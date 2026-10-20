@@ -270,7 +270,8 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 	if isBundleMode {
 		bundle, bErr = ParsePortableBundle(fullText)
 		if bErr == nil {
-			if !shaMatches(bundle.HeadSHA, headSHA) && !(headTreeSHA != "" && bundle.TreeSHA != "" && bundle.TreeSHA == headTreeSHA) {
+			treeMatch := headTreeSHA != "" && bundle.TreeSHA != "" && bundle.TreeSHA == headTreeSHA
+			if !shaMatches(bundle.HeadSHA, headSHA) && !treeMatch {
 				bErr = fmt.Errorf("bundle head SHA %s (tree %s) does not match target head %s (tree %s)", bundle.HeadSHA, bundle.TreeSHA, headSHA, headTreeSHA)
 			}
 		}
@@ -359,7 +360,8 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 			if e.Status != "PASS" || e.Dirty {
 				continue
 			}
-			if !shaMatches(e.SHA, headSHA) && !(headTreeSHA != "" && e.TreeSHA != "" && e.TreeSHA == headTreeSHA) {
+			eTreeMatch := headTreeSHA != "" && e.TreeSHA != "" && e.TreeSHA == headTreeSHA
+			if !shaMatches(e.SHA, headSHA) && !eTreeMatch {
 				continue
 			}
 			if matchVerifyCommand(e.Cmd, cfg.VerifyCommands) {
