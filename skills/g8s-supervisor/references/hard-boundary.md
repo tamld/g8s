@@ -12,13 +12,16 @@
 
 ## Stop boundary
 
-| Action | Requirement |
-|---|---|
-| Submit/monitor `read_only` task | Explicit packet, current executable/interface proof, sandbox, scope, receipt fields, zero-change oracle |
-| `workspace_write`, write receipt, worktree/branch | Separate human-approved writable campaign and exact path containment proof |
-| Config, installation, upgrade, provider configuration | Separate explicit authorization; never inspect credentials or secrets |
-| Remote issue/PR publication, push, merge | Verified packet plus named repository/destination/action authorization; PiC reviews first |
-| g8s source fix | Reproduced blocker plus PiC approval of named local scope; then follow `g8s/AGENTS.md` and OpenSpec-first flow in owned worktree |
+Commitment points require `f0 gate check` PASS; exploration is free (Axiom 1: Freedom on the road, toll at the booth). See [ADR-0033](../../../docs/decisions/0033-f0-verified-delegation.md).
+
+| Tier | Name | Governed Actions | Authorization & Gate Requirements |
+|---|---|---|---|
+| `T0` | Free / Observation | Local exploration, worktree edits, F1 dispatch via WriteReceipt, read files, search codebase, reason, draft plans, `f0 status` | Free exploration; path-scoped WriteReceipt for F1 mutations; zero hard gates (Axiom 1). |
+| `T1` | Low-Impact Mutation | Push branch, open PR, comment, close issue | Requires active campaign mandate (`T1+`) and `f0 gate check` PASS; closing an issue requires per-criterion evidence (G0, G6, G7). |
+| `T2` | Standard Merge | Merge PR to default branch (outside trust boundaries and excluded paths) | Requires active campaign mandate (`T2+`), `f0 gate check --action merge` PASS (G0–G6), and `F0-Ledger-Head` anchor trailer. Pre-created revert, watch, and auto-revert enforced. |
+| `T3` | High-Impact Merge | Merge touching trust boundaries / `LaneSecurity` / `excluded_paths` | Escalated automatically from `T2`; requires `T3` mandate plus second independent verifier (`g8s eval` probes or distinct provider); disagreement or missing verifier = automatic veto & escalate to PiC (Decision D9). |
+| `T4` | Critical / Sovereign | Release/tag, force-push, deleting refs, credentials/Keychain, editing `hooks.json` or ledger | Never pre-authorized; mandate cannot authorize T4; always requires synchronous PiC approval (`force_ask`). |
+| g8s source fix | Internal Fix | Fix to g8s source code | Reproduced blocker plus PiC approval of named local scope; then follow `g8s/AGENTS.md` and OpenSpec-first flow in owned worktree |
 
 Never use direct AGY shell, `--dangerously-skip-permissions`, `--no-sandbox`, credentials, raw
 prompts, raw logs, provider configuration, or sensitive paths as workaround.
