@@ -12,7 +12,7 @@ func TestConfig_LoadDefaults(t *testing.T) {
 	dir := t.TempDir()
 
 	// 1. Inferred verify_commands for go.mod
-	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n"), 0o644)
 	cfg, err := LoadConfig(dir)
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
@@ -31,7 +31,7 @@ func TestConfig_LoadDefaults(t *testing.T) {
 
 	// 2. Inferred verify_commands for Cargo.toml
 	cargoDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(cargoDir, "Cargo.toml"), []byte("[package]\nname = \"test\"\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cargoDir, "Cargo.toml"), []byte("[package]\nname = \"test\"\n"), 0o644)
 	cfgCargo, err := LoadConfig(cargoDir)
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
@@ -43,7 +43,7 @@ func TestConfig_LoadDefaults(t *testing.T) {
 
 	// 3. Inferred verify_commands for package.json
 	nodeDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(nodeDir, "package.json"), []byte("{\"name\": \"test\"}\n"), 0644)
+	_ = os.WriteFile(filepath.Join(nodeDir, "package.json"), []byte("{\"name\": \"test\"}\n"), 0o644)
 	cfgNode, err := LoadConfig(nodeDir)
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
@@ -57,7 +57,7 @@ func TestConfig_LoadDefaults(t *testing.T) {
 func TestConfig_LoadExplicitPolicy(t *testing.T) {
 	dir := t.TempDir()
 	g8sDir := filepath.Join(dir, ".g8s")
-	_ = os.MkdirAll(g8sDir, 0755)
+	_ = os.MkdirAll(g8sDir, 0o755)
 
 	content := `
 ci: github
@@ -68,7 +68,7 @@ manual_free:
   - "plans/**"
   - "docs/notes.md"
 `
-	_ = os.WriteFile(filepath.Join(g8sDir, "f0.yml"), []byte(content), 0644)
+	_ = os.WriteFile(filepath.Join(g8sDir, "f0.yml"), []byte(content), 0o644)
 
 	cfg, err := LoadConfig(dir)
 	if err != nil {

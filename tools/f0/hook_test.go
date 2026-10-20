@@ -140,13 +140,13 @@ func TestHook_MergeCommandGateCheck(t *testing.T) {
 	// Case B: Gate check PASSES
 	// 1. Issue valid mandate
 	m := &Mandate{
-		Version:   1,
-		ID:        "md-hooktest1",
-		Issuer:    "test-op",
-		IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-		ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-		Campaign:  "hook testing",
-		Repos:     []MandateRepo{{Name: "testrepo", Path: repoDir, MaxTier: "T2"}},
+		Version:     1,
+		ID:          "md-hooktest1",
+		Issuer:      "test-op",
+		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+		Campaign:    "hook testing",
+		Repos:       []MandateRepo{{Name: "testrepo", Path: repoDir, MaxTier: "T2"}},
 		ErrorBudget: ErrorBudget{Limit: 3},
 	}
 	if err := IssueMandate(m); err != nil {
@@ -155,8 +155,8 @@ func TestHook_MergeCommandGateCheck(t *testing.T) {
 
 	// 2. Add config with CI: none and verify_commands: go test ./...
 	cfgDir := filepath.Join(repoDir, ".g8s")
-	_ = os.MkdirAll(cfgDir, 0755)
-	_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+	_ = os.MkdirAll(cfgDir, 0o755)
+	_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 	// 3. Add clean PASS evidence in repo ledger
 	ledger, err := OpenRepoLedger(repoDir)
@@ -221,7 +221,7 @@ func TestHook_StopHook(t *testing.T) {
 	uncitedContent := `{"step_index":1,"type":"USER_INPUT","content":"Check CI"}
 {"step_index":2,"type":"PLANNER_RESPONSE","content":"Tests finished. CI GREEN."}
 `
-	if err := os.WriteFile(uncitedFixture, []byte(uncitedContent), 0644); err != nil {
+	if err := os.WriteFile(uncitedFixture, []byte(uncitedContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,7 +229,7 @@ func TestHook_StopHook(t *testing.T) {
 	citedContent := `{"step_index":1,"type":"USER_INPUT","content":"Check CI"}
 {"step_index":2,"type":"PLANNER_RESPONSE","content":"Tests finished. CI GREEN (ev-aabb1122)."}
 `
-	if err := os.WriteFile(citedFixture, []byte(citedContent), 0644); err != nil {
+	if err := os.WriteFile(citedFixture, []byte(citedContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

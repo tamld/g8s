@@ -31,7 +31,7 @@ func setupTestGitRepo(t *testing.T) (repoDir string, baseSHA string, headSHA str
 	runGit("config", "user.name", "Tester")
 
 	// Commit 1: base
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Hello\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit("add", "README.md")
@@ -39,7 +39,7 @@ func setupTestGitRepo(t *testing.T) (repoDir string, baseSHA string, headSHA str
 	baseSHA = runGit("rev-parse", "HEAD")
 
 	// Commit 2: head
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit("add", "main.go")
@@ -223,13 +223,13 @@ func TestGate_G2(t *testing.T) {
 
 	// Issue active mandate
 	m := &Mandate{
-		Version:   1,
-		ID:        "md-g2test",
-		Issuer:    "test-op",
-		IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-		ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-		Campaign:  "g2 tests",
-		Repos:     []MandateRepo{{Name: "testrepo", Path: repoDir, MaxTier: "T2"}},
+		Version:     1,
+		ID:          "md-g2test",
+		Issuer:      "test-op",
+		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+		Campaign:    "g2 tests",
+		Repos:       []MandateRepo{{Name: "testrepo", Path: repoDir, MaxTier: "T2"}},
 		ErrorBudget: ErrorBudget{Limit: 2},
 	}
 	_ = IssueMandate(m)
@@ -238,8 +238,8 @@ func TestGate_G2(t *testing.T) {
 
 	// Setup config with ci: github
 	cfgDir := filepath.Join(repoDir, ".g8s")
-	_ = os.MkdirAll(cfgDir, 0755)
-	_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+	_ = os.MkdirAll(cfgDir, 0o755)
+	_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 	// Add G1 PASS evidence so G1 passes
 	_ = ledger.Append(&Entry{

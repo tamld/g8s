@@ -106,7 +106,7 @@ func IssueMandate(m *Mandate) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
 		return fmt.Errorf("creating mandate cache dir: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func IssueMandate(m *Mandate) error {
 		return fmt.Errorf("marshaling mandate cache: %w", err)
 	}
 
-	if err := os.WriteFile(cachePath, append(cacheData, '\n'), 0644); err != nil {
+	if err := os.WriteFile(cachePath, append(cacheData, '\n'), 0o600); err != nil {
 		return fmt.Errorf("writing mandate cache file: %w", err)
 	}
 

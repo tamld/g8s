@@ -410,7 +410,7 @@ func extractShellCPayload(s string) (string, bool) {
 }
 
 var (
-	subshellDollarRegex = regexp.MustCompile(`\$\(([^)]+)\)`)
+	subshellDollarRegex   = regexp.MustCompile(`\$\(([^)]+)\)`)
 	subshellBacktickRegex = regexp.MustCompile("`([^`]+)`")
 )
 
@@ -472,9 +472,11 @@ func targetsProtectedPath(s string) bool {
 		strings.Contains(lower, "f0/ledger.jsonl")
 }
 
-var mutatingVerbRegex = regexp.MustCompile(`(?i)(?:^|[\s|;&])(?:rm|unlink|shred|mv|cp|touch|truncate|tee|chmod|chown)\b`)
-var sedInPlaceRegex = regexp.MustCompile(`(?i)\bsed\b[^\n;&]*(?:-i|--in-place)`)
-var gitMutatingRegex = regexp.MustCompile(`(?i)\bgit\s+(?:rm|restore|checkout\s+--)\b`)
+var (
+	mutatingVerbRegex = regexp.MustCompile(`(?i)(?:^|[\s|;&])(?:rm|unlink|shred|mv|cp|touch|truncate|tee|chmod|chown)\b`)
+	sedInPlaceRegex   = regexp.MustCompile(`(?i)\bsed\b[^\n;&]*(?:-i|--in-place)`)
+	gitMutatingRegex  = regexp.MustCompile(`(?i)\bgit\s+(?:rm|restore|checkout\s+--)\b`)
+)
 
 func checkTamper(cmd string) (bool, string) {
 	if !targetsProtectedPath(cmd) {
@@ -644,10 +646,7 @@ func extractRepoFlag(cmd string) string {
 }
 
 func checkMerge(cmd string) (bool, int, string) {
-	isMerge := false
-	if ghPrMergeRegex.MatchString(cmd) || ghApiMergeRegex.MatchString(cmd) || gitPushMainRegex.MatchString(cmd) {
-		isMerge = true
-	}
+	isMerge := ghPrMergeRegex.MatchString(cmd) || ghApiMergeRegex.MatchString(cmd) || gitPushMainRegex.MatchString(cmd)
 	if !isMerge {
 		return false, 0, ""
 	}

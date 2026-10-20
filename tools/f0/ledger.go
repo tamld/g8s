@@ -203,7 +203,7 @@ func OpenLedgerAtPath(p string) *Ledger {
 
 // Append adds a new entry to the ledger under an exclusive advisory lock with fsync.
 func (l *Ledger) Append(entry *Entry) error {
-	if err := os.MkdirAll(filepath.Dir(l.Path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o700); err != nil {
 		return fmt.Errorf("creating ledger directory: %w", err)
 	}
 
@@ -240,7 +240,7 @@ func (l *Ledger) Append(entry *Entry) error {
 		return fmt.Errorf("marshaling entry: %w", err)
 	}
 
-	f, err := os.OpenFile(l.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(l.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening ledger for append: %w", err)
 	}

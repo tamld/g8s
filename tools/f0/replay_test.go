@@ -42,7 +42,7 @@ func setupReplayRepo(tb testing.TB, repoName string) (repoDir, baseSHA, headSHA 
 	runGit("config", "user.name", "ReplayTester")
 
 	// Base commit on main
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# "+repoName+"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# "+repoName+"\n"), 0o644); err != nil {
 		tb.Fatal(err)
 	}
 	runGit("add", "README.md")
@@ -53,7 +53,7 @@ func setupReplayRepo(tb testing.TB, repoName string) (repoDir, baseSHA, headSHA 
 	runGit("checkout", "-b", "topic")
 
 	// Head commit on topic
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		tb.Fatal(err)
 	}
 	runGit("add", "main.go")
@@ -65,13 +65,13 @@ func setupReplayRepo(tb testing.TB, repoName string) (repoDir, baseSHA, headSHA 
 
 func setupRealisticGateFixture(tb testing.TB) (string, GateOptions) {
 	tb.Helper()
-	repoDir, _, headSHA := setupReplayRepo(tb, "realistic-repo")
+	repoDir, _, _ := setupReplayRepo(tb, "realistic-repo")
 
 	// Create 3 files in diff
 	for i := 1; i <= 3; i++ {
 		fname := fmt.Sprintf("pkg%d.go", i)
 		content := fmt.Sprintf("package main\n// pkg %d\n", i)
-		if err := os.WriteFile(filepath.Join(repoDir, fname), []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(repoDir, fname), []byte(content), 0o644); err != nil {
 			tb.Fatal(err)
 		}
 	}
@@ -87,17 +87,17 @@ func setupRealisticGateFixture(tb testing.TB) (string, GateOptions) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	headSHA = strings.TrimSpace(string(headOut))
+	headSHA := strings.TrimSpace(string(headOut))
 
 	// Mandate
 	m := &Mandate{
-		Version:   1,
-		ID:        "md-perf1",
-		Issuer:    "bench-tester",
-		IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-		ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-		Campaign:  "perf-testing",
-		Repos:     []MandateRepo{{Name: "realistic-repo", Path: repoDir, MaxTier: "T2"}},
+		Version:     1,
+		ID:          "md-perf1",
+		Issuer:      "bench-tester",
+		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+		Campaign:    "perf-testing",
+		Repos:       []MandateRepo{{Name: "realistic-repo", Path: repoDir, MaxTier: "T2"}},
 		ErrorBudget: ErrorBudget{Limit: 5},
 	}
 	if err := IssueMandate(m); err != nil {
@@ -106,10 +106,10 @@ func setupRealisticGateFixture(tb testing.TB) (string, GateOptions) {
 
 	// Policy config
 	cfgDir := filepath.Join(repoDir, ".g8s")
-	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		tb.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644); err != nil {
 		tb.Fatal(err)
 	}
 
@@ -176,13 +176,13 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		repoDir, _, headSHA := setupReplayRepo(t, "hash-checker")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c1",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c1-replay",
-			Repos:     []MandateRepo{{Name: "hash-checker", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c1",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c1-replay",
+			Repos:       []MandateRepo{{Name: "hash-checker", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		if err := IssueMandate(m); err != nil {
@@ -190,8 +190,8 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -261,13 +261,13 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		repoDir, _, headSHA := setupReplayRepo(t, "defense-in-depth")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c2",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c2-replay",
-			Repos:     []MandateRepo{{Name: "defense-in-depth", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c2",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c2-replay",
+			Repos:       []MandateRepo{{Name: "defense-in-depth", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		if err := IssueMandate(m); err != nil {
@@ -275,8 +275,8 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: github\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -348,8 +348,8 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 			ItemsChecked: 0,
 		})
 		vacCfgDir := filepath.Join(vacRepo, ".g8s")
-		_ = os.MkdirAll(vacCfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(vacCfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"node\", \"./dist/cli/index.js\", \"verify\", \"--files\"]\n"), 0644)
+		_ = os.MkdirAll(vacCfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(vacCfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"node\", \"./dist/cli/index.js\", \"verify\", \"--files\"]\n"), 0o644)
 
 		vacOut, _ := EvaluateGate(GateOptions{RepoDir: vacRepo, Action: "merge"})
 		if vacOut.Overall != "FAIL" {
@@ -380,12 +380,12 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 	// Expected: NOT_COVERED (Wave B #625 G4)
 	// -------------------------------------------------------------------------
 	t.Run("C3_SedTodoAppeasement", func(t *testing.T) {
-		repoDir, _, headSHA := setupReplayRepo(t, "appeasement-repo")
+		repoDir, _, _ := setupReplayRepo(t, "appeasement-repo")
 
 		// F1 delivered pkg/artifact.go with "To-Do"
 		artifactPath := filepath.Join(repoDir, "pkg", "artifact.go")
-		_ = os.MkdirAll(filepath.Dir(artifactPath), 0755)
-		_ = os.WriteFile(artifactPath, []byte("package pkg\n// To-Do: implement artifact validation\n"), 0644)
+		_ = os.MkdirAll(filepath.Dir(artifactPath), 0o755)
+		_ = os.WriteFile(artifactPath, []byte("package pkg\n// To-Do: implement artifact validation\n"), 0o644)
 
 		runGit := func(args ...string) string {
 			cmd := exec.Command("git", args...)
@@ -395,26 +395,26 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 		runGit("add", "pkg/artifact.go")
 		runGit("commit", "-m", "worker delivery with To-Do rewrite")
-		headSHA = runGit("rev-parse", "HEAD")
+		headSHA := runGit("rev-parse", "HEAD")
 
 		mainBlob, _ := gitBlobAt(repoDir, headSHA, "main.go")
 		artBlob, _ := gitBlobAt(repoDir, headSHA, "pkg/artifact.go")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c3",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c3-replay",
-			Repos:     []MandateRepo{{Name: "appeasement-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c3",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c3-replay",
+			Repos:       []MandateRepo{{Name: "appeasement-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -462,15 +462,15 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 	// Expected: NOT_COVERED (Wave B #625 G4)
 	// -------------------------------------------------------------------------
 	t.Run("C4_InventedYAMLKeys", func(t *testing.T) {
-		repoDir, _, headSHA := setupReplayRepo(t, "yaml-repo")
+		repoDir, _, _ := setupReplayRepo(t, "yaml-repo")
 
 		tbFile := filepath.Join(repoDir, ".g8s", "trust-boundaries.yml")
-		_ = os.MkdirAll(filepath.Dir(tbFile), 0755)
+		_ = os.MkdirAll(filepath.Dir(tbFile), 0o755)
 		c4Content, err := os.ReadFile(filepath.Join("testdata", "replay", "c4_unread_keys.yml"))
 		if err != nil {
 			t.Fatalf("reading c4 fixture: %v", err)
 		}
-		_ = os.WriteFile(tbFile, c4Content, 0644)
+		_ = os.WriteFile(tbFile, c4Content, 0o644)
 
 		runGit := func(args ...string) string {
 			cmd := exec.Command("git", args...)
@@ -480,25 +480,25 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 		runGit("add", ".g8s/trust-boundaries.yml")
 		runGit("commit", "-m", "add trust boundaries with unread keys")
-		headSHA = runGit("rev-parse", "HEAD")
+		headSHA := runGit("rev-parse", "HEAD")
 
 		mainBlob, _ := gitBlobAt(repoDir, headSHA, "main.go")
 		tbBlob, _ := gitBlobAt(repoDir, headSHA, ".g8s/trust-boundaries.yml")
 
 		// Mandate with T2 (rules in c4 do not trigger LaneSecurity)
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c4",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c4-replay",
-			Repos:     []MandateRepo{{Name: "yaml-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c4",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c4-replay",
+			Repos:       []MandateRepo{{Name: "yaml-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
-		_ = os.WriteFile(filepath.Join(repoDir, ".g8s", "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.WriteFile(filepath.Join(repoDir, ".g8s", "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -584,20 +584,20 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		repoDir, _, headSHA := setupReplayRepo(t, "fixture-repo")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c6",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c6-replay",
-			Repos:     []MandateRepo{{Name: "fixture-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c6",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c6-replay",
+			Repos:       []MandateRepo{{Name: "fixture-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -699,20 +699,20 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 
 		// 2. EvaluateGate on PR with Closes #617: passes in Wave A (G7 in Wave B)
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c7",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c7-replay",
-			Repos:     []MandateRepo{{Name: "issue-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c7",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c7-replay",
+			Repos:       []MandateRepo{{Name: "issue-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -761,16 +761,16 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 	// Expected: FLAG
 	// -------------------------------------------------------------------------
 	t.Run("C8_InaccurateScorecardCounts", func(t *testing.T) {
-		repoDir, _, headSHA := setupReplayRepo(t, "scorecard-repo")
+		repoDir, _, _ := setupReplayRepo(t, "scorecard-repo")
 
 		// Sub-case (a): Numeric table edits delivered via F1 pass G3
 		scPath := filepath.Join(repoDir, "offer", "SCORECARD.md")
-		_ = os.MkdirAll(filepath.Dir(scPath), 0755)
+		_ = os.MkdirAll(filepath.Dir(scPath), 0o755)
 		c8Content, err := os.ReadFile(filepath.Join("testdata", "replay", "c8_scorecard.md"))
 		if err != nil {
 			t.Fatalf("reading c8 fixture: %v", err)
 		}
-		_ = os.WriteFile(scPath, c8Content, 0644)
+		_ = os.WriteFile(scPath, c8Content, 0o644)
 
 		runGit := func(args ...string) string {
 			cmd := exec.Command("git", args...)
@@ -780,26 +780,26 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 		runGit("add", "offer/SCORECARD.md")
 		runGit("commit", "-m", "update scorecard with inaccurate counts")
-		headSHA = runGit("rev-parse", "HEAD")
+		headSHA := runGit("rev-parse", "HEAD")
 
 		mainBlob, _ := gitBlobAt(repoDir, headSHA, "main.go")
 		scBlob, _ := gitBlobAt(repoDir, headSHA, "offer/SCORECARD.md")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c8",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c8-replay",
-			Repos:     []MandateRepo{{Name: "scorecard-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c8",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c8-replay",
+			Repos:       []MandateRepo{{Name: "scorecard-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{
@@ -856,12 +856,12 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 	// Expected: BLOCK
 	// -------------------------------------------------------------------------
 	t.Run("C9_F0DirectManualEdits", func(t *testing.T) {
-		repoDir, _, headSHA := setupReplayRepo(t, "manual-repo")
+		repoDir, _, _ := setupReplayRepo(t, "manual-repo")
 
 		// F0 directly edits src/fix.go without g8s-deliver
 		fixPath := filepath.Join(repoDir, "src", "fix.go")
-		_ = os.MkdirAll(filepath.Dir(fixPath), 0755)
-		_ = os.WriteFile(fixPath, []byte("package src\n// f0 direct hotfix\n"), 0644)
+		_ = os.MkdirAll(filepath.Dir(fixPath), 0o755)
+		_ = os.WriteFile(fixPath, []byte("package src\n// f0 direct hotfix\n"), 0o644)
 
 		runGit := func(args ...string) string {
 			cmd := exec.Command("git", args...)
@@ -871,25 +871,25 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 		}
 		runGit("add", "src/fix.go")
 		runGit("commit", "-m", "manual hotfix by F0")
-		headSHA = runGit("rev-parse", "HEAD")
+		headSHA := runGit("rev-parse", "HEAD")
 
 		mainBlob, _ := gitBlobAt(repoDir, headSHA, "main.go")
 
 		m := &Mandate{
-			Version:   1,
-			ID:        "md-c9",
-			Issuer:    "test-pic",
-			IssuedAt:  time.Now().UTC().Format(time.RFC3339),
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			Campaign:  "c9-replay",
-			Repos:     []MandateRepo{{Name: "manual-repo", Path: repoDir, MaxTier: "T2"}},
+			Version:     1,
+			ID:          "md-c9",
+			Issuer:      "test-pic",
+			IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+			ExpiresAt:   time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			Campaign:    "c9-replay",
+			Repos:       []MandateRepo{{Name: "manual-repo", Path: repoDir, MaxTier: "T2"}},
 			ErrorBudget: ErrorBudget{Limit: 3},
 		}
 		_ = IssueMandate(m)
 
 		cfgDir := filepath.Join(repoDir, ".g8s")
-		_ = os.MkdirAll(cfgDir, 0755)
-		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0644)
+		_ = os.MkdirAll(cfgDir, 0o755)
+		_ = os.WriteFile(filepath.Join(cfgDir, "f0.yml"), []byte("ci: none\nverify_commands:\n  - [\"go\", \"test\", \"./...\"]\n"), 0o644)
 
 		ledger, _ := OpenRepoLedger(repoDir)
 		_ = ledger.Append(&Entry{

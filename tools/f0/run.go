@@ -83,7 +83,7 @@ func runCommand(args []string) int {
 	tail := redactSecrets(string(tailBytes))
 
 	extra := make(map[string]any)
-	items := -1
+	var items int
 
 	switch kind {
 	case "go-test":

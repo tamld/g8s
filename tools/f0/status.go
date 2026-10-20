@@ -10,13 +10,13 @@ import (
 )
 
 type StatusOutput struct {
-	Repo           string        `json:"repo"`
-	Branch         string        `json:"branch"`
-	SHA            string        `json:"sha"`
-	Dirty          bool          `json:"dirty"`
+	Repo           string         `json:"repo"`
+	Branch         string         `json:"branch"`
+	SHA            string         `json:"sha"`
+	Dirty          bool           `json:"dirty"`
 	Mandate        *StatusMandate `json:"mandate,omitempty"`
-	EvidenceAtHead []Entry       `json:"evidence_at_head"`
-	Checks         []ForgeCheck  `json:"checks,omitempty"`
+	EvidenceAtHead []Entry        `json:"evidence_at_head"`
+	Checks         []ForgeCheck   `json:"checks,omitempty"`
 }
 
 type StatusMandate struct {

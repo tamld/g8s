@@ -186,4 +186,21 @@ func TestParsers(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("g8s_verify", func(t *testing.T) {
+		jsonOut := []byte(`some log prefix {"data":{"results":[{"name":"chk1"},{"name":"chk2"}]}} trailing`)
+		if got := parseG8sVerify(jsonOut); got != 2 {
+			t.Errorf("expected 2 items for g8s verify json, got %d", got)
+		}
+
+		textOut := []byte("[PASS] test1\n[FAIL] test2\n[SKIP] test3")
+		if got := parseG8sVerify(textOut); got != 3 {
+			t.Errorf("expected 3 items for g8s verify text, got %d", got)
+		}
+
+		defaultOut := []byte("plain verification finished")
+		if got := parseG8sVerify(defaultOut); got != 1 {
+			t.Errorf("expected 1 for fallback, got %d", got)
+		}
+	})
 }

@@ -30,7 +30,7 @@ func initTestGitRepo(t *testing.T) string {
 
 	// Create initial file and commit
 	readme := filepath.Join(dir, "README.md")
-	if err := os.WriteFile(readme, []byte("# Test Repo\n"), 0644); err != nil {
+	if err := os.WriteFile(readme, []byte("# Test Repo\n"), 0o644); err != nil {
 		t.Fatalf("writing readme: %v", err)
 	}
 	run("add", "README.md")
@@ -92,7 +92,7 @@ func TestChainVerifyAndTamper(t *testing.T) {
 	// Tamper line 3 by changing items_checked from 10 to 999
 	lines[2] = strings.Replace(lines[2], `"items_checked":10`, `"items_checked":999`, 1)
 	tamperedContent := strings.Join(lines, "\n") + "\n"
-	if err := os.WriteFile(ledger.Path, []byte(tamperedContent), 0644); err != nil {
+	if err := os.WriteFile(ledger.Path, []byte(tamperedContent), 0o644); err != nil {
 		t.Fatalf("write tampered ledger: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestTruncationAfterAnchor(t *testing.T) {
 		t.Fatalf("expected 5 lines, got %d", len(lines))
 	}
 	truncatedContent := strings.Join(lines[:2], "\n") + "\n"
-	if err := os.WriteFile(ledger.Path, []byte(truncatedContent), 0644); err != nil {
+	if err := os.WriteFile(ledger.Path, []byte(truncatedContent), 0o644); err != nil {
 		t.Fatalf("write truncated ledger: %v", err)
 	}
 

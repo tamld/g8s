@@ -215,10 +215,10 @@ type FakeRun struct {
 
 // FakeForge provides an in-memory or fixture-driven implementation of ForgeAdapter.
 type FakeForge struct {
-	PRs          map[int]FakePR          `json:"prs"`
-	Checks       map[int][]ForgeCheck    `json:"checks"`
-	Issues       map[string]FakeIssue    `json:"issues"`
-	WorkflowRuns map[string]FakeRun      `json:"workflow_runs"`
+	PRs          map[int]FakePR       `json:"prs"`
+	Checks       map[int][]ForgeCheck `json:"checks"`
+	Issues       map[string]FakeIssue `json:"issues"`
+	WorkflowRuns map[string]FakeRun   `json:"workflow_runs"`
 }
 
 var _ ForgeAdapter = (*FakeForge)(nil)

@@ -65,14 +65,14 @@ func TestT3Escalation(t *testing.T) {
 	t.Run("escalation via repo trust-boundaries.yml", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		g8sDir := filepath.Join(tmpDir, ".g8s")
-		if err := os.MkdirAll(g8sDir, 0755); err != nil {
+		if err := os.MkdirAll(g8sDir, 0o755); err != nil {
 			t.Fatalf("mkdir .g8s: %v", err)
 		}
 		tbFile := filepath.Join(g8sDir, "trust-boundaries.yml")
 		tbContent := `trust_boundaries:
   - "custom/sensitive/*"
 `
-		if err := os.WriteFile(tbFile, []byte(tbContent), 0644); err != nil {
+		if err := os.WriteFile(tbFile, []byte(tbContent), 0o644); err != nil {
 			t.Fatalf("write trust-boundaries.yml: %v", err)
 		}
 
@@ -92,7 +92,7 @@ func TestT3Escalation(t *testing.T) {
 	t.Run("missing trust-boundaries.yml in sibling repo vs g8s", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		siblingRepoDir := filepath.Join(tmpDir, "sibling-tool")
-		if err := os.MkdirAll(siblingRepoDir, 0755); err != nil {
+		if err := os.MkdirAll(siblingRepoDir, 0o755); err != nil {
 			t.Fatalf("mkdir sibling-tool: %v", err)
 		}
 
@@ -104,7 +104,7 @@ func TestT3Escalation(t *testing.T) {
 
 		// g8s repo without .g8s/trust-boundaries.yml: uses DefaultTrustBoundaries -> T3
 		g8sRepoDir := filepath.Join(tmpDir, "g8s")
-		if err := os.MkdirAll(g8sRepoDir, 0755); err != nil {
+		if err := os.MkdirAll(g8sRepoDir, 0o755); err != nil {
 			t.Fatalf("mkdir g8s: %v", err)
 		}
 
@@ -354,11 +354,11 @@ func TestMandateCacheTamper(t *testing.T) {
 		if err != nil {
 			t.Fatalf("cache path: %v", err)
 		}
-		if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
 		fakeMandate := `{"version":1,"id":"md-fake1234","issuer":"attacker","campaign":"fake"}`
-		if err := os.WriteFile(cachePath, []byte(fakeMandate), 0644); err != nil {
+		if err := os.WriteFile(cachePath, []byte(fakeMandate), 0o644); err != nil {
 			t.Fatalf("write fake cache: %v", err)
 		}
 
@@ -395,7 +395,7 @@ func TestMandateCacheTamper(t *testing.T) {
 			t.Fatalf("read cache: %v", err)
 		}
 		tampered := strings.Replace(string(data), `"max_tier": "T2"`, `"max_tier": "T3"`, 1)
-		if err := os.WriteFile(cachePath, []byte(tampered), 0644); err != nil {
+		if err := os.WriteFile(cachePath, []byte(tampered), 0o644); err != nil {
 			t.Fatalf("write tampered cache: %v", err)
 		}
 

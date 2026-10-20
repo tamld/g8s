@@ -102,7 +102,7 @@ func TestRunGoTestVacuous(t *testing.T) {
 	}
 
 	// Create a minimal go.mod and test file in repoDir
-	if err := os.WriteFile("go.mod", []byte("module example.com/testmod\n\ngo 1.22\n"), 0644); err != nil {
+	if err := os.WriteFile("go.mod", []byte("module example.com/testmod\n\ngo 1.22\n"), 0o644); err != nil {
 		t.Fatalf("writing go.mod: %v", err)
 	}
 	testContent := `package testmod
@@ -111,7 +111,7 @@ import "testing"
 
 func TestReal(t *testing.T) {}
 `
-	if err := os.WriteFile("mod_test.go", []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile("mod_test.go", []byte(testContent), 0o644); err != nil {
 		t.Fatalf("writing mod_test.go: %v", err)
 	}
 	_ = exec.Command("git", "add", "go.mod", "mod_test.go").Run()
@@ -166,7 +166,7 @@ func TestRunDidVerify(t *testing.T) {
 	// Create mock script for did-verify
 	mockScript := filepath.Join(repoDir, "did-verify.sh")
 	scriptContent := "#!/bin/sh\nexit 0\n"
-	if err := os.WriteFile(mockScript, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("write mock script: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestRunDidVerify(t *testing.T) {
 
 	// 3. node ./dist/cli/index.js verify --files with 0 files => VACUOUS
 	mockNode := filepath.Join(repoDir, "node")
-	if err := os.WriteFile(mockNode, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+	if err := os.WriteFile(mockNode, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write mock node: %v", err)
 	}
 	code = runCommand([]string{"--", mockNode, "./dist/cli/index.js", "verify", "--files"})
@@ -231,7 +231,7 @@ func TestRunDeliverDryRun(t *testing.T) {
 
 	// Create a real file in repo so git hash-object succeeds
 	appliedFile := filepath.Join(repoDir, "applied.go")
-	if err := os.WriteFile(appliedFile, []byte("package main\n"), 0644); err != nil {
+	if err := os.WriteFile(appliedFile, []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write applied.go: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestRunDeliverDryRun(t *testing.T) {
   }
 }`
 	scriptContent := fmt.Sprintf("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\nexit 0\n", jsonEnvelope)
-	if err := os.WriteFile(mockDeliver, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(mockDeliver, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("write mock deliver: %v", err)
 	}
 
@@ -321,7 +321,7 @@ func TestRunDirtyWorktree(t *testing.T) {
 
 	// Create dirty uncommitted file
 	dirtyFile := filepath.Join(repoDir, "dirty.txt")
-	if err := os.WriteFile(dirtyFile, []byte("uncommitted change"), 0644); err != nil {
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted change"), 0o644); err != nil {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
