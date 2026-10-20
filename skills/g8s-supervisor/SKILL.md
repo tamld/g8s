@@ -60,6 +60,22 @@ task receipt (operator mandate 2026-09-27).
 | Multi-project tenancy, cross-repo worktrees, atomic F1 quotas, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.2 addendum — field-proven contracts through 2026-10-14 cross-repo campaign) |
 
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
+Verified delegation boundary: see [ADR-0033](../../docs/decisions/0033-f0-verified-delegation.md) for evidence-gated autonomy (T1–T3 supersede synchronous HITL; T4 requires PiC approval).
+
+## F0 Evidence Toolkit (ADR-0033)
+
+*Axiom: "Freedom on the road, toll at the booth — zero hard gates during exploration or F1 dispatch; deterministic hard gates at commitment points."*
+
+The F0 supervisor evidence toolkit (`tools/f0`) provides machine-checkable verification across T0–T4:
+
+- `f0 run -- <cmd...>`: wraps test/verify/deliver commands, records tamper-evident evidence (`ev-xxxxxxxx`) into the per-repo ledger, enforces G5 vacuous-pass guard (`items_checked == 0 => VACUOUS`).
+- `f0 status [--repo <path>] [--pr <N>] [--report-block]`: read-only ground truth viewer and trusted status block generator (`<!-- f0:status -->`).
+- `f0 gate check --repo <path> --action <merge|close|publish> (--pr <N> | --head-sha <S> --base <B>)`: deterministic commitment-point gate evaluating G0 (mandate), G1 (head evidence), G2 (forge CI), G3 (provenance), and G6 (claim citations).
+- `f0 waive`: records scoped CI waivers tied to an open same-repo issue in the global ledger (debits error budget).
+- `f0 manual`: tags un-attributed files as intentional supervisor edits (debits error budget unless `manual_free`).
+- `f0 mandate`: views, checks, or mints campaign mandates (`~/.local/state/g8s/f0/mandate.json` cache + global ledger).
+- `f0 anchor`: publishes or verifies external ledger head anchors (`F0-Ledger-Head: <seq>:<hash>`) in commit trailers or comments.
+- `f0 audit`: scans default-branch commit history for merge/squash commits lacking verified gate entries or anchor trailers.
 
 ## The six laws
 

@@ -107,6 +107,20 @@ if [ -z "$GH_CMD" ]; then
     fi
 fi
 
+# Resolve f0 binary
+F0_CMD="${F0_CMD:-${F0_BIN:-}}"
+if [ -z "$F0_CMD" ]; then
+    if [ -x "bin/f0" ]; then
+        F0_CMD="bin/f0"
+    elif [ -x "${REPO_ROOT}/bin/f0" ]; then
+        F0_CMD="${REPO_ROOT}/bin/f0"
+    elif command -v f0 >/dev/null 2>&1; then
+        F0_CMD="f0"
+    else
+        F0_CMD="bin/f0"
+    fi
+fi
+
 # -----------------------------------------------------------------------------
 # Gate a: Autonomy gate
 # bin/g8s config get autonomy_level must be exactly 1.
@@ -298,6 +312,18 @@ if [ "$failure_count" -gt 0 ]; then
 fi
 
 echo "GATE ci: pass — checks green (pass=${pass_count}, pending=0, failure=0)"
+
+# -----------------------------------------------------------------------------
+# Gate e: f0 verified delegation gate
+# -----------------------------------------------------------------------------
+f0_out=""
+f0_err=0
+f0_out=$("$F0_CMD" gate check --repo "$REPO_ROOT" --action merge --pr "$PR_NUM" 2>&1) || f0_err=$?
+if [ "$f0_err" -ne 0 ]; then
+    echo "GATE f0: fail — f0 gate check failed (exit=${f0_err}): ${f0_out}"
+    exit 1
+fi
+echo "GATE f0: pass — verified delegation gate green"
 
 # -----------------------------------------------------------------------------
 # Merge action

@@ -178,6 +178,21 @@ esac
 EOF
 chmod +x "${MOCK_BIN}/gh"
 
+# Mock f0 script
+cat > "${MOCK_BIN}/f0" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+outcome="${MOCK_F0_OUTCOME:-pass}"
+if [ "$outcome" = "fail" ]; then
+    echo '{"overall":"FAIL","checks":[{"id":"G0","status":"FAIL","detail":"mandate check failed"}]}'
+    exit 1
+fi
+echo '{"overall":"PASS","checks":[{"id":"G0","status":"PASS"}]}'
+exit 0
+EOF
+chmod +x "${MOCK_BIN}/f0"
+
 export PATH="${MOCK_BIN}:${PATH}"
 export MOCK_DIR
 
@@ -202,6 +217,8 @@ mkdir -p "${FIXTURE_REPO}"
     chmod +x tools/merger.sh
     cp "${MOCK_BIN}/g8s" bin/g8s
     chmod +x bin/g8s
+    cp "${MOCK_BIN}/f0" bin/f0
+    chmod +x bin/f0
 
     git add tools/ README.md
     git commit -q -m "add tools"
@@ -238,7 +255,7 @@ run_merger() {
 # -----------------------------------------------------------------------------
 # Test 1: Refuses at autonomy_level=0 (exit 3, before any other gates)
 # -----------------------------------------------------------------------------
-echo "Testing: [1/9] Refuses at level 0 (exit 3, before other gates)..."
+echo "Testing: [1/10] Refuses at level 0 (exit 3, before other gates)..."
 echo "0" > "${MOCK_DIR}/autonomy_level"
 rm -f "${MOCK_DIR}/merge_calls.log"
 
@@ -266,7 +283,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 2: Refuses when lane=build (exit 1)
 # -----------------------------------------------------------------------------
-echo "Testing: [2/9] Refuses when lane=build (exit 1)..."
+echo "Testing: [2/10] Refuses when lane=build (exit 1)..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 rm -f "${MOCK_DIR}/merge_calls.log"
 
@@ -304,7 +321,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 3a: Refuses when verifier says unregistered (exit 1)
 # -----------------------------------------------------------------------------
-echo "Testing: [3/9] Refuses when verifier says unregistered..."
+echo "Testing: [3/10] Refuses when verifier says unregistered..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 export MOCK_VERIFIER_REGISTERED="false"
 export MOCK_VERIFIER_CLASS="docs"
@@ -339,7 +356,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 3b: Refuses when verifier says outcome=fail (exit 1)
 # -----------------------------------------------------------------------------
-echo "Testing: [4/9] Refuses when verifier says outcome=fail..."
+echo "Testing: [4/10] Refuses when verifier says outcome=fail..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 export MOCK_VERIFIER_REGISTERED="true"
 export MOCK_VERIFIER_CLASS="docs"
@@ -365,7 +382,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 4: Refuses when checks pending (exit 1)
 # -----------------------------------------------------------------------------
-echo "Testing: [5/9] Refuses when checks pending (exit 1)..."
+echo "Testing: [5/10] Refuses when checks pending (exit 1)..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 export MOCK_VERIFIER_REGISTERED="true"
 export MOCK_VERIFIER_CLASS="docs"
@@ -395,7 +412,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 5: Dry-run never merges
 # -----------------------------------------------------------------------------
-echo "Testing: [6/9] Dry-run never merges (all gates pass, no merge executed)..."
+echo "Testing: [6/10] Dry-run never merges (all gates pass, no merge executed)..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 export MOCK_VERIFIER_REGISTERED="true"
 export MOCK_VERIFIER_CLASS="docs"
@@ -424,6 +441,9 @@ elif ! echo "$out" | grep -q "GATE verifier: pass"; then
 elif ! echo "$out" | grep -q "GATE ci: pass"; then
     echo "  FAIL: CI gate missing pass"
     FAILURES=$((FAILURES + 1))
+elif ! echo "$out" | grep -q "GATE f0: pass"; then
+    echo "  FAIL: f0 gate missing pass"
+    FAILURES=$((FAILURES + 1))
 elif ! echo "$out" | grep -q "DRY-RUN: would execute:"; then
     echo "  FAIL: missing DRY-RUN explanation in output, got: $out"
     FAILURES=$((FAILURES + 1))
@@ -438,9 +458,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Test 6: All-green prints all four GATE lines then the MERGED line
+# Test 6: All-green prints all five GATE lines then the MERGED line
 # -----------------------------------------------------------------------------
-echo "Testing: [7/9] All-green prints all four GATE lines then MERGED line..."
+echo "Testing: [7/10] All-green prints all five GATE lines then MERGED line..."
 echo "1" > "${MOCK_DIR}/autonomy_level"
 export MOCK_VERIFIER_REGISTERED="true"
 export MOCK_VERIFIER_CLASS="docs"
@@ -469,6 +489,9 @@ elif ! echo "$out" | grep -q "GATE verifier: pass"; then
 elif ! echo "$out" | grep -q "GATE ci: pass — checks green"; then
     echo "  FAIL: missing GATE ci: pass"
     FAILURES=$((FAILURES + 1))
+elif ! echo "$out" | grep -q "GATE f0: pass — verified delegation gate green"; then
+    echo "  FAIL: missing GATE f0: pass"
+    FAILURES=$((FAILURES + 1))
 elif ! echo "$out" | grep -qE "MERGED 1 at [0-9]{4}-[0-9]{2}-[0-9]{2}T"; then
     echo "  FAIL: missing MERGED line with ISO timestamp, got: $out"
     FAILURES=$((FAILURES + 1))
@@ -476,13 +499,13 @@ elif [ ! -f "${MOCK_DIR}/merge_calls.log" ]; then
     echo "  FAIL: gh pr merge was not called!"
     FAILURES=$((FAILURES + 1))
 else
-    echo "  ok (all 4 gate lines + MERGED line printed)"
+    echo "  ok (all 5 gate lines + MERGED line printed)"
 fi
 
 # -----------------------------------------------------------------------------
 # Test 7: Advisory verdict includes human decision rationale verbatim
 # -----------------------------------------------------------------------------
-echo "Testing: [8/9] Advisory verdict includes human decision rationale verbatim..."
+echo "Testing: [8/10] Advisory verdict includes human decision rationale verbatim..."
 expected_rationale="advisory verdicts are ACCEPTED here because the operator flip to level 1 IS the recorded human decision for this round"
 if ! echo "$out" | grep -F -q "$expected_rationale"; then
     echo "  FAIL: output does not contain exact verbatim rationale: '$expected_rationale'"
@@ -495,7 +518,7 @@ fi
 # -----------------------------------------------------------------------------
 # Test 8: Hard verifier verdict passes
 # -----------------------------------------------------------------------------
-echo "Testing: [9/9] Hard verifier status passes..."
+echo "Testing: [9/10] Hard verifier status passes..."
 export MOCK_VERIFIER_STATUS="hard"
 rm -f "${MOCK_DIR}/merge_calls.log"
 
@@ -514,11 +537,43 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Test 10: Refuses when f0 gate fails (exit 1)
+# -----------------------------------------------------------------------------
+echo "Testing: [10/10] Refuses when f0 gate fails (exit 1)..."
+echo "1" > "${MOCK_DIR}/autonomy_level"
+export MOCK_VERIFIER_REGISTERED="true"
+export MOCK_VERIFIER_CLASS="docs"
+export MOCK_VERIFIER_OUTCOME="pass"
+export MOCK_VERIFIER_STATUS="advisory"
+export MOCK_F0_OUTCOME="fail"
+echo "docs-battery pass 10s https://github.com/tamld/g8s/actions/runs/1" > "${MOCK_DIR}/gh_checks"
+rm -f "${MOCK_DIR}/merge_calls.log"
+
+out=""
+code=0
+out=$(run_merger --pr 1 --task "task-010" 2>&1) || code=$?
+
+if [ "$code" -ne 1 ]; then
+    echo "  FAIL: expected exit code 1, got $code"
+    echo "  Output: $out"
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$out" | grep -q "GATE f0: fail — f0 gate check failed"; then
+    echo "  FAIL: expected f0 failure message, got: $out"
+    FAILURES=$((FAILURES + 1))
+elif [ -f "${MOCK_DIR}/merge_calls.log" ]; then
+    echo "  FAIL: executed merge despite f0 gate failure!"
+    FAILURES=$((FAILURES + 1))
+else
+    echo "  ok (refused when f0 gate fails, exit 1)"
+fi
+export MOCK_F0_OUTCOME="pass"
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 echo "--------------------------------------------------------"
 if [ "$FAILURES" -eq 0 ]; then
-    echo "ALL TESTS PASSED (9/9)"
+    echo "ALL TESTS PASSED (10/10)"
     exit 0
 else
     echo "FAILURES DETECTED: $FAILURES"

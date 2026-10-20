@@ -1,0 +1,15 @@
+running 12 tests
+test tests::test_one ... ok
+test tests::test_two ... ok
+test tests::test_three ... FAILED
+test tests::test_four ... ok
+test tests::test_five ... FAILED
+test tests::test_six ... ok
+test tests::test_seven ... ok
+test tests::test_eight ... ok
+test tests::test_nine ... ok
+test tests::test_ten ... ok
+test tests::test_eleven ... ok
+test tests::test_twelve ... ok
+
+test result: FAILED. 10 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s

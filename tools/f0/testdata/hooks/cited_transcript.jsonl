@@ -1,0 +1,2 @@
+{"step_index":1,"type":"USER_INPUT","content":"Please check CI status"}
+{"step_index":2,"type":"PLANNER_RESPONSE","content":"Tests finished. CI GREEN (ev-aabb1122)."}

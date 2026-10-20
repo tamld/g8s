@@ -1,0 +1,3 @@
+{"Time":"2026-10-20T08:00:00.000000Z","Action":"start","Package":"github.com/tamld/g8s/tools/f0/empty"}
+{"Time":"2026-10-20T08:00:00.001000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0/empty","Output":"?   \tgithub.com/tamld/g8s/tools/f0/empty\t[no tests to run]\n"}
+{"Time":"2026-10-20T08:00:00.002000Z","Action":"pass","Package":"github.com/tamld/g8s/tools/f0/empty","Elapsed":0}

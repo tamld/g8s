@@ -1,0 +1,25 @@
+{
+  "prs": {
+    "80": {
+      "head_sha": "HEAD_PLACEHOLDER",
+      "base_ref": "main",
+      "body": "F0-Tasks: task-80\n<!-- f0:status -->\n<!-- /f0:status -->"
+    }
+  },
+  "checks": {
+    "80": [
+      {
+        "name": "linux",
+        "state": "pending",
+        "bucket": "pending",
+        "link": "https://github.com/tamld/hash-checker/actions/runs/101"
+      },
+      {
+        "name": "macos",
+        "state": "success",
+        "bucket": "pass",
+        "link": "https://github.com/tamld/hash-checker/actions/runs/102"
+      }
+    ]
+  }
+}
