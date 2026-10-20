@@ -223,7 +223,23 @@ esac
 		t.Fatal(err)
 	}
 
-	// 3. Fixture Git repository
+	// 3. Mock f0 binary (bash 3.2 compatible)
+	mockF0 := filepath.Join(mockBin, "f0")
+	f0Script := `#!/usr/bin/env bash
+set -euo pipefail
+MOCK_DIR="${MOCK_DIR:-/tmp}"
+if [ -f "${MOCK_DIR}/f0_fail" ]; then
+    echo '{"overall":"FAIL","checks":[{"id":"G1","status":"FAIL","detail":"mock fail"}]}'
+    exit 1
+fi
+echo '{"overall":"PASS","checks":[]}'
+exit 0
+`
+	if err := os.WriteFile(mockF0, []byte(f0Script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Fixture Git repository
 	fixtureDir := filepath.Join(tmpDir, "repo")
 	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -258,6 +274,7 @@ esac
 	copyFile(t, detectSrc, filepath.Join(toolsDir, "ci_lane_detect.sh"), 0o755)
 	copyFile(t, mergerSrc, filepath.Join(toolsDir, "merger.sh"), 0o755)
 	copyFile(t, mockG8s, filepath.Join(binDir, "g8s"), 0o755)
+	copyFile(t, mockF0, filepath.Join(binDir, "f0"), 0o755)
 
 	runCmd(t, fixtureDir, gitEnv, "git", "add", ".")
 	runCmd(t, fixtureDir, gitEnv, "git", "commit", "-q", "-m", "initial commit with tools")

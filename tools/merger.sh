@@ -108,7 +108,7 @@ if [ -z "$GH_CMD" ]; then
 fi
 
 # Resolve f0 binary
-F0_CMD="${F0_BIN:-}"
+F0_CMD="${F0_CMD:-${F0_BIN:-}}"
 if [ -z "$F0_CMD" ]; then
     if [ -x "bin/f0" ]; then
         F0_CMD="bin/f0"
