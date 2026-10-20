@@ -341,3 +341,59 @@ func TestQueryTopPatterns(t *testing.T) {
 		t.Errorf("pre-flight section missing top pattern title")
 	}
 }
+
+// TestQueryTopPatterns_ExcludesDraftAndLowConfidenceBeforeLimit reproduces the scenario from #633:
+// QueryTopPatterns must filter out DRAFT and low-confidence (<0.5) patterns before ORDER BY and LIMIT.
+func TestQueryTopPatterns_ExcludesDraftAndLowConfidenceBeforeLimit(t *testing.T) {
+	config := DefaultTelemetryConfig()
+	config.DBPath = filepath.Join(t.TempDir(), "telemetry.db")
+	engine, err := NewTelemetryEngine(config)
+	require.NoError(t, err)
+	defer engine.Close()
+
+	ctx := context.Background()
+	now := time.Now().UnixNano()
+
+	seedPattern := func(id string, occ int, conf float64, status string) {
+		pkg, _ := json.Marshal([]string{"internal/x"})
+		_, err := engine.db.Exec(`INSERT INTO negative_patterns
+			(id, pattern_type, title, description, root_cause, remediation, occurrence_count, first_seen, last_seen, affected_packages, example_contexts, confidence_score, status)
+			VALUES (?, 'timeout', ?, 'desc', 'root cause', 'remediate', ?, ?, ?, ?, ?, ?, ?)`,
+			id, id, occ, now, now, pkg, pkg, conf, status)
+		require.NoError(t, err)
+	}
+
+	seedPattern("draft-high", 100, 0.99, "DRAFT")
+	seedPattern("validated-low-confidence", 90, 0.01, "VALIDATED")
+	seedPattern("validated-ok", 4, 0.8, "VALIDATED")
+	seedPattern("applied-ok", 2, 0.8, "APPLIED")
+
+	patterns, err := engine.QueryTopPatterns(ctx, 3)
+	require.NoError(t, err)
+	require.Len(t, patterns, 2)
+	assert.Equal(t, "validated-ok", patterns[0].ID)
+	assert.Equal(t, "applied-ok", patterns[1].ID)
+
+	// When only DRAFT and low-confidence patterns exist in the DB, QueryTopPatterns returns empty
+	_, err = engine.db.Exec(`DELETE FROM negative_patterns WHERE id IN ('validated-ok', 'applied-ok')`)
+	require.NoError(t, err)
+
+	patternsEmpty, err := engine.QueryTopPatterns(ctx, 3)
+	require.NoError(t, err)
+	assert.Empty(t, patternsEmpty)
+
+	// Defense-in-depth in RenderPreflightContext:
+	// Filter out any pattern where p.ConfidenceScore < 0.5 or (p.Status != "" && p.Status != PatternStatusValidated && p.Status != PatternStatusApplied)
+	// If no eligible patterns remain, return "".
+	assert.Equal(t, "", RenderPreflightContext([]NegativePattern{
+		{ID: "draft-high", ConfidenceScore: 0.99, Status: PatternStatusDraft, Title: "Draft"},
+		{ID: "validated-low-confidence", ConfidenceScore: 0.01, Status: PatternStatusValidated, Title: "Low Conf"},
+		{ID: "rejected-pat", ConfidenceScore: 0.99, Status: "REJECTED", Title: "Rejected"},
+	}))
+
+	// Defense-in-depth: allows empty p.Status == "" only for synthetic unit-test structs with conf >= 0.5
+	out := RenderPreflightContext([]NegativePattern{
+		{ID: "synthetic", ConfidenceScore: 0.8, Status: "", Title: "Synthetic Test"},
+	})
+	assert.Contains(t, out, "Synthetic Test")
+}

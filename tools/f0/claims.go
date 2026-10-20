@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -34,9 +35,8 @@ var subjectTokens = map[string]bool{
 	"audit":    true,
 	"trivy":    true,
 	"clippy":   true,
-	"cargo":    true,
 	"pipeline": true,
-	"main":     true,
+	"coverage": true,
 }
 
 var verdictTokens = map[string]bool{
@@ -51,8 +51,6 @@ var verdictTokens = map[string]bool{
 	"succeeds":   true,
 	"success":    true,
 	"successful": true,
-	"fixed":      true,
-	"resolved":   true,
 	"đạt":        true,
 	"thành_công": true,
 	"✅":          true,
@@ -99,6 +97,51 @@ func LintClaims(text string, mode string, repoDir string, headSHA string, ciMode
 
 	var violations []ClaimViolation
 
+	var bundle *PortableBundle
+	if strings.Contains(text, "<!-- f0:bundle:") {
+		if b, err := ParsePortableBundle(text); err == nil {
+			bundle = b
+		}
+	}
+
+	var headTreeSHA string
+	if repoDir != "" && headSHA != "" {
+		out, err := exec.Command("git", "-C", repoDir, "rev-parse", headSHA+"^{tree}").Output()
+		if err == nil {
+			headTreeSHA = strings.TrimSpace(string(out))
+		}
+	}
+	if headTreeSHA == "" && bundle != nil && bundle.TreeSHA != "" {
+		if shaMatches(bundle.HeadSHA, headSHA) {
+			headTreeSHA = bundle.TreeSHA
+		}
+	}
+
+	findEvidence := func(evID string) *Entry {
+		if ledger != nil {
+			if e, err := ledger.FindByID(evID); err == nil && e != nil {
+				return e
+			}
+		}
+		if bundle != nil {
+			for _, bev := range bundle.Evidence {
+				if bev.ID == evID || (!strings.HasPrefix(evID, "ev-") && bev.ID == "ev-"+evID) {
+					return &Entry{
+						ID:           bev.ID,
+						Kind:         bev.Kind,
+						SHA:          bev.SHA,
+						TreeSHA:      bev.TreeSHA,
+						Cmd:          bev.Cmd,
+						ItemsChecked: bev.ItemsChecked,
+						Status:       bev.Status,
+						Dirty:        false,
+					}
+				}
+			}
+		}
+		return nil
+	}
+
 	// Step 1: Process and strip trusted status blocks <!-- f0:status --> ... <!-- /f0:status -->
 	inStatusBlock := false
 	var statusBlockLines []int
@@ -119,12 +162,12 @@ func LintClaims(text string, mode string, repoDir string, headSHA string, ciMode
 				for _, lineIdx := range statusBlockLines {
 					evMatches := evIDRegex.FindAllString(lines[lineIdx], -1)
 					for _, evID := range evMatches {
-						entry, err := ledger.FindByID(evID)
-						if err != nil || entry == nil {
+						entry := findEvidence(evID)
+						if entry == nil {
 							violations = append(violations, ClaimViolation{
 								LineNum: lineIdx + 1,
 								Line:    lines[lineIdx],
-								Reason:  fmt.Sprintf("tampered status block: evidence %s not found in ledger", evID),
+								Reason:  fmt.Sprintf("tampered status block: evidence %s not found in ledger or bundle", evID),
 							})
 							blockHasError = true
 							continue
@@ -139,7 +182,7 @@ func LintClaims(text string, mode string, repoDir string, headSHA string, ciMode
 							continue
 						}
 						if mode == "gate" {
-							shaMatch := (strings.HasPrefix(entry.SHA, headSHA) || strings.HasPrefix(headSHA, entry.SHA))
+							shaMatch := shaMatches(entry.SHA, headSHA) || (headTreeSHA != "" && entry.TreeSHA != "" && entry.TreeSHA == headTreeSHA)
 							if !shaMatch {
 								violations = append(violations, ClaimViolation{
 									LineNum: lineIdx + 1,
@@ -273,13 +316,13 @@ func LintClaims(text string, mode string, repoDir string, headSHA string, ciMode
 		var citeErrors []string
 
 		for _, evID := range extractedEVs {
-			if ledger == nil {
-				citeErrors = append(citeErrors, "repo ledger not available")
-				continue
-			}
-			entry, err := ledger.FindByID(evID)
-			if err != nil || entry == nil {
-				citeErrors = append(citeErrors, fmt.Sprintf("evidence %s not found in repo ledger", evID))
+			entry := findEvidence(evID)
+			if entry == nil {
+				if ledger == nil && bundle == nil {
+					citeErrors = append(citeErrors, "repo ledger not available")
+				} else {
+					citeErrors = append(citeErrors, fmt.Sprintf("evidence %s not found in repo ledger or bundle", evID))
+				}
 				continue
 			}
 			if entry.Status != "PASS" {
@@ -287,7 +330,7 @@ func LintClaims(text string, mode string, repoDir string, headSHA string, ciMode
 				continue
 			}
 			if mode == "gate" {
-				shaMatch := (strings.HasPrefix(entry.SHA, headSHA) || strings.HasPrefix(headSHA, entry.SHA))
+				shaMatch := shaMatches(entry.SHA, headSHA) || (headTreeSHA != "" && entry.TreeSHA != "" && entry.TreeSHA == headTreeSHA)
 				if !shaMatch {
 					citeErrors = append(citeErrors, fmt.Sprintf("evidence %s sha %s does not match head %s", evID, entry.SHA, headSHA))
 					continue

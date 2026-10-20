@@ -1,10 +1,12 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -709,5 +711,213 @@ classes:
 	// Runner error because script doesn't exist -> OutcomeNotRun (fail-open)
 	if verdict.Outcome != OutcomeNotRun {
 		t.Errorf("verdict.Outcome = %q, want not-run", verdict.Outcome)
+	}
+}
+
+// TestL4_GoTestFailureExtractionAndRawLogPersistence tests L4 lossless failure extraction,
+// mechanical noise stripping, and raw log file persistence with RawLogSHA256.
+func TestL4_GoTestFailureExtractionAndRawLogPersistence(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("G8S_STATE_DIR", stateDir)
+
+	stdoutData := `=== RUN   TestPassing
+--- PASS: TestPassing (0.01s)
+=== RUN   TestBroken
+    broken_test.go:42: expected 42, got 0
+    broken_test.go:43: assert.Equal failed
+--- FAIL: TestBroken (0.02s)
+FAIL`
+
+	yamlData := `
+classes:
+  - name: test
+    status: advisory
+    founding_catch: "#510"
+    priority: 10
+    paths: ["cmd/g8s/*_test.go"]
+    checks:
+      - type: go-test
+        packages: ["cmd/g8s"]
+`
+	v := NewVerifier(
+		WithRegistryData([]byte(yamlData)),
+		WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+			return []byte(stdoutData), nil, 1, nil
+		}),
+	)
+
+	verdict, err := v.Verify(TaskRef{
+		ID:           "task-fail-diag",
+		ReceiptID:    "rcpt-1",
+		AllowedPaths: []string{"cmd/g8s/verify_test.go"},
+	}, TaskRef{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if verdict.Outcome != OutcomeFail {
+		t.Errorf("verdict.Outcome = %q, want fail", verdict.Outcome)
+	}
+	if verdict.TestsRan != 2 {
+		t.Errorf("verdict.TestsRan = %d, want 2", verdict.TestsRan)
+	}
+	if verdict.TestsFailed != 1 {
+		t.Errorf("verdict.TestsFailed = %d, want 1", verdict.TestsFailed)
+	}
+
+	if len(verdict.FailureDiagnostics) != 1 {
+		t.Fatalf("got %d diagnostics, want 1", len(verdict.FailureDiagnostics))
+	}
+	diag := verdict.FailureDiagnostics[0]
+	if diag.Test != "TestBroken" {
+		t.Errorf("diag.Test = %q, want TestBroken", diag.Test)
+	}
+	if !strings.Contains(diag.Summary, "broken_test.go:42: expected 42, got 0") {
+		t.Errorf("diag.Summary missing assertion details: %q", diag.Summary)
+	}
+	if strings.Contains(diag.Summary, "=== RUN") {
+		t.Errorf("diag.Summary should strip === RUN, got: %q", diag.Summary)
+	}
+	if strings.Contains(diag.Summary, "TestPassing") {
+		t.Errorf("diag.Summary should strip passing test noise, got: %q", diag.Summary)
+	}
+
+	// Verify log file creation
+	expectedLogPath := filepath.Join(stateDir, "logs", "verify-task-fail-diag.log")
+	if verdict.RawLogPath != expectedLogPath {
+		t.Errorf("verdict.RawLogPath = %q, want %q", verdict.RawLogPath, expectedLogPath)
+	}
+	content, err := os.ReadFile(expectedLogPath)
+	if err != nil {
+		t.Fatalf("failed to read raw log file %s: %v", expectedLogPath, err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(content), bytes.TrimSpace([]byte(stdoutData))) {
+		t.Errorf("raw log content mismatch, got %q", string(content))
+	}
+	if verdict.RawLogSHA256 == "" {
+		t.Errorf("verdict.RawLogSHA256 is empty")
+	}
+}
+
+// TestL4_VacuousPassRejection tests that [no tests to run] is rejected with vacuous pass error.
+func TestL4_VacuousPassRejection(t *testing.T) {
+	yamlData := `
+classes:
+  - name: test
+    status: advisory
+    founding_catch: "#510"
+    priority: 10
+    paths: ["cmd/g8s/*_test.go"]
+    checks:
+      - type: go-test
+        packages: ["cmd/g8s"]
+`
+	v := NewVerifier(
+		WithRegistryData([]byte(yamlData)),
+		WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+			return []byte("ok  github.com/tamld/g8s/internal/verifier 0.237s [no tests to run]"), nil, 0, nil
+		}),
+	)
+
+	verdict, err := v.Verify(TaskRef{
+		ID:           "task-vacuous",
+		ReceiptID:    "rcpt-1",
+		AllowedPaths: []string{"cmd/g8s/verify_test.go"},
+	}, TaskRef{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if verdict.Outcome != OutcomeFail {
+		t.Errorf("verdict.Outcome = %q, want fail for vacuous pass", verdict.Outcome)
+	}
+	if len(verdict.Checks) != 1 || verdict.Checks[0].OK {
+		t.Fatalf("expected check OK=false, got checks: %+v", verdict.Checks)
+	}
+	if verdict.Checks[0].Detail != "vacuous pass: 0 tests ran" {
+		t.Errorf("check.Detail = %q, want 'vacuous pass: 0 tests ran'", verdict.Checks[0].Detail)
+	}
+	if verdict.TestsRan != 0 {
+		t.Errorf("verdict.TestsRan = %d, want 0", verdict.TestsRan)
+	}
+}
+
+// TestDoD2_EvaluateDoDMatrix tests 1-to-1 coverage and rejection of incomplete DoD mappings.
+func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
+	items := []BriefDoDItem{
+		{ID: "D1", Description: "Implement firewall"},
+		{ID: "D2", Description: "Add tests"},
+	}
+
+	// 1. Complete reported items with all MET
+	reportedComplete := []DoDItemStatus{
+		{ID: "D1", Status: "MET", Evidence: "firewall active"},
+		{ID: "D2", Status: "MET", Evidence: "tests green"},
+	}
+	matrix, ok := EvaluateDoDMatrix(items, reportedComplete, true, "sha1")
+	if !ok || len(matrix) != 2 {
+		t.Errorf("expected complete MET to pass, ok=%v, matrix=%+v", ok, matrix)
+	}
+
+	// 2. Incomplete: D2 missing from reported
+	reportedIncomplete := []DoDItemStatus{
+		{ID: "D1", Status: "MET", Evidence: "firewall active"},
+	}
+	matrix, ok = EvaluateDoDMatrix(items, reportedIncomplete, true, "sha1")
+	if ok {
+		t.Errorf("expected missing D2 to fail, got ok=true")
+	}
+	if len(matrix) != 2 {
+		t.Fatalf("expected 2 matrix items, got %d", len(matrix))
+	}
+	if matrix[1].ID != "D2" || matrix[1].Status != "UNMET" || matrix[1].Evidence != "missing from reported DoD matrix" {
+		t.Errorf("unexpected matrix item for missing D2: %+v", matrix[1])
+	}
+
+	// 3. Empty reported with checksOK=true -> auto populated as MET
+	matrix, ok = EvaluateDoDMatrix(items, nil, true, "log-sha-abc")
+	if !ok || len(matrix) != 2 {
+		t.Errorf("expected empty reported with checksOK to pass, ok=%v, matrix=%+v", ok, matrix)
+	}
+	if matrix[0].Status != "MET" || !strings.Contains(matrix[0].Evidence, "log-sha-abc") {
+		t.Errorf("matrix[0] should be MET with log sha, got %+v", matrix[0])
+	}
+
+	// 4. Empty reported with checksOK=false -> auto populated as UNMET
+	matrix, ok = EvaluateDoDMatrix(items, nil, false, "log-sha-abc")
+	if ok || len(matrix) != 2 {
+		t.Errorf("expected empty reported with checksOK=false to fail, ok=%v, matrix=%+v", ok, matrix)
+	}
+	if matrix[0].Status != "UNMET" {
+		t.Errorf("matrix[0] should be UNMET, got %+v", matrix[0])
+	}
+}
+
+// TestParseBriefDoDItems tests parsing DoD items from JSON and Markdown formats.
+func TestParseBriefDoDItems(t *testing.T) {
+	mdContent := `
+# DoD
+- [ ] D1: First requirement
+- **D2**: Second requirement
+- DoD-3 - Third requirement
+`
+	items := ParseBriefDoDItems(mdContent)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items from markdown, got %d: %+v", len(items), items)
+	}
+	if items[0].ID != "D1" || items[0].Description != "First requirement" {
+		t.Errorf("items[0] = %+v", items[0])
+	}
+	if items[1].ID != "D2" || items[1].Description != "Second requirement" {
+		t.Errorf("items[1] = %+v", items[1])
+	}
+	if items[2].ID != "DoD-3" || items[2].Description != "Third requirement" {
+		t.Errorf("items[2] = %+v", items[2])
+	}
+
+	jsonContent := `[{"id":"D1","description":"From JSON","verifier_hint":"hint1"}]`
+	jsonItems := ParseBriefDoDItems(jsonContent)
+	if len(jsonItems) != 1 || jsonItems[0].ID != "D1" || jsonItems[0].VerifierHint != "hint1" {
+		t.Errorf("jsonItems = %+v", jsonItems)
 	}
 }

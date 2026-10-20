@@ -22,6 +22,8 @@ type BuildWorkerArgvOptions struct {
 	// Empty means "leave agy's default in place". Set to "high" to fully
 	// exploit Gemini 3.8 Flash (High) on reasoning-heavy briefs.
 	Effort string
+	// ToolPolicy configures model tool use ("" | "default" | "none").
+	ToolPolicy string
 }
 
 // WorkerArgvOptions is an alias for BuildWorkerArgvOptions.
@@ -69,7 +71,7 @@ func BuildWorkerArgv(opts BuildWorkerArgvOptions) []string {
 		argv = append(argv, "--dangerously-skip-permissions")
 	}
 
-	if opts.Permission == "read_only" || (!opts.NoSandbox && opts.Permission != "workspace_write") {
+	if opts.Permission == "read_only" || opts.Permission == "supplied_text" || (!opts.NoSandbox && opts.Permission != "workspace_write") {
 		argv = append(argv, "--sandbox")
 	}
 

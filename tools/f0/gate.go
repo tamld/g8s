@@ -50,6 +50,7 @@ type GateOptions struct {
 	BaseRef    string
 	ReportFile string
 	PRBody     string
+	Mode       string // "auto", "local", "remote"
 }
 
 var f0TasksRegex = regexp.MustCompile(`(?i)F0-Tasks:\s*([^\r\n]+)`)
@@ -95,6 +96,11 @@ func runGateCheck(args []string) int {
 		case "--pr-body":
 			if i+1 < len(args) {
 				opts.PRBody = args[i+1]
+				i++
+			}
+		case "--mode":
+			if i+1 < len(args) {
+				opts.Mode = args[i+1]
 				i++
 			}
 		case "--json":
@@ -184,6 +190,16 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 		}
 	}
 
+	var headTreeSHA string
+	targetTree := "HEAD^{tree}"
+	if headSHA != "" {
+		targetTree = headSHA + "^{tree}"
+	}
+	treeOut, err := exec.Command("git", "-C", absRepo, "rev-parse", targetTree).Output()
+	if err == nil {
+		headTreeSHA = strings.TrimSpace(string(treeOut))
+	}
+
 	// Default baseRef to origin/HEAD or default branch if still empty
 	if baseRef == "" {
 		baseRef = findDefaultBranch(absRepo)
@@ -237,6 +253,30 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 		ledgerEntries, _ = repoLedger.ReadEntries()
 	}
 
+	mode := opts.Mode
+	if mode == "" {
+		mode = "auto"
+	}
+	hasEvidence := false
+	for _, e := range ledgerEntries {
+		if e.Kind != "gate" {
+			hasEvidence = true
+			break
+		}
+	}
+	isBundleMode := (mode == "remote") || (mode != "local" && (!hasEvidence || len(ledgerEntries) == 0) && strings.Contains(fullText, "<!-- f0:bundle:"))
+	var bundle *PortableBundle
+	var bErr error
+	if isBundleMode {
+		bundle, bErr = ParsePortableBundle(fullText)
+		if bErr == nil {
+			treeMatch := headTreeSHA != "" && bundle.TreeSHA != "" && bundle.TreeSHA == headTreeSHA
+			if !shaMatches(bundle.HeadSHA, headSHA) && !treeMatch {
+				bErr = fmt.Errorf("bundle head SHA %s (tree %s) does not match target head %s (tree %s)", bundle.HeadSHA, bundle.TreeSHA, headSHA, headTreeSHA)
+			}
+		}
+	}
+
 	var checks []GateCheckResult
 
 	// -------------------------------------------------------------------------
@@ -249,6 +289,25 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 			Status: "PASS",
 			Detail: mResult.Reason,
 		})
+	} else if isBundleMode && bundle != nil && bErr == nil && bundle.MandateID != "" {
+		reqTier := ClassifyActionTier(absRepo, filepath.Base(absRepo), action, diffPaths, nil)
+		effectiveTier := bundle.MandateTier
+		if effectiveTier == "" {
+			effectiveTier = "T2"
+		}
+		if reqTier != "T3" && reqTier != "T4" && tierRank(reqTier) <= tierRank(effectiveTier) {
+			checks = append(checks, GateCheckResult{
+				ID:     "G0",
+				Status: "PASS",
+				Detail: fmt.Sprintf("remote mandate %s verified (tier %s, no trust boundary violation)", bundle.MandateID, effectiveTier),
+			})
+		} else {
+			checks = append(checks, GateCheckResult{
+				ID:     "G0",
+				Status: "FAIL",
+				Detail: fmt.Sprintf("diff touches trust boundary (%s required, max %s)", reqTier, effectiveTier),
+			})
+		}
 	} else {
 		checks = append(checks, GateCheckResult{
 			ID:     "G0",
@@ -260,34 +319,70 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 	// -------------------------------------------------------------------------
 	// G1: Evidence at Head
 	// -------------------------------------------------------------------------
-	g1Found := false
-	var g1Detail string
-	for i := len(ledgerEntries) - 1; i >= 0; i-- {
-		e := &ledgerEntries[i]
-		if e.Status != "PASS" || e.Dirty {
-			continue
+	if isBundleMode {
+		if bErr != nil {
+			checks = append(checks, GateCheckResult{
+				ID:     "G1",
+				Status: "FAIL",
+				Detail: fmt.Sprintf("bundle verification failed: %v", bErr),
+			})
+		} else {
+			g1Found := false
+			var g1Detail string
+			for _, ev := range bundle.Evidence {
+				if ev.Status == "PASS" && ev.ItemsChecked > 0 && matchVerifyCommand(ev.Cmd, cfg.VerifyCommands) {
+					if shaMatches(ev.SHA, headSHA) || (headTreeSHA != "" && ev.TreeSHA != "" && ev.TreeSHA == headTreeSHA) {
+						g1Found = true
+						g1Detail = fmt.Sprintf("bundle clean PASS evidence %s matching verify_commands (%s)", ev.ID, strings.Join(ev.Cmd, " "))
+						break
+					}
+				}
+			}
+			if g1Found {
+				checks = append(checks, GateCheckResult{
+					ID:     "G1",
+					Status: "PASS",
+					Detail: g1Detail,
+				})
+			} else {
+				checks = append(checks, GateCheckResult{
+					ID:     "G1",
+					Status: "FAIL",
+					Detail: "no clean PASS evidence found in bundle matching verify_commands with items_checked > 0",
+				})
+			}
 		}
-		if headSHA != "" && !strings.HasPrefix(e.SHA, headSHA) && !strings.HasPrefix(headSHA, e.SHA) {
-			continue
-		}
-		if matchVerifyCommand(e.Cmd, cfg.VerifyCommands) {
-			g1Found = true
-			g1Detail = fmt.Sprintf("clean PASS evidence %s matching verify_commands (%s)", e.ID, strings.Join(e.Cmd, " "))
-			break
-		}
-	}
-	if g1Found {
-		checks = append(checks, GateCheckResult{
-			ID:     "G1",
-			Status: "PASS",
-			Detail: g1Detail,
-		})
 	} else {
-		checks = append(checks, GateCheckResult{
-			ID:     "G1",
-			Status: "FAIL",
-			Detail: "no clean PASS evidence found at head SHA matching verify_commands",
-		})
+		g1Found := false
+		var g1Detail string
+		for i := len(ledgerEntries) - 1; i >= 0; i-- {
+			e := &ledgerEntries[i]
+			if e.Status != "PASS" || e.Dirty {
+				continue
+			}
+			eTreeMatch := headTreeSHA != "" && e.TreeSHA != "" && e.TreeSHA == headTreeSHA
+			if !shaMatches(e.SHA, headSHA) && !eTreeMatch {
+				continue
+			}
+			if matchVerifyCommand(e.Cmd, cfg.VerifyCommands) {
+				g1Found = true
+				g1Detail = fmt.Sprintf("clean PASS evidence %s matching verify_commands (%s)", e.ID, strings.Join(e.Cmd, " "))
+				break
+			}
+		}
+		if g1Found {
+			checks = append(checks, GateCheckResult{
+				ID:     "G1",
+				Status: "PASS",
+				Detail: g1Detail,
+			})
+		} else {
+			checks = append(checks, GateCheckResult{
+				ID:     "G1",
+				Status: "FAIL",
+				Detail: "no clean PASS evidence found at head SHA matching verify_commands",
+			})
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -435,144 +530,198 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 	// -------------------------------------------------------------------------
 	// G3: Provenance
 	// -------------------------------------------------------------------------
-	// Extract task IDs from PR body / report
-	var taskIDs []string
-	if m := f0TasksRegex.FindStringSubmatch(fullText); len(m) >= 2 {
-		for _, tid := range strings.Split(m[1], ",") {
-			tid = strings.TrimSpace(tid)
-			if tid != "" {
-				taskIDs = append(taskIDs, tid)
-			}
-		}
-	}
-
-	// Find merge base commit time if no taskIDs given
-	var mbCommitTime time.Time
-	if len(taskIDs) == 0 {
-		mbOut, mbErr := exec.Command("git", "-C", absRepo, "merge-base", baseRef, headSHA).Output()
-		if mbErr == nil {
-			mbSHA := strings.TrimSpace(string(mbOut))
-			tsOut, tsErr := exec.Command("git", "-C", absRepo, "show", "-s", "--format=%cI", mbSHA).Output()
-			if tsErr == nil {
-				mbCommitTime, _ = time.Parse(time.RFC3339, strings.TrimSpace(string(tsOut)))
-			}
-		}
-	}
-
-	// Filter g8s-deliver entries
-	appliedBlobs := make(map[string]string)
-	deletedFiles := make(map[string]bool)
-
-	for _, e := range ledgerEntries {
-		if e.Kind != "g8s-deliver" {
-			continue
-		}
-		if isDryRun(e) {
-			continue
-		}
-
-		if len(taskIDs) > 0 {
-			tid, _ := e.Extra["task_id"].(string)
-			if !sliceContains(taskIDs, tid) {
-				continue
-			}
-		} else if !mbCommitTime.IsZero() {
-			eTime, err := time.Parse(time.RFC3339, e.Ts)
-			if err == nil && eTime.Before(mbCommitTime) {
-				continue
-			}
-		}
-
-		applied := getExtraStringSlice(e.Extra["applied"])
-		deleted := getExtraStringSlice(e.Extra["deleted"])
-		blobs := getExtraStringMap(e.Extra["blobs"])
-
-		for _, f := range applied {
-			delete(deletedFiles, f)
-			if bHash, ok := blobs[f]; ok {
-				appliedBlobs[f] = bHash
-			}
-		}
-		for _, f := range deleted {
-			delete(appliedBlobs, f)
-			deletedFiles[f] = true
-		}
-	}
-
-	// Collect manual tags
-	manualBlobs := make(map[string]string)
-	for _, e := range ledgerEntries {
-		if e.Kind == "manual" {
-			file, _ := e.Extra["file"].(string)
-			blob, _ := e.Extra["blob"].(string)
-			if file != "" {
-				manualBlobs[file] = blob
-			}
-		}
-	}
-
-	var g3Failures []string
-	var manualUsed []string
-
-	// For each file in diff D
-	for _, f := range diffPaths {
-		expectedBlob, inApplied := appliedBlobs[f]
-		inDeleted := deletedFiles[f]
-		mBlob, inManual := manualBlobs[f]
-
-		if !inApplied && !inDeleted && !inManual {
-			g3Failures = append(g3Failures, "unattributed: "+f)
-			continue
-		}
-
-		if inApplied {
-			blobAtHead, err := gitBlobAt(absRepo, headSHA, f)
-			if err == nil && blobAtHead != expectedBlob {
-				if inManual && mBlob == blobAtHead {
-					manualUsed = append(manualUsed, f)
-				} else {
+	if isBundleMode {
+		if bErr != nil {
+			checks = append(checks, GateCheckResult{
+				ID:     "G3",
+				Status: "FAIL",
+				Detail: fmt.Sprintf("bundle verification failed: %v", bErr),
+			})
+		} else {
+			var g3Failures []string
+			for _, f := range diffPaths {
+				if isManualFree(f, cfg.ManualFree) {
+					continue
+				}
+				expectedBlob, hasBlob := bundle.Blobs[f]
+				if !hasBlob {
+					g3Failures = append(g3Failures, "unattributed: "+f)
+					continue
+				}
+				actualBlob, err := gitBlobAt(absRepo, headSHA, f)
+				if err != nil || actualBlob != expectedBlob {
 					g3Failures = append(g3Failures, "altered-after-delivery: "+f)
 				}
 			}
-		} else if inManual {
-			manualUsed = append(manualUsed, f)
+			if len(g3Failures) > 0 {
+				checks = append(checks, GateCheckResult{
+					ID:     "G3",
+					Status: "FAIL",
+					Detail: strings.Join(g3Failures, "; "),
+				})
+			} else {
+				checks = append(checks, GateCheckResult{
+					ID:     "G3",
+					Status: "PASS",
+					Detail: "provenance verified via portable bundle",
+				})
+			}
 		}
-	}
+	} else {
+		// Extract task IDs from PR body / report
+		var taskIDs []string
+		if m := f0TasksRegex.FindStringSubmatch(fullText); len(m) >= 2 {
+			for _, tid := range strings.Split(m[1], ",") {
+				tid = strings.TrimSpace(tid)
+				if tid != "" {
+					taskIDs = append(taskIDs, tid)
+				}
+			}
+		}
 
-	// For each applied file in Delivered: must be in D unless already matches head
-	for f, expectedBlob := range appliedBlobs {
-		if !sliceContains(diffPaths, f) {
-			blobAtHead, err := gitBlobAt(absRepo, headSHA, f)
-			if err != nil || blobAtHead != expectedBlob {
+		// Find merge base commit time if no taskIDs given
+		var mbCommitTime time.Time
+		if len(taskIDs) == 0 {
+			mbOut, mbErr := exec.Command("git", "-C", absRepo, "merge-base", baseRef, headSHA).Output()
+			if mbErr == nil {
+				mbSHA := strings.TrimSpace(string(mbOut))
+				tsOut, tsErr := exec.Command("git", "-C", absRepo, "show", "-s", "--format=%cI", mbSHA).Output()
+				if tsErr == nil {
+					mbCommitTime, _ = time.Parse(time.RFC3339, strings.TrimSpace(string(tsOut)))
+				}
+			}
+		}
+
+		// Filter g8s-deliver entries
+		appliedBlobs := make(map[string]string)
+		deletedFiles := make(map[string]bool)
+
+		for _, e := range ledgerEntries {
+			if e.Kind != "g8s-deliver" {
+				continue
+			}
+			if isDryRun(e) {
+				continue
+			}
+
+			if len(taskIDs) > 0 {
+				tid, _ := e.Extra["task_id"].(string)
+				if !sliceContains(taskIDs, tid) {
+					continue
+				}
+			} else if !mbCommitTime.IsZero() {
+				eTime, err := time.Parse(time.RFC3339, e.Ts)
+				if err == nil && eTime.Before(mbCommitTime) {
+					continue
+				}
+			}
+
+			applied := getExtraStringSlice(e.Extra["applied"])
+			deleted := getExtraStringSlice(e.Extra["deleted"])
+			blobs := getExtraStringMap(e.Extra["blobs"])
+
+			for _, f := range applied {
+				delete(deletedFiles, f)
+				if bHash, ok := blobs[f]; ok {
+					appliedBlobs[f] = bHash
+				}
+			}
+			for _, f := range deleted {
+				delete(appliedBlobs, f)
+				deletedFiles[f] = true
+			}
+		}
+
+		// Collect manual tags
+		manualBlobs := make(map[string]string)
+		for _, e := range ledgerEntries {
+			if e.Kind == "manual" {
+				file, _ := e.Extra["file"].(string)
+				blob, _ := e.Extra["blob"].(string)
+				if file != "" {
+					manualBlobs[file] = blob
+				}
+			}
+		}
+
+		var g3Failures []string
+		var manualUsed []string
+
+		// For each file in diff D
+		for _, f := range diffPaths {
+			if isManualFree(f, cfg.ManualFree) {
+				continue
+			}
+			expectedBlob, inApplied := appliedBlobs[f]
+			inDeleted := deletedFiles[f]
+			mBlob, inManual := manualBlobs[f]
+
+			if !inApplied && !inDeleted && !inManual {
+				g3Failures = append(g3Failures, "unattributed: "+f)
+				continue
+			}
+
+			if inApplied {
+				blobAtHead, err := gitBlobAt(absRepo, headSHA, f)
+				if err == nil && blobAtHead != expectedBlob {
+					if inManual && mBlob == blobAtHead {
+						manualUsed = append(manualUsed, f)
+					} else {
+						g3Failures = append(g3Failures, "altered-after-delivery: "+f)
+					}
+				}
+			} else if inManual {
+				manualUsed = append(manualUsed, f)
+			}
+		}
+
+		// For each applied file in Delivered: must be in D unless already matches head
+		for f, expectedBlob := range appliedBlobs {
+			if isManualFree(f, cfg.ManualFree) {
+				continue
+			}
+			if !sliceContains(diffPaths, f) {
+				blobAtHead, err := gitBlobAt(absRepo, headSHA, f)
+				if err != nil || blobAtHead != expectedBlob {
+					g3Failures = append(g3Failures, "dropped: "+f)
+				}
+			}
+		}
+
+		// For each deleted file in Delivered: must not exist at head
+		for f := range deletedFiles {
+			if isManualFree(f, cfg.ManualFree) {
+				continue
+			}
+			if gitFileExistsAt(absRepo, headSHA, f) {
 				g3Failures = append(g3Failures, "dropped: "+f)
 			}
 		}
-	}
 
-	// For each deleted file in Delivered: must not exist at head
-	for f := range deletedFiles {
-		if gitFileExistsAt(absRepo, headSHA, f) {
-			g3Failures = append(g3Failures, "dropped: "+f)
+		if len(g3Failures) > 0 {
+			checks = append(checks, GateCheckResult{
+				ID:     "G3",
+				Status: "FAIL",
+				Detail: strings.Join(g3Failures, "; "),
+			})
+		} else {
+			detail := "provenance verified"
+			if len(manualUsed) > 0 {
+				detail += fmt.Sprintf(" (manual tags: %s)", strings.Join(manualUsed, ", "))
+			}
+			checks = append(checks, GateCheckResult{
+				ID:     "G3",
+				Status: "PASS",
+				Detail: detail,
+			})
 		}
 	}
 
-	if len(g3Failures) > 0 {
-		checks = append(checks, GateCheckResult{
-			ID:     "G3",
-			Status: "FAIL",
-			Detail: strings.Join(g3Failures, "; "),
-		})
-	} else {
-		detail := "provenance verified"
-		if len(manualUsed) > 0 {
-			detail += fmt.Sprintf(" (manual tags: %s)", strings.Join(manualUsed, ", "))
-		}
-		checks = append(checks, GateCheckResult{
-			ID:     "G3",
-			Status: "PASS",
-			Detail: detail,
-		})
-	}
+	// -------------------------------------------------------------------------
+	// G4: Gate Appeasement
+	// -------------------------------------------------------------------------
+	g4Res, _ := CheckGateAppeasement(absRepo, baseRef, headSHA, "", ledgerEntries)
+	checks = append(checks, g4Res)
 
 	// -------------------------------------------------------------------------
 	// G6: Claim Citations
@@ -603,6 +752,12 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 	}
 
 	// -------------------------------------------------------------------------
+	// G7: Issue Closure Criteria
+	// -------------------------------------------------------------------------
+	g7Res, _ := CheckIssueClosureGate(absRepo, fullText, forge, ledgerEntries)
+	checks = append(checks, g7Res)
+
+	// -------------------------------------------------------------------------
 	// Compute Overall Result & Append Gate Entry
 	// -------------------------------------------------------------------------
 	overall := "PASS"
@@ -620,6 +775,7 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 			Kind:         "gate",
 			Repo:         absRepo,
 			SHA:          headSHA,
+			TreeSHA:      headTreeSHA,
 			Cmd:          []string{"gate", "check", "--action", action},
 			Status:       overall,
 			ItemsChecked: len(checks),
@@ -737,4 +893,13 @@ func getExtraStringMap(v any) map[string]string {
 		return res
 	}
 	return nil
+}
+
+func isManualFree(file string, patterns []string) bool {
+	for _, p := range patterns {
+		if pathMatches(file, p) {
+			return true
+		}
+	}
+	return false
 }

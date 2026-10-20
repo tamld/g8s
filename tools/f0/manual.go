@@ -66,6 +66,12 @@ func manualCommand(args []string) int {
 		headSHA = strings.TrimSpace(string(headOut))
 	}
 
+	var headTreeSHA string
+	treeOut, err := exec.Command("git", "-C", absRepo, "rev-parse", "HEAD^{tree}").Output()
+	if err == nil {
+		headTreeSHA = strings.TrimSpace(string(treeOut))
+	}
+
 	ledger, err := OpenRepoLedger(absRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "f0 manual: opening repo ledger: %v\n", err)
@@ -78,6 +84,7 @@ func manualCommand(args []string) int {
 		Kind:         "manual",
 		Repo:         absRepo,
 		SHA:          headSHA,
+		TreeSHA:      headTreeSHA,
 		Cmd:          []string{"manual", "--file", file},
 		Status:       "PASS",
 		ItemsChecked: 1,

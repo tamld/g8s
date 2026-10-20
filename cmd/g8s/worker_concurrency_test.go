@@ -6,6 +6,7 @@ package main
 // usage error, never a warning.
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -14,8 +15,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/pathutil"
 )
 
@@ -264,4 +268,119 @@ func TestWorkerConcurrentDrainReleasesWorktrees(t *testing.T) {
 	if n := strings.Count(string(out), "\n"); n > 1 {
 		t.Fatalf("expected only the main worktree to remain, got:\n%s", out)
 	}
+
+	// All sess/worker-* branches must also be deleted (#617 Criterion 1)
+	branches, berr := exec.Command("git", "-C", repoDir, "branch", "--list", "sess/worker-*").CombinedOutput()
+	if berr != nil {
+		t.Fatalf("git branch list: %v (%s)", berr, branches)
+	}
+	if strings.TrimSpace(string(branches)) != "" {
+		t.Fatalf("expected no sess/worker-* branches to remain, got:\n%s", branches)
+	}
+}
+
+// TestPoolIsolationCleanup verifies that poolIsolation.Cleanup marks all live attempt
+// rows dead, cleans up all session pool worktrees, and deletes all sess/worker-* branches
+// upon worker pool exit (#617 Criterion 1).
+func TestPoolIsolationCleanup(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("open control plane: %v", err)
+	}
+	defer store.Close()
+
+	repoDir := initGitRepo(t)
+	pool, err := orchestrator.NewPool(orchestrator.PoolOptions{
+		Repo:   repoDir,
+		Root:   filepath.Join(tempDir, "worktrees"),
+		Prefix: "sess",
+	})
+	if err != nil {
+		t.Fatalf("new pool: %v", err)
+	}
+
+	var outMu sync.Mutex
+	var warnings []string
+	iso := &poolIsolation{
+		pool:  pool,
+		store: store,
+		outMu: &outMu,
+		warn: func(msg string) {
+			outMu.Lock()
+			warnings = append(warnings, msg)
+			outMu.Unlock()
+		},
+	}
+
+	ctx := context.Background()
+	wtPath1, _, err := iso.Acquire(ctx, "w1")
+	if err != nil {
+		t.Fatalf("acquire w1: %v", err)
+	}
+	wtPath2, _, err := iso.Acquire(ctx, "w2")
+	if err != nil {
+		t.Fatalf("acquire w2: %v", err)
+	}
+
+	// Verify worktrees and branches exist
+	if _, err := os.Stat(wtPath1); os.IsNotExist(err) {
+		t.Fatalf("expected wtPath1 to exist: %s", wtPath1)
+	}
+	if _, err := os.Stat(wtPath2); os.IsNotExist(err) {
+		t.Fatalf("expected wtPath2 to exist: %s", wtPath2)
+	}
+	out, err := exec.Command("git", "-C", repoDir, "branch", "--list", "sess/worker-*").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch list: %v (%s)", err, out)
+	}
+	if strings.Count(strings.TrimSpace(string(out)), "\n")+1 < 2 {
+		t.Fatalf("expected at least 2 sess/worker-* branches before cleanup, got:\n%s", out)
+	}
+
+	// Verify session rows are registered as active
+	iso.mu.Lock()
+	activeRows := len(iso.rows)
+	iso.mu.Unlock()
+	if activeRows != 2 {
+		t.Fatalf("expected 2 active attempt rows, got %d", activeRows)
+	}
+
+	// Execute Cleanup (e.g. on exit)
+	iso.Cleanup(ctx)
+
+	// 1. Worktrees removed from disk
+	if _, err := os.Stat(wtPath1); !os.IsNotExist(err) {
+		t.Fatalf("expected wtPath1 to be removed, but still exists: %s", wtPath1)
+	}
+	if _, err := os.Stat(wtPath2); !os.IsNotExist(err) {
+		t.Fatalf("expected wtPath2 to be removed, but still exists: %s", wtPath2)
+	}
+
+	// 2. All sess/worker-* branches deleted
+	out, err = exec.Command("git", "-C", repoDir, "branch", "--list", "sess/worker-*").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch list after cleanup: %v (%s)", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("expected all sess/worker-* branches deleted, got:\n%s", out)
+	}
+
+	// 3. All attempt session rows marked dead
+	var liveSessions int
+	db, derr := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=ro"))
+	if derr != nil {
+		t.Fatalf("open db: %v", derr)
+	}
+	defer db.Close()
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE status != 'dead'`).Scan(&liveSessions); err != nil {
+		t.Fatalf("query live sessions: %v", err)
+	}
+	if liveSessions != 0 {
+		t.Fatalf("expected 0 live sessions, got %d", liveSessions)
+	}
+
+	// 4. Calling Cleanup again is idempotent
+	iso.Cleanup(ctx)
 }

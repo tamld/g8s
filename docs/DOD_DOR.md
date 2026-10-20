@@ -72,3 +72,27 @@ model the project now runs on:
    draft releases, no unpushed local state without a safety tag.
 6. **Delegated-Write Proof**: workspace_write runs show `consumed=1` owned by
    the task and host-materialized outputs (verified E2E, 2026-09-25).
+
+## 4. Symmetric Zero-Trust: Supervisor (`F0`) vs. Worker (`F1`) & Multi-Round Schema Governance (ADR-0033, 2026-10-20)
+
+### 4.1 Differentiated Trust Model (`F1` vs. `F0`)
+Both `F0` (Supervisor) and `F1` (Worker) run on stochastic LLMs; neither is trusted by role title. Trust is constructed differently for each layer:
+* **Worker (`F1`) Trust = Physical Capability Containment + Artifact Verification**:
+  * **Entry**: Locked into an isolated git worktree (`wt-<id>`) with a single-use, path-scoped `WriteReceipt` (`AllowedPaths`).
+  * **Exit**: Evaluated strictly by physical disk state (`git status --porcelain`, blob hashes, and worktree test execution), never by worker prose.
+* **Supervisor (`F0`) Trust = Information Fidelity + Schema-Checked Commitment Completeness**:
+  * **In-Flight (Information Firewall)**: `F0` never reads raw test/CI logs (`go test -json`, `gh pr checks --watch`) directly in its control-plane context. Raw logs are persisted to disk (`$G8S_STATE_DIR/logs/`) and digested into a `RoundReceiptSchema` that strips 100% of mechanical noise while preserving 100% of failure diagnostics and DoD mappings (no arbitrary fixed-line truncation).
+  * **Commitment**: Iteration rounds (`1..N`) are free in topology, but `F0` cannot transition from *Iterate* to *Commit/Merge/Close* until Go code verifies 1-to-1 completeness between `BriefSchema` (`D1..Dn`) and `RoundReceiptSchema` (`all D1..Dn == MET`).
+
+### 4.2 Multi-Round Supervisor DoR (Before Dispatching Round `k`)
+1. **`BriefSchema` Defined (`D1..Dn`)**: The round brief explicitly enumerates atomic acceptance items `D1..Dn`, target files, and the verifier class.
+2. **Disjoint WriteReceipt**: `1 issue/slice = 1 worker = 1 receipt` with narrow `AllowedPaths`.
+3. **Clean Control-Plane Context**: `F0` context is anchored to the living `BriefSchema` / `RoundReceiptSchema` state, not raw log streams.
+
+### 4.3 Multi-Round Supervisor DoD (Before Accepting Round `k` or Closing/Merging)
+1. **Worktree-Targeted Verification (`g8s verify`)**: Verification executes inside the F1 worktree (`res.Deliverable.Dir`), captures both `stdout` and `stderr`, persists raw logs to disk, and confirms `tests_ran > 0` (non-vacuous).
+2. **`RoundReceiptSchema` Completeness (1-to-1 `D1..Dn` Mapping)**:
+   * Every `Di` in `BriefSchema` has an explicit entry in `dod_matrix` (`MET | UNMET | PARTIAL`) with `file:line` or test evidence.
+   * Every distinct failure in the raw log is preserved in `failure_diagnostics` without fixed-line truncation (`Size = f(|DoD| + |Failures| + |Boundaries|)`).
+3. **Zero Dropped or Unattributed Files (`G3`)**: `applied` and `deleted` blob hashes in the worktree match the delivered commit tree (`HEAD^{tree}`) 1-for-1; `untracked_in_worktree == 0` and `unattributed_in_main == 0`.
+4. **Live CI & Reversibility Tier Gate (`T0–T4`)**: All forge CI checks are terminal `pass` (`pending == 0`, `failing == 0`); `T3` trust-boundary touches pass dual independent verification; `T4` irreversible actions stop for explicit PiC approval.

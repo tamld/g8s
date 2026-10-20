@@ -98,6 +98,16 @@ func waiveCommand(args []string) int {
 		}
 	}
 
+	var headTreeSHA string
+	targetTree := "HEAD^{tree}"
+	if headSHA != "" {
+		targetTree = headSHA + "^{tree}"
+	}
+	treeOut, err := exec.Command("git", "-C", absRepo, "rev-parse", targetTree).Output()
+	if err == nil {
+		headTreeSHA = strings.TrimSpace(string(treeOut))
+	}
+
 	ledger, err := OpenRepoLedger(absRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "f0 waive: opening repo ledger: %v\n", err)
@@ -110,6 +120,7 @@ func waiveCommand(args []string) int {
 		Kind:         "waiver",
 		Repo:         absRepo,
 		SHA:          headSHA,
+		TreeSHA:      headTreeSHA,
 		Cmd:          []string{"waive", "--pr", strconv.Itoa(pr), "--check", checkName},
 		Status:       "PASS",
 		ItemsChecked: 1,

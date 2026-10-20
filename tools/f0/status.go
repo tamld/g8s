@@ -62,7 +62,7 @@ func statusCommand(args []string) int {
 		absRepo = repoDir
 	}
 
-	repoRoot, branch, sha, dirty, _ := getGitState(absRepo)
+	repoRoot, branch, sha, treeSHA, dirty, _ := getGitState(absRepo)
 	cfg, _ := LoadConfig(absRepo)
 
 	// Mandate
@@ -79,12 +79,12 @@ func statusCommand(args []string) int {
 		}
 	}
 
-	// Evidence at HEAD
+	// Evidence at HEAD (or matching tree_sha)
 	var evidenceAtHead []Entry
 	if ledger, err := OpenRepoLedger(absRepo); err == nil {
 		entries, _ := ledger.ReadEntries()
 		for _, e := range entries {
-			if sha != "" && (strings.HasPrefix(e.SHA, sha) || strings.HasPrefix(sha, e.SHA)) {
+			if shaMatches(e.SHA, sha) || (treeSHA != "" && e.TreeSHA != "" && e.TreeSHA == treeSHA) {
 				evidenceAtHead = append(evidenceAtHead, e)
 			}
 		}
@@ -113,9 +113,16 @@ func statusCommand(args []string) int {
 		if statusMandate != nil {
 			fmt.Printf("- **Mandate**: `%s` (budget %d/%d spent, expires %s)\n", statusMandate.ID, statusMandate.Spent, statusMandate.Limit, statusMandate.ExpiresAt)
 		}
-		if len(evidenceAtHead) > 0 {
+
+		var cleanPassEvidence []Entry
+		for _, e := range evidenceAtHead {
+			if e.Status == "PASS" && !e.Dirty {
+				cleanPassEvidence = append(cleanPassEvidence, e)
+			}
+		}
+		if len(cleanPassEvidence) > 0 {
 			fmt.Println("- **Evidence**:")
-			for _, e := range evidenceAtHead {
+			for _, e := range cleanPassEvidence {
 				fmt.Printf("  - `%s`: %s %s (items=%d, %dms)\n", e.ID, e.Kind, e.Status, e.ItemsChecked, e.DurationMS)
 			}
 		}
@@ -125,6 +132,77 @@ func statusCommand(args []string) int {
 				fmt.Printf("  - %s: %s (%s)\n", c.Name, c.State, c.Bucket)
 			}
 		}
+
+		// Build and emit portable bundle
+		blobs := make(map[string]string)
+		if ledger, err := OpenRepoLedger(absRepo); err == nil {
+			entries, _ := ledger.ReadEntries()
+			for _, e := range entries {
+				if e.Kind == "g8s-deliver" && !isDryRun(e) {
+					delBlobs := getExtraStringMap(e.Extra["blobs"])
+					for f, b := range delBlobs {
+						blobs[f] = b
+					}
+					deleted := getExtraStringSlice(e.Extra["deleted"])
+					for _, f := range deleted {
+						delete(blobs, f)
+					}
+				} else if e.Kind == "manual" {
+					file, _ := e.Extra["file"].(string)
+					blob, _ := e.Extra["blob"].(string)
+					if file != "" && blob != "" {
+						blobs[file] = blob
+					}
+				}
+			}
+		}
+
+		var portableEvs []PortableEv
+		for _, e := range cleanPassEvidence {
+			portableEvs = append(portableEvs, PortableEv{
+				ID:           e.ID,
+				Kind:         e.Kind,
+				SHA:          e.SHA,
+				TreeSHA:      e.TreeSHA,
+				Cmd:          e.Cmd,
+				ItemsChecked: e.ItemsChecked,
+				Status:       e.Status,
+			})
+		}
+		if portableEvs == nil {
+			portableEvs = []PortableEv{}
+		}
+
+		mandateID := ""
+		mandateTier := ""
+		if m != nil {
+			mandateID = m.ID
+			for _, r := range m.Repos {
+				rAbs, _ := filepath.Abs(r.Path)
+				if filepath.Clean(rAbs) == filepath.Clean(absRepo) || r.Path == repoRoot {
+					mandateTier = r.MaxTier
+					break
+				}
+			}
+			if mandateTier == "" && len(m.Repos) > 0 {
+				mandateTier = m.Repos[0].MaxTier
+			}
+		}
+
+		bundle := &PortableBundle{
+			Version:     1,
+			HeadSHA:     sha,
+			TreeSHA:     treeSHA,
+			MandateID:   mandateID,
+			MandateTier: mandateTier,
+			Evidence:    portableEvs,
+			Blobs:       blobs,
+		}
+		bHash, _ := ComputeBundleHash(bundle)
+		bundle.BundleSHA256 = bHash
+		bBytes, _ := json.Marshal(bundle)
+		fmt.Printf("<!-- f0:bundle: %s -->\n", string(bBytes))
+
 		fmt.Println("<!-- /f0:status -->")
 		return 0
 	}

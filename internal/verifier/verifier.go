@@ -10,6 +10,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -92,12 +95,36 @@ type Class struct {
 	Checks        []Check  `json:"checks" yaml:"checks"`
 }
 
+// BriefDoDItem represents a single Definition of Done requirement from BriefSchema.
+type BriefDoDItem struct {
+	ID           string `json:"id"`
+	Description  string `json:"description"`
+	VerifierHint string `json:"verifier_hint,omitempty"`
+}
+
+// DoDItemStatus represents the evaluation result of a DoD item in RoundReceiptSchema.
+type DoDItemStatus struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"` // "MET" | "UNMET" | "PARTIAL"
+	Evidence string `json:"evidence"`
+}
+
+// FailureDiagnostic captures lossless, untruncated failure details for a failed test/check.
+type FailureDiagnostic struct {
+	Target  string `json:"target"`
+	Test    string `json:"test"`
+	Summary string `json:"summary"`
+}
+
 // TaskRef references a task and its write delegation scope.
 type TaskRef struct {
-	ID             string   `json:"id"`
-	ReceiptID      string   `json:"receipt_id,omitempty"`
-	AllowedPaths   []string `json:"allowed_paths,omitempty"`
-	OverrideReason string   `json:"override_reason,omitempty"`
+	ID             string          `json:"id"`
+	ReceiptID      string          `json:"receipt_id,omitempty"`
+	AllowedPaths   []string        `json:"allowed_paths,omitempty"`
+	OverrideReason string          `json:"override_reason,omitempty"`
+	WorktreeDir    string          `json:"worktree_dir,omitempty"`
+	DoDItems       []BriefDoDItem  `json:"dod_items,omitempty"`
+	ReportedDoD    []DoDItemStatus `json:"reported_dod,omitempty"`
 }
 
 // CheckResult represents the outcome of a single check execution.
@@ -110,16 +137,24 @@ type CheckResult struct {
 
 // Verdict encapsulates the complete machine acceptance decision.
 type Verdict struct {
-	Class             string         `json:"class"`
-	Registered        bool           `json:"registered"`
-	Status            Status         `json:"status"`
-	Outcome           Outcome        `json:"outcome"`
-	Checks            []CheckResult  `json:"checks"`
-	Advisories        []DiffAdvisory `json:"advisories,omitempty"`
-	DormantReawakened []string       `json:"dormant_reawakened,omitempty"`
-	OverrideReason    string         `json:"override_reason,omitempty"`
-	Scope             bool           `json:"scope"`
-	RecordedAt        time.Time      `json:"recorded_at"`
+	Class              string              `json:"class"`
+	Registered         bool                `json:"registered"`
+	Status             Status              `json:"status"`
+	Outcome            Outcome             `json:"outcome"`
+	Checks             []CheckResult       `json:"checks"`
+	Advisories         []DiffAdvisory      `json:"advisories,omitempty"`
+	DormantReawakened  []string            `json:"dormant_reawakened,omitempty"`
+	OverrideReason     string              `json:"override_reason,omitempty"`
+	Scope              bool                `json:"scope"`
+	RecordedAt         time.Time           `json:"recorded_at"`
+	WorktreeDir        string              `json:"worktree_dir,omitempty"`
+	TreeSHA            string              `json:"tree_sha,omitempty"`
+	RawLogPath         string              `json:"raw_log_path,omitempty"`
+	RawLogSHA256       string              `json:"raw_log_sha256,omitempty"`
+	TestsRan           int                 `json:"tests_ran"`
+	TestsFailed        int                 `json:"tests_failed"`
+	FailureDiagnostics []FailureDiagnostic `json:"failure_diagnostics,omitempty"`
+	DoDMatrix          []DoDItemStatus     `json:"dod_matrix,omitempty"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.
@@ -419,15 +454,16 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	now := time.Now().UTC()
 
 	// Read-only or no receipt -> unregistered verdict (exit 0 / human acceptance floor)
-	if target.ReceiptID == "" || len(target.AllowedPaths) == 0 {
+	if (target.ReceiptID == "" || len(target.AllowedPaths) == 0) && target.WorktreeDir == "" && len(target.DoDItems) == 0 {
 		verdict := Verdict{
-			Class:      "unregistered",
-			Registered: false,
-			Status:     StatusAdvisory,
-			Outcome:    OutcomeUnregistered,
-			Checks:     []CheckResult{},
-			Scope:      false,
-			RecordedAt: now,
+			Class:       "unregistered",
+			Registered:  false,
+			Status:      StatusAdvisory,
+			Outcome:     OutcomeUnregistered,
+			Checks:      []CheckResult{},
+			Scope:       false,
+			RecordedAt:  now,
+			WorktreeDir: target.WorktreeDir,
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -436,14 +472,31 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	// Class resolution
 	class, registered := v.registry.Resolve(target.AllowedPaths)
 	if !registered {
+		if target.WorktreeDir != "" {
+			pkgs := derivePackagesFromPaths(target.AllowedPaths)
+			if len(pkgs) > 0 {
+				class = Class{
+					Name:   "worktree-go-test",
+					Status: StatusAdvisory,
+					Checks: []Check{
+						{Type: CheckTypeGoTest, Packages: pkgs},
+					},
+				}
+				registered = true
+			}
+		}
+	}
+
+	if !registered && target.WorktreeDir == "" && len(target.DoDItems) == 0 {
 		verdict := Verdict{
-			Class:      "unregistered",
-			Registered: false,
-			Status:     StatusAdvisory,
-			Outcome:    OutcomeUnregistered,
-			Checks:     []CheckResult{},
-			Scope:      false,
-			RecordedAt: now,
+			Class:       "unregistered",
+			Registered:  false,
+			Status:      StatusAdvisory,
+			Outcome:     OutcomeUnregistered,
+			Checks:      []CheckResult{},
+			Scope:       false,
+			RecordedAt:  now,
+			WorktreeDir: target.WorktreeDir,
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -453,22 +506,45 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	var checkResults []CheckResult
 	var allAdvisories []DiffAdvisory
 	var allDormantReawakened []string
+	var allDiagnostics []FailureDiagnostic
+	var totalTestsRan, totalTestsFailed int
+	var combinedLogs bytes.Buffer
 	hasRunnerError := false
 	hasCheckFailure := false
 
+	repoRoot := v.repoRoot
+	if repoRoot == "" && target.WorktreeDir != "" {
+		repoRoot = target.WorktreeDir
+	}
+
 	runner := v.runner
 	if runner == nil {
-		runner = defaultCommandRunner(v.repoRoot)
+		runner = defaultCommandRunner(repoRoot)
 	}
 
 	for _, chk := range class.Checks {
 		switch chk.Type {
 		case CheckTypeScript:
 			res := v.runScriptCheck(ctx, runner, chk.Run)
-			checkResults = append(checkResults, res)
-			if strings.HasPrefix(res.Detail, "runner error:") {
+			checkResults = append(checkResults, res.checkResult)
+			if len(res.stdout) > 0 {
+				combinedLogs.Write(res.stdout)
+				if !bytes.HasSuffix(res.stdout, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			if len(res.stderr) > 0 {
+				combinedLogs.Write(res.stderr)
+				if !bytes.HasSuffix(res.stderr, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			if res.diagnostic != nil {
+				allDiagnostics = append(allDiagnostics, *res.diagnostic)
+			}
+			if strings.HasPrefix(res.checkResult.Detail, "runner error:") {
 				hasRunnerError = true
-			} else if !res.OK {
+			} else if !res.checkResult.OK {
 				hasCheckFailure = true
 			}
 
@@ -488,10 +564,27 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 				})
 			} else {
 				res := v.runGoTestCheck(ctx, runner, pkgs)
-				checkResults = append(checkResults, res)
-				if strings.HasPrefix(res.Detail, "runner error:") {
+				checkResults = append(checkResults, res.checkResult)
+				if len(res.stdout) > 0 {
+					combinedLogs.Write(res.stdout)
+					if !bytes.HasSuffix(res.stdout, []byte("\n")) {
+						combinedLogs.WriteByte('\n')
+					}
+				}
+				if len(res.stderr) > 0 {
+					combinedLogs.Write(res.stderr)
+					if !bytes.HasSuffix(res.stderr, []byte("\n")) {
+						combinedLogs.WriteByte('\n')
+					}
+				}
+				totalTestsRan += res.testsRan
+				totalTestsFailed += res.testsFailed
+				if len(res.diagnostics) > 0 {
+					allDiagnostics = append(allDiagnostics, res.diagnostics...)
+				}
+				if strings.HasPrefix(res.checkResult.Detail, "runner error:") {
 					hasRunnerError = true
-				} else if !res.OK {
+				} else if !res.checkResult.OK {
 					hasCheckFailure = true
 				}
 			}
@@ -513,6 +606,8 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	// Fail-open rule: check's runner error (infrastructure error) => outcome not-run
 	var outcome Outcome
 	switch {
+	case !registered:
+		outcome = OutcomeUnregistered
 	case hasRunnerError:
 		outcome = OutcomeNotRun
 	case hasCheckFailure:
@@ -521,24 +616,83 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		outcome = OutcomePass
 	}
 
+	// Persist combined raw check logs
+	var rawLogPath, rawLogSHA string
+	if len(checkResults) > 0 || combinedLogs.Len() > 0 {
+		logDir := os.Getenv("G8S_STATE_DIR")
+		if strings.TrimSpace(logDir) != "" {
+			logDir = filepath.Join(logDir, "logs")
+		} else {
+			logDir = filepath.Join(os.TempDir(), "g8s-logs")
+		}
+
+		taskIDSlug := strings.TrimSpace(target.ID)
+		if taskIDSlug == "" {
+			taskIDSlug = "unknown"
+		}
+
+		logPath := filepath.Join(logDir, fmt.Sprintf("verify-%s.log", taskIDSlug))
+		if err := os.MkdirAll(logDir, 0o700); err == nil {
+			rawBytes := combinedLogs.Bytes()
+			if err := os.WriteFile(logPath, rawBytes, 0o600); err == nil {
+				sum := sha256.Sum256(rawBytes)
+				rawLogPath = logPath
+				rawLogSHA = hex.EncodeToString(sum[:])
+			}
+		}
+	}
+
+	// Evaluate DoD matrix
+	var dodMatrix []DoDItemStatus
+	if len(target.DoDItems) > 0 || len(target.ReportedDoD) > 0 {
+		checksOK := (outcome == OutcomePass)
+		var dodOK bool
+		dodMatrix, dodOK = EvaluateDoDMatrix(target.DoDItems, target.ReportedDoD, checksOK, rawLogSHA)
+		if !dodOK {
+			outcome = OutcomeFail
+		}
+	}
+
 	verdict := Verdict{
-		Class:             class.Name,
-		Registered:        true,
-		Status:            class.Status,
-		Outcome:           outcome,
-		Checks:            checkResults,
-		Advisories:        allAdvisories,
-		DormantReawakened: allDormantReawakened,
-		OverrideReason:    strings.TrimSpace(target.OverrideReason),
-		Scope:             true,
-		RecordedAt:        now,
+		Class:              class.Name,
+		Registered:         registered,
+		Status:             class.Status,
+		Outcome:            outcome,
+		Checks:             checkResults,
+		Advisories:         allAdvisories,
+		DormantReawakened:  allDormantReawakened,
+		OverrideReason:     strings.TrimSpace(target.OverrideReason),
+		Scope:              registered,
+		RecordedAt:         now,
+		WorktreeDir:        target.WorktreeDir,
+		RawLogPath:         rawLogPath,
+		RawLogSHA256:       rawLogSHA,
+		TestsRan:           totalTestsRan,
+		TestsFailed:        totalTestsFailed,
+		FailureDiagnostics: allDiagnostics,
+		DoDMatrix:          dodMatrix,
+	}
+
+	targetGitDir := repoRoot
+	if targetGitDir != "" {
+		cmd := exec.CommandContext(ctx, "git", "-C", targetGitDir, "rev-parse", "HEAD^{tree}")
+		if out, err := cmd.Output(); err == nil {
+			verdict.TreeSHA = strings.TrimSpace(string(out))
+		}
 	}
 
 	v.emitTelemetry(target.ID, verdict)
 	return verdict, nil
 }
 
-func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scriptPath string) CheckResult {
+type scriptCheckResult struct {
+	checkResult CheckResult
+	stdout      []byte
+	stderr      []byte
+	diagnostic  *FailureDiagnostic
+}
+
+func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scriptPath string) scriptCheckResult {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -549,21 +703,27 @@ func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scr
 	}
 
 	if _, err := os.Stat(resolvedPath); err != nil {
-		return CheckResult{
-			Type:   string(CheckTypeScript),
-			Target: scriptPath,
-			OK:     false,
-			Detail: fmt.Sprintf("runner error: script file not found: %v", err),
+		return scriptCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeScript),
+				Target: scriptPath,
+				OK:     false,
+				Detail: fmt.Sprintf("runner error: script file not found: %v", err),
+			},
 		}
 	}
 
-	_, stderr, exitCode, err := runner(timeoutCtx, "bash", scriptPath)
+	stdout, stderr, exitCode, err := runner(timeoutCtx, "bash", scriptPath)
 	if err != nil {
-		return CheckResult{
-			Type:   string(CheckTypeScript),
-			Target: scriptPath,
-			OK:     false,
-			Detail: fmt.Sprintf("runner error: %v", err),
+		return scriptCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeScript),
+				Target: scriptPath,
+				OK:     false,
+				Detail: fmt.Sprintf("runner error: %v", err),
+			},
+			stdout: stdout,
+			stderr: stderr,
 		}
 	}
 
@@ -571,58 +731,451 @@ func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scr
 		detail := fmt.Sprintf("exit code %d", exitCode)
 		if trimmed := strings.TrimSpace(string(stderr)); trimmed != "" {
 			detail += ": " + trimmed
+		} else if trimmed := strings.TrimSpace(string(stdout)); trimmed != "" {
+			detail += ": " + trimmed
 		}
-		return CheckResult{
-			Type:   string(CheckTypeScript),
-			Target: scriptPath,
-			OK:     false,
-			Detail: detail,
+		var diag *FailureDiagnostic
+		summary := strings.TrimSpace(string(stdout) + "\n" + string(stderr))
+		if summary != "" {
+			diag = &FailureDiagnostic{
+				Target:  scriptPath,
+				Test:    filepath.Base(scriptPath),
+				Summary: summary,
+			}
+		}
+		return scriptCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeScript),
+				Target: scriptPath,
+				OK:     false,
+				Detail: detail,
+			},
+			stdout:     stdout,
+			stderr:     stderr,
+			diagnostic: diag,
 		}
 	}
 
-	return CheckResult{
-		Type:   string(CheckTypeScript),
-		Target: scriptPath,
-		OK:     true,
-		Detail: "ok",
+	return scriptCheckResult{
+		checkResult: CheckResult{
+			Type:   string(CheckTypeScript),
+			Target: scriptPath,
+			OK:     true,
+			Detail: "ok",
+		},
+		stdout: stdout,
+		stderr: stderr,
 	}
 }
 
-func (v *Verifier) runGoTestCheck(ctx context.Context, runner CommandRunner, pkgs []string) CheckResult {
+type goTestCheckResult struct {
+	checkResult CheckResult
+	stdout      []byte
+	stderr      []byte
+	testsRan    int
+	testsFailed int
+	diagnostics []FailureDiagnostic
+}
+
+func (v *Verifier) runGoTestCheck(ctx context.Context, runner CommandRunner, pkgs []string) goTestCheckResult {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	targetStr := strings.Join(pkgs, " ")
 	args := append([]string{"test", "-count=1"}, pkgs...)
-	_, stderr, exitCode, err := runner(timeoutCtx, "go", args...)
+	stdout, stderr, exitCode, err := runner(timeoutCtx, "go", args...)
 	if err != nil {
-		return CheckResult{
-			Type:   string(CheckTypeGoTest),
-			Target: targetStr,
-			OK:     false,
-			Detail: fmt.Sprintf("runner error: %v", err),
+		return goTestCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeGoTest),
+				Target: targetStr,
+				OK:     false,
+				Detail: fmt.Sprintf("runner error: %v", err),
+			},
+			stdout: stdout,
+			stderr: stderr,
+		}
+	}
+
+	testsRan, testsFailed, isVacuous := countGoTests(stdout, exitCode)
+	if isVacuous {
+		return goTestCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeGoTest),
+				Target: targetStr,
+				OK:     false,
+				Detail: "vacuous pass: 0 tests ran",
+			},
+			stdout:      stdout,
+			stderr:      stderr,
+			testsRan:    0,
+			testsFailed: 0,
 		}
 	}
 
 	if exitCode != 0 {
+		diagnostics := extractGoTestFailures(targetStr, stdout, stderr)
 		detail := fmt.Sprintf("exit code %d", exitCode)
-		if trimmed := strings.TrimSpace(string(stderr)); trimmed != "" {
+		if len(diagnostics) > 0 {
+			var names []string
+			for _, d := range diagnostics {
+				names = append(names, d.Test)
+			}
+			detail = fmt.Sprintf("exit code %d: %d test(s) failed (%s)", exitCode, len(diagnostics), strings.Join(names, ", "))
+		} else if trimmed := strings.TrimSpace(string(stderr)); trimmed != "" {
+			detail += ": " + trimmed
+		} else if trimmed := strings.TrimSpace(string(stdout)); trimmed != "" {
 			detail += ": " + trimmed
 		}
-		return CheckResult{
-			Type:   string(CheckTypeGoTest),
-			Target: targetStr,
-			OK:     false,
-			Detail: detail,
+
+		if testsFailed == 0 && len(diagnostics) > 0 {
+			testsFailed = len(diagnostics)
+		}
+		if testsRan < testsFailed {
+			testsRan = testsFailed
+		}
+
+		return goTestCheckResult{
+			checkResult: CheckResult{
+				Type:   string(CheckTypeGoTest),
+				Target: targetStr,
+				OK:     false,
+				Detail: detail,
+			},
+			stdout:      stdout,
+			stderr:      stderr,
+			testsRan:    testsRan,
+			testsFailed: testsFailed,
+			diagnostics: diagnostics,
 		}
 	}
 
-	return CheckResult{
-		Type:   string(CheckTypeGoTest),
-		Target: targetStr,
-		OK:     true,
-		Detail: "ok",
+	return goTestCheckResult{
+		checkResult: CheckResult{
+			Type:   string(CheckTypeGoTest),
+			Target: targetStr,
+			OK:     true,
+			Detail: "ok",
+		},
+		stdout:      stdout,
+		stderr:      stderr,
+		testsRan:    testsRan,
+		testsFailed: 0,
 	}
+}
+
+// countGoTests parses stdout of go test to determine tests ran, failed, and whether execution was vacuous.
+func countGoTests(stdout []byte, exitCode int) (ran int, failed int, isVacuous bool) {
+	passRegex := regexp.MustCompile(`^(?:\s*)--- PASS:\s*(\S+)`)
+	failRegex := regexp.MustCompile(`^(?:\s*)--- FAIL:\s*(\S+)`)
+
+	var passCount, failCount, okCount int
+	var hasVacuousMarker bool
+
+	scanner := bufio.NewScanner(bytes.NewReader(stdout))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		// Check for JSON go test event
+		if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+			var event struct {
+				Action string `json:"Action"`
+				Test   string `json:"Test"`
+			}
+			if err := json.Unmarshal([]byte(trimmed), &event); err == nil && event.Test != "" {
+				switch event.Action {
+				case "pass":
+					passCount++
+				case "fail":
+					failCount++
+				}
+				continue
+			}
+		}
+
+		if passRegex.MatchString(trimmed) {
+			passCount++
+		} else if failRegex.MatchString(trimmed) {
+			failCount++
+		} else {
+			if strings.HasPrefix(trimmed, "ok\t") || strings.HasPrefix(trimmed, "ok ") || trimmed == "ok" {
+				if strings.Contains(trimmed, "[no tests to run]") || strings.Contains(trimmed, "[no test files]") {
+					hasVacuousMarker = true
+				} else {
+					okCount++
+				}
+			}
+		}
+
+		if strings.Contains(trimmed, "[no tests to run]") ||
+			strings.Contains(trimmed, "[no test files]") ||
+			strings.Contains(trimmed, "testing: warning: no tests to run") {
+			hasVacuousMarker = true
+		}
+	}
+
+	if passCount > 0 || failCount > 0 {
+		ran = passCount + failCount
+		failed = failCount
+	} else if okCount > 0 {
+		ran = okCount
+		failed = 0
+	}
+
+	if (hasVacuousMarker && (passCount == 0 && okCount == 0)) || (exitCode == 0 && ran == 0) {
+		ran = 0
+		failed = 0
+		isVacuous = true
+	}
+
+	return ran, failed, isVacuous
+}
+
+// extractGoTestFailures extracts lossless failure diagnostics from go test stdout/stderr.
+// Strips === RUN and --- PASS mechanical noise lines, preserving file:line diagnostics.
+func extractGoTestFailures(targetStr string, stdout, stderr []byte) []FailureDiagnostic {
+	var diagnostics []FailureDiagnostic
+	diagMap := make(map[string]*FailureDiagnostic)
+
+	scanner := bufio.NewScanner(bytes.NewReader(stdout))
+	var currentRunTest string
+	var currentRunLines []string
+	var activeFailTest string
+
+	failRegex := regexp.MustCompile(`^(?:\s*)--- FAIL:\s*(\S+)`)
+	passRegex := regexp.MustCompile(`^(?:\s*)--- PASS:\s*(\S+)`)
+	runRegex := regexp.MustCompile(`^=== RUN\s+(\S+)`)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		if m := runRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+			currentRunTest = m[1]
+			currentRunLines = nil
+			activeFailTest = ""
+			continue
+		}
+
+		if m := passRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+			currentRunTest = ""
+			currentRunLines = nil
+			activeFailTest = ""
+			continue
+		}
+
+		if m := failRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+			testName := m[1]
+			activeFailTest = testName
+			var lines []string
+			lines = append(lines, line)
+			if currentRunTest == testName && len(currentRunLines) > 0 {
+				lines = append(lines, currentRunLines...)
+			}
+
+			if existing, ok := diagMap[testName]; ok {
+				existing.Summary += "\n" + strings.Join(lines, "\n")
+			} else {
+				diag := &FailureDiagnostic{
+					Target:  targetStr,
+					Test:    testName,
+					Summary: strings.Join(lines, "\n"),
+				}
+				diagMap[testName] = diag
+				diagnostics = append(diagnostics, *diag)
+			}
+			currentRunTest = ""
+			currentRunLines = nil
+			continue
+		}
+
+		// Indented lines
+		if strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "    ") || strings.HasPrefix(line, " ") {
+			if activeFailTest != "" {
+				for i := range diagnostics {
+					if diagnostics[i].Test == activeFailTest {
+						diagnostics[i].Summary += "\n" + line
+						break
+					}
+				}
+			} else if currentRunTest != "" {
+				currentRunLines = append(currentRunLines, line)
+			}
+			continue
+		}
+
+		// Non-indented lines
+		if activeFailTest != "" {
+			if strings.HasPrefix(line, "panic:") || strings.HasPrefix(line, "goroutine ") {
+				for i := range diagnostics {
+					if diagnostics[i].Test == activeFailTest {
+						diagnostics[i].Summary += "\n" + line
+						break
+					}
+				}
+				continue
+			}
+			activeFailTest = ""
+		}
+	}
+
+	var stderrLines []string
+	if len(stderr) > 0 {
+		errScanner := bufio.NewScanner(bytes.NewReader(stderr))
+		for errScanner.Scan() {
+			t := strings.TrimSpace(errScanner.Text())
+			if t != "" {
+				stderrLines = append(stderrLines, errScanner.Text())
+			}
+		}
+	}
+
+	if len(stderrLines) > 0 {
+		diagnostics = append(diagnostics, FailureDiagnostic{
+			Target:  targetStr,
+			Test:    "build",
+			Summary: strings.Join(stderrLines, "\n"),
+		})
+	} else if len(diagnostics) == 0 {
+		var errLines []string
+		outScanner := bufio.NewScanner(bytes.NewReader(stdout))
+		for outScanner.Scan() {
+			l := outScanner.Text()
+			t := strings.TrimSpace(l)
+			if t == "" || strings.HasPrefix(t, "=== RUN") || strings.HasPrefix(t, "--- PASS") {
+				continue
+			}
+			errLines = append(errLines, l)
+		}
+		if len(errLines) > 0 {
+			diagnostics = append(diagnostics, FailureDiagnostic{
+				Target:  targetStr,
+				Test:    "build",
+				Summary: strings.Join(errLines, "\n"),
+			})
+		}
+	}
+
+	return diagnostics
+}
+
+// ParseBriefDoDItems extracts BriefDoDItems from json or markdown DoD content.
+func ParseBriefDoDItems(dodMD string) []BriefDoDItem {
+	trimmed := strings.TrimSpace(dodMD)
+	if trimmed == "" {
+		return nil
+	}
+
+	// Try JSON first
+	if strings.HasPrefix(trimmed, "[") {
+		var jsonItems []BriefDoDItem
+		if err := json.Unmarshal([]byte(trimmed), &jsonItems); err == nil && len(jsonItems) > 0 {
+			return jsonItems
+		}
+	}
+
+	var items []BriefDoDItem
+	seen := make(map[string]bool)
+
+	// Markdown patterns matching (D\d+|DoD-\d+)
+	itemRegex := regexp.MustCompile(`(?i)^\s*(?:[-*]\s+(?:\[[ xX]\]\s+)?)?\*{0,2}(D\d+|DoD-\d+)\*{0,2}(?:[:\-–—\s]+(.*))?$`)
+	fallbackRegex := regexp.MustCompile(`(?i)\b(D\d+|DoD-\d+)\b[:\-–—\s]*(.*)`)
+
+	scanner := bufio.NewScanner(strings.NewReader(dodMD))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var id, desc string
+		if m := itemRegex.FindStringSubmatch(line); len(m) > 1 {
+			id = strings.TrimSpace(m[1])
+			if len(m) > 2 {
+				desc = strings.TrimSpace(m[2])
+			}
+		} else if m := fallbackRegex.FindStringSubmatch(line); len(m) > 1 {
+			id = strings.TrimSpace(m[1])
+			if len(m) > 2 {
+				desc = strings.TrimSpace(m[2])
+			}
+		}
+		if id != "" {
+			normID := strings.ToUpper(id)
+			if !seen[normID] {
+				seen[normID] = true
+				desc = strings.Trim(desc, "*_` \t")
+				items = append(items, BriefDoDItem{
+					ID:          id,
+					Description: desc,
+				})
+			}
+		}
+	}
+	return items
+}
+
+// EvaluateDoDMatrix evaluates 1-to-1 coverage of items against reported statuses.
+func EvaluateDoDMatrix(items []BriefDoDItem, reported []DoDItemStatus, checksOK bool, rawLogSHA string) ([]DoDItemStatus, bool) {
+	if len(items) == 0 {
+		if len(reported) == 0 {
+			return nil, true
+		}
+		allMET := true
+		for _, r := range reported {
+			if r.Status != "MET" || strings.TrimSpace(r.Evidence) == "" {
+				allMET = false
+			}
+		}
+		return reported, allMET
+	}
+
+	if len(reported) == 0 {
+		matrix := make([]DoDItemStatus, 0, len(items))
+		for _, item := range items {
+			if checksOK {
+				matrix = append(matrix, DoDItemStatus{
+					ID:       item.ID,
+					Status:   "MET",
+					Evidence: fmt.Sprintf("log sha256: %s", rawLogSHA),
+				})
+			} else {
+				matrix = append(matrix, DoDItemStatus{
+					ID:       item.ID,
+					Status:   "UNMET",
+					Evidence: "checks failed",
+				})
+			}
+		}
+		return matrix, checksOK
+	}
+
+	// Reported is non-empty: verify 1-to-1 coverage of every item in items
+	repMap := make(map[string]DoDItemStatus, len(reported))
+	for _, r := range reported {
+		repMap[strings.ToUpper(strings.TrimSpace(r.ID))] = r
+	}
+
+	allOK := true
+	matrix := make([]DoDItemStatus, 0, len(items))
+	for _, item := range items {
+		normID := strings.ToUpper(strings.TrimSpace(item.ID))
+		if r, ok := repMap[normID]; ok {
+			if r.Status != "MET" || strings.TrimSpace(r.Evidence) == "" {
+				allOK = false
+			}
+			matrix = append(matrix, r)
+		} else {
+			allOK = false
+			matrix = append(matrix, DoDItemStatus{
+				ID:       item.ID,
+				Status:   "UNMET",
+				Evidence: "missing from reported DoD matrix",
+			})
+		}
+	}
+
+	return matrix, allOK
 }
 
 func (v *Verifier) emitTelemetry(taskID string, verdict Verdict) {

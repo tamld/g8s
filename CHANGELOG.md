@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-21
+
+### Added
+
+- F0 Verified Delegation & Symmetric Zero-Trust Control Plane (`ADR-0033`, `DELTA-24`, Epic #620, #621–#630): append-only hash-chained evidence ledger (`f0 run`, `f0 status`), signed operator mandates (`f0 mandate issue|show|check`) with action tier classification (`T0`–`T4`), merge/commit gates `G0`–`G7` (`f0 gate check`), pre-tool & stop hooks (`f0 hook pre-tool|stop`), portable ground-truth PR bundles (`<!-- f0:bundle:v1 -->`, `TreeSHA` equivalence, declarative `.g8s/f0.yml` parsers), `G4` gate-appeasement detector (#625), `G7` per-criterion issue-closure gate (#626), `T2` merge executor with post-merge verification (#627), `T3` independent worktree second verifier (#628), error-budget circuit breaker (`f0 breaker`, #629), and pluggable read-only auditor + session digest (`f0 digest`, #630).
+- Lossless-Signal / Zero-Noise Information Firewall (`Slice 06b-1`): `g8s verify --task <id>` executes in the F1 worktree, persists raw command logs to `$G8S_STATE_DIR/logs/verify-<task>-<ts>.log`, guards against vacuous `0`-test runs, and emits `RoundReceiptSchema` (`DoDMatrix`, `FailureDiagnostics`). `g8s watch --pr <num> [--repo <owner/repo>]` blocks until PR checks reach a terminal state.
+- Runtime `--tool-policy none` & `supplied_text` Permission Profile (#616): `g8s submit --tool-policy none` and `supplied_text` strip workspace/tool flags (`--add-dir`, `--workspace`), inject runtime tool-denial boundaries, and emit `tool_policy_evidence` in attempt results.
+
+### Fixed
+
+- Unicode & Vietnamese Diacritic Hotfix/Refactor Detection (#615): `internal/lane` (`isHotfixSummary`, `isRefactor`) matches Unicode word boundaries and folded ASCII equivalents alongside ASCII zero-allocation fast paths.
+- Concurrent Worker Pool Worktree & Branch Cleanup (#617): `Pool.Close()` and `poolIsolation.Cleanup()` prune session pool worktrees (`worktrees/pool-*`) and `sess/worker-*` branches on exit.
+- Telemetry Preflight Eligibility Filter & Pattern Lowercasing (#633, #632): `QueryTopPatterns` filters `occurrences >= 2` and non-empty `preventive_rule` in SQL before `LIMIT`, with defense-in-depth in `RenderPreflightContext` and hoisted lowercasing in `GetRelevantPatterns`.
+
 ## [0.17.0] - 2026-10-16
 
 ### Added

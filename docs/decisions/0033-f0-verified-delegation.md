@@ -96,18 +96,47 @@ On a single-user workstation without kernel-enforced compartmentalization:
 - `f0 audit` detects un-attested default-branch commits after the fact.
 - Tamper-evident session digests record all mandate issuances, debits, waivers, and overrides for PiC review.
 
-## Implementation Audit (2026-10-19, Honest)
+## Implementation Audit & Post-Wave-A Architectural Refinement (2026-10-20)
 
-| Component | Status | Evidence / Notes | Gap |
+### 1. Wave A Empirical Audit (Merged in PR #634 at `3c46759`)
+
+| Component | Status | Evidence / Notes | Gap / Next Step |
 |---|---|---|---|
-| F0 Authority & Tiering (T0–T4) | **Ratified** | Approved in brainstorm B′ (2026-10-19); codified in ADR-0033 | Tooling enforcement pending Wave A/B rollout |
-| Evidence Ledger & `f0 run` (G5) | Designed | Specified in Phase 02 (`plans/261020-f0-verified-delegation/phase-02-evidence-ledger.md`) | Implementation in `tools/f0/` pending |
-| Campaign Mandate & Budget (G0) | Designed | Specified in Phase 03 (`plans/261020-f0-verified-delegation/phase-03-mandate.md`) | Implementation in `tools/f0/` pending |
-| Gate Core (G1, G2, G3, G6) | Designed | Specified in Phase 04 (`plans/261020-f0-verified-delegation/phase-04-gate-core.md`) | Implementation in `tools/f0/` and `tools/merger.sh` pending |
-| Agent Hooks (PreToolUse, Stop) | Designed | Specified in Phase 04b (`plans/261020-f0-verified-delegation/phase-04b-agent-hooks.md`) | Implementation in `tools/f0/` pending |
-| Anti-appeasement (G4) & Closure (G7) | Outlined | Specified in Phase 07 (Wave B, #625, #626) | Wave B implementation pending |
-| T2 Executor & T3 Verifier (D9) | Outlined | Specified in Phase 07 (Wave B, #627, #628) | PiC review stop on T2 Keychain executor; Wave B pending |
-| Breaker, Auditor, Digest, Jev | Outlined | Specified in Phase 07 (Wave B, #629, #630) | Wave B implementation pending |
+| F0 Authority & Tiering (T0–T4) | **Delivered** | Codified in ADR-0033 (`#621`) and `skills/g8s-supervisor/` (`#631`) | Enforced in Wave A (`3c46759`) |
+| Evidence Ledger & `f0 run` (G5) | **Delivered** | `tools/f0/{ledger,parsers,run}.go` (`#622`), multi-process lockfile, `F0-Ledger-Head` anchor | Needs `tree_sha` equivalence & `Extra` struct canonicalization (Phase 06b) |
+| Campaign Mandate & Budget (G0) | **Delivered** | `tools/f0/mandate.go` (`#623`), `global-ledger.jsonl` source of truth, cache tamper detection | Enforced in Wave A (`3c46759`) |
+| Gate Core (G1, G2, G3, G6) | **Delivered** | `tools/f0/{gate,forge,status,waive,manual,anchor,audit,claims}.go` + `tools/merger.sh` Gate e (`#624`) | Caught pending CI & Windows failures live on PR `#634` (`p50 = 45.98 ms`) |
+| Agent Hooks (PreToolUse, Stop) | **Delivered** | `tools/f0/hook.go`, `tools/f0/hooks/agy-hooks.json` (`#624`) | Ready for optional PiC `T4` activation |
+| Wave A C1–C10 Replay (`#620`) | **Measured** | `tools/f0/replay_test.go`: **`5/10 BLOCK`** (`C1, C2, C6, C9, C10`), **`2/10 FLAG`** (`C5, C8`), **`3/10 NOT_COVERED`** (`C3, C4, C7`) | Meets Wave A falsification threshold (`>= 5 BLOCK`, `>= 2 FLAG`, `< 60s`) |
+| Information Firewall & `RoundReceiptSchema` | **Planned (06b)** | Discovered via Socratic RCA after PR `#634` dogfooding (see §2 below) | Phase 06b (`cmd/g8s/verify.go`, `internal/verifier`, `tools/f0`) |
+| Anti-appeasement (G4) & Closure (G7) | **Outlined** | Specified in Phase 07 (Wave B, `#625`, `#626`) | Wave B implementation pending |
+| T2 Executor, T3 Verifier, Breaker, Auditor | **Outlined** | Specified in Phase 07 (Wave B, `#627`, `#628`, `#629`, `#630`) | Wave B implementation pending |
+
+### 2. Post-Wave-A Socratic RCA: Why Supervisor Context Drifts & How Trust Differs Between F0 and F1
+
+Live dogfooding on PR `#634` exposed a deeper structural truth:
+1. **Root Cause of Supervisor (`F0`) Context Drift (Data Plane Flooding the Control Plane)**:
+   - During Wave A execution, running `go test -json ./...` and `gh pr checks --watch` directly in `F0`'s session flooded `F0`'s context window with **> 6.2 MB of raw mechanical logs**, triggering context compaction and **Role Collapse** (`F0` dropping from strategic orchestration into tactical debugging).
+   - Code inspection revealed two defects in `g8s verify` that forced `F0` to read raw logs manually:
+     - **Defect L3 (`cmd/g8s/verify.go:133-147`)**: `g8s verify --task <id>` resolved `targetRepoDir` to `reqPayload.AddDirs[0]` (the unmodified main checkout) instead of `res.Deliverable.Dir` (the isolated F1 worktree).
+     - **Defect L4 (`internal/verifier/verifier.go:597`)**: `runGoTestCheck` discarded `stdout` (`_`), where `go test` prints failing test names and `file:line` diagnostics, returning only `"exit code 1"`.
+2. **Differentiated Trust Model (`F1` vs. `F0`)**:
+   - Neither `F0` nor `F1` is trusted by role title; both are stochastic LLMs governed by Zero-Trust contracts.
+   - **Worker (`F1`) Trust** is established via **Physical Capability Containment + Artifact Verification** (`worktree` isolation + `WriteReceipt` `AllowedPaths` + post-run disk/blob inspection). Note that `WriteReceipt` constrains *hands* (file mutations), not *comprehension* (a reader worker can still misread a log unless backed by deterministic harness counters).
+   - **Supervisor (`F0`) Trust** is established via **Information Firewall (Signal Fidelity) + Boundary Schema Completeness**:
+     - `F0` must never ingest raw log streams. Raw logs are captured to disk (`$G8S_STATE_DIR/logs/`) by the Go harness.
+     - An F1 `verifier`/`summarizer` worker (combined with the Go harness's deterministic parser) reads **100% of the raw log and worktree diff** in its disposable context and emits a schema-validated `RoundReceiptSchema` to `F0`.
+3. **Signal-Proportional Sizing (No Arbitrary Line Truncation)**:
+   - Fixed line limits (e.g., "truncate to 30 lines") are rejected because they cause **Decision Blindness** when a round has many DoD items or multiple failures.
+   - Instead, compression is **Lossless on Signal, Zero on Mechanical Noise**:
+     $$\text{Size}(\text{RoundReceipt}) = f\big(|\text{DoD Items}| + |\text{Distinct Failures}| + |\text{Changed Boundaries}|\big)$$
+     100% of passing-test chatter and polling frames are stripped; 100% of failing test diagnostics, root-cause locations, and `D1..Dn` DoD mappings are preserved.
+4. **Free Iteration Topology, Code-Enforced Boundary Schemas**:
+   - Go code does **not** hardcode the number or sequence of `F0 ↔ F1` rounds.
+   - Go code strictly enforces the **Schemas at each round boundary**:
+     - **Downward (`F0 -> F1`)**: `BriefSchema` enumerating explicit acceptance criteria `D1..Dn` and `AllowedPaths`.
+     - **Upward (`F1/Harness -> F0`)**: `RoundReceiptSchema` containing deterministic `execution_facts` (`tree_sha`, `tests_ran`, `tests_failed`, `applied_files`, `untracked_files`, `raw_log_sha256`), `dod_matrix` (1-to-1 status `MET | UNMET | PARTIAL` + evidence for every `D1..Dn`), and untruncated `failure_diagnostics`.
+     - **Commitment Gate**: Transition from *Iterate* to *Deliver/Merge/Close* is deterministically blocked by Go code unless `all(D1..Dn == MET) && tests_failed == 0 && untracked_files == 0`.
 
 ## Falsification Clocks
 

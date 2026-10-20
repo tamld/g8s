@@ -428,9 +428,8 @@ func isDocsOnly(paths []string) bool {
 
 // isHotfixSummary reports whether the summary declares an explicit hotfix marker.
 func isHotfixSummary(summary string) bool {
-	s := strings.TrimSpace(summary)
-	// ⚡ Bolt Optimization: Use bounded EqualFold for zero-allocation prefix matching
-	if strings.EqualFold(s, "0") || strings.EqualFold(s, "hotfix") || strings.EqualFold(s, "lane:0") || strings.EqualFold(s, "lane: 0") || strings.EqualFold(s, "lane:hotfix") {
+	s := strings.ToLower(strings.TrimSpace(summary))
+	if s == "0" || s == "hotfix" || s == "lane:0" || s == "lane: 0" || s == "lane:hotfix" {
 		return true
 	}
 	prefixes := []string{
@@ -442,11 +441,16 @@ func isHotfixSummary(summary string) bool {
 		"hotfix ",
 	}
 	for _, prefix := range prefixes {
-		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		if strings.HasPrefix(s, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsHotfixSummary reports whether the summary declares an explicit hotfix marker.
+func IsHotfixSummary(summary string) bool {
+	return isHotfixSummary(summary)
 }
 
 // isRefactor reports whether the change declares a pure refactoring without behavior change.
@@ -455,10 +459,9 @@ func isHotfixSummary(summary string) bool {
 //  2. Summary markers "[refactor]", "(refactor)", "refactor/", "refactor -", "refactor "
 //  3. Paths explicitly located under a refactor/ directory
 func isRefactor(paths []string, summary string) bool {
-	s := strings.TrimSpace(summary)
+	s := strings.ToLower(strings.TrimSpace(summary))
 
-	// ⚡ Bolt Optimization: Use bounded EqualFold for zero-allocation prefix matching
-	if strings.EqualFold(s, "r") || strings.EqualFold(s, "refactor") || strings.EqualFold(s, "lane:r") || strings.EqualFold(s, "lane: r") || strings.EqualFold(s, "lane:refactor") {
+	if s == "r" || s == "refactor" || s == "lane:r" || s == "lane: r" || s == "lane:refactor" {
 		return true
 	}
 
@@ -473,13 +476,13 @@ func isRefactor(paths []string, summary string) bool {
 		"chore(refactor):",
 	}
 	for _, prefix := range refactorPrefixes {
-		if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		if strings.HasPrefix(s, prefix) {
 			return true
 		}
 	}
 
 	// Conventional commit scope: refactor(component): ...
-	if len(s) >= 9 && strings.EqualFold(s[:9], "refactor(") && strings.Contains(s, "):") {
+	if strings.HasPrefix(s, "refactor(") && strings.Contains(s, "):") {
 		return true
 	}
 

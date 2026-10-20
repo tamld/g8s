@@ -106,6 +106,9 @@ func (f *fakeProviders) DiscoverAll(_ context.Context) ([]provider.ProviderInfo,
 
 func newTestServer(t *testing.T) (*Server, *fakeControlPlane, *fakeIssuer, *fakeProviders) {
 	t.Helper()
+	t.Setenv("G8S_TIER", "")
+	t.Setenv("G8S_SCOPE_ROOT", "")
+	t.Setenv("G8S_RECEIPT_ID", "")
 	cp := &fakeControlPlane{}
 	issuer := &fakeIssuer{rc: &receipt.WriteReceipt{ReceiptID: "rc-1", Issuer: "mcp-server"}}
 	providers := &fakeProviders{infos: []provider.ProviderInfo{{Name: "agy", Status: provider.StatusReady}}}
@@ -502,8 +505,8 @@ func TestListPermissionsMarksWorkspaceWriteDisabled(t *testing.T) {
 		enabled[p.Name] = p.MCPEnabled
 		reasons[p.Name] = p.DisabledReason
 	}
-	if len(out.Permissions) != 3 {
-		t.Fatalf("got %d permissions, want 3", len(out.Permissions))
+	if len(out.Permissions) != 4 {
+		t.Fatalf("got %d permissions, want 4", len(out.Permissions))
 	}
 	if enabled["workspace_write"] {
 		t.Fatal("workspace_write must be disabled on the MCP surface")
@@ -511,7 +514,7 @@ func TestListPermissionsMarksWorkspaceWriteDisabled(t *testing.T) {
 	if !strings.Contains(reasons["workspace_write"], "workspace_write") {
 		t.Fatalf("disabled_reason must name workspace_write: %q", reasons["workspace_write"])
 	}
-	if !enabled["read_only"] || !enabled["automation_read"] {
+	if !enabled["read_only"] || !enabled["automation_read"] || !enabled["supplied_text"] {
 		t.Fatalf("read profiles must stay enabled: %+v", enabled)
 	}
 }

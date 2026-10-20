@@ -12,6 +12,7 @@ type PermissionProfile struct {
 	MutationAllowed        bool   `json:"mutation_allowed"`
 	SkipPermissionsAllowed bool   `json:"skip_permissions_allowed"`
 	MaxPromptChars         int    `json:"max_prompt_chars"`
+	ToolPolicy             string `json:"tool_policy,omitempty"`
 }
 
 var Permissions = map[string]PermissionProfile{
@@ -21,6 +22,7 @@ var Permissions = map[string]PermissionProfile{
 		MutationAllowed:        false,
 		SkipPermissionsAllowed: false,
 		MaxPromptChars:         30000,
+		ToolPolicy:             "default",
 	},
 	"automation_read": {
 		Name:                   "automation_read",
@@ -28,6 +30,7 @@ var Permissions = map[string]PermissionProfile{
 		MutationAllowed:        false,
 		SkipPermissionsAllowed: true,
 		MaxPromptChars:         30000,
+		ToolPolicy:             "default",
 	},
 	"workspace_write": {
 		Name:                   "workspace_write",
@@ -35,6 +38,15 @@ var Permissions = map[string]PermissionProfile{
 		MutationAllowed:        true,
 		SkipPermissionsAllowed: true,
 		MaxPromptChars:         20000,
+		ToolPolicy:             "default",
+	},
+	"supplied_text": {
+		Name:                   "supplied_text",
+		Description:            "Supplied-text reasoning profile. Disables all model-initiated tool calls at the adapter boundary.",
+		MutationAllowed:        false,
+		SkipPermissionsAllowed: false,
+		MaxPromptChars:         30000,
+		ToolPolicy:             "none",
 	},
 }
 

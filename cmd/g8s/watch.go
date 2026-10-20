@@ -89,6 +89,7 @@ func runWatch(args []string) {
 	_ = actor
 	prFlag := fs.Int("pr", 0, "GitHub PR number: watch its CI checks until terminal")
 	taskFlag := fs.String("task", "", "g8s task id: watch its state until terminal")
+	repoFlag := fs.String("repo", "", "target GitHub repository for --pr watch (e.g. owner/repo; defaults to git remote in current directory)")
 	interval := fs.Duration("interval", 60*time.Second, "poll interval (default 60s for task/pr watch; 500ms for --failed)")
 	timeout := fs.Duration("timeout", 30*time.Minute, "give up after this long (default 30m for task/pr watch; default 0 = block forever for --failed; exit 3)")
 	milestone := fs.String("milestone", MilestoneAccept, "watch milestone: accept (default) or worker-complete")
@@ -98,7 +99,7 @@ func runWatch(args []string) {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage:
   g8s watch --task <task-id> [--interval 10s] [--timeout 30m] [--milestone <accept|worker-complete>]
-  g8s watch --pr <pr-number> [--interval 60s] [--timeout 30m]
+  g8s watch --pr <pr-number> [--repo <owner/name>] [--interval 60s] [--timeout 30m]
   g8s watch --failed [--since <RFC3339|duration>] [--timeout <dur>]
 
 Long-polls for task/PR completion, or watches signals file (<db-dir>/signals/tasks.jsonl)
@@ -198,8 +199,9 @@ Exit codes (--failed mode):
 	case *prFlag != 0:
 		target = fmt.Sprintf("pr/%d", *prFlag)
 		pr := *prFlag
+		repo := strings.TrimSpace(*repoFlag)
 		checker = func(ctx context.Context) (watch.CheckResult, error) {
-			return checkPR(ctx, pr)
+			return checkPR(ctx, pr, repo)
 		}
 	default:
 		target = "task/" + *taskFlag
@@ -262,10 +264,25 @@ Exit codes (--failed mode):
 	}
 }
 
+// buildCheckPRArgs constructs the argument list for gh pr checks.
+// If repo is non-empty, --repo is passed; otherwise gh defaults to the git remote of the current directory.
+func buildCheckPRArgs(pr int, repo string) []string {
+	args := []string{"pr", "checks", fmt.Sprint(pr)}
+	if strings.TrimSpace(repo) != "" {
+		args = append(args, "--repo", strings.TrimSpace(repo))
+	}
+	args = append(args, "--json", "name,state")
+	return args
+}
+
 // checkPR observes one GitHub PR's CI checks via gh.
-func checkPR(ctx context.Context, pr int) (watch.CheckResult, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "checks", fmt.Sprint(pr),
-		"--repo", "tamld/g8s", "--json", "name,state")
+func checkPR(ctx context.Context, pr int, repo ...string) (watch.CheckResult, error) {
+	var targetRepo string
+	if len(repo) > 0 {
+		targetRepo = repo[0]
+	}
+	args := buildCheckPRArgs(pr, targetRepo)
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// gh exits non-zero while checks are pending — treat as not-done.
