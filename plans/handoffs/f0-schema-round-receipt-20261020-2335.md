@@ -10,6 +10,8 @@ head: 3c4675944094cf20eed6e6791e3f6acca2989c83
 
 # HANDOFF: Phase 06b & Wave B — Information Firewall, BriefSchema/RoundReceiptSchema, Worktree-Targeted g8s verify, and Portable Ground Truth
 
+**Session type**: T1 (strategy)
+
 ## Mission and current status
 Focus: "Phase 06b & Wave B — Information Firewall, BriefSchema/RoundReceiptSchema, Worktree-Targeted g8s verify, and Portable Ground Truth".
 Done:

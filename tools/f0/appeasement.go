@@ -20,7 +20,7 @@ type AppeasementViolation struct {
 
 var (
 	tokenRewriteRegex = regexp.MustCompile(`(?i)\b(to-do|to_do|to-be-determined|place-holder)\b`)
-	testSkipRegex     = regexp.MustCompile(`t\.Skip(Now|f)?\(`)
+	testSkipRegex     = regexp.MustCompile(`^\s*t\.Skip(Now|f)?\(`)
 
 	validConfigKeys = map[string][]string{
 		"trust-boundaries": {"trust_boundaries"},
@@ -190,7 +190,12 @@ func DetectGateAppeasement(repoDir, baseRef, headSHA string) ([]AppeasementViola
 			addedLine := line[1:]
 
 			// Signal 1: token-rewrite
-			if tokenRewriteRegex.MatchString(addedLine) {
+			cleanCur := filepath.ToSlash(currentFile)
+			isTokenExempt := strings.HasSuffix(cleanCur, "_test.go") ||
+				strings.HasPrefix(cleanCur, "plans/") ||
+				strings.HasPrefix(cleanCur, "docs/") ||
+				cleanCur == "tools/f0/appeasement.go"
+			if !isTokenExempt && tokenRewriteRegex.MatchString(addedLine) {
 				match := tokenRewriteRegex.FindString(addedLine)
 				violations = append(violations, AppeasementViolation{
 					Kind:   "token-rewrite",

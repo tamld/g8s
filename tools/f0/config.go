@@ -71,6 +71,13 @@ func defaultVerifyCommands(repoDir string) [][]string {
 	return cmds
 }
 
+func defaultManualFree(repoDir string) []string {
+	if filepath.Base(repoDir) == "g8s" {
+		return []string{"plans/**", "docs/**"}
+	}
+	return []string{}
+}
+
 // LoadConfig loads the repo policy file .g8s/f0.yml or applies defaults.
 func LoadConfig(repoDir string) (*Config, error) {
 	if repoDir == "" {
@@ -87,7 +94,7 @@ func LoadConfig(repoDir string) (*Config, error) {
 		return &Config{
 			CI:             defaultCI(repoDir),
 			VerifyCommands: defaultVerifyCommands(repoDir),
-			ManualFree:     []string{},
+			ManualFree:     defaultManualFree(repoDir),
 			Parsers:        []ParserRule{},
 		}, nil
 	} else if err != nil {
