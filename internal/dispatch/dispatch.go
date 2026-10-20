@@ -730,7 +730,7 @@ echo {"decision":"deny","reason":"model tool calls disabled by supplied_text pol
   }
 }`, cmdHook)
 		hooksJSONPath := filepath.Join(agentsDir, "hooks.json")
-		if err := os.WriteFile(hooksJSONPath, []byte(hooksJSON), 0o644); err != nil {
+		if err := os.WriteFile(hooksJSONPath, []byte(hooksJSON), 0o600); err != nil {
 			return Result{}, fmt.Errorf("failed to write hooks.json: %w", err)
 		}
 
