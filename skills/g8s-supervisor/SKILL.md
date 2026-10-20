@@ -60,6 +60,7 @@ task receipt (operator mandate 2026-09-27).
 | Multi-project tenancy, cross-repo worktrees, atomic F1 quotas, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.2 addendum — field-proven contracts through 2026-10-14 cross-repo campaign) |
 
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
+Verified delegation boundary: see [ADR-0033](../../docs/decisions/0033-f0-verified-delegation.md) for evidence-gated autonomy (T1–T3 supersede synchronous HITL; T4 requires PiC approval).
 
 ## The six laws
 
