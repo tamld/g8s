@@ -3,7 +3,7 @@ handoff-version: 1
 generated: 2026-10-20T16:35:00Z
 generator: ak:handoff@2.1.0
 focus: "Phase 06b & Wave B — Information Firewall, BriefSchema/RoundReceiptSchema, Worktree-Targeted g8s verify, and Portable Ground Truth"
-workspace: /Users/tamld/Documents/github/g8s
+workspace: github.com/tamld/g8s
 branch: main
 head: 3c4675944094cf20eed6e6791e3f6acca2989c83
 ---
@@ -25,7 +25,7 @@ Remaining:
 Urgency: high (next session starts with a clean context window and must preserve the Information Firewall from turn 1).
 
 ## Scope and guardrails
-Workspace: /Users/tamld/Documents/github/g8s
+Workspace: github.com/tamld/g8s
 In scope:
 - `plans/261020-f0-verified-delegation/phase-06b-portable-ground-truth.md`
 - `plans/261020-f0-verified-delegation/plan.md`
@@ -90,7 +90,7 @@ Not run:
 - Type: risk. Owner: F0 Supervisor. Impact: DEBT-34 layer-ownership gate forbids mixing `cmd/g8s` with `internal/worker` in the same PR; keep `Slice 06b-1` scoped to `internal/verifier/**` + `cmd/g8s/{verify,watch}*.go`.
 
 ## Exact next actions
-1. **First safe step** — Read `plans/handoffs/f0-schema-round-receipt-20261020-2335.md` and `plans/261020-f0-verified-delegation/phase-06b-portable-ground-truth.md`, then verify `git status --short` on `/Users/tamld/Documents/github/g8s`.
+1. **First safe step** — Read `plans/handoffs/f0-schema-round-receipt-20261020-2335.md` and `plans/261020-f0-verified-delegation/phase-06b-portable-ground-truth.md`, then verify `git status --short` on `github.com/tamld/g8s`.
 2. Create and switch to branch `feat/f0-phase-06b-information-firewall` (`git checkout -b feat/f0-phase-06b-information-firewall`) and commit the updated spec/plan/ADR/handoff files (`docs/PRD.md`, `docs/SRS.md`, `docs/DOD_DOR.md`, `docs/decisions/0033-f0-verified-delegation.md`, `plans/261020-f0-verified-delegation/*`, `plans/handoffs/f0-schema-round-receipt-20261020-2335.md`).
 3. Isolate supervisor state (`export G8S_STATE_DIR="$HOME/.local/state/g8s-sess-06b" AGY_MCP_ALLOW_WORKSPACE_WRITE=1`) and dispatch **Slice 06b-1** via `g8s receipt issue` + `g8s submit` + `g8s worker --once` to fix `L3` (`cmd/g8s/verify.go` worktree target), `L4` (`internal/verifier/verifier.go` `stdout` capture, vacuous guard, `$G8S_STATE_DIR/logs/verify-<task-id>.log`, and `RoundReceiptSchema` `FailureDiagnostics` + `DoDMatrix`), and `L2` (`cmd/g8s/watch.go` `--repo` flag).
 4. Verify Slice 06b-1 with `./bin/g8s verify --task <id> --json`, deliver via `./bin/g8s deliver <id> --prune-worktree --json`, and rebuild `./bin/g8s` (`make local`).
