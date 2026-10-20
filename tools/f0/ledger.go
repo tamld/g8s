@@ -29,6 +29,7 @@ type Entry struct {
 	Repo         string         `json:"repo"`
 	Branch       string         `json:"branch"`
 	SHA          string         `json:"sha"`
+	TreeSHA      string         `json:"tree_sha,omitempty"`
 	Dirty        bool           `json:"dirty"`
 	DirtyHash    string         `json:"dirty_hash,omitempty"`
 	Cmd          []string       `json:"cmd"`
@@ -52,6 +53,7 @@ type entryWithoutHash struct {
 	Repo         string         `json:"repo"`
 	Branch       string         `json:"branch"`
 	SHA          string         `json:"sha"`
+	TreeSHA      string         `json:"tree_sha,omitempty"`
 	Dirty        bool           `json:"dirty"`
 	DirtyHash    string         `json:"dirty_hash,omitempty"`
 	Cmd          []string       `json:"cmd"`
@@ -66,6 +68,23 @@ type entryWithoutHash struct {
 	PrevHash     string         `json:"prev_hash"`
 }
 
+// normalizeExtra converts arbitrary structures in extra to map[string]any
+// via JSON round-trip so key-ordering remains canonically deterministic.
+func normalizeExtra(extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(extra)
+	if err != nil {
+		return extra
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return extra
+	}
+	return out
+}
+
 // computeHash calculates sha256(prev_hash || canonical_json(entry without hash)).
 func computeHash(e *Entry) (string, error) {
 	cmd := e.Cmd
@@ -74,7 +93,7 @@ func computeHash(e *Entry) (string, error) {
 	}
 	var extra map[string]any
 	if len(e.Extra) > 0 {
-		extra = e.Extra
+		extra = normalizeExtra(e.Extra)
 	}
 
 	raw := entryWithoutHash{
@@ -85,6 +104,7 @@ func computeHash(e *Entry) (string, error) {
 		Repo:         e.Repo,
 		Branch:       e.Branch,
 		SHA:          e.SHA,
+		TreeSHA:      e.TreeSHA,
 		Dirty:        e.Dirty,
 		DirtyHash:    e.DirtyHash,
 		Cmd:          cmd,
@@ -234,6 +254,10 @@ func (l *Ledger) Append(entry *Entry) error {
 	} else {
 		entry.Seq = last.Seq + 1
 		entry.PrevHash = last.Hash
+	}
+
+	if len(entry.Extra) > 0 {
+		entry.Extra = normalizeExtra(entry.Extra)
 	}
 
 	hash, err := computeHash(entry)

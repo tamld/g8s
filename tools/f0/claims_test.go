@@ -17,6 +17,8 @@ func TestClaims_ProseFalsePositives(t *testing.T) {
 		"Added a quick fix for layout.",
 		"Let's discuss the overall roadmap.",
 		"The closed issues were reviewed.",
+		"Fixed bug in test runner",
+		"Resolved lint issue",
 	}
 
 	for _, text := range corpus {

@@ -41,16 +41,74 @@ func parseGoTest(stdout []byte) int {
 	return count
 }
 
-var nodeTestRegex = regexp.MustCompile(`(?i)(?:ℹ|#)\s+tests\s+(\d+)`)
+var (
+	nodeTestRegex      = regexp.MustCompile(`(?i)(?:ℹ|#)\s+tests\s+(\d+)`)
+	vitestSummaryRegex = regexp.MustCompile(`(?i)Tests\s*(?::)?\s*(?:\d+\s+failed\s*(?:\||,)\s*)?(\d+)\s+passed`)
+	vitestPassedRegex  = regexp.MustCompile(`(?i)(\d+)\s+passed`)
+)
 
-// parseNodeTest returns the sum of tests from node:test or tap summaries.
+// parseNodeTest returns the sum of tests from node:test, tap, vitest, or jest summaries.
 func parseNodeTest(output string) int {
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "no test files found") {
+		return 0
+	}
+
 	matches := nodeTestRegex.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
+	if len(matches) > 0 {
+		total := 0
+		for _, m := range matches {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				total += n
+			}
+		}
+		return total
+	}
+
+	vMatches := vitestSummaryRegex.FindAllStringSubmatch(output, -1)
+	if len(vMatches) > 0 {
+		total := 0
+		for _, m := range vMatches {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				total += n
+			}
+		}
+		return total
+	}
+
+	pMatches := vitestPassedRegex.FindAllStringSubmatch(output, -1)
+	if len(pMatches) > 0 {
+		total := 0
+		for _, m := range pMatches {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				total += n
+			}
+		}
+		return total
+	}
+
+	return 0
+}
+
+var (
+	pytestPassedRegex = regexp.MustCompile(`(?i)(\d+)\s+passed`)
+	pytestFailedRegex = regexp.MustCompile(`(?i)(\d+)\s+failed`)
+)
+
+// parsePytest returns the sum of passed + failed tests from pytest output.
+// Returns 0 on 'no tests ran' or 'collected 0 items'.
+func parsePytest(output string) int {
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "no tests ran") || strings.Contains(lower, "collected 0 items") {
 		return 0
 	}
 	total := 0
-	for _, m := range matches {
+	for _, m := range pytestPassedRegex.FindAllStringSubmatch(output, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			total += n
+		}
+	}
+	for _, m := range pytestFailedRegex.FindAllStringSubmatch(output, -1) {
 		if n, err := strconv.Atoi(m[1]); err == nil {
 			total += n
 		}

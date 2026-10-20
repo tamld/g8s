@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +44,7 @@ func runCommand(args []string) int {
 	kind := detectKind(cmdArgs)
 	execArgs := rewriteArgv(kind, cmdArgs)
 
-	repoRoot, branch, sha, dirty, dirtyHash := getGitState(".")
+	repoRoot, branch, sha, treeSHA, dirty, dirtyHash := getGitState(".")
 
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -85,23 +87,78 @@ func runCommand(args []string) int {
 	extra := make(map[string]any)
 	var items int
 
-	switch kind {
-	case "go-test":
-		items = parseGoTest(stdoutBuf.Bytes())
-	case "node-test", "npm-test":
-		items = parseNodeTest(combinedBuf.String())
-	case "cargo-test":
-		items = parseCargoTest(combinedBuf.String())
-	case "did-verify":
-		items = parseDidVerify(execArgs)
-	case "g8s-offer-check":
-		items = parseOfferCheck(combinedBuf.String())
-	case "g8s-deliver":
-		items = parseDeliver(execArgs, stdoutBuf.Bytes(), repoRoot, extra)
-	case "g8s-verify":
-		items = parseG8sVerify(stdoutBuf.Bytes())
-	default:
-		items = -1
+	matchedCustom := false
+	cfg, _ := LoadConfig(repoRoot)
+	if cfg != nil && len(cfg.Parsers) > 0 {
+		cleanExec := stripEnv(execArgs)
+		outStr := combinedBuf.String()
+		for _, rule := range cfg.Parsers {
+			if matchArgvPrefix(cleanExec, rule.ArgvPrefix) {
+				kind = rule.Name
+				matchedCustom = true
+				if rule.VacuousRegex != "" {
+					if re, err := regexp.Compile(rule.VacuousRegex); err == nil && re.MatchString(outStr) {
+						items = 0
+						break
+					}
+				}
+				if rule.CountRegex != "" {
+					if re, err := regexp.Compile(rule.CountRegex); err == nil {
+						matches := re.FindAllStringSubmatch(outStr, -1)
+						if len(matches) == 0 {
+							items = 0
+						} else {
+							total := 0
+							hasGroup := re.NumSubexp() >= 1
+							for _, m := range matches {
+								if hasGroup && len(m) >= 2 {
+									if n, err := strconv.Atoi(m[1]); err == nil {
+										total += n
+									}
+								} else {
+									total++
+								}
+							}
+							items = total
+						}
+						break
+					}
+				}
+				if rule.PassOnExitZero {
+					if exitCode == 0 {
+						items = 1
+					} else {
+						items = 0
+					}
+					break
+				}
+				items = -1
+				break
+			}
+		}
+	}
+
+	if !matchedCustom {
+		switch kind {
+		case "go-test":
+			items = parseGoTest(stdoutBuf.Bytes())
+		case "node-test", "npm-test":
+			items = parseNodeTest(combinedBuf.String())
+		case "pytest":
+			items = parsePytest(combinedBuf.String())
+		case "cargo-test":
+			items = parseCargoTest(combinedBuf.String())
+		case "did-verify":
+			items = parseDidVerify(execArgs)
+		case "g8s-offer-check":
+			items = parseOfferCheck(combinedBuf.String())
+		case "g8s-deliver":
+			items = parseDeliver(execArgs, stdoutBuf.Bytes(), repoRoot, extra)
+		case "g8s-verify":
+			items = parseG8sVerify(stdoutBuf.Bytes())
+		default:
+			items = -1
+		}
 	}
 
 	if durationMS < 50 && items > 0 {
@@ -127,6 +184,7 @@ func runCommand(args []string) int {
 		Repo:         repoRoot,
 		Branch:       branch,
 		SHA:          sha,
+		TreeSHA:      treeSHA,
 		Dirty:        dirty,
 		DirtyHash:    dirtyHash,
 		Cmd:          execArgs,
@@ -225,6 +283,18 @@ func stripEnv(argv []string) []string {
 	return argv[start:]
 }
 
+func matchArgvPrefix(argv []string, prefix []string) bool {
+	if len(prefix) == 0 || len(argv) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if argv[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func detectKind(argv []string) string {
 	cleanArgv := stripEnv(argv)
 	if len(cleanArgv) == 0 {
@@ -251,7 +321,15 @@ func detectKind(argv []string) string {
 	if (base0 == "go" || strings.HasSuffix(cleanArgv[0], "/go") || strings.HasSuffix(cleanArgv[0], `\go`)) && len(cleanArgv) >= 2 && cleanArgv[1] == "test" {
 		return "go-test"
 	}
+	if base0 == "pytest" ||
+		(strings.HasPrefix(base0, "python") && len(cleanArgv) >= 3 && cleanArgv[1] == "-m" && cleanArgv[2] == "pytest") ||
+		(base0 == "uv" && len(cleanArgv) >= 3 && cleanArgv[1] == "run" && cleanArgv[2] == "pytest") {
+		return "pytest"
+	}
 	if strings.Contains(base0, "node") && hasArg("--test") {
+		return "node-test"
+	}
+	if base0 == "vitest" || base0 == "jest" || hasArg("vitest") || hasArg("jest") {
 		return "node-test"
 	}
 	if (base0 == "npm" || base0 == "pnpm" || base0 == "yarn" || base0 == "bun") && hasArg("test") {
@@ -341,7 +419,7 @@ func rewriteArgv(kind string, argv []string) []string {
 	return argv
 }
 
-func getGitState(dir string) (repoRoot, branch, sha string, dirty bool, dirtyHash string) {
+func getGitState(dir string) (repoRoot, branch, sha, treeSHA string, dirty bool, dirtyHash string) {
 	if dir == "" {
 		dir = "."
 	}
@@ -362,6 +440,11 @@ func getGitState(dir string) (repoRoot, branch, sha string, dirty bool, dirtyHas
 		sha = strings.TrimSpace(string(out))
 	}
 
+	out, err = exec.Command("git", "-C", repoRoot, "rev-parse", "HEAD^{tree}").Output()
+	if err == nil {
+		treeSHA = strings.TrimSpace(string(out))
+	}
+
 	statusOut, err := exec.Command("git", "-C", repoRoot, "status", "--porcelain").Output()
 	if err == nil && len(bytes.TrimSpace(statusOut)) > 0 {
 		dirty = true
@@ -372,5 +455,5 @@ func getGitState(dir string) (repoRoot, branch, sha string, dirty bool, dirtyHas
 		dirtyHash = hex.EncodeToString(h.Sum(nil))
 	}
 
-	return repoRoot, branch, sha, dirty, dirtyHash
+	return repoRoot, branch, sha, treeSHA, dirty, dirtyHash
 }

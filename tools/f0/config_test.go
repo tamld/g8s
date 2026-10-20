@@ -48,9 +48,21 @@ func TestConfig_LoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
 	}
-	expectedNode := [][]string{{"npm", "test"}, {"pnpm", "test"}, {"node", "--test"}}
+	expectedNode := [][]string{{"npm", "test"}, {"pnpm", "test"}, {"node", "--test"}, {"npx", "vitest", "run"}, {"npx", "jest"}}
 	if !reflect.DeepEqual(cfgNode.VerifyCommands, expectedNode) {
 		t.Errorf("expected %v, got %v", expectedNode, cfgNode.VerifyCommands)
+	}
+
+	// 4. Inferred verify_commands for pyproject.toml / pytest.ini
+	pyDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(pyDir, "pyproject.toml"), []byte("[tool.pytest]\n"), 0o644)
+	cfgPy, err := LoadConfig(pyDir)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	expectedPy := [][]string{{"pytest"}, {"python3", "-m", "pytest"}, {"uv", "run", "pytest"}}
+	if !reflect.DeepEqual(cfgPy.VerifyCommands, expectedPy) {
+		t.Errorf("expected %v, got %v", expectedPy, cfgPy.VerifyCommands)
 	}
 }
 

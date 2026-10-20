@@ -203,4 +203,43 @@ func TestParsers(t *testing.T) {
 			t.Errorf("expected 1 for fallback, got %d", got)
 		}
 	})
+
+	t.Run("pytest", func(t *testing.T) {
+		outPass := "================ 12 passed in 0.42s ================"
+		if got := parsePytest(outPass); got != 12 {
+			t.Errorf("expected 12, got %d", got)
+		}
+
+		outMix := "================ 8 passed, 2 failed in 1.10s ================"
+		if got := parsePytest(outMix); got != 10 {
+			t.Errorf("expected 10 (8 passed + 2 failed), got %d", got)
+		}
+
+		outVacuous := "collected 0 items\nno tests ran in 0.01s"
+		if got := parsePytest(outVacuous); got != 0 {
+			t.Errorf("expected 0 for vacuous pytest, got %d", got)
+		}
+	})
+
+	t.Run("vitest_jest", func(t *testing.T) {
+		vitestPass := " Tests  5 passed (5)\n Duration  1.23s"
+		if got := parseNodeTest(vitestPass); got != 5 {
+			t.Errorf("expected 5 for vitest pass, got %d", got)
+		}
+
+		vitestFail := " Tests  1 failed | 4 passed (5)\n Duration  1.23s"
+		if got := parseNodeTest(vitestFail); got != 4 {
+			t.Errorf("expected 4 for vitest summary with failed, got %d", got)
+		}
+
+		jestPass := "Tests:       10 passed, 10 total"
+		if got := parseNodeTest(jestPass); got != 10 {
+			t.Errorf("expected 10 for jest pass, got %d", got)
+		}
+
+		noFiles := "No test files found, exiting with code 0"
+		if got := parseNodeTest(noFiles); got != 0 {
+			t.Errorf("expected 0 when No test files found, got %d", got)
+		}
+	})
 }
