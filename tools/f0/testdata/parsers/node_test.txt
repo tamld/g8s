@@ -1,0 +1,13 @@
+▶ test-suite-a (12.3ms)
+  ✔ user model tests (4.5ms)
+  ✔ auth token validation (2.1ms)
+▶ test-suite-b (34.5ms)
+  ✔ payment workflow (15.2ms)
+ℹ tests 1046
+ℹ suites 12
+ℹ pass 1045
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1234.56

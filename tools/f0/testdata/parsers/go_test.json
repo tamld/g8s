@@ -1,0 +1,14 @@
+{"Time":"2026-10-20T08:00:00.000000Z","Action":"start","Package":"github.com/tamld/g8s/tools/f0"}
+{"Time":"2026-10-20T08:00:00.001000Z","Action":"run","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserAlpha"}
+{"Time":"2026-10-20T08:00:00.002000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserAlpha","Output":"=== RUN   TestParserAlpha\n"}
+{"Time":"2026-10-20T08:00:00.005000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserAlpha","Output":"--- PASS: TestParserAlpha (0.00s)\n"}
+{"Time":"2026-10-20T08:00:00.005100Z","Action":"pass","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserAlpha","Elapsed":0.003}
+{"Time":"2026-10-20T08:00:00.006000Z","Action":"run","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserBeta"}
+{"Time":"2026-10-20T08:00:00.007000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserBeta","Output":"=== RUN   TestParserBeta\n"}
+{"Time":"2026-10-20T08:00:00.008000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserBeta","Output":"--- FAIL: TestParserBeta (0.00s)\n"}
+{"Time":"2026-10-20T08:00:00.008100Z","Action":"fail","Package":"github.com/tamld/g8s/tools/f0","Test":"TestParserBeta","Elapsed":0.002}
+{"Time":"2026-10-20T08:00:00.009000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0","Output":"FAIL\n"}
+{"Time":"2026-10-20T08:00:00.010000Z","Action":"fail","Package":"github.com/tamld/g8s/tools/f0","Elapsed":0.01}
+{"Time":"2026-10-20T08:00:00.011000Z","Action":"start","Package":"github.com/tamld/g8s/tools/f0/empty"}
+{"Time":"2026-10-20T08:00:00.012000Z","Action":"output","Package":"github.com/tamld/g8s/tools/f0/empty","Output":"?   \tgithub.com/tamld/g8s/tools/f0/empty\t[no tests to run]\n"}
+{"Time":"2026-10-20T08:00:00.013000Z","Action":"pass","Package":"github.com/tamld/g8s/tools/f0/empty","Elapsed":0}

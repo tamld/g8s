@@ -1,0 +1,320 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func TestRewriteArgv(t *testing.T) {
+	t.Run("go-test injects -json", func(t *testing.T) {
+		args := []string{"go", "test", "./..."}
+		rewritten := rewriteArgv("go-test", args)
+		if len(rewritten) != 4 || rewritten[2] != "-json" {
+			t.Fatalf("expected -json injected after test, got: %v", rewritten)
+		}
+
+		// Already has -json
+		argsWithJSON := []string{"go", "test", "-json", "./..."}
+		rewrittenSame := rewriteArgv("go-test", argsWithJSON)
+		if len(rewrittenSame) != 4 {
+			t.Fatalf("expected no extra injection, got: %v", rewrittenSame)
+		}
+	})
+
+	t.Run("g8s-deliver injects --json", func(t *testing.T) {
+		args := []string{"g8s", "deliver", "--task-id", "123"}
+		rewritten := rewriteArgv("g8s-deliver", args)
+		if len(rewritten) != 5 || rewritten[2] != "--json" {
+			t.Fatalf("expected --json injected after deliver, got: %v", rewritten)
+		}
+
+		// Already has --json
+		argsWithJSON := []string{"g8s", "deliver", "--json", "--task-id", "123"}
+		rewrittenSame := rewriteArgv("g8s-deliver", argsWithJSON)
+		if len(rewrittenSame) != 5 {
+			t.Fatalf("expected no extra injection, got: %v", rewrittenSame)
+		}
+	})
+}
+
+func TestRunGoTestVacuous(t *testing.T) {
+	// Running go test with -run NONE on tools/f0 must yield 0 tests and status VACUOUS
+	repoDir := initTestGitRepo(t)
+
+	// Copy tools/f0 parsers_test.go so there is a test file to run against
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldDir)
+	}()
+
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Create a minimal go.mod and test file in repoDir
+	if err := os.WriteFile("go.mod", []byte("module example.com/testmod\n\ngo 1.22\n"), 0644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	testContent := `package testmod
+
+import "testing"
+
+func TestReal(t *testing.T) {}
+`
+	if err := os.WriteFile("mod_test.go", []byte(testContent), 0644); err != nil {
+		t.Fatalf("writing mod_test.go: %v", err)
+	}
+	_ = exec.Command("git", "add", "go.mod", "mod_test.go").Run()
+	_ = exec.Command("git", "commit", "-m", "add test").Run()
+
+	// 1. Run with -run NONE: exit code 0, items = 0, VACUOUS
+	code := runCommand([]string{"--", "go", "test", "-run", "NONE", "."})
+	if code != 0 {
+		t.Fatalf("expected exit code 0 from go test -run NONE, got %d", code)
+	}
+
+	ledger, err := OpenRepoLedger(repoDir)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	last, err := ledger.LastEntry()
+	if err != nil {
+		t.Fatalf("read last entry: %v", err)
+	}
+	if last.Status != "VACUOUS" {
+		t.Errorf("expected status VACUOUS, got %s", last.Status)
+	}
+	if last.ItemsChecked != 0 {
+		t.Errorf("expected items_checked 0, got %d", last.ItemsChecked)
+	}
+
+	// 2. Run with -run TestReal: exit code 0, items = 1, PASS
+	code = runCommand([]string{"--", "go", "test", "-run", "TestReal", "."})
+	if code != 0 {
+		t.Fatalf("expected exit code 0 from go test -run TestReal, got %d", code)
+	}
+	last, err = ledger.LastEntry()
+	if err != nil {
+		t.Fatalf("read last entry: %v", err)
+	}
+	if last.Status != "PASS" {
+		t.Errorf("expected status PASS, got %s", last.Status)
+	}
+	if last.ItemsChecked != 1 {
+		t.Errorf("expected items_checked 1, got %d", last.ItemsChecked)
+	}
+}
+
+func TestRunDidVerify(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+	oldDir, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(oldDir)
+	}()
+	_ = os.Chdir(repoDir)
+
+	// Create mock script for did-verify
+	mockScript := filepath.Join(repoDir, "did-verify.sh")
+	scriptContent := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("write mock script: %v", err)
+	}
+
+	// 1. Empty --files => VACUOUS
+	code := runCommand([]string{"--", mockScript, "--files"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	ledger, err := OpenRepoLedger(repoDir)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	last, _ := ledger.LastEntry()
+	if last.Status != "VACUOUS" {
+		t.Errorf("expected status VACUOUS for empty --files, got %s", last.Status)
+	}
+	if last.ItemsChecked != 0 {
+		t.Errorf("expected items_checked 0, got %d", last.ItemsChecked)
+	}
+
+	// 2. With files => PASS
+	code = runCommand([]string{"--", mockScript, "--files", "file1.txt", "file2.txt"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	last, _ = ledger.LastEntry()
+	if last.Status != "PASS" {
+		t.Errorf("expected status PASS with files, got %s", last.Status)
+	}
+	if last.ItemsChecked != 2 {
+		t.Errorf("expected items_checked 2, got %d", last.ItemsChecked)
+	}
+}
+
+func TestRunDeliverDryRun(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+	oldDir, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(oldDir)
+	}()
+	_ = os.Chdir(repoDir)
+
+	// Create a real file in repo so git hash-object succeeds
+	appliedFile := filepath.Join(repoDir, "applied.go")
+	if err := os.WriteFile(appliedFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write applied.go: %v", err)
+	}
+
+	// Create mock deliver binary/script
+	mockDeliver := filepath.Join(repoDir, "g8s")
+	jsonEnvelope := `{
+  "v": 1,
+  "kind": "deliver",
+  "cmd": "deliver",
+  "data": {
+    "task_id": "task-dry-run-123",
+    "applied": ["applied.go"],
+    "deleted": ["deleted.go"],
+    "receipt_id": "rc-test-456"
+  }
+}`
+	scriptContent := fmt.Sprintf("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\nexit 0\n", jsonEnvelope)
+	if err := os.WriteFile(mockDeliver, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("write mock deliver: %v", err)
+	}
+
+	// Run with --dry-run
+	code := runCommand([]string{"--", mockDeliver, "deliver", "--dry-run"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+
+	ledger, err := OpenRepoLedger(repoDir)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	last, _ := ledger.LastEntry()
+	if last == nil {
+		t.Fatalf("no entry recorded")
+	}
+
+	if last.Extra == nil || last.Extra["dry_run"] != true {
+		t.Errorf("expected extra.dry_run == true, got %v", last.Extra)
+	}
+	if last.Extra["task_id"] != "task-dry-run-123" {
+		t.Errorf("expected task_id task-dry-run-123, got %v", last.Extra["task_id"])
+	}
+	if last.Extra["receipt_id"] != "rc-test-456" {
+		t.Errorf("expected receipt_id rc-test-456, got %v", last.Extra["receipt_id"])
+	}
+	if last.ItemsChecked != 2 {
+		t.Errorf("expected items_checked 2 (1 applied + 1 deleted), got %d", last.ItemsChecked)
+	}
+
+	// Blobs check
+	blobs, ok := last.Extra["blobs"].(map[string]any)
+	if !ok {
+		// or map[string]string if unmarshaled as string
+		blobsStr, okStr := last.Extra["blobs"].(map[string]string)
+		if !okStr || blobsStr["applied.go"] == "" {
+			t.Errorf("expected extra.blobs with applied.go hash, got %v", last.Extra["blobs"])
+		}
+	} else if blobs["applied.go"] == "" {
+		t.Errorf("expected blobs for applied.go, got %v", blobs)
+	}
+}
+
+func TestRunDirtyWorktree(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+	oldDir, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(oldDir)
+	}()
+	_ = os.Chdir(repoDir)
+
+	// Clean worktree initially
+	code := runCommand([]string{"--", "sh", "-c", "echo clean"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	ledger, err := OpenRepoLedger(repoDir)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	last, _ := ledger.LastEntry()
+	if last.Dirty {
+		t.Errorf("expected dirty=false on clean worktree, got dirty=true")
+	}
+	if last.DirtyHash != "" {
+		t.Errorf("expected dirty_hash=\"\" on clean worktree, got %s", last.DirtyHash)
+	}
+
+	// Create dirty uncommitted file
+	dirtyFile := filepath.Join(repoDir, "dirty.txt")
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted change"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	code = runCommand([]string{"--", "sh", "-c", "echo dirty"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	last, _ = ledger.LastEntry()
+	if !last.Dirty {
+		t.Errorf("expected dirty=true on dirty worktree, got dirty=false")
+	}
+	if len(last.DirtyHash) != 64 {
+		t.Errorf("expected 64-char sha256 dirty_hash, got %q", last.DirtyHash)
+	}
+
+	// Commit change and verify clean again
+	_ = exec.Command("git", "add", "dirty.txt").Run()
+	_ = exec.Command("git", "commit", "-m", "commit dirty file").Run()
+
+	code = runCommand([]string{"--", "sh", "-c", "echo clean again"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	last, _ = ledger.LastEntry()
+	if last.Dirty {
+		t.Errorf("expected dirty=false after commit, got dirty=true")
+	}
+	if last.DirtyHash != "" {
+		t.Errorf("expected dirty_hash=\"\" after commit, got %s", last.DirtyHash)
+	}
+}
+
+func TestRunExitCodePassthrough(t *testing.T) {
+	repoDir := initTestGitRepo(t)
+	oldDir, _ := os.Getwd()
+	defer func() {
+		_ = os.Chdir(oldDir)
+	}()
+	_ = os.Chdir(repoDir)
+
+	testCases := []int{0, 7, 42}
+	for _, expectedCode := range testCases {
+		cmdStr := fmt.Sprintf("exit %d", expectedCode)
+		code := runCommand([]string{"--", "sh", "-c", cmdStr})
+		if code != expectedCode {
+			t.Errorf("expected exit code %d, got %d", expectedCode, code)
+		}
+		ledger, err := OpenRepoLedger(repoDir)
+		if err != nil {
+			t.Fatalf("open ledger: %v", err)
+		}
+		last, _ := ledger.LastEntry()
+		if last.Exit != expectedCode {
+			t.Errorf("expected recorded exit %d, got %d", expectedCode, last.Exit)
+		}
+		if expectedCode != 0 && last.Status != "FAIL" {
+			t.Errorf("expected status FAIL for exit %d, got %s", expectedCode, last.Status)
+		}
+	}
+}

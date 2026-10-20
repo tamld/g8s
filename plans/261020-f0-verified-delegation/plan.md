@@ -62,13 +62,79 @@ Wave B is planned at outline level in phase-07. It is re-planned in detail after
 - Merge: only when all CI checks are completed and successful, with run IDs cited.
 - **PiC stops**: (1) installing hooks into the operator's customization root (T4 config); (2) Phase 07 T2 executor credential/Keychain design.
 
-## 5. Definition of Done (Wave A)
-- [ ] ADR-0033 merged
-- [ ] `f0 run`, `f0 ledger verify` (with anchors), `f0 mandate`, `f0 gate check`, `f0 status`, `f0 audit` work offline (`ci: none`)
-- [ ] `f0 hook pre-tool` denies a merge whose gate FAILs and denies bypass flags. `f0 hook stop` forces a continue on uncited status claims.
-- [ ] merger.sh Gate e refuses on gate FAIL
-- [ ] Replay suite records **actual** results. Hypothesis: hard BLOCK = C1, C2, C6, C9, C10 (5); FLAG = C5, C8 (2); not covered = C3, C4, C7 (Wave B)
-- [ ] Skill updated and synced to `~/.agents/skills/g8s-supervisor`
+## 5. Definition of Ready (DoR), Definition of Done (DoD) & Pre-Completion Checklist
+
+### 5.1. Definition of Ready (DoR)
+Một phase / slice chỉ được phép bắt đầu (`cook`) khi **tất cả** điều kiện sau đã thỏa mãn:
+- [x] **DoR-1 (Problem & Evidence Grounding)**: Mọi yêu cầu thiết kế đều truy nguyên trực tiếp về một lỗi thực tế trong bảng tự kiểm C1–C10 (ngày 2026-10-18) hoặc lỗ hổng red-team đã được xác nhận (C1–C3, M1–M9, m1–m6). Không thiết kế tính năng suy đoán (YAGNI).
+- [x] **DoR-2 (Architectural Ratification)**: Quyết định kiến trúc D1–D9 (Design B′) đã được PiC phê duyệt và đóng băng thành ADR-0033 (`#621`).
+- [x] **DoR-3 (Disjoint Scope & WriteReceipt)**: Mỗi phase có danh sách `AllowedPaths` tường minh, tách rời (`1 issue = 1 worker = 1 receipt`), hoàn toàn nằm trong `tools/f0/**`, `tools/merger*.sh`, `docs/decisions/**`, hoặc `skills/g8s-supervisor/**` — **không chạm vào `cmd/g8s` hay `internal/`** trong Wave A.
+- [x] **DoR-4 (Deterministic Acceptance Verifier)**: Mỗi phase định nghĩa rõ bộ test đơn vị/tích hợp chạy offline (`CGO_ENABLED=0 go test -count=1 ./tools/f0/...` / `bash tools/merger_test.sh`) với test fixture cụ thể trước khi giao cho F1.
+- [x] **DoR-5 (Harness Health)**: Binary `./bin/g8s` đã build mới (`make local`), `./bin/g8s doctor --json` báo `healthy`, và `G8S_STATE_DIR` được cô lập riêng cho phiên supervisor.
+
+### 5.2. Definition of Done (DoD)
+
+#### A. Per-Phase DoD (Áp dụng cho từng Phase 01 → 06)
+- [ ] **DoD-P1 (F0 → F1 Provenance)**: 100% thay đổi code/skill/ADR đi qua F1 worker (`g8s submit` + `WriteReceipt` + `g8s verify` + `g8s deliver --prune-worktree`). F0 chỉ chỉnh sửa `plans/**`.
+- [ ] **DoD-P2 (Zero Dropped / Zero Unattributed Files)**: Tập file trong `git diff` khớp 1-1 với tập `applied`/`deleted` từ `g8s deliver` (trừ `plans/**`).
+- [ ] **DoD-P3 (Unit & Integration Tests Pass)**: `CGO_ENABLED=0 go test -count=1 ./tools/f0/...` và `go vet ./tools/f0/...` pass 100% (không bị `VACUOUS` 0 test).
+- [ ] **DoD-P4 (Independent Code Review against Spec)**: Diff của phase được đối chiếu từng mục với spec của phase (bao gồm các mục red-team C1–C3, M1–M9); mọi lệch chuẩn phải được sửa bằng F1 worker trước khi commit.
+- [ ] **DoD-P5 (Self-Dogfooding Verification)**: Chạy thử binary `bin/f0` thực tế trên repo thật và ghi nhận evidence ID (`ev-xxxxxxxx`).
+
+#### B. Wave A Release DoD (`#621`, `#622`, `#623`, `#624`, `#631`, và `#620` Wave A Replay)
+- [ ] **DoD-WA1 (`#621` ADR-0033)**: `docs/decisions/0033-f0-verified-delegation.md` đã commit, khớp với kiến trúc sau red-team và được tham chiếu từ `skills/g8s-supervisor/SKILL.md`.
+- [ ] **DoD-WA2 (`#622` Evidence Ledger + `f0 run` + G5)**:
+  - Per-repo ledger tại `$(git rev-parse --git-common-dir)/f0/ledger.jsonl` và global ledger tại `~/.local/state/g8s/f0/global-ledger.jsonl` đều **bỏ qua `G8S_STATE_DIR`**.
+  - Hash chain (`prev_hash` + canonical JSON) phát hiện sửa dòng giữa; external anchor `F0-Ledger-Head: <seq>:<hash>` phát hiện cắt đuôi (tail truncation).
+  - Multi-process lockfile (`TryLock` + backoff) chịu được ≥4 tiến trình ghi đồng thời không hỏng dòng.
+  - `f0 run` tự tiêm `-json` cho `go test`, `--json` cho `g8s deliver`, phát hiện `VACUOUS` (`items_checked == 0`) cho `go test -run NONE` và `defense-in-depth`/`node dist/cli/index.js verify --files` rỗng.
+- [ ] **DoD-WA3 (`#623` Campaign Mandate)**:
+  - `f0 mandate issue|show|check` đọc nguồn sự thật từ `global-ledger.jsonl` (loại `mandate-issue`), phát hiện giả mạo cache `mandate.json`.
+  - Từ chối cấp `max_tier: T4`; tự động hạ về `T0` khi hết hạn, ngoài danh sách repo, hoặc cạn `error_budget` (tính từ các entry `debit`).
+  - Tự động nâng bậc `merge` từ `T2` lên `T3` khi chạm `excluded_paths` hoặc trust boundary (`internal/lane` `LaneSecurity`).
+- [ ] **DoD-WA4 (`#624` Gate Core + Merger Gate e + Agent Hooks)**:
+  - `f0 gate check` thực thi đầy đủ **G0** (mandate), **G1** (evidence PASS tại `head_sha`, `dirty=false`, khớp prefix `verify_commands`), **G2** (forge CI pass, 0 check = FAIL, pending = FAIL, waiver hợp lệ cùng repo & còn budget), **G3** (provenance từ `g8s-deliver` + blob hash, phát hiện `unattributed`, `dropped`, `altered-after-delivery`, loại trừ `--dry-run`), và **G6** (claim linter subject+verdict có trích dẫn `ev-` hoặc `actions/runs/<id>`).
+  - `f0 status [--report-block]`, `f0 waive`, `f0 manual`, `f0 anchor`, `f0 audit` hoạt động đầy đủ cả ở chế độ offline (`ci: none`).
+  - `tools/merger.sh` tích hợp **Gate e (f0)** và `bash tools/merger_test.sh` pass 100%.
+  - `f0 hook pre-tool` chặn `gh pr merge` / `gh api .../merge` / `git push <default>` khi gate FAIL, chặn cờ bypass (`--no-verify`, `HUSKY=0`, ...), chặn sửa `hooks.json`/ledger qua shell, và yêu cầu `force_ask` cho lệnh `T4`.
+  - `f0 hook stop` kiểm tra tin nhắn cuối của F0 bằng G6 report mode và trả `{"decision":"continue"}` (tối đa 2 lần/lượt) nếu có khẳng định trạng thái không kèm bằng chứng.
+- [ ] **DoD-WA5 (`#631` Supervisor Skill Update)**:
+  - Cập nhật `skills/g8s-supervisor/{SKILL.md,references/hard-boundary.md,references/operational-hard-lessons.md}` với bảng phân tầng `T0–T4`, bộ công cụ `f0`, và 8 bài học thực chiến từ C1–C10.
+  - Đồng bộ sang `~/.agents/skills/g8s-supervisor` sau khi merge.
+- [ ] **DoD-WA6 (`#620` Wave A Replay & Falsification Measurement)**:
+  - Bộ test `tools/f0/replay_test.go` tái hiện cả 10 sự cố C1–C10 và ghi nhận kết quả thực tế (tách biệt **BLOCK** cứng và **FLAG** cảnh báo).
+  - Đo thời gian chạy trung vị của `f0 gate check` (mục tiêu falsification clock: `< 60s`).
+- [ ] **DoD-WA7 (CI, Merge & Post-Merge Verification)**:
+  - `./tools/pre_push.sh --fast` pass.
+  - PR Wave A trên `tamld/g8s` có đầy đủ CI checks `completed` + `success` (trích dẫn run ID thực tế) trước khi merge.
+  - Chỉ đóng các issue con đã hoàn thành 100% tiêu chí (`#621`, `#622`, `#623`, `#624`, `#631`); giữ `#620` và các issue Wave B (`#625`–`#630`) mở cho Wave B.
+  - Dọn sạch worktree/state tạm, kiểm tra `git worktree list` và post-merge CI trên `main`.
+
+### 5.3. Pre-Completion Execution Checklist (Wave A)
+- [x] **Step 0 — Plan & Red-Team Review**: Lập kế hoạch chi tiết `phase-01`..`07`, chạy Red-Team review độc lập, cập nhật toàn bộ 18 phát hiện (C1–C3, M1–M9, m1–m6) vào spec.
+- [x] **Step 1 — Phase 01 (`#621` ADR-0033)**: Dispatch F1 (`b291f72a`, `f50c0b1b`), verify doc/link gates, deliver & commit (`f7da706`).
+- [ ] **Step 2 — Phase 02 (`#622` Evidence Ledger + `f0 run` + G5)**:
+  - [x] Dispatch F1 (`525d1f19`) & deliver `tools/f0/{main,ledger,parsers,run}*.go`.
+  - [ ] Fix `detectKind` cho `node ./dist/cli/index.js verify --files` / `defense-in-depth verify --files` + `env` wrapper qua F1 worker, verify dogfooding & commit `#622`.
+- [ ] **Step 3 — Phase 03 (`#623` Campaign Mandate)**:
+  - [ ] Dispatch F1 cho `tools/f0/mandate*.go`, verify tests + trust-boundary escalation (`T2 -> T3`), deliver & commit `#623`.
+- [ ] **Step 4 — Phase 04 & 04b (`#624` Gate Core + Merger Gate e + Agent Hooks)**:
+  - [ ] Dispatch F1 cho `phase-04-gate-core.md` (`gate`, `forge`, `status`, `waive`, `manual`, `anchor`, `audit`, `config`, `claims`, `merger.sh` Gate e).
+  - [ ] Dispatch F1 cho `phase-04b-agent-hooks.md` (`hook.go`, `hook_test.go`, `hooks/agy-hooks.json`).
+  - [ ] Verify `go test ./tools/f0/...` và `bash tools/merger_test.sh`, deliver & commit `#624`.
+- [ ] **Step 5 — Phase 05 (`#631` Supervisor Skill Update)**:
+  - [ ] Dispatch F1 cập nhật `skills/g8s-supervisor/**`, verify link/doc gates, deliver & commit `#631`.
+- [ ] **Step 6 — Phase 06 (`#620` Replay C1–C10 & Measurement)**:
+  - [ ] Dispatch F1 viết `tools/f0/replay_test.go` + `testdata/replay/**`.
+  - [ ] Chạy replay test & benchmark latency, cập nhật bảng kết quả thực tế vào `plan.md` §5.4, deliver & commit.
+- [ ] **Step 7 — Pre-Push, PR, Dogfood `f0 gate check` & Merge**:
+  - [ ] Chạy `./bin/f0 run -- env CGO_ENABLED=0 go test ./tools/f0/...` để ghi nhận evidence tại HEAD.
+  - [ ] Chạy `./tools/pre_push.sh --fast`, push branch, mở PR kèm `f0 status --report-block` và `F0-Ledger-Head` trailer.
+  - [ ] Chờ toàn bộ GitHub Actions checks hoàn tất xanh, chạy `./bin/f0 gate check --repo . --action merge --pr <N>`, merge PR, đồng bộ `~/.agents/skills/g8s-supervisor`, và báo cáo PiC kèm bảng đối chiếu DoD.
+
+### 5.4. Wave A Replay Results (To be populated in Phase 06)
+- Hypothesis: hard BLOCK = C1, C2, C6, C9, C10 (5); FLAG = C5, C8 (2); not covered = C3, C4, C7 (Wave B).
+- Actual results: *(pending Phase 06 execution)*
 
 ## 6. Risks
 | Risk | Mitigation |

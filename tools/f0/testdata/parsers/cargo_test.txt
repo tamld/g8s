@@ -1,0 +1,17 @@
+running 14 tests
+test tests::test_init ... ok
+test tests::test_parse_header ... ok
+test tests::test_execute_batch ... ok
+test tests::test_verify_signature ... ok
+test tests::test_commit_trailer ... ok
+test tests::test_rollback_guard ... ok
+test tests::test_concurrency_lock ... ok
+test tests::test_sqlite_wal ... ok
+test tests::test_error_classification ... ok
+test tests::test_fsops_sanitize ... ok
+test tests::test_receipt_hash ... ok
+test tests::test_worktree_clean ... ok
+test tests::test_retry_backoff ... ok
+test tests::test_boundary_filter ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s

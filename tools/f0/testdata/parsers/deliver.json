@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "kind": "deliver",
+  "cmd": "deliver",
+  "data": {
+    "task_id": "task-7b49a1d2",
+    "deliverable_dir": "/tmp/worktrees/wt-7b49a1d2",
+    "applied": [
+      "tools/f0/parsers.go",
+      "tools/f0/parsers_test.go"
+    ],
+    "deleted": [
+      "tools/f0/obsolete.go"
+    ],
+    "skipped": [],
+    "receipt_id": "rc-92a105c8",
+    "pruned_worktree": true
+  },
+  "at": "2026-10-20T08:00:00Z"
+}
