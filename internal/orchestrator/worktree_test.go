@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -421,5 +422,121 @@ func TestFanOutPreservesReceiptScopedDeliverable_ViaReceiptLookup(t *testing.T) 
 	}
 	if string(content) != "model: gemini-3.8-flash-high" {
 		t.Fatalf("deliverable content mismatch: %q", string(content))
+	}
+}
+
+// TestPoolCloseCleansUpWorktreesAndBranches verifies that Pool.Close releases all remaining
+// allocated worktrees, removes unpreserved worktrees, prunes git worktrees, and deletes all
+// pool branches while preserving worktrees that were intentionally kept (#617 Criterion 1).
+func TestPoolCloseCleansUpWorktreesAndBranches(t *testing.T) {
+	repo := setupGitRepo(t)
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir(), Prefix: "sess"})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt1, err := pool.Acquire(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("acquire wt1: %v", err)
+	}
+	wt2, err := pool.Acquire(ctx, "worker-2")
+	if err != nil {
+		t.Fatalf("acquire wt2: %v", err)
+	}
+	wt3, err := pool.Acquire(ctx, "worker-3")
+	if err != nil {
+		t.Fatalf("acquire wt3: %v", err)
+	}
+
+	// In wt3, write a dirty file and release with keep=true to preserve it
+	if err := os.WriteFile(filepath.Join(wt3.Path, "deliverable.txt"), []byte("kept"), 0o644); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+	if err := pool.Release(ctx, wt3, true); err != nil {
+		t.Fatalf("release wt3: %v", err)
+	}
+
+	// Release wt1 normally with keep=false before Close
+	if err := pool.Release(ctx, wt1, false); err != nil {
+		t.Fatalf("release wt1: %v", err)
+	}
+
+	// wt2 is left allocated (simulating an in-flight worker when Close is called)
+	if _, err := os.Stat(wt2.Path); os.IsNotExist(err) {
+		t.Fatalf("expected wt2 to exist before Close: %s", wt2.Path)
+	}
+	mustRunGit(t, repo, "rev-parse", "--verify", wt2.Branch)
+
+	// Close the pool
+	if err := pool.Close(ctx); err != nil {
+		t.Fatalf("pool.Close: %v", err)
+	}
+
+	// 1. wt1 and wt2 must have their directories removed
+	if _, err := os.Stat(wt1.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected wt1 path to be removed, but still exists: %s", wt1.Path)
+	}
+	if _, err := os.Stat(wt2.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected wt2 path to be removed, but still exists: %s", wt2.Path)
+	}
+
+	// 2. wt1 and wt2 branches must be deleted
+	for _, br := range []string{wt1.Branch, wt2.Branch} {
+		cmd := exec.Command("git", "rev-parse", "--verify", br)
+		cmd.Dir = repo
+		if err := cmd.Run(); err == nil {
+			t.Fatalf("expected branch %s to be deleted, but still exists", br)
+		}
+	}
+
+	// 3. wt3 was intentionally preserved: directory and branch must remain intact
+	if _, err := os.Stat(wt3.Path); os.IsNotExist(err) {
+		t.Fatalf("expected preserved wt3 path to still exist: %s", wt3.Path)
+	}
+	mustRunGit(t, repo, "rev-parse", "--verify", wt3.Branch)
+
+	// 4. No active leases remain in pool
+	if len(pool.Active()) != 0 {
+		t.Fatalf("expected 0 active leases, got %d", len(pool.Active()))
+	}
+}
+
+// TestPoolReleaseFallbackRemovesWorktreeAndDeletesBranch verifies that when git worktree remove
+// fails, Release(keep=false) falls back to os.RemoveAll, runs git worktree prune, and deletes
+// the branch (#617 Criterion 1).
+func TestPoolReleaseFallbackRemovesWorktreeAndDeletesBranch(t *testing.T) {
+	repo := setupGitRepo(t)
+	pool, err := NewPool(PoolOptions{Repo: repo, Root: t.TempDir(), Prefix: "sess"})
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+
+	ctx := context.Background()
+	wt, err := pool.Acquire(ctx, "fallback-worker")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	// Corrupt worktree directory metadata by removing .git file so git worktree remove fails
+	if err := os.Remove(filepath.Join(wt.Path, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+
+	// Release with keep=false should invoke fallback: os.RemoveAll + git worktree prune + gitDeleteBranch
+	if err := pool.Release(ctx, wt, false); err != nil {
+		t.Fatalf("expected Release to succeed via fallback, got: %v", err)
+	}
+
+	// Worktree directory must be removed
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected worktree %s to be removed by fallback, but still exists", wt.Path)
+	}
+
+	// Branch must be deleted
+	cmd := exec.Command("git", "rev-parse", "--verify", wt.Branch)
+	cmd.Dir = repo
+	if err := cmd.Run(); err == nil {
+		t.Fatalf("expected branch %s to be deleted, but still exists", wt.Branch)
 	}
 }

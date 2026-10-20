@@ -4,7 +4,8 @@
 
 * **FR-1 (Role & Permission Harness)**:
   * Enforce 6 distinct worker roles: `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`.
-  * Enforce 3 permission profiles: `read_only` (default), `automation_read` (permits CLI permission skipping behind sandbox), `workspace_write` (requires write receipt).
+  * Enforce 4 permission profiles: `read_only` (default), `automation_read` (permits CLI permission skipping behind sandbox), `workspace_write` (requires write receipt), and `supplied_text` (disables all model-initiated tool calls at the provider adapter boundary).
+  * Enforce tool policy options (`--tool-policy default|none`): `supplied_text` and `--tool-policy none` disable all model-facing tool calls at the provider adapter boundary (`PreToolUse` hook interceptor + callback audit). Boundary specification: this capability governs model-facing tool calls at the provider adapter boundary and does not claim an OS filesystem sandbox or prove that trusted provider/runtime housekeeping made no changes.
   * Enforce pre-dispatch safety filters: `BLOCKED_TASK_PATTERNS` (destructive shell/database commands) and `DENIED_PATH_FRAGMENTS` (`.ssh`, `.aws`, `.env`, `id_rsa`, etc.).
   * Contract Prompt Injection: Inject role boundaries, mutation policies, and wiki/session constraints into the worker prompt.
 

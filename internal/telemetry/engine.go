@@ -847,6 +847,7 @@ func (e *TelemetryEngine) QueryTopPatterns(ctx context.Context, limit int) ([]Ne
 		       occurrence_count, first_seen, last_seen, affected_packages,
 		       example_contexts, confidence_score, status
 		FROM negative_patterns
+		WHERE status IN ('VALIDATED', 'APPLIED') AND confidence_score >= 0.5
 		ORDER BY occurrence_count DESC, confidence_score DESC
 		LIMIT ?`, limit)
 	if err != nil {
@@ -997,8 +998,10 @@ func (e *TelemetryEngine) GetRelevantPatterns(ctx context.Context, role string, 
 
 	// Filter by relevance to role, path, and prompt
 	relevant := make([]NegativePattern, 0)
+	lowerRole := strings.ToLower(role)
+	lowerPromptPart := strings.ToLower(prompt[:min(20, len(prompt))])
 	for _, p := range patterns {
-		score := relevanceScore(p, role, path, prompt)
+		score := relevanceScore(p, path, lowerRole, lowerPromptPart)
 		if score > 0.3 {
 			relevant = append(relevant, p)
 		}
@@ -1006,7 +1009,7 @@ func (e *TelemetryEngine) GetRelevantPatterns(ctx context.Context, role string, 
 	return relevant, nil
 }
 
-func relevanceScore(pattern NegativePattern, role, path, prompt string) float64 {
+func relevanceScore(pattern NegativePattern, path, lowerRole, lowerPromptPart string) float64 {
 	score := 0.0
 	pkgStr := strings.Join(pattern.AffectedPackages, " ")
 	if strings.Contains(pkgStr, path) {
@@ -1014,12 +1017,10 @@ func relevanceScore(pattern NegativePattern, role, path, prompt string) float64 
 	}
 
 	lowerPatternType := strings.ToLower(string(pattern.PatternType))
-	lowerRole := strings.ToLower(role)
 	if strings.Contains(lowerPatternType, lowerRole) {
 		score += 0.2
 	}
 
-	lowerPromptPart := strings.ToLower(prompt[:min(20, len(prompt))])
 	for _, ctx := range pattern.ExampleContexts {
 		if strings.Contains(strings.ToLower(ctx), lowerPromptPart) {
 			score += 0.3
@@ -1042,8 +1043,21 @@ func RenderPreflightContext(patterns []NegativePattern) string {
 	if len(patterns) == 0 {
 		return ""
 	}
-	ranked := make([]NegativePattern, len(patterns))
-	copy(ranked, patterns)
+	var eligible []NegativePattern
+	for _, p := range patterns {
+		if p.ConfidenceScore < 0.5 {
+			continue
+		}
+		if p.Status != "" && p.Status != PatternStatusValidated && p.Status != PatternStatusApplied {
+			continue
+		}
+		eligible = append(eligible, p)
+	}
+	if len(eligible) == 0 {
+		return ""
+	}
+	ranked := make([]NegativePattern, len(eligible))
+	copy(ranked, eligible)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		return ranked[i].ConfidenceScore*float64(ranked[i].OccurrenceCount) >
 			ranked[j].ConfidenceScore*float64(ranked[j].OccurrenceCount)

@@ -200,6 +200,69 @@ func TestHotfixRouting(t *testing.T) {
 	}
 }
 
+// TestIsHotfixSummaryUnicodeCompatibility tests explicit hotfix matching compatibility
+// for Unicode characters such as U+0130 ('İ') alongside ordinary ASCII controls and non-matches (#615).
+func TestIsHotfixSummaryUnicodeCompatibility(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary string
+		want    bool
+	}{
+		// Unicode U+0130 ('İ') compatibility cases
+		{name: "unicode lowercase/mixed hotfİx", summary: "hotfİx", want: true},
+		{name: "unicode uppercase HOTFİX: prefix", summary: "HOTFİX:", want: true},
+		{name: "unicode lane marker lane:hotfİx", summary: "lane:hotfİx", want: true},
+		{name: "unicode [HOTFİX] bracket tag", summary: "[HOTFİX] patch", want: true},
+		{name: "unicode (hotfİx) parenthesis tag", summary: "(hotfİx) bug", want: true},
+
+		// Ordinary ASCII controls
+		{name: "ascii exact hotfix", summary: "hotfix", want: true},
+		{name: "ascii exact uppercase HOTFIX", summary: "HOTFIX", want: true},
+		{name: "ascii exact digit 0", summary: "0", want: true},
+		{name: "ascii marker lane:0", summary: "lane:0", want: true},
+		{name: "ascii marker lane: 0", summary: "lane: 0", want: true},
+		{name: "ascii marker lane:hotfix", summary: "lane:hotfix", want: true},
+		{name: "ascii prefix hotfix:", summary: "hotfix: critical bug", want: true},
+		{name: "ascii prefix hotfix/", summary: "hotfix/urgent-patch", want: true},
+		{name: "ascii tag [hotfix]", summary: "[hotfix] emergency release", want: true},
+		{name: "ascii tag (hotfix)", summary: "(hotfix) null pointer fix", want: true},
+		{name: "ascii prefix hotfix -", summary: "hotfix - quick fix", want: true},
+		{name: "ascii prefix hotfix space", summary: "hotfix quick fix", want: true},
+
+		// Non-matches
+		{name: "empty summary", summary: "", want: false},
+		{name: "regular fix prefix", summary: "fix: standard bug fix", want: false},
+		{name: "refactor prefix", summary: "refactor: optimize parser", want: false},
+		{name: "feat prefix", summary: "feat: add shiny feature", want: false},
+		{name: "word hotfixing", summary: "hotfixing the server", want: false},
+		{name: "substring my_hotfix", summary: "my_hotfix_branch", want: false},
+		{name: "other lane marker lane:1", summary: "lane:1", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDirect := lane.IsHotfixSummary(tc.summary)
+			if gotDirect != tc.want {
+				t.Errorf("lane.IsHotfixSummary(%q) = %v; want %v", tc.summary, gotDirect, tc.want)
+			}
+
+			gotRoute := lane.Route(lane.Input{
+				Paths:   []string{"internal/analyzer/analyzer.go"},
+				Summary: tc.summary,
+			})
+			if tc.want {
+				if gotRoute != lane.LaneHotfix {
+					t.Errorf("lane.Route(summary=%q) = %q; want %q", tc.summary, gotRoute, lane.LaneHotfix)
+				}
+			} else {
+				if gotRoute == lane.LaneHotfix {
+					t.Errorf("lane.Route(summary=%q) unexpectedly routed to LaneHotfix", tc.summary)
+				}
+			}
+		})
+	}
+}
+
 // TestRefactorRouting tests pure refactor declarations routing to Lane R.
 func TestRefactorRouting(t *testing.T) {
 	tests := []struct {

@@ -30,6 +30,8 @@ type Pool struct {
 
 	mu        sync.Mutex
 	allocated map[string]Worktree // active leases
+	created   []Worktree          // all worktrees created by this pool
+	preserved map[string]bool      // worktrees intentionally preserved via Release(keep=true)
 }
 
 // PoolOptions configures a Pool. Repo is required; Root + Base + Prefix
@@ -79,6 +81,7 @@ func NewPool(opts PoolOptions) (*Pool, error) {
 		base:      base,
 		prefix:    prefix,
 		allocated: map[string]Worktree{},
+		preserved: map[string]bool{},
 	}, nil
 }
 
@@ -136,6 +139,7 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 		BaseSHA: baseSHA,
 	}
 	p.allocated[taskID] = wt
+	p.created = append(p.created, wt)
 	p.mu.Unlock()
 	return wt, nil
 }
@@ -165,21 +169,82 @@ func (p *Pool) Release(_ context.Context, wt Worktree, keep bool, protected ...s
 	if keep {
 		if dirty, derr := worktreeDirty(wt.Path); derr == nil && dirty {
 			// preserve: skip removal, keep branch implicitly (it exists)
+			p.mu.Lock()
+			if p.preserved == nil {
+				p.preserved = make(map[string]bool)
+			}
+			p.preserved[wt.ID] = true
+			p.mu.Unlock()
 			fmt.Fprintf(os.Stderr, "[info] orchestrator: worktree %s preserved (uncommitted deliverables)\n", wt.Path)
 			return nil
 		}
 		if hasProtectedPath(wt.Path, effectiveProtected) {
 			// preserve: skip removal, keep branch implicitly (receipt-scoped deliverables)
+			p.mu.Lock()
+			if p.preserved == nil {
+				p.preserved = make(map[string]bool)
+			}
+			p.preserved[wt.ID] = true
+			p.mu.Unlock()
 			fmt.Fprintf(os.Stderr, "[info] orchestrator: worktree %s preserved (receipt-scoped deliverables)\n", wt.Path)
 			return nil
 		}
 	}
 
+	if !keep {
+		if err := gitRemoveWorktree(p.repo, wt.Path); err != nil {
+			safeRemoveWorktreeDir(p.root, wt.Path)
+			_ = gitPruneWorktrees(p.repo)
+		}
+		_ = gitDeleteBranch(p.repo, wt.Branch)
+		return nil
+	}
+
 	if err := gitRemoveWorktree(p.repo, wt.Path); err != nil {
 		return fmt.Errorf("git worktree remove: %w", err)
 	}
-	if !keep {
-		_ = gitDeleteBranch(p.repo, wt.Branch)
+	return nil
+}
+
+// Close releases all remaining entries in p.allocated with keep=false,
+// removes any leftover worktree directories from p.created that were not
+// intentionally preserved (!keep), runs git worktree prune on p.repo,
+// and deletes any remaining <p.prefix>/* branches created by this Pool.
+func (p *Pool) Close(ctx context.Context) error {
+	p.mu.Lock()
+	remaining := make([]Worktree, 0, len(p.allocated))
+	for _, wt := range p.allocated {
+		remaining = append(remaining, wt)
+	}
+	p.mu.Unlock()
+
+	for _, wt := range remaining {
+		_ = p.Release(ctx, wt, false)
+	}
+
+	p.mu.Lock()
+	created := append([]Worktree(nil), p.created...)
+	preserved := make(map[string]bool, len(p.preserved))
+	for k, v := range p.preserved {
+		preserved[k] = v
+	}
+	p.mu.Unlock()
+
+	for _, wt := range created {
+		if preserved[wt.ID] {
+			continue
+		}
+		safeRemoveWorktreeDir(p.root, wt.Path)
+	}
+	_ = gitPruneWorktrees(p.repo)
+
+	for _, wt := range created {
+		if preserved[wt.ID] {
+			continue
+		}
+		if p.prefix != "" && strings.HasPrefix(wt.Branch, p.prefix+"/") {
+			_ = gitDeleteBranch(p.repo, wt.Branch)
+		}
 	}
 	return nil
 }
@@ -345,6 +410,32 @@ func gitRemoveWorktree(repo, path string) error {
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func gitPruneWorktrees(repo string) error {
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = repo
+	return cmd.Run()
+}
+
+// safeRemoveWorktreeDir deletes path only if it is a non-empty, safe subpath inside root,
+// preventing accidental deletion of root or os.TempDir().
+func safeRemoveWorktreeDir(root, path string) {
+	if path == "" {
+		return
+	}
+	cleanPath := filepath.Clean(path)
+	cleanRoot := filepath.Clean(root)
+	if cleanPath == cleanRoot || cleanPath == filepath.Clean(os.TempDir()) || cleanPath == "/" || cleanPath == "." {
+		return
+	}
+	if cleanRoot != "" && cleanRoot != "." && cleanRoot != "/" {
+		rel, err := filepath.Rel(cleanRoot, cleanPath)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return
+		}
+	}
+	_ = os.RemoveAll(cleanPath)
 }
 
 func gitDeleteBranch(repo, branch string) error {

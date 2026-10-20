@@ -40,10 +40,11 @@ type poolIsolation struct {
 	pool  *orchestrator.Pool
 	store *controlplane.Store
 
-	mu    sync.Mutex
-	rows  []string // live attempt row IDs, heartbeated by the drain loop
-	warn  func(string)
-	outMu *sync.Mutex // serializes stderr warnings (worker goroutines)
+	mu          sync.Mutex
+	rows        []string // live attempt row IDs, heartbeated by the drain loop
+	cleanupOnce sync.Once
+	warn        func(string)
+	outMu       *sync.Mutex // serializes stderr warnings (worker goroutines)
 }
 
 func (p *poolIsolation) Acquire(ctx context.Context, workerID string) (string, func(), error) {
@@ -101,6 +102,34 @@ func (p *poolIsolation) forget(id string) {
 	p.mu.Unlock()
 }
 
+// Cleanup marks any remaining session rows dead and closes the worktree pool,
+// ensuring all session pool worktrees and sess/worker-* branches are cleaned up.
+func (p *poolIsolation) Cleanup(ctx context.Context) {
+	p.cleanupOnce.Do(func() {
+		p.mu.Lock()
+		rows := append([]string(nil), p.rows...)
+		p.rows = nil
+		p.mu.Unlock()
+
+		if p.store != nil {
+			for _, id := range rows {
+				if ferr := p.store.MarkSessionDead(ctx, id); ferr != nil {
+					if p.warn != nil {
+						p.warn("worker: mark attempt session dead: " + ferr.Error())
+					}
+				}
+			}
+		}
+		if p.pool != nil {
+			if cerr := p.pool.Close(ctx); cerr != nil {
+				if p.warn != nil {
+					p.warn("worker: pool close: " + cerr.Error())
+				}
+			}
+		}
+	})
+}
+
 // runWorkerConcurrentDrain drains the queue through up to N simultaneous
 // attempts (#394 PR-B). Concurrency is hard-gated on worktree isolation:
 // outside a git checkout it is a usage error, never a warning. RunOnce
@@ -130,13 +159,6 @@ func runWorkerConcurrentDrain(ctx context.Context, sup *worker.Supervisor, store
 	}); rerr != nil {
 		exitRuntime("worker", "session-gate", traceID, cli.CodeRuntime, rerr, "", jsonl)
 	}
-	gate := &sessionGate{ID: sessionID, Mode: controlplane.SessionModeWorktree, store: store}
-	finishGate := func() {
-		if ferr := gate.Finish(context.Background(), false); ferr != nil {
-			fmt.Fprintln(os.Stderr, "worker: session gate finish:", ferr)
-		}
-	}
-	defer finishGate()
 
 	var outMu sync.Mutex
 	iso := &poolIsolation{pool: pool, store: store, outMu: &outMu}
@@ -145,6 +167,15 @@ func runWorkerConcurrentDrain(ctx context.Context, sup *worker.Supervisor, store
 		defer outMu.Unlock()
 		fmt.Fprintln(os.Stderr, msg)
 	}
+
+	gate := &sessionGate{ID: sessionID, Mode: controlplane.SessionModeWorktree, store: store}
+	finishGate := func() {
+		iso.Cleanup(context.Background())
+		if ferr := gate.Finish(context.Background(), false); ferr != nil {
+			fmt.Fprintln(os.Stderr, "worker: session gate finish:", ferr)
+		}
+	}
+	defer finishGate()
 
 	hbCtx, hbStop := context.WithCancel(context.Background())
 	defer hbStop()

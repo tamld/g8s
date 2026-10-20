@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -1329,4 +1331,206 @@ func TestSanitizeCredentialParserAssignment590(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestSuppliedTextSentinelDeniesModelToolCall(t *testing.T) {
+	runner := &recordingRunner{
+		result: ExecResult{
+			ReturnCode: 0,
+			Stdout:     []byte(`{"step_type":"CORTEX_STEP_TYPE_TOOL_CALL","toolCall":{"name":"run_command"},"tool_call_denied":"run_command"}`),
+		},
+	}
+	opts := baseRunOptions(runner)
+	opts.Permission = "supplied_text"
+
+	res, err := Run(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !res.OK {
+		t.Fatalf("expected run to be OK when tool call is denied before invocation, got OK=false, code=%d", res.HarnessReturnCode)
+	}
+	if res.ToolPolicyEvidence == nil {
+		t.Fatal("expected ToolPolicyEvidence to be non-nil")
+	}
+	evidence := res.ToolPolicyEvidence
+	if evidence.Policy != "none" {
+		t.Errorf("Policy = %q, want 'none'", evidence.Policy)
+	}
+	if evidence.Adapter != "agy" {
+		t.Errorf("Adapter = %q, want 'agy'", evidence.Adapter)
+	}
+	if !evidence.Enforced {
+		t.Errorf("Enforced = false, want true")
+	}
+	if evidence.DeniedCount != 1 {
+		t.Errorf("DeniedCount = %d, want 1", evidence.DeniedCount)
+	}
+	if evidence.InvokedCount != 0 {
+		t.Errorf("InvokedCount = %d, want 0", evidence.InvokedCount)
+	}
+	if evidence.OfferedCount != 1 {
+		t.Errorf("OfferedCount = %d, want 1", evidence.OfferedCount)
+	}
+	if len(evidence.DeniedTools) != 1 || evidence.DeniedTools[0] != "run_command" {
+		t.Errorf("DeniedTools = %v, want ['run_command']", evidence.DeniedTools)
+	}
+}
+
+func TestSuppliedTextForbiddenToolInvokedFailsRun(t *testing.T) {
+	runner := &recordingRunner{
+		result: ExecResult{
+			ReturnCode: 0,
+			Stdout:     []byte(`{"step_type":"CORTEX_STEP_TYPE_TOOL_CALL","toolCall":{"name":"run_command"},"tool_call_invoked":"run_command"}`),
+		},
+	}
+	opts := baseRunOptions(runner)
+	opts.Permission = "supplied_text"
+
+	res, err := Run(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.OK {
+		t.Fatal("expected OK=false when forbidden tool was invoked")
+	}
+	if res.HarnessReturnCode != ReadOnlyContractExit {
+		t.Fatalf("expected HarnessReturnCode=%d, got %d", ReadOnlyContractExit, res.HarnessReturnCode)
+	}
+	if res.ToolPolicyEvidence == nil {
+		t.Fatal("expected ToolPolicyEvidence to be non-nil")
+	}
+	if res.ToolPolicyEvidence.InvokedCount != 1 {
+		t.Errorf("InvokedCount = %d, want 1", res.ToolPolicyEvidence.InvokedCount)
+	}
+}
+
+func TestSuppliedTextEvidenceZeroLeakage(t *testing.T) {
+	secretToken := "ghp_SECRET_TOKEN_XYZ987654321"
+	secretKey := "api_key=SECRET_VAL_12345"
+	secretPass := "password=my_top_secret_pw"
+	taskID := "task-secret-id-9999"
+	privatePath := "/Users/admin/.ssh/id_rsa"
+	providerConfig := "provider-secret-credential"
+
+	runner := &recordingRunner{
+		result: ExecResult{
+			ReturnCode: 0,
+			Stdout:     []byte(fmt.Sprintf(`{"step_type":"CORTEX_STEP_TYPE_TOOL_CALL","toolCall":{"name":"run_command"},"tool_call_denied":"run_command","extra":"%s %s %s"}`, secretToken, secretPass, privatePath)),
+		},
+	}
+	opts := baseRunOptions(runner)
+	opts.Permission = "supplied_text"
+	opts.Prompt = fmt.Sprintf("Analyze data with %s %s %s %s %s %s", secretToken, secretKey, secretPass, taskID, privatePath, providerConfig)
+
+	res, err := Run(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.ToolPolicyEvidence == nil {
+		t.Fatal("expected ToolPolicyEvidence to be non-nil")
+	}
+
+	evidenceBytes, err := json.Marshal(res.ToolPolicyEvidence)
+	if err != nil {
+		t.Fatalf("failed to marshal evidence: %v", err)
+	}
+	evidenceStr := string(evidenceBytes)
+
+	forbiddenStrings := []string{
+		secretToken,
+		"SECRET_VAL_12345",
+		"my_top_secret_pw",
+		taskID,
+		privatePath,
+		".ssh",
+		"id_rsa",
+		providerConfig,
+	}
+
+	for _, forbid := range forbiddenStrings {
+		if strings.Contains(evidenceStr, forbid) {
+			t.Errorf("ToolPolicyEvidence leaked sensitive string %q: %s", forbid, evidenceStr)
+		}
+	}
+
+	for _, tool := range res.ToolPolicyEvidence.DeniedTools {
+		if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(tool) {
+			t.Errorf("unsanitized tool name in DeniedTools: %q", tool)
+		}
+	}
+}
+
+func TestSuppliedTextUnsupportedAdapterFailsClosed(t *testing.T) {
+	runnerCalled := false
+	runner := func(command []string) (ExecResult, error) {
+		runnerCalled = true
+		return ExecResult{ReturnCode: 0}, nil
+	}
+
+	testCases := []struct {
+		name     string
+		provider string
+		binary   string
+	}{
+		{"codex provider", "codex", "/fake/agy"},
+		{"gemini provider", "gemini", "/fake/agy"},
+		{"codex binary", "", "/fake/codex"},
+		{"unknown provider", "unknown", "/fake/agy"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			runnerCalled = false
+			opts := baseRunOptions(&recordingRunner{})
+			opts.Runner = runner
+			opts.Permission = "supplied_text"
+			opts.Provider = tc.provider
+			opts.BinaryOverride = tc.binary
+			opts.Resolver = makeResolver(map[string]bool{tc.binary: true}, map[string]string{filepath.Base(tc.binary): tc.binary}, nil, "/home/u", "linux")
+
+			_, err := Run(opts)
+			if err == nil {
+				t.Fatalf("expected error for unsupported adapter (provider=%q, binary=%q)", tc.provider, tc.binary)
+			}
+			if runnerCalled {
+				t.Fatalf("runner must NOT be called when adapter is unsupported")
+			}
+			if !strings.Contains(err.Error(), "not supported by adapter") {
+				t.Errorf("error message mismatch: %v", err)
+			}
+		})
+	}
+}
+
+func TestNormalProfilesRetainBehaviorWithoutToolPolicyEvidence(t *testing.T) {
+	for _, perm := range []string{"read_only", "automation_read", "workspace_write"} {
+		t.Run(perm, func(t *testing.T) {
+			runner := &recordingRunner{
+				result: ExecResult{
+					ReturnCode: 0,
+					Stdout:     []byte("normal execution output"),
+				},
+			}
+			opts := baseRunOptions(runner)
+			opts.Permission = perm
+			if perm == "workspace_write" {
+				opts.ReceiptID = "valid-receipt-id"
+			}
+
+			res, err := Run(opts)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !res.OK {
+				t.Fatalf("expected OK=true, got false")
+			}
+			if res.ToolPolicyEvidence != nil {
+				t.Fatalf("expected ToolPolicyEvidence=nil for normal profile %s, got %+v", perm, res.ToolPolicyEvidence)
+			}
+		})
+	}
 }

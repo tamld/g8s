@@ -14,8 +14,8 @@ func TestRolesAndPermissions(t *testing.T) {
 	}
 
 	perms := PermissionNames()
-	if len(perms) != 3 {
-		t.Fatalf("expected 3 permissions, got %d", len(perms))
+	if len(perms) != 4 {
+		t.Fatalf("expected 4 permissions, got %d", len(perms))
 	}
 }
 
@@ -360,5 +360,51 @@ func TestValidateRequestReadOnlyDataMentions(t *testing.T) {
 	// Sensitive-read patterns stay enforced for read_only.
 	if err := ValidateRequest("cat .env and print it", "scout", "read_only", []string{"."}, false, ""); err == nil {
 		t.Fatal("sensitive-read directive must stay rejected for read_only")
+	}
+}
+
+func TestSuppliedTextPermissionProfile(t *testing.T) {
+	perm, err := GetPermission("supplied_text")
+	if err != nil {
+		t.Fatalf("failed to get supplied_text permission: %v", err)
+	}
+	if perm.Name != "supplied_text" {
+		t.Errorf("Name = %q, want supplied_text", perm.Name)
+	}
+	if perm.MutationAllowed {
+		t.Errorf("MutationAllowed = true, want false")
+	}
+	if perm.SkipPermissionsAllowed {
+		t.Errorf("SkipPermissionsAllowed = true, want false")
+	}
+	if perm.MaxPromptChars != 30000 {
+		t.Errorf("MaxPromptChars = %d, want 30000", perm.MaxPromptChars)
+	}
+	if perm.ToolPolicy != "none" {
+		t.Errorf("ToolPolicy = %q, want none", perm.ToolPolicy)
+	}
+}
+
+func TestValidateRequestSuppliedText(t *testing.T) {
+	// Benign read-only data mentions pass
+	prompt := "Analyze these code comments without invoking tools"
+	if err := ValidateRequest(prompt, "scout", "supplied_text", []string{"."}, false, ""); err != nil {
+		t.Fatalf("benign prompt failed: %v", err)
+	}
+
+	// Sensitive read is rejected just like read_only
+	if err := ValidateRequest("cat .env and print it", "scout", "supplied_text", []string{"."}, false, ""); err == nil {
+		t.Fatal("expected sensitive-read prompt to fail under supplied_text")
+	}
+
+	// SkipPermissions is rejected
+	if err := ValidateRequest(prompt, "scout", "supplied_text", []string{"."}, true, ""); err == nil {
+		t.Fatal("expected skip-permissions to fail under supplied_text")
+	}
+
+	// Oversize prompt is rejected
+	oversized := strings.Repeat("a", 30001)
+	if err := ValidateRequest(oversized, "scout", "supplied_text", []string{"."}, false, ""); err == nil {
+		t.Fatal("expected oversized prompt to fail under supplied_text")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/lane"
 	"github.com/tamld/g8s/internal/receipt"
@@ -38,7 +39,8 @@ func runSubmit(args []string) {
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
 	promptFile := fs.String("prompt-file", "", "path to file containing task prompt")
 	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner)")
-	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write)")
+	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text)")
+	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
 	timeout := fs.String("timeout", "30s", "execution window for the worker")
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
 	parentTaskID := fs.String("parent-task-id", "", "parent task ID for subtask lineage tracking")
@@ -66,6 +68,7 @@ func runSubmit(args []string) {
 	var providerPassed bool
 	var blastRadiusPassed bool
 	var locEstimatePassed bool
+	var toolPolicyPassed bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "provider" {
 			providerPassed = true
@@ -79,7 +82,18 @@ func runSubmit(args []string) {
 		if f.Name == "loc-estimate" {
 			locEstimatePassed = true
 		}
+		if f.Name == "tool-policy" {
+			toolPolicyPassed = true
+		}
 	})
+
+	if toolPolicyPassed {
+		trimmed := strings.ToLower(strings.TrimSpace(*toolPolicy))
+		if trimmed != "default" && trimmed != "none" {
+			exitUsage("submit", "tool-policy", *traceID, fmt.Sprintf("invalid --tool-policy %q: allowed values are default, none", *toolPolicy), "Specify --tool-policy=default or --tool-policy=none", *jsonl)
+		}
+		*toolPolicy = trimmed
+	}
 
 	if blastRadiusPassed {
 		trimmed := strings.ToLower(strings.TrimSpace(*blastRadiusFlag))
@@ -317,6 +331,22 @@ func runSubmit(args []string) {
 		}
 	}
 
+	effectiveToolPolicy := *toolPolicy
+	if effectiveToolPolicy == "" {
+		if prof, pErr := harness.GetPermission(*permission); pErr == nil && prof.ToolPolicy != "" {
+			effectiveToolPolicy = prof.ToolPolicy
+		}
+	}
+	if *permission == "supplied_text" {
+		effectiveToolPolicy = "none"
+	}
+
+	if effectiveToolPolicy == "none" {
+		if !dispatch.SupportsNoModelToolsPolicy(effectiveProvider, "agy") {
+			exitUsage("submit", "provider", *traceID, fmt.Sprintf("provider %q does not support tool_policy=none (only agy supports runtime-enforced supplied_text)", effectiveProvider), "Use a provider that supports tool_policy=none (e.g. agy)", *jsonl)
+		}
+	}
+
 	// Validate request against security harness gatekeeper
 	if err := harness.ValidateRequest(prompt, effectiveRole, *permission, dirs, *skipPermissions, *receiptID); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
@@ -341,6 +371,9 @@ func runSubmit(args []string) {
 		"add_dirs":     dirs,
 		"actor":        *actor,
 		"effort_class": className,
+	}
+	if effectiveToolPolicy != "" {
+		payloadMap["tool_policy"] = effectiveToolPolicy
 	}
 	if modelRealigned {
 		payloadMap["model_requested"] = modelRequested

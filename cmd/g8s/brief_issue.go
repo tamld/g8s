@@ -165,7 +165,7 @@ func skillBankDir() string {
 }
 
 // preflightSection builds the negative-pattern pre-flight section from the
-// telemetry ledger (#253, #594). Prioritizes path/prompt-scoped patterns via
+// telemetry ledger (#253, #594, #633). Prioritizes path/prompt-scoped patterns via
 // GetRelevantPatterns and falls back to QueryTopPatterns, capped at K_max
 // (ResolveMaxActiveRules). Empty when telemetry is disabled, K_max == 0, or
 // the ledger cannot be opened — brief issuance must never fail because of telemetry.

@@ -7,14 +7,17 @@
 package dispatch
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -360,6 +363,8 @@ type CommandOptions struct {
 	Home string
 	// Effort pins agy's reasoning effort (low|medium|high). Empty omits --effort.
 	Effort string
+	// ToolPolicy configures model tool use ("" | "default" | "none").
+	ToolPolicy string
 }
 
 // BuildCommand constructs the AGY argv. The sandbox stays enabled unless the
@@ -541,6 +546,8 @@ type RunOptions struct {
 	BinaryOverride  string
 	// Effort overrides reasoning effort (low|medium|high). Empty falls back to DefaultEffort.
 	Effort string
+	// ToolPolicy configures model tool use ("" | "default" | "none").
+	ToolPolicy string
 
 	// Resolver overrides resolution seams; zero functions use host defaults.
 	Resolver ResolveOptions
@@ -548,6 +555,17 @@ type RunOptions struct {
 	Runner Runner
 	// Clock measures duration; nil uses time.Now (constitution: injectable).
 	Clock func() time.Time
+}
+
+// ToolPolicyEvidence captures enforcement details and counts for model tool calls.
+type ToolPolicyEvidence struct {
+	Policy       string   `json:"policy"`         // "none"
+	Adapter      string   `json:"adapter"`        // e.g. "agy"
+	Enforced     bool     `json:"enforced"`
+	OfferedCount int      `json:"offered_count"`
+	DeniedCount  int      `json:"denied_count"`
+	InvokedCount int      `json:"invoked_count"`
+	DeniedTools  []string `json:"denied_tools,omitempty"`
 }
 
 // ContractViolationReport summarizes read-only policy enforcement results.
@@ -559,20 +577,21 @@ type ContractViolationReport struct {
 
 // Result is the structured dispatch outcome written by the CLI envelope.
 type Result struct {
-	OK                bool                     `json:"ok"`
-	ReturnCode        int                      `json:"returncode"`
-	HarnessReturnCode int                      `json:"harness_returncode"`
-	DurationSeconds   float64                  `json:"duration_seconds"`
-	Provider          string                   `json:"provider,omitempty"`
-	Model             string                   `json:"model"`
-	Role              string                   `json:"role"`
-	Permission        string                   `json:"permission"`
-	AGYBin            string                   `json:"agy_bin"`
-	AddDirs           []string                 `json:"add_dirs"`
-	CommandPreview    string                   `json:"command_preview"`
-	Stdout            string                   `json:"stdout"`
-	Stderr            string                   `json:"stderr"`
-	ContractViolation *ContractViolationReport `json:"contract_violation,omitempty"`
+	OK                 bool                     `json:"ok"`
+	ReturnCode         int                      `json:"returncode"`
+	HarnessReturnCode  int                      `json:"harness_returncode"`
+	DurationSeconds    float64                  `json:"duration_seconds"`
+	Provider           string                   `json:"provider,omitempty"`
+	Model              string                   `json:"model"`
+	Role               string                   `json:"role"`
+	Permission         string                   `json:"permission"`
+	AGYBin             string                   `json:"agy_bin"`
+	AddDirs            []string                 `json:"add_dirs"`
+	CommandPreview     string                   `json:"command_preview"`
+	Stdout             string                   `json:"stdout"`
+	Stderr             string                   `json:"stderr"`
+	ContractViolation  *ContractViolationReport `json:"contract_violation,omitempty"`
+	ToolPolicyEvidence *ToolPolicyEvidence      `json:"tool_policy_evidence,omitempty"`
 }
 
 // Run executes one bounded dispatch: resolve, gate, execute, detect,
@@ -593,6 +612,16 @@ func Run(opts RunOptions) (Result, error) {
 	}
 	role, permission := opts.normalize()
 
+	effectiveToolPolicy := opts.ToolPolicy
+	if effectiveToolPolicy == "" {
+		if prof, permErr := permissionProfile(permission); permErr == nil && prof.ToolPolicy != "" {
+			effectiveToolPolicy = prof.ToolPolicy
+		}
+	}
+	if permission == "supplied_text" {
+		effectiveToolPolicy = "none"
+	}
+
 	binary, err := ResolveBinary(opts.BinaryOverride, opts.Resolver)
 	if err != nil {
 		return Result{}, err
@@ -606,9 +635,106 @@ func Run(opts RunOptions) (Result, error) {
 	if err := validateGate(opts); err != nil {
 		return Result{}, err
 	}
+
+	if effectiveToolPolicy == "none" {
+		if !SupportsNoModelToolsPolicy(opts.Provider, binary) {
+			adapter := opts.Provider
+			if adapter == "" {
+				adapter = filepath.Base(binary)
+			}
+			return Result{}, fmt.Errorf("tool_policy %q is not supported by adapter %q (only agy supports runtime-enforced supplied_text)", effectiveToolPolicy, adapter)
+		}
+	}
+
 	contractPrompt, err := buildPrompt(opts)
 	if err != nil {
 		return Result{}, err
+	}
+
+	cmdAddDirs := opts.AddDirs
+	var hookDir string
+	var evidenceLogPath string
+	if effectiveToolPolicy == "none" {
+		tempDir, err := os.MkdirTemp("", "g8s-supplied-text-*")
+		if err != nil {
+			return Result{}, fmt.Errorf("failed to create supplied_text hook workspace: %w", err)
+		}
+		defer os.RemoveAll(tempDir)
+		hookDir = tempDir
+		evidenceLogPath = filepath.Join(hookDir, "evidence.log")
+
+		agentsDir := filepath.Join(hookDir, ".agents")
+		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+			return Result{}, fmt.Errorf("failed to create .agents directory: %w", err)
+		}
+
+		denyShScript := fmt.Sprintf(`#!/bin/sh
+INPUT=$(cat)
+TOOL=""
+if command -v python3 >/dev/null 2>&1; then
+    TOOL=$(echo "$INPUT" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    t = (d.get("toolCall") or {}).get("name") or (d.get("tool_call") or {}).get("name") or d.get("tool_name") or d.get("name") or ""
+    print(t)
+except Exception:
+    pass
+' 2>/dev/null)
+fi
+if [ -z "$TOOL" ]; then
+    TOOL=$(echo "$INPUT" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+if [ -z "$TOOL" ]; then
+    TOOL=$(echo "$INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+CLEAN=$(echo "$TOOL" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
+if [ -n "$CLEAN" ]; then
+    echo "$CLEAN" >> %q
+fi
+printf '{"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}\n'
+`, evidenceLogPath)
+
+		denyShPath := filepath.Join(agentsDir, "deny.sh")
+		if err := os.WriteFile(denyShPath, []byte(denyShScript), 0o755); err != nil {
+			return Result{}, fmt.Errorf("failed to write deny hook script: %w", err)
+		}
+		_ = os.WriteFile(filepath.Join(hookDir, "deny.sh"), []byte(denyShScript), 0o755)
+
+		denyBatScript := fmt.Sprintf(`@echo off
+setlocal
+echo model_tool >> %q
+echo {"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}
+`, evidenceLogPath)
+		_ = os.WriteFile(filepath.Join(agentsDir, "deny.bat"), []byte(denyBatScript), 0o755)
+		_ = os.WriteFile(filepath.Join(hookDir, "deny.bat"), []byte(denyBatScript), 0o755)
+
+		cmdHook := "sh ./deny.sh"
+		if runtime.GOOS == "windows" {
+			cmdHook = "deny.bat"
+		}
+		hooksJSON := fmt.Sprintf(`{
+  "supplied_text": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": %q,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}`, cmdHook)
+		hooksJSONPath := filepath.Join(agentsDir, "hooks.json")
+		if err := os.WriteFile(hooksJSONPath, []byte(hooksJSON), 0o644); err != nil {
+			return Result{}, fmt.Errorf("failed to write hooks.json: %w", err)
+		}
+
+		cmdAddDirs = append(append([]string{}, opts.AddDirs...), hookDir)
 	}
 
 	command := BuildCommand(CommandOptions{
@@ -616,10 +742,11 @@ func Run(opts RunOptions) (Result, error) {
 		Prompt:          contractPrompt,
 		Model:           model,
 		Timeout:         timeout,
-		AddDirs:         opts.AddDirs,
+		AddDirs:         cmdAddDirs,
 		SkipPermissions: opts.SkipPermissions,
 		NoSandbox:       opts.NoSandbox,
 		Effort:          effort,
+		ToolPolicy:      effectiveToolPolicy,
 	})
 
 	clock := opts.Clock
@@ -661,20 +788,30 @@ func Run(opts RunOptions) (Result, error) {
 		harnessReturnCode = ReadOnlyContractExit
 	}
 
+	var toolPolicyEvidence *ToolPolicyEvidence
+	if effectiveToolPolicy == "none" {
+		tpe := extractToolPolicyEvidence(stdout, stderr, evidenceLogPath)
+		toolPolicyEvidence = &tpe
+		if tpe.InvokedCount > 0 {
+			harnessReturnCode = ReadOnlyContractExit
+		}
+	}
+
 	result := Result{
-		OK:                harnessReturnCode == 0,
-		ReturnCode:        execResult.ReturnCode,
-		HarnessReturnCode: harnessReturnCode,
-		DurationSeconds:   duration,
-		Provider:          opts.Provider,
-		Model:             model,
-		Role:              role,
-		Permission:        permission,
-		AGYBin:            binary,
-		AddDirs:           opts.AddDirs,
-		CommandPreview:    commandPreview(binary, model, timeout, effort),
-		Stdout:            SanitizeOutput(stdout),
-		Stderr:            SanitizeOutput(stderr),
+		OK:                 harnessReturnCode == 0,
+		ReturnCode:         execResult.ReturnCode,
+		HarnessReturnCode:  harnessReturnCode,
+		DurationSeconds:    duration,
+		Provider:           opts.Provider,
+		Model:              model,
+		Role:               role,
+		Permission:         permission,
+		AGYBin:             binary,
+		AddDirs:            opts.AddDirs,
+		CommandPreview:     commandPreview(binary, model, timeout, effort),
+		Stdout:             SanitizeOutput(stdout),
+		Stderr:             SanitizeOutput(stderr),
+		ToolPolicyEvidence: toolPolicyEvidence,
 	}
 	if len(violations) > 0 {
 		result.ContractViolation = &ContractViolationReport{
@@ -797,4 +934,222 @@ func VerifyExecutableIdentity(path string) error {
 
 func verifyExecutableIdentity(path string) error {
 	return VerifyExecutableIdentity(path)
+}
+
+// SupportsNoModelToolsPolicy reports whether the given provider and binary adapter
+// can enforce and report ToolPolicy "none".
+func SupportsNoModelToolsPolicy(provider, binary string) bool {
+	if provider != "" {
+		p := strings.ToLower(strings.TrimSpace(provider))
+		if p != "agy" {
+			return false
+		}
+	}
+	if binary != "" {
+		base := strings.ToLower(filepath.Base(binary))
+		base = strings.TrimSuffix(base, ".exe")
+		base = strings.TrimSuffix(base, ".cmd")
+		base = strings.TrimSuffix(base, ".bat")
+		if base != "agy" {
+			return false
+		}
+	}
+	if provider == "" && binary == "" {
+		return false
+	}
+	return true
+}
+
+var (
+	toolDeniedRegex       = regexp.MustCompile(`(?i)(?:tool_call_denied|denied_tool)[\s:=]+([a-zA-Z0-9_]+)`)
+	toolInvokedRegex      = regexp.MustCompile(`(?i)(?:tool_call_invoked|invoked_tool)[\s:=]+([a-zA-Z0-9_]+)`)
+	cortexStepDeniedRegex = regexp.MustCompile(`(?i)cortex_step_type_.*?(?:denied|deny).*?([a-zA-Z0-9_]+)`)
+)
+
+func sanitizeToolName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.ToLower(raw)
+	raw = strings.TrimPrefix(raw, "cortex_step_type_")
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	res := b.String()
+	if len(res) > 64 {
+		res = res[:64]
+	}
+	return res
+}
+
+func extractToolNameFromObject(obj map[string]any) string {
+	if s, ok := obj["tool"].(string); ok && s != "" {
+		return sanitizeToolName(s)
+	}
+	if s, ok := obj["tool_name"].(string); ok && s != "" {
+		return sanitizeToolName(s)
+	}
+	if s, ok := obj["name"].(string); ok && s != "" {
+		return sanitizeToolName(s)
+	}
+	if tc, ok := obj["toolCall"].(map[string]any); ok {
+		if s, ok := tc["name"].(string); ok && s != "" {
+			return sanitizeToolName(s)
+		}
+	}
+	if tc, ok := obj["tool_call"].(map[string]any); ok {
+		if s, ok := tc["name"].(string); ok && s != "" {
+			return sanitizeToolName(s)
+		}
+	}
+	return ""
+}
+
+func processJSONStep(obj map[string]any, evidence *ToolPolicyEvidence, seenDenied map[string]bool) {
+	// 1. Check for denied
+	if v, ok := obj["tool_call_denied"]; ok {
+		if str, ok := v.(string); ok {
+			tool := sanitizeToolName(str)
+			if tool != "" && !seenDenied[tool] {
+				evidence.DeniedTools = append(evidence.DeniedTools, tool)
+				evidence.DeniedCount++
+				seenDenied[tool] = true
+			}
+		} else if b, ok := v.(bool); ok && b {
+			tool := extractToolNameFromObject(obj)
+			if tool != "" && !seenDenied[tool] {
+				evidence.DeniedTools = append(evidence.DeniedTools, tool)
+				evidence.DeniedCount++
+				seenDenied[tool] = true
+			}
+		}
+		return
+	}
+
+	evt, _ := obj["event"].(string)
+	typ, _ := obj["type"].(string)
+	if strings.EqualFold(evt, "tool_call_denied") || strings.EqualFold(typ, "tool_call_denied") {
+		tool := extractToolNameFromObject(obj)
+		if tool != "" && !seenDenied[tool] {
+			evidence.DeniedTools = append(evidence.DeniedTools, tool)
+			evidence.DeniedCount++
+			seenDenied[tool] = true
+		}
+		return
+	}
+
+	dec, _ := obj["decision"].(string)
+	st, _ := obj["status"].(string)
+	deniedBool, _ := obj["denied"].(bool)
+	reason, _ := obj["reason"].(string)
+	if strings.EqualFold(dec, "deny") || strings.EqualFold(st, "denied") || deniedBool || strings.Contains(strings.ToLower(reason), "disabled by supplied_text") {
+		tool := extractToolNameFromObject(obj)
+		if tool != "" && !seenDenied[tool] {
+			evidence.DeniedTools = append(evidence.DeniedTools, tool)
+			evidence.DeniedCount++
+			seenDenied[tool] = true
+		}
+		return
+	}
+
+	// 2. Check for invoked
+	if v, ok := obj["tool_call_invoked"]; ok {
+		if str, ok := v.(string); ok && str != "" {
+			evidence.InvokedCount++
+		} else if b, ok := v.(bool); ok && b {
+			evidence.InvokedCount++
+		}
+		return
+	}
+
+	invokedBool, _ := obj["invoked"].(bool)
+	if strings.EqualFold(evt, "tool_call_invoked") || strings.EqualFold(typ, "tool_call_invoked") || strings.EqualFold(st, "invoked") || invokedBool {
+		evidence.InvokedCount++
+		return
+	}
+
+	// Check AGY / Cortex step types
+	stepType := strings.ToLower(fmt.Sprint(obj["step_type"]))
+	if strings.Contains(stepType, "tool_call") || strings.Contains(stepType, "tool_use") || obj["toolCall"] != nil || obj["tool_call"] != nil {
+		if strings.EqualFold(st, "success") || strings.EqualFold(st, "completed") || obj["output"] != nil {
+			evidence.InvokedCount++
+		}
+	}
+}
+
+func processLineText(line string, evidence *ToolPolicyEvidence, seenDenied map[string]bool) {
+	if m := toolDeniedRegex.FindStringSubmatch(line); len(m) > 1 {
+		tool := sanitizeToolName(m[1])
+		if tool != "" && !seenDenied[tool] {
+			evidence.DeniedTools = append(evidence.DeniedTools, tool)
+			evidence.DeniedCount++
+			seenDenied[tool] = true
+		}
+	} else if m := cortexStepDeniedRegex.FindStringSubmatch(line); len(m) > 1 {
+		tool := sanitizeToolName(m[1])
+		if tool != "" && !seenDenied[tool] {
+			evidence.DeniedTools = append(evidence.DeniedTools, tool)
+			evidence.DeniedCount++
+			seenDenied[tool] = true
+		}
+	} else if m := toolInvokedRegex.FindStringSubmatch(line); len(m) > 1 {
+		evidence.InvokedCount++
+	}
+}
+
+func extractToolPolicyEvidence(stdout, stderr, evidenceLogPath string) ToolPolicyEvidence {
+	evidence := ToolPolicyEvidence{
+		Policy:      "none",
+		Adapter:     "agy",
+		Enforced:    true,
+		DeniedTools: make([]string, 0),
+	}
+
+	seenDenied := make(map[string]bool)
+
+	// 1. Read from evidenceLogPath if available on disk
+	if evidenceLogPath != "" {
+		if content, err := os.ReadFile(evidenceLogPath); err == nil {
+			scanner := bufio.NewScanner(bytes.NewReader(content))
+			for scanner.Scan() {
+				tool := sanitizeToolName(scanner.Text())
+				if tool != "" && !seenDenied[tool] {
+					evidence.DeniedTools = append(evidence.DeniedTools, tool)
+					evidence.DeniedCount++
+					seenDenied[tool] = true
+				}
+			}
+		}
+	}
+
+	// 2. Scan stdout and stderr for stream-json or sentinel tool-call callbacks
+	combined := stdout + "\n" + stderr
+	scanner := bufio.NewScanner(strings.NewReader(combined))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		// Try parsing as JSON
+		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+			var obj map[string]any
+			if err := json.Unmarshal([]byte(line), &obj); err == nil {
+				processJSONStep(obj, &evidence, seenDenied)
+				continue
+			}
+		}
+
+		// Plain text / sentinel scan
+		processLineText(line, &evidence, seenDenied)
+	}
+
+	// Calculate OfferedCount
+	evidence.OfferedCount = evidence.DeniedCount + evidence.InvokedCount
+	if len(evidence.DeniedTools) == 0 {
+		evidence.DeniedTools = nil
+	}
+
+	return evidence
 }
