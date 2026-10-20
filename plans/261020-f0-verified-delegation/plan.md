@@ -43,7 +43,9 @@ epistemic_status: hypothesis
 | [04b](phase-04b-agent-hooks.md) | A | #624 | Agent-level intercept: PreToolUse + Stop hooks | `tools/f0/{main,hook}*.go`, `tools/f0/hooks/**`, `tools/f0/testdata/hooks/**` | 04 |
 | [05](phase-05-skill-update.md) | A | #631 | Supervisor skill: tier table + lessons + toolkit | `skills/g8s-supervisor/**` | 01–04b |
 | [06](phase-06-wave-a-replay.md) | A | #620 | Replay C1–C10 and measure | `tools/f0/testdata/replay/**`, `tools/f0/replay_test.go` | 02–04b |
-| [07](phase-07-wave-b.md) | B | #625 #626 #630 #627 #628 #629 | G4, G7, auditor+digest+Jev, T2 executor (PiC stop), T3 verifier, breaker | per sub-phase | Wave A measured |
+| [06b-1](phase-06b-portable-ground-truth.md) | A+ | #620 | Information Firewall in `g8s verify` (`L3` worktree target, `L4` lossless failure signal + raw log file, `RoundReceiptSchema` `D1..Dn`) + `g8s watch --pr` repo fix (`L2`) | `internal/verifier/**`, `cmd/g8s/verify*.go`, `cmd/g8s/watch*.go` | 01–06 |
+| [06b-2](phase-06b-portable-ground-truth.md) | A+ | #620 | Portable ground truth (`f0:bundle`), `tree_sha` equivalence, `normalizeExtra` hash fix, declarative `.g8s/f0.yml` parsers, & `G6` prose precision | `tools/f0/**`, `.g8s/f0.yml` | 06b-1 |
+| [07](phase-07-wave-b.md) | B | #625 #626 #630 #627 #628 #629 | G4, G7, auditor+digest+Jev, T2 executor (PiC stop), T3 verifier, breaker | per sub-phase | Wave A / 06b measured |
 
 Wave B is planned at outline level in phase-07. It is re-planned in detail after the Phase 06 measurement (YAGNI).
 
@@ -127,10 +129,15 @@ Một phase / slice chỉ được phép bắt đầu (`cook`) khi **tất cả*
 - [x] **Step 6 — Phase 06 (`#620` Replay C1–C10 & Measurement)**:
   - [x] Dispatch F1 (`fc3e4325`) viết `tools/f0/replay_test.go` + `testdata/replay/**`.
   - [x] Chạy replay test & benchmark latency, cập nhật bảng kết quả thực tế vào `plan.md` §5.4, deliver & commit.
-- [ ] **Step 7 — Pre-Push, PR, Dogfood `f0 gate check` & Merge**:
-  - [ ] Chạy `./bin/f0 run -- env CGO_ENABLED=0 go test ./tools/f0/...` để ghi nhận evidence tại HEAD.
-  - [ ] Chạy `./tools/pre_push.sh --fast`, push branch, mở PR kèm `f0 status --report-block` và `F0-Ledger-Head` trailer.
-  - [ ] Chờ toàn bộ GitHub Actions checks hoàn tất xanh, chạy `./bin/f0 gate check --repo . --action merge --pr <N>`, merge PR, đồng bộ `~/.agents/skills/g8s-supervisor`, và báo cáo PiC kèm bảng đối chiếu DoD.
+- [x] **Step 7 — Pre-Push, PR, Dogfood `f0 gate check` & Merge (Wave A)**:
+  - [x] Chạy `./bin/f0 run -- env CGO_ENABLED=0 go test ./...` (`ev-1ac3c8d9`, 3178 items) để ghi nhận evidence tại HEAD `d6093e6`.
+  - [x] Chạy `./tools/pre_push.sh --fast`, push branch, mở PR [`#634`](https://github.com/tamld/g8s/pull/634) kèm `f0 status --report-block` và `F0-Ledger-Head` trailer.
+  - [x] Chờ toàn bộ 18/18 GitHub Actions checks hoàn tất xanh (`CI` `39367924386`, `Quality` `39367924251`, `Windows E2E` `39367924143`), chạy `./bin/f0 gate check --repo . --action merge --pr 634` (`overall: PASS`), merge PR tại `3c4675944094cf20eed6e6791e3f6acca2989c83`, và đồng bộ `~/.agents/skills/g8s-supervisor`.
+- [ ] **Step 8 — Phase 06b (`phase-06b-portable-ground-truth.md` — Portable Ground Truth & Un-Hardcoding `f0`)**:
+  - [ ] Fix `Extra` struct hash canonicalization (`normalizeExtra` in `ledger.go`) & add `TreeSHA` (`HEAD^{tree}`).
+  - [ ] Add `f0:bundle` portable status block in `status.go` (clean `PASS`-only) and `--mode auto|local|remote` verification in `gate.go` (verifying `G1`, `G3` git blob hashes, and `G6` on fresh clones / CI runners without `.git/f0/ledger.jsonl`).
+  - [ ] Add `pytest`/`vitest`/`jest` built-in parsers and declarative `.g8s/f0.yml` `parsers` rules (`argv_prefix`, `count_regex`, `vacuous_regex`, `pass_on_exit_zero`).
+  - [ ] Narrow `G6` prose claim detection (`claims.go`) to verification-subject + verdict pairs so ordinary `"Fixed bug..."` bullets never trigger false positives.
 
 ### 5.4. Wave A Replay Results & Falsification Measurement (Measured 2026-10-20)
 
