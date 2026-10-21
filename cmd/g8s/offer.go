@@ -143,7 +143,8 @@ classes:
       - "**/*.spec.*"
 `
 
-const defaultVerifierClassesSeed = `# Verifier Classes Configuration (scaffolded by g8s offer init)
+const defaultVerifierClassesSeed = `schema_version: "verifier-classes.v1"
+# Verifier Classes Configuration (scaffolded by g8s offer init)
 # Maps task write-scope paths to machine verification check bundles.
 
 classes:

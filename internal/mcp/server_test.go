@@ -1178,4 +1178,30 @@ func TestMCPLLMCallTool(t *testing.T) {
 			t.Fatalf("expected invalid params on missing prompt, got %+v", rpcErr)
 		}
 	})
+
+	t.Run("hydrates context_files within scope_root", func(t *testing.T) {
+		ctxDir := t.TempDir()
+		ctxFile := filepath.Join(ctxDir, "sample.txt")
+		if err := os.WriteFile(ctxFile, []byte("context-body-123\n"), 0o600); err != nil {
+			t.Fatalf("write sample.txt: %v", err)
+		}
+		res, rpcErr := callTool(t, s, "g8s_llm_call", map[string]any{
+			"provider":      "test-provider",
+			"model":         "fast-agent",
+			"prompt":        "audit this file",
+			"scope_root":    ctxDir,
+			"context_files": []string{"sample.txt"},
+		})
+		if rpcErr != nil {
+			t.Fatalf("unexpected rpc error: %+v", rpcErr)
+		}
+		var output map[string]any
+		if err := json.Unmarshal([]byte(res), &output); err != nil {
+			t.Fatalf("decode output: %v", err)
+		}
+		files, ok := output["context_files"].([]any)
+		if !ok || len(files) != 1 || files[0] != "sample.txt" {
+			t.Errorf("expected context_files [sample.txt], got %v", output["context_files"])
+		}
+	})
 }

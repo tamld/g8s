@@ -90,9 +90,13 @@ func evalCanonicalPathDepth(p string, depth int) (string, error) {
 		return filepath.Clean(resolved), nil
 	}
 
+	rootPrefix := filepath.VolumeName(abs) + string(filepath.Separator)
 	cur := abs
 	var tail []string
 	for {
+		if !strings.HasPrefix(cur, rootPrefix) {
+			return "", fmt.Errorf("non-canonical path %q", cur)
+		}
 		if linfo, lerr := os.Lstat(cur); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
 			target, rerr := os.Readlink(cur)
 			if rerr != nil {
@@ -291,6 +295,17 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
 		return nil, err
 	}
+	scopeRoot := opts.ScopeRoot
+	if scopeRoot == "" {
+		scopeRoot = "."
+	}
+	canonScope, err := evalCanonicalPath(scopeRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(canonTarget, canonScope) {
+		return nil, fmt.Errorf("path %q escapes scope root %q", opts.Path, opts.ScopeRoot)
+	}
 
 	raw, err := os.ReadFile(canonTarget)
 	if err != nil {
@@ -418,6 +433,17 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
 		return nil, err
 	}
+	scopeRoot := opts.ScopeRoot
+	if scopeRoot == "" {
+		scopeRoot = "."
+	}
+	canonScope, err := evalCanonicalPath(scopeRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(canonTarget, canonScope) {
+		return nil, fmt.Errorf("path %q escapes scope root %q", opts.Path, opts.ScopeRoot)
+	}
 
 	info, err := os.Stat(canonTarget)
 	if err != nil {
@@ -472,6 +498,9 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	}
 
 	dir := filepath.Dir(canonTarget)
+	if !strings.HasPrefix(dir, canonScope) {
+		return nil, fmt.Errorf("directory %q escapes scope root %q", dir, opts.ScopeRoot)
+	}
 	tmpFile, err := os.CreateTemp(dir, ".g8s-edit-*")
 	if err != nil {
 		return nil, err

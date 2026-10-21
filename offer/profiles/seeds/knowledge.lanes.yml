@@ -1,3 +1,4 @@
+schema_version: "lane-bundles.v1"
 # knowledge profile — docs lane dominant, weekly freshness audit
 default_lane: D
 audit_cadence: weekly

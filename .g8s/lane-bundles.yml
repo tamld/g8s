@@ -1,8 +1,9 @@
+schema_version: "lane-bundles.v1"
 # Layer 1 Lane Bundles Configuration (ADR-0024 / docs/designs/gate-lane-routing.md)
 # Maps each PR lane to its required gate bundle.
 
 lanes:
-  0:
+  "0":
     name: hotfix
     description: "Emergency hotfix with supervisor approval"
     gates:

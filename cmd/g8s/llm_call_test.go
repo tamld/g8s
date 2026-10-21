@@ -391,3 +391,74 @@ func TestLLMCallApplyFiles(t *testing.T) {
 		t.Errorf("got file content %q, want %q", string(content), expected)
 	}
 }
+
+func TestLLMCallContextFiles(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	ctxFile := filepath.Join(tempDir, "notes.md")
+	if err := os.WriteFile(ctxFile, []byte("hello-context-payload\n"), 0o600); err != nil {
+		t.Fatalf("write notes.md: %v", err)
+	}
+
+	var receivedPrompt string
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-agent"}]}`))
+		case "/v1/chat/completions":
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			for _, m := range reqBody.Messages {
+				if m.Role == "user" {
+					receivedPrompt = m.Content
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"chatcmpl-ctx","model":"fast-agent","choices":[{"message":{"role":"assistant","content":"VERIFIED"}}],"usage":{"prompt_tokens":15,"completion_tokens":5,"total_tokens":20}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	cmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Summarize notes",
+		"--base-url", mockServer.URL+"/v1",
+		"--scope-root", tempDir,
+		"--context-files", "notes.md",
+		"--json",
+	)
+	cmd.Dir = tempDir
+	cmd.Env = isolatedEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("llm-call --context-files failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(receivedPrompt, "--- FILE: notes.md") || !strings.Contains(receivedPrompt, "hello-context-payload") {
+		t.Errorf("expected hydrated file content in prompt, got %q", receivedPrompt)
+	}
+
+	// Out-of-scope file must be rejected
+	outsideCmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Summarize",
+		"--base-url", mockServer.URL+"/v1",
+		"--scope-root", tempDir,
+		"--context-files", "../outside.txt",
+		"--json",
+	)
+	outsideCmd.Dir = tempDir
+	outsideCmd.Env = isolatedEnv()
+	if _, err := outsideCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected out-of-scope --context-files to fail")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -522,14 +523,16 @@ func (s *Server) selectTool(_ context.Context, args json.RawMessage) (any, *json
 }
 
 type llmCallArgs struct {
-	Provider    string   `json:"provider"`
-	Model       string   `json:"model"`
-	Prompt      string   `json:"prompt"`
-	System      string   `json:"system"`
-	Effort      string   `json:"effort"`
-	MaxTokens   int      `json:"max_tokens"`
-	Temperature *float64 `json:"temperature"`
-	Timeout     string   `json:"timeout"`
+	Provider     string   `json:"provider"`
+	Model        string   `json:"model"`
+	Prompt       string   `json:"prompt"`
+	System       string   `json:"system"`
+	Effort       string   `json:"effort"`
+	MaxTokens    int      `json:"max_tokens"`
+	Temperature  *float64 `json:"temperature"`
+	Timeout      string   `json:"timeout"`
+	ScopeRoot    string   `json:"scope_root"`
+	ContextFiles []string `json:"context_files"`
 }
 
 // llmCallTool executes a direct synchronous LLM call against configured providers (DELTA-25).
@@ -583,6 +586,40 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 
+	effectivePrompt := a.Prompt
+	var hydratedFiles []string
+	if len(a.ContextFiles) > 0 {
+		_, scopeRoot, dErr := fsops.ResolveDelegationContext("", a.ScopeRoot, false)
+		if dErr != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: dErr.Error()}
+		}
+		var cb strings.Builder
+		for _, rawPath := range a.ContextFiles {
+			p := strings.TrimSpace(rawPath)
+			if p == "" {
+				continue
+			}
+			readPath := p
+			if !filepath.IsAbs(p) && scopeRoot != "" && scopeRoot != "." {
+				if _, vErr := fsops.VerifyScope(p, scopeRoot, nil); vErr != nil {
+					readPath = filepath.Join(scopeRoot, p)
+				}
+			}
+			readRes, rErr := fsops.Read(callCtx, fsops.ReadOptions{
+				Path:      readPath,
+				ScopeRoot: scopeRoot,
+			})
+			if rErr != nil {
+				return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("read context file %q: %v", p, rErr)}
+			}
+			_, _ = fmt.Fprintf(&cb, "--- FILE: %s (sha256: %s) ---\n%s\n", p, readRes.SHA256, readRes.Content)
+			hydratedFiles = append(hydratedFiles, p)
+		}
+		if cb.Len() > 0 {
+			effectivePrompt = cb.String() + effectivePrompt
+		}
+	}
+
 	hp := provider.NewHTTPProviderFromConfig(*entry)
 	opts := provider.ExecuteOptions{
 		SystemPrompt: a.System,
@@ -591,7 +628,7 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 		Temperature:  a.Temperature,
 	}
 	start := time.Now()
-	res, err := hp.ExecuteWithResult(callCtx, a.Prompt, model, opts)
+	res, err := hp.ExecuteWithResult(callCtx, effectivePrompt, model, opts)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("llm call failed: %v", err)}
 	}
@@ -600,7 +637,7 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 		durationMs = time.Since(start).Milliseconds()
 	}
 
-	return map[string]any{
+	out := map[string]any{
 		"provider":          entry.Name,
 		"protocol":          entry.EffectiveProtocol(),
 		"requested_model":   model,
@@ -610,5 +647,9 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 		"completion_tokens": res.CompletionTokens,
 		"total_tokens":      res.TotalTokens,
 		"duration_ms":       durationMs,
-	}, nil
+	}
+	if len(hydratedFiles) > 0 {
+		out["context_files"] = hydratedFiles
+	}
+	return out, nil
 }

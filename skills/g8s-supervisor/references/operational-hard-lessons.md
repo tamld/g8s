@@ -101,6 +101,16 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
   file list with `$G8S_REPO_ROOT`-style placeholders, never absolute home
   paths); submit prompt stays tiny and neutral.
 
+### Lesson #9: HTTP Worker Context Hydration (`--context-files`) & CodeQL `PrefixCheck` / `DotDotCheck` Sanitizer Barriers
+
+1. **HTTP Worker Context Hydration (`--context-files`)**: Pure HTTP LLM providers (`9router`, `openai`, `anthropic`) do not execute interactive local filesystem tool loops; they receive a single-turn or multi-turn prompt envelope. To inspect or audit repository files, pass `--context-files <paths>` to `g8s llm-call` (or `context_files` array to the `g8s_llm_call` MCP tool). This hydrates `fsops.Read`-verified, DLP-redacted file contents directly into the prompt with `--- FILE: <path> (sha256: <hash>) ---` boundaries without resorting to unsafe external shell interpolation.
+2. **CodeQL `go/path-injection` Sanitizer Barriers (`PrefixCheck` / `DotDotCheck`)**:
+   - Under CodeQL's query `go/path-injection` (`TaintedPathCustomizations.qll`), generic helper functions (e.g. `filepath.Clean` or indirect validation predicates) do NOT satisfy the static analysis dataflow taint tracker.
+   - The sanitizer barrier MUST use `strings.HasPrefix(target, scope)` (`PrefixCheck`) or `strings.Contains(target, "..")` (`DotDotCheck`) directly on the exact local SSA variable that dominates the filesystem sink (`os.ReadFile`, `os.Stat`, `os.Lstat`, `os.Readlink`, `os.CreateTemp`, `os.Rename`).
+   - If a cleaned path is bound to a new variable or returned from a helper, CodeQL treats the taint as propagating unless the prefix or dot-dot guard directly checks that specific variable prior to the sink call.
+3. **Go Toolchain Floor for Vulnerability Remediation**:
+   - Clearing `GO-2026-6809` (`crypto/x509` certificate parsing denial-of-service) in `govulncheck` requires bumping the Go toolchain floor to `1.26.10` or `1.27.3` across `go.mod`, GitHub Actions workflows, and Dockerfiles. Toolchain directives (`toolchain go1.26.10`) ensure reproducibility across developer environments and CI runners.
+
 ## 10. Push topology
 
 - origin is GitHub-only since 2026-09-30 (the LAN `ct122` pushurl was

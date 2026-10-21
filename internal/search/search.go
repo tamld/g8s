@@ -111,16 +111,21 @@ func Execute(ctx context.Context, opts Options) (*Result, error) {
 
 		var ignorePatterns []string
 		if !opts.NoIgnore {
-			for _, ignoreName := range []string{".gitignore", ".ignore"} {
-				ignorePath := filepath.Join(root, ignoreName)
-				if data, err := os.ReadFile(ignorePath); err == nil {
-					scanner := bufio.NewScanner(bytes.NewReader(data))
-					for scanner.Scan() {
-						line := strings.TrimSpace(scanner.Text())
-						if line == "" || strings.HasPrefix(line, "#") {
-							continue
+			if absRoot, absErr := filepath.Abs(root); absErr == nil {
+				for _, ignoreName := range []string{".gitignore", ".ignore"} {
+					ignorePath := filepath.Join(absRoot, ignoreName)
+					if !strings.HasPrefix(ignorePath, absRoot) {
+						continue
+					}
+					if data, err := os.ReadFile(ignorePath); err == nil {
+						scanner := bufio.NewScanner(bytes.NewReader(data))
+						for scanner.Scan() {
+							line := strings.TrimSpace(scanner.Text())
+							if line == "" || strings.HasPrefix(line, "#") {
+								continue
+							}
+							ignorePatterns = append(ignorePatterns, line)
 						}
-						ignorePatterns = append(ignorePatterns, line)
 					}
 				}
 			}
@@ -542,9 +547,13 @@ func evalSearchCanonicalPath(p string, depth int) (string, error) {
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return filepath.Clean(resolved), nil
 	}
+	rootPrefix := filepath.VolumeName(abs) + string(filepath.Separator)
 	cur := abs
 	var tail []string
 	for {
+		if !strings.HasPrefix(cur, rootPrefix) {
+			return "", fmt.Errorf("non-canonical search path %q", cur)
+		}
 		if linfo, lerr := os.Lstat(cur); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
 			target, rerr := os.Readlink(cur)
 			if rerr != nil {
