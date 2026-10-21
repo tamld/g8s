@@ -53,10 +53,20 @@
   * Direct synchronous execution via `g8s llm-call` supporting `--provider`, `--model`, `--prompt`, `--prompt-file`, `--system`, `--timeout`, `--effort`, `--max-tokens`, `--base-url`, `--protocol`, `--auth-env`, `--apply-files`, and `--worker-envelope`.
   * Native queue execution bridge in `g8s worker` wiring `api_call` providers to `g8s llm-call --worker-envelope`, capturing duration, token usage (`input_tokens`, `output_tokens`, `total_tokens`), and response text into `agyResult` format.
   * Live model discovery via `g8s providers discover [--provider <name>] [--json]` querying `/v1/models`.
-  * Catalog registration of standardized 9router SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) in `.g8s/agent-models.yml`.
+  * Catalog registration of standardized 9router SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) in `.g8s/agent-models.yml`.
+  * Two-Layer Separation Rule: Public repo files declare generic protocol mechanisms and standard combos only; private LAN endpoints or custom homelab combos reside strictly in untracked local configurations (`~/.config/g8s/providers.json`).
 
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.
 * **NFR-2 (Memory Footprint)**: Idle daemon memory consumption < 15MB RAM.
 * **NFR-3 (Data Security)**: State DB and exported files locked to POSIX `0600` permissions; directories locked to `0700`.
 * **NFR-4 (Portability)**: 100% Pure Go with zero CGO dependencies. Compilable on `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, `windows/amd64`.
+
+## 3. Release Milestones & Grounded Roadmap
+
+| Milestone | Scope & Grounded Milestones | Status |
+| :--- | :--- | :---: |
+| **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
+| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
+| **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

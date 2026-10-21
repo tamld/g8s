@@ -58,6 +58,7 @@ task receipt (operator mandate 2026-09-27).
 | Detect problems → report without leaking project data | **Security** | `references/security-redaction-playbook.md` |
 | Admission/failure patterns | **Reference** | `references/binary-admission.md`, `references/anti-patterns.md` |
 | Multi-project tenancy, cross-repo worktrees, atomic F1 quotas, verdict-vs-delivery, release mechanics | **Reference** | `references/operational-hard-lessons.md` (v4.2 addendum — field-proven contracts through 2026-10-14 cross-repo campaign) |
+| Documentation standards, pedagogical README, single MIT license, zero-stale manifests, evidence-bound claims | **Reference** | `references/doc-standard.md` (v4.3 addendum — 10-section README, zero-stale paths, single MIT, no unverified claims) |
 
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 Verified delegation boundary: see [ADR-0033](../../docs/decisions/0033-f0-verified-delegation.md) for evidence-gated autonomy (T1–T3 supersede synchronous HITL; T4 requires PiC approval).
@@ -89,7 +90,7 @@ Under `ADR-0033` (Phase 06b + Wave B), F0 enforces a strict **Cognitive Firewall
    - F0 ONLY reasons, authors `BriefSchema` / `Spec`, reads structured receipts (`RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`), and makes commitment-point decisions (`T0`–`T4`).
    - F0 NEVER manually hunts raw CI logs, scans disk bloat, runs verbose test suites, or executes procedural janitor tasks in F0's context window.
 2. **Lossless-Signal / Zero-Noise Delegation**:
-   - All log-hunting, CI failure extraction, documentation sync, formatting, and file editing are delegated to F1 workers (`agy` or `9router` combos: `fast-agent`, `butler-free-sre`, `docs-retriever`, `reasoning-free`, `deep-coding`).
+   - All log-hunting, CI failure extraction, documentation sync, formatting, and file editing are delegated to F1 workers (`agy` or `9router` combos: `fast-agent`, `docs-retriever`, `reasoning-free`, `deep-coding`).
    - Raw logs are isolated to disk at `$G8S_STATE_DIR/logs/verify-<task>-<ts>.log`, while F0 consumes only the compact, structured verdict.
 
 ## Universal Config-Driven LLM Call Consumer & 9Router Fleet (DELTA-25, v0.19.0)
@@ -98,7 +99,8 @@ With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer f
 - **Direct CLI Invocation**: `g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
 - **Worker Queue Execution**: `g8s submit --provider 9router --model <combo>` + `g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope` with duration, usage, and response capture.
 - **Live Model Discovery**: `g8s providers discover [--provider 9router] [--json]` queries live `/v1/models` from upstream.
-- **Multi-Model SWE Fleet**: Standard combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) and prefix globs (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) provide high-availability upstream failover with zero vendor lock-in.
+- **Multi-Model SWE Fleet**: Standard combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix globs (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) provide high-availability upstream failover with zero vendor lock-in.
+- **Two-Layer Separation Rule**: Public repo mechanisms and standard models remain strictly separated from untracked local policies (`~/.config/g8s/providers.json` and `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
 
 ## The six laws
 

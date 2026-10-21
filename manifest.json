@@ -10,7 +10,7 @@
     "commit": "0f07738",
     "date": "2026-10-16"
   },
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "repository": "https://github.com/tamld/g8s",
   "governance": {
     "constitution": "spec/constitution.md",
@@ -25,6 +25,30 @@
     "release_sop": "docs/RELEASE_SOP.md",
     "contributing": "CONTRIBUTING.md",
     "agent_protocol": "AGENTS.md"
+  },
+  "declarative_registries": {
+    "agent_models": ".g8s/agent-models.yml",
+    "effort_classes": ".g8s/effort-classes.yml",
+    "lane_bundles": ".g8s/lane-bundles.yml",
+    "trust_boundaries": ".g8s/trust-boundaries.yml",
+    "verifier_classes": ".g8s/verifier-classes.yml"
+  },
+  "documentation_index": {
+    "quickstart": "docs/quickstart.md",
+    "prd": "docs/PRD.md",
+    "srs": "docs/SRS.md",
+    "dod_dor": "docs/DOD_DOR.md",
+    "architecture_roadmap": "docs/ARCHITECTURE_ROADMAP.md",
+    "refactoring_plan": "docs/REFACTORING_PLAN.md",
+    "user_guide_mcp": "docs/user-guide/mcp-tools.md",
+    "user_guide_cli": "docs/user-guide/cli-reference.md",
+    "claims_registry": "docs/claims.yml",
+    "skill_supervisor": "skills/g8s-supervisor/SKILL.md",
+    "skill_manifest": "skills/manifest.json",
+    "offer_readme": "offer/README.md",
+    "offer_onboarding": "offer/ONBOARDING.md",
+    "offer_scorecard": "offer/SCORECARD.md",
+    "offer_search_guide": "offer/SEARCH_GUIDE.md"
   },
   "runtime": {
     "language": "Go 1.26.9",
@@ -248,7 +272,7 @@
       "id": "DELTA-25",
       "title": "Universal Config-Driven LLM Call Consumer & 9Router Multi-Model Gateway",
       "path": "spec/openspec/25-config-driven-llm-consumer-spec.md",
-      "status": "IMPLEMENTED"
+      "status": "APPLIED"
     }
   ],
   "milestones": {

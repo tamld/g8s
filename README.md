@@ -4,10 +4,10 @@
 
 # g8s (The Gatekeepers)
 
-> **Single-binary zero-trust process execution harness (<25MB static pure-Go binary) for AI agent CLI workers.**
+> **Single-binary zero-trust process execution harness (<25MB static pure-Go binary) for AI agent CLI workers.**  
 > *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.26.9-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
 [![Release](https://img.shields.io/github/v/release/tamld/g8s)](https://github.com/tamld/g8s/releases)
@@ -18,262 +18,347 @@
 
 ---
 
-## What g8s is
+## 1. Overview & Why g8s?
 
-g8s is a single static binary (pure Go, zero CGO) that lets a high-tier orchestrator ("Brain": Claude, GPT, Codex) delegate mechanical work to external CLI worker processes (agy, Claude, Gemini, Ollama) **without giving them the keys to your machine**. The model layer cannot be trusted with authority; g8s enforces it in process terms:
+When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on local machines, giving them ambient shell authority invites catastrophe: accidental deletions, out-of-scope edits, dropped files, runaway loops, and environment leakage.
 
-- **Durable task queue**: SQLite WAL, atomic CAS leases, idempotency keys, parent-child lineage. Tasks survive session death; the queue is the memory.
-- **Capability receipts**: a worker cannot write the filesystem without a single-use, time-limited, path-scoped receipt issued by the Brain.
-- **Process containment**: every attempt runs in a killable process group inside a private worktree; concurrent attempts stay isolated.
-- **Evidence, not verdicts**: every run seals a redacted receipt into the Evidence Lake. Worker verdicts are claims; files on disk are proof.
+`g8s` solves this by introducing a **symmetric zero-trust boundary** between the reasoning model ("Brain") and mechanical execution workers ("Muscle"). Built as a single static pure-Go binary with zero CGO dependencies, `g8s` isolates execution into private Git worktrees, enforces path-scoped write receipts, and captures durable evidence.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│               BRAIN TIER (Orchestrator: Opus / Codex)        │
-│  • Strategic reasoning, architecture decisions              │
-│  • Owns knowledge vault promotion and Git commits           │
-│  • Issues time-limited, path-scoped Write Receipts          │
-└──────────────────────────────┬──────────────────────────────┘
-                               │  JSON-RPC MCP / CLI Dispatch
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   g8s (Zero-CGO Static Binary)              │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────┐  │
-│  │ Role & Perm Gate │  │ Write Receipt DB │  │ WAL Queue │  │
-│  └──────────────────┘  └──────────────────┘  └───────────┘  │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │   Pluggable CLI Providers: agy │ claude │ gemini │ ... │  │
-│  └───────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │   Supervisor Fix Loop (planner→enforcer→reviewer→rca) │  │
-│  │   Context Broker │ Memory Gate │ Reflex Sensor (L1/L3)│  │
-│  └───────────────────────────────────────────────────────┘  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │  Isolated Process Group & Sandbox
-                               ▼
+### Without g8s vs. With g8s
+
+| Dimension | Without g8s (Ambient Shell) | With g8s (Zero-Trust Harness) |
+| :--- | :--- | :--- |
+| **Execution Authority** | Ambient user machine access; worker can touch anything. | Strict role-based permission profiles (`read_only`, `workspace_write`). |
+| **Filesystem Safety** | Unchecked file mutations directly corrupt working tree. | Path-scoped, single-use `WriteReceipt`s enforced in-process (`AllowedPaths`). |
+| **Process Containment** | Child processes survive crashes as orphan zombies. | Isolated OS process groups (`Setpgid`) terminating cleanly on cancel/timeout. |
+| **Task Durability** | Stored in ephemeral agent memory; lost on disconnect. | SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases. |
+| **LLM Gateway Access** | Ad-hoc Python scripts or proprietary closed agent clouds. | Universal config-driven consumer (`g8s llm-call`, `9router`, OpenAI, Anthropic). |
+| **Supervisor Context** | Flooded with megabytes of noisy test/CI raw logs. | Lossless Information Firewall (`RoundReceiptSchema` strips noise, preserves failures). |
+
+### Core Terminology
+
+| Term | Architectural Definition |
+| :--- | :--- |
+| **Brain (`F0`)** | High-tier orchestrator (Claude 3.7 Sonnet / Opus, GPT-4o, Codex) holding strategic reasoning and commit authority. |
+| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `claude`, `gemini`, `ollama`) or HTTP gateway consumer executing one scoped packet. |
+| **Subagent (`F2`)** | Ephemeral subagent spawned recursively by F1 within F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`). |
+| **Task** | An atomic, durable work item queued in the SQLite WAL store with an idempotency key and attempt budget. |
+| **Receipt** | A cryptographically validated single-use authorization token granting scoped filesystem write permissions (`AllowedPaths`). |
+| **Attempt** | A concrete execution attempt of a task, isolated in a private Git worktree and process group. |
+| **Evidence Lake** | An append-only durable store capturing execution receipts, telemetry events, and physical diffs on disk. |
+
+---
+
+## 2. Architecture & Execution Lifecycle
+
+`g8s` structures multi-agent collaboration into three strictly contained tiers (`F0 / F1 / F2` per [ADR-0032](docs/decisions/0032-containment-levels.md)):
+
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│               WORKER TIER (Muscle: Flash / Haiku / Local)              │
-│  • Bounded file inventory & code extraction                            │
-│  • Bounded-time test generation and log digestion (<60s per attempt)   │
-│  • Zero access to credentials / shared session state                   │
+│                      F0 — BRAIN / SUPERVISOR TIER                      │
+│  • Architecture reasoning, task decomposition, and milestone planning  │
+│  • Exclusive authority: Git commits, vault promotion, receipt issuance │
+│  • Information Firewall: Consumes compact structured RoundReceiptSchema│
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ JSON-RPC MCP / CLI Dispatch
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                       g8s HARNESS (Zero-CGO Pure Go)                   │
+│  ┌──────────────────────┐  ┌────────────────────┐  ┌────────────────┐  │
+│  │ Role & Perm Gate     │  │ Write Receipt DB   │  │ WAL Task Queue │  │
+│  └──────────────────────┘  └────────────────────┘  └────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Providers: agy │ claude │ gemini │ ollama │ 9router (DELTA-25)   │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Context Broker │ Reflex Sensor (L1/L3) │ Lossless Verify Firewall│  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Isolated Worktree & Setpgid
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        F1 — WORKER TIER (Muscle)                       │
+│  • Bounded execution: file exploration, diff distillation, test runner │
+│  • Single-use WriteReceipt with path-scoped enforcement (AllowedPaths) │
+│  • May recursively spawn F2 subagents within its receipt boundary      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ In-Process Delegation
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      F2 — RECURSIVE SUBAGENT TIER                      │
+│  • Transient micro-tasks (AST parsing, syntax check, doc extraction)   │
+│  • Inherits F1's sandbox, receipt boundary, and scope root             │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Shipped in v0.14.0 – v0.19.0
+### 5-Step Execution Lifecycle
 
-- **Universal Config-Driven LLM Consumer & 9Router Multi-Model Fleet ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `v0.19.0`, `DELTA-25`)**: direct synchronous CLI execution via `g8s llm-call`, durable queue consumption via `g8s submit --provider 9router --model <combo>` + `g8s worker`, live model discovery via `g8s providers discover`, and standardized SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) with prefix matching.
-- **F0 Cognitive Purity & Information Firewall ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md) Phase 06b + Wave B, `v0.19.0`)**: Brain vs. Hands strict division; F0 consumes only structured `RoundReceiptSchema` and gate verdicts while F1 handles log hunting and file synchronization.
-- **F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), `v0.18.0`, Epic #620)**: hash-chained evidence ledger (`f0 run`, `f0 status`), signed operator mandates (`T0`–`T4`), merge/commit gates `G0`–`G7` (`f0 gate check`), agent hooks (`f0 hook pre-tool|stop`), portable ground-truth bundles, gate-appeasement detection (G4), issue-closure gate (G7), and error-budget circuit breaker.
-- **Native cross-platform Agent I/O (`DELTA-23`, `v0.17.0`)**: pure-Go `g8s search` (replaces `rg`/`grep`/`find`), `g8s read` (bounded line-range reader with SHA-256 digest), `g8s edit` (atomic compare-and-swap editor preserving CRLF/LF and enforcing `WriteReceipt.AllowedPaths`), and `--select` / `g8s select` (zero-dependency JSON dot-path extractor replacing `jq`), with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
-- **F0 / F1 / F2 recursive containment (`ADR-0032`, `v0.17.0`)**: F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT`, binding all F1 and F2 file mutations to the task's Write Receipt in-process.
-- **Cross-repo Offer Bundle rollout (`v0.17.0`, `#442`)**: 4 domain profiles (`knowledge`, `security`, `infra`, `utility`), `RepoWorktreeIsolator` for sibling repositories, `g8s deliver --worktree --prune-worktree` with deletion propagation (`#569`), and polyglot spec/structure CI gates.
-- **Provider-neutral effort optimization (`v0.16.0`)**: declarative model effort catalog (`.g8s/agent-models.yml`, `.g8s/effort-classes.yml`) with `named`, `budget`, `baked-name`, and `toggle` adapters and per-class cost telemetry.
-- **Event-driven supervision**: terminal transitions append to `<state_dir>/signals/tasks.jsonl`; `g8s watch --failed` wakes the supervisor with one sleeping process. Polling is the fallback, never the primary.
-- **Multi-provider queue**: `providers.json` is the manifest; per-provider claim affinity, `--provider` on submit and worker, no silent fallback.
-- **Budgeted retry**: failed tasks auto-resubmit under caps: 2 per task, 10/hour per state dir, exponential backoff, feature flag default OFF. Receipt-free tasks only for unattended ticks.
-- **Concurrent dispatch**: `g8s worker --concurrency N` drains through N isolated attempts with per-attempt worktrees.
-- **Adversarial eval harness**: probe suite with semantic-class scoring and a Provider Reliability Index; mock providers make it CI-runnable.
-- **Fuzzed inputs, measured baseline**: four native fuzz targets over the external-input parsers; queue operation latencies recorded in [docs/user-guide/performance.md](docs/user-guide/performance.md).
+1. **Submit**: Brain creates an atomic task via `g8s submit` with role, budget, and narrow prompt.
+2. **Lease**: Worker acquires task with atomic Compare-And-Swap (CAS) lease in SQLite WAL.
+3. **Contain**: Harness spawns worker in private Git worktree and killable OS process group (`Setpgid`).
+4. **Verify**: Verification gate (`g8s verify`) runs checks inside worktree, capturing unredacted diagnostics to disk while summarizing structured results.
+5. **Seal**: Outcome sealed in durable receipt; physical diff inspected before Brain squash-merges.
 
-Quantitative claims (containment layers, PRI thresholds, gate counts) live in [docs/claims.yml](docs/claims.yml) and [docs/ENTERPRISE_LEDGER.md](docs/ENTERPRISE_LEDGER.md), each bound to a verifying test; [tools/claims_check.sh](tools/claims_check.sh) re-checks them on every commit.
+---
 
-## Install
+## 3. Core Capabilities
 
-One line (macOS / Linux):
+| Domain | Architectural Capability | Primary Surface |
+| :--- | :--- | :--- |
+| **Zero-Trust Containment** | Single-use path-scoped `WriteReceipt`s, POSIX process groups, and isolated Git worktrees. | `g8s receipt issue`, `g8s worker` |
+| **Durable Task Queue** | SQLite WAL storage, atomic CAS leases, idempotency deduplication, and retry policies. | `g8s submit`, `g8s watch`, `g8s status` |
+| **Native Agent I/O** | Pure-Go cross-platform file discovery (`search`), bounded reader (`read`), atomic editor (`edit`), and dot-path JSON extractor (`--select` / `g8s select`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select` |
+| **Universal LLM Consumer** | Config-driven direct synchronous CLI (`llm-call`) and worker queue execution for OpenAI/Anthropic/9Router with live model discovery. | `g8s llm-call`, `g8s providers discover` |
+| **Decoupled Knowledge Vault** | Sub-millisecond SQLite FTS5 + BM25 ranked indexing of architectural records and JIT spatial whispers. | `g8s vault store`, `g8s vault query` |
+
+---
+
+## 4. Installation
+
+`g8s` is distributed as a single static, self-contained binary (<25MB) with zero external runtime dependencies.
+
+### Pre-built Binaries (GitHub Releases)
+
+Download pre-compiled binaries for your architecture from [GitHub Releases](https://github.com/tamld/g8s/releases):
+- macOS (Apple Silicon `arm64` / Intel `amd64`)
+- Linux (`amd64` / `arm64`)
+- Windows (`amd64`)
+
+### Via Go Toolchain (`go1.26.9`+)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+go install github.com/tamld/g8s/cmd/g8s@latest
 ```
 
-From a [release](https://github.com/tamld/g8s/releases) (macOS universal, Linux amd64+arm64, Windows amd64, plus `.deb`/`.rpm`/`.apk`): download the archive, verify against `checksums.txt`.
-
-From source:
+### Build from Source
 
 ```bash
-git clone https://github.com/tamld/g8s.git && cd g8s
-go build -o bin/g8s ./cmd/g8s
+git clone https://github.com/tamld/g8s.git
+cd g8s
+make local
+./bin/g8s doctor --json
 ```
 
-## Quickstart
+---
 
+## 5. Usage Paradigms (Quickstart)
+
+### Paradigm 1: Read-Only Reconnaissance
+Safely explore a codebase without granting write permissions:
 ```bash
-# 1. Submit a read-only scout task
+# Submit a read-only reconnaissance task
 g8s submit \
-  --idempotency-key scout-1 \
   --role scout \
   --permission read_only \
-  --add-dir ./src \
-  --model gemini-3.8-flash-high \
-  --timeout 60s \
-  --prompt "Scan ./src and return a JSON inventory of entry points."
+  --prompt "Scan internal/provider and map all exported interfaces"
 
-# 2. Drain the queue (workers claim tasks in isolated worktrees)
-g8s worker --once                 # single attempt
-g8s worker --once=false --concurrency 4   # concurrent drain (git checkout required)
-
-# 3. Wake on completion (no polling)
-g8s watch --task <task-id> --milestone worker-complete
-g8s watch --failed                # exits when ANY task reaches a terminal state
-
-# 4. Read the sealed result
-g8s get <task-id>
+# Run one worker attempt to process the task
+g8s worker --once
 ```
 
-Delegated writes need a single-use receipt (note `--ttl`: the default is short by design; size it to the task):
+### Paradigm 2: Capability-Scoped Mutation
+Issue a single-use, path-scoped receipt before mutating files:
+```bash
+# 1. Issue single-use write receipt scoped to a specific directory
+RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select --selector .data.receipt_id)
+
+# 2. Dispatch worker bounded by the receipt
+g8s submit \
+  --role test-runner \
+  --permission workspace_write \
+  --receipt-id "$RECEIPT_ID" \
+  --prompt "Add unit tests for config validation in internal/config"
+
+g8s worker --once
+```
+
+### Paradigm 3: Universal Config-Driven LLM Gateway Consumer
+Directly invoke or queue tasks across configured remote LLM gateways (OpenAI, Anthropic, 9Router):
+```bash
+# Direct synchronous execution with reasoning effort and file block application
+g8s llm-call \
+  --provider 9router \
+  --model reasoning-high \
+  --effort high \
+  --prompt "Review internal/fsops for race conditions"
+
+# Live model discovery
+g8s providers discover --provider 9router --json
+```
+
+### Paradigm 4: Native Cross-Platform Agent I/O
+Pure-Go high-performance replacements for external CLI utilities:
+```bash
+# Search codebase (replaces rg / grep / find)
+g8s search "WriteReceipt" --globs "*.go"
+
+# Bounded read with SHA-256 fingerprint (replaces sed -n / cat / head)
+g8s read internal/provider/registry.go --lines 20:50
+
+# Atomic compare-and-swap edit (replaces sed -i / awk)
+g8s edit internal/config/config.go --old "timeout = 30s" --new "timeout = 60s"
+
+# Extract JSON dot-path value (replaces jq)
+cat result.json | g8s select --selector .data.status
+```
+
+---
+
+## 6. MCP, Agent Skills & Offer Bundle
+
+### Model Context Protocol (MCP) Server
+
+`g8s` runs as a native stdio Model Context Protocol (MCP) server supporting IDE hosts (Claude Desktop, Cursor, Windsurf, Antigravity):
 
 ```bash
-RID=$(g8s receipt issue --issuer "brain-orchestrator" --path "./tests/*.py" --ttl 3600 --select .data.receipt_id)
-AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --role test-runner --permission workspace_write \
-  --receipt-id "$RID" --add-dir ./tests \
-  --prompt "Generate pytest tests. receipt_id=$RID allowed_paths=./tests/*.py"
+g8s mcp
 ```
 
-Use native cross-platform Agent I/O (zero external dependency on `rg`, `sed`, `head`, or `jq`):
+#### Complete MCP Tool Inventory (16 Tools)
 
-```bash
-g8s search -F "SubmitTask" -g "*.go" internal/         # concurrent gitignore-aware search
-g8s read --lines 1:40 internal/fsops/fsops.go --json   # bounded line slice + sha256 digest
-g8s edit --old "v1" --new "v2" --receipt-id "$RID" ./tests/sample.py
-```
+| Tool Name | Operation & Purpose |
+| :--- | :--- |
+| `g8s_submit` | Enqueue a durable task with role, permissions, and timeout budget. |
+| `g8s_worker` | Execute queued tasks in isolated process groups and Git worktrees. |
+| `g8s_status` | Query queue health, active attempts, and worker heartbeats. |
+| `g8s_list_tasks` | List tasks filtered by state (`QUEUED`, `LEASED`, `SUCCEEDED`, `FAILED`). |
+| `g8s_inspect_task` | Inspect full task details including payload, events, and receipts. |
+| `g8s_receipt_issue` | Issue a single-use, path-scoped, time-limited Write Receipt. |
+| `g8s_receipt_verify` | Validate cryptographic integrity and scope bounds of a receipt. |
+| `g8s_vault_store` | Store architectural decisions and distilled patterns in Knowledge Vault. |
+| `g8s_vault_query` | Retrieve relevant knowledge records using SQLite FTS5 + BM25 ranking. |
+| `g8s_dispatch` | Execute a bounded, read-only dispatch through the CLI wrapper. |
+| `g8s_list_roles` | Enumerate available worker roles and their default permissions. |
+| `g8s_list_permissions` | Enumerate permission profiles (`read_only`, `workspace_write`). |
+| `g8s_search` | Pure-Go regex and literal file search with gitignore awareness. |
+| `g8s_read` | Bounded file reading with line-range slicing and SHA-256 validation. |
+| `g8s_edit` | Atomic CAS file editing with CRLF/LF preservation and receipt checks. |
+| `g8s_select` | Pure-Go JSON dot-path selector (replaces jq; `DELTA-23`). |
+| `g8s_llm_call` | Direct synchronous LLM invocation across configured providers (`DELTA-25`). |
 
-Run a self-audit, reflex gate, and hygiene sweep:
+### Agent Skills & Supervisor Charter
 
-```bash
-g8s eval run --provider agy      # adversarial probe suite
-g8s reflex triage --summary "raise test deadline" --files "internal/runtime/verify_test.go"
-g8s autopilot tick               # stateless maintenance: doctor, retention, hygiene
-g8s cleanup --dry-run            # ghosts, orphan sessions, scratch branches
-```
+The canonical operating charter for `g8s` supervisors is vendored at [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md) (`v4.3.0`), registered in [`skills/manifest.json`](skills/manifest.json), and governed by [`skills/g8s-supervisor/references/doc-standard.md`](skills/g8s-supervisor/references/doc-standard.md).
 
-## Skills
+### Sibling Repo Adoption via Offer Bundle
 
-g8s ships its own operating practice as loadable agent skills: see [`skills/README.md`](skills/README.md) and the versioned [`manifest.json`](skills/manifest.json):
+Other repositories adopt `g8s` via the pull-based Offer Bundle ([`offer/README.md`](offer/README.md)), providing 4 domain profiles ([`knowledge`](offer/profiles/knowledge.md), [`security`](offer/profiles/security.md), [`infra`](offer/profiles/infra.md), [`utility`](offer/profiles/utility.md)) and 3 CI sync gates.
 
-| Skill | Purpose |
-|---|---|
-| [`g8s-supervisor`](skills/g8s-supervisor/SKILL.md) | The supervisor/worker charter: admission-gated dispatch, multi-worker fan-out, evidence-verified acceptance, security-redaction playbook for upstream reporting. |
+> [!NOTE]
+> **AI Agent SSoT Discovery**: Autonomous agents entering this repository should inspect [`manifest.json`](manifest.json) for machine-readable schemas and [`AGENTS.md`](AGENTS.md) for the complete 5-step reading order.
 
-Install by copying or symlinking into your platform's skill directory.
+---
 
-## MCP Integration
+## 7. Scope & Non-Goals
 
-Plug into Claude Desktop, Cursor, Codex, or Windsurf via stdio JSON-RPC:
+To maintain high reliability and performance, `g8s` explicitly bounds its product scope:
 
-```json
-{
-  "mcpServers": {
-    "g8s": { "command": "/usr/local/bin/g8s", "args": ["mcp"] }
-  }
-}
-```
+| Target Domain | Architectural Decision & Non-Goal |
+| :--- | :--- |
+| **In-Process Plugins** | **Non-Goal**: Dynamic in-process C/Go plugins. `g8s` uses **Declarative Config + Standard Protocols** (`providers.json`, JSON-RPC MCP, CLI subprocesses) to prevent runtime compilation fragility and sandbox escapes. |
+| **Heavy Frameworks** | **Non-Goal**: Heavy Python runtimes (LangChain, AutoGen). `g8s` is a pure-Go, zero-dependency static binary. |
+| **GUI Dashboard Bloat** | **Non-Goal**: Bloated web dashboards. `g8s` is CLI-first; telemetry is stored in the Evidence Lake and queried via CLI/MCP envelopes. |
+| **Model Inference Hosting** | **Non-Goal**: In-process model weights execution. `g8s` orchestrates external processes and gateways; inference is owned by upstream providers. |
 
-Tool reference: [docs/user-guide/mcp-tools.md](docs/user-guide/mcp-tools.md).
+---
 
-## Non-Goals
+## 8. Documentation & Quality Assurance
 
-| Area | Non-Goal | Rationale |
-|------|----------|-----------|
-| **Container Orchestration** | Kubernetes/nomad, service mesh | g8s is a *process* harness: run g8s workers on k8s/nomad, not inside them. |
-| **Secret Management** | Vault/AWS/GCP Secret Manager | Credentials never enter the worker sandbox; inject via environment before g8s starts. |
-| **Multi-Tenancy** | RBAC, namespaces, SaaS audit | Single-tenant CLI; one g8s binary + state dir per tenant ([ADR-0028](docs/decisions/0028-multi-project-tenancy.md)). |
-| **GUI Dashboard** | Web UI for tasks/receipts | CLI-first; Evidence Lake + `g8s status` are the observability surface. |
-| **Worker SDK** | Go/Rust/Python SDK | Workers are any CLI speaking the AIC protocol. |
-| **Model Hosting** | Inference, model registry | g8s delegates to external CLIs; hosting is their problem. |
+### Documentation Index
 
-## Documentation
+| Guide / Specification | Scope & Focus |
+| :--- | :--- |
+| [Quickstart Guide](docs/quickstart.md) | Step-by-step introduction from first install to delegated execution. |
+| [CLI Reference](docs/user-guide/cli-reference.md) | Exhaustive manual of all subcommands, flags, and exit codes. |
+| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 16 MCP tools. |
+| [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Fast pure-Go searching, slicing, editing, and dot-path extraction. |
+| [Product Requirements (PRD)](docs/PRD.md) | Problem statement, target personas, and core value propositions. |
+| [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..10) and non-functional requirements (NFR-1..4). |
+| [Definition of Done & Ready](docs/DOD_DOR.md) | Engineering criteria, multi-round verification, and gate rules. |
+| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0034 architectural choices and rationales. |
 
-| By need | Where |
-|---|---|
-| Zero to first delegated task | [docs/quickstart.md](docs/quickstart.md) |
-| Full command matrix & runbooks | [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/user-guide/cli-reference.md](docs/user-guide/cli-reference.md) |
-| Native cross-platform search & Agent I/O | [offer/SEARCH_GUIDE.md](offer/SEARCH_GUIDE.md), [spec/openspec/23-native-agent-io-spec.md](spec/openspec/23-native-agent-io-spec.md) |
-| Configuration & service lifecycle | [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [docs/user-guide/service.md](docs/user-guide/service.md) |
-| Effort configuration & quality ladder | [docs/user-guide/effort.md](docs/user-guide/effort.md) |
-| Security & verification | [docs/security/VERIFICATION_GUIDE.md](docs/security/VERIFICATION_GUIDE.md) |
-| Provider integrations | [docs/integrations/](docs/integrations/) (Antigravity, Claude Desktop, Cursor, Windsurf) |
-| Requirements & acceptance | [docs/PRD.md](docs/PRD.md), [docs/SRS.md](docs/SRS.md), [docs/DOD_DOR.md](docs/DOD_DOR.md) |
-| Governing rules | [spec/constitution.md](spec/constitution.md): Zero-CGO, two-tier governance, process containment |
-| Technical deltas | [spec/openspec/](spec/openspec/): DELTA-01..24 with lifecycle status |
-| Architecture decisions | [docs/decisions/](docs/decisions/): ADR-0001…0032 |
-| Campaign ledgers & history | [plans/](plans/), [docs/history/](docs/history/) |
-| Release history | [CHANGELOG.md](CHANGELOG.md) |
+### AppSec & Quality Gates
 
-Key ADRs: [ADR-0021](docs/decisions/0021-standard-operating-model.md) (standard operating model) · [ADR-0024](docs/decisions/0024-gate-lane-routing.md) (gate lane routing) · [ADR-0026](docs/decisions/0026-independent-verification-phases.md) (verification phases) · [ADR-0028](docs/decisions/0028-multi-project-tenancy.md) (multi-project tenancy) · [ADR-0029](docs/decisions/0029-budgeted-auto-retry.md) (budgeted auto-retry) · [ADR-0030](docs/decisions/0030-context-router.md) (context router) · [ADR-0032](docs/decisions/0032-containment-levels.md) (F0/F1/F2 containment levels).
+Every code change is verified against four AppSec pillars and quantitative claims bound to [`docs/claims.yml`](docs/claims.yml) via `tools/claims_check.sh`:
 
-## Quality Gates
+| Pillar | Quality Assurance Mechanism | Verification Target |
+| :--- | :--- | :--- |
+| **1. SAST Triad** | `gosec` (in `golangci-lint`) + `Semgrep` (`.semgrep/g8s-rules.yml`) + `CodeQL` | Zero security antipatterns, zero unchecked errors (`errcheck`). |
+| **2. Black-Box DAST** | End-to-end API fuzzing & boundary probing (`dast_test.go`) | HTTP endpoints and MCP stdio resist malicious payloads and path escapes. |
+| **3. In-Process IAST** | `RuntimeSensor` and red-team probe suite (`sa-006`..`sa-008`) | Real-time detection of sandbox bypasses, lease races, and receipt reuse. |
+| **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Deterministic parsing resilience across arbitrary inputs. |
 
-Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and `CGO_ENABLED=1 -race` (race detector), plus a **4-pillar application security battery**: (1) **SAST Triad** (`Gosec` via `golangci-lint`, `Semgrep` offline AST policy rules in `.semgrep/g8s-rules.yml`, and `CodeQL` inter-procedural taint & dataflow analysis in `.github/workflows/codeql.yml`), (2) **Live Black-Box DAST** (`internal/server/dast_test.go`, `internal/mcp/dast_test.go` exercising `/api/v1/fs/*` and MCP stdio boundaries), (3) **In-Process IAST & Swarm Red-Team Probes** (`RuntimeSensor` and `sa-006`..`sa-008` in `internal/harness/probe/iast_dast.go`), and (4) **Grey-Box Fuzzing** (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`, plus parser fuzz targets). Pushes clear the pre-push gate battery: doc-contract sync, layer ownership, version sync, coverage ratchet, `govulncheck`, native fuzzing, dogfooding roundtrip, cross-platform build, root hygiene.
+---
 
-## Roadmap
+## 9. Roadmap, Project Structure & License
 
-| Milestone | Key Deliverables | Status |
-|--------|-----------|:---:|
-| v0.12.0 (2026-09-27) | Concurrent dispatch, sessions isolation, memory promotion gate, Context Broker, live eval | **Done** |
-| v0.13.0 (2026-09-30) | Multi-provider queue, hardening waves B–E, event-driven signals (signals/tasks.jsonl + `watch --failed`), release gates 7–8 | **Done** |
-| v0.14.0 (2026-10-03) | AI-factory loop, stage 1: budgeted auto-retry ✅ (#501/#502), router in user hands — [#513](https://github.com/tamld/g8s/issues/513), lane router — [#514](https://github.com/tamld/g8s/issues/514), verifier registry — [#515](https://github.com/tamld/g8s/issues/515), first unattended closed round — [#516](https://github.com/tamld/g8s/issues/516); cut = [#517](https://github.com/tamld/g8s/issues/517) · [SCORECARD](plans/261002-factory/SCORECARD.md) | **Done** |
-| v0.15.0 (2026-10-05) | Retrospective-as-task (`g8s lesson`), agent-models catalog v1, live Jev SystemOne benchmark, quantitative claims gate (#519, #543, #547) | **Done** |
-| v0.16.0 (2026-10-07) | Effort optimization: provider-neutral effort manifest (`named`/`budget`/`baked-name` adapters), task-class→effort mapping, quality ladder & per-class cost telemetry (#550, #568, #570) | **Done** |
-| v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), F0/F1/F2 recursive containment (#587, #593), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims | **Done** |
-| v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): hash-chained evidence ledger, signed mandates (T0–T4), gates G0–G7, agent hooks, circuit breaker, lossless verify firewall | **Done** |
-| v0.19.0 (2026-10-21) | Universal Config-Driven LLM Consumer, 9Router Multi-Model Fleet & F0 Cognitive Purity ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25) | **Done** |
-| v1.0.0 (2026-12-15) | GA: 6-month homelab stability, enterprise security signoff, distributed fleet mTLS | Planned |
+### Grounded Release Roadmap
 
-## Project Structure
+Milestones are evidence-gated on test verification and burn-in stability:
+
+| Version Milestone | Scope & Grounded Milestones | Status |
+| :--- | :--- | :---: |
+| **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
+| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
+| **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |
+
+### Project Structure
 
 <!-- structure:start -->
 ```
 g8s/
 ├── cmd/g8s/                # CLI entrypoint (stdlib flag-based, no cobra)
 ├── internal/               # All packages (private, not importable)
-│   ├── analyzer/ — implements AST-based reference tracking and Blast Radius
-│   ├── autopilot/ — implements the cron-based supervisor trigger that scans
-│   ├── brief/ — implements structured brief dispatch and consumption contracts
-│   ├── cleanup/ — implements ghost process and orphan resource detection
-│   ├── cli/ — defines the unified JSON envelope and standard flag parsing
-│   ├── codeintel/ — implements multi-tier code intelligence and blast radius
+│   ├── analyzer/ — implements AST-based reference tracking and Blast Radius Intelligence per OpenSpec DELTA-07, quantifying code change impact and generating optimal write receipt path scopes
+│   ├── autopilot/ — implements the cron-based supervisor trigger that scans GitHub issues, failing CI runs, static analysis findings, and stale @agy-fix-me TODOs
+│   ├── brief/ — implements structured brief dispatch and consumption contracts backed by the control plane SQLite store
+│   ├── cleanup/ — implements ghost process and orphan resource detection and purging for g8s lifecycle management per DEBT-28 and DEBT-32
+│   ├── cli/ — defines the unified JSON envelope and standard flag parsing conventions for the g8s command-line interface per DEBT-30
+│   ├── codeintel/ — implements multi-tier code intelligence and blast radius analysis per OpenSpec DELTA-20, adhering to the "Fat Kernel + Thin Adapters" architecture pattern
 │   ├── completion/ — generates shell auto-completion scripts for bash, zsh, and fish
-│   ├── config/ — loads the operator-declared provider registry that feeds
-│   ├── context/ — is the Context Broker (ADR-0021 §8
-│   ├── controlplane/ — implements the DELTA-03 SQLite-backed task queue with
+│   ├── config/ — loads the operator-declared provider registry that feeds the two-class resource pool (DELTA-10): api_call proxy pools defined by hand and platform_dispatch entries resolved from local CLI binaries
+│   ├── context/ — is the Context Broker (ADR-0021 §8.2, #396): it assembles a bounded situational ContextPacket per deployment point from the knowledge vault (post promotion gate, #395), the telemetry ledger (recent outcomes, failure signatures), and the SOM state (current phase, DoR status)
+│   ├── controlplane/ — implements the DELTA-03 SQLite-backed task queue with compare-and-swap leases and an append-only event log, ported from the Python baseline (reference/python/scripts/agy_control_plane.py) under the g8s Zero-CGO constitution: modernc.org/sqlite only, injectable deterministic clock, and per-operation connection pragmas
 │   ├── conv/ — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications
-│   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A):
-│   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning,
-│   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported
-│   ├── doctor/ — implements diagnostic sanity checks for g8s environment,
-│   ├── fsops/ — implements safe, receipt-bounded file system operations
+│   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A): a deterministic debate engine where a thesis is refined through bounded critique rounds
+│   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning, and context slicing for high-precision, token-efficient subagent code reviews
+│   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported from reference/python/scripts/agy_dispatch.py
+│   ├── doctor/ — implements diagnostic sanity checks for g8s environment, security boundaries, permissions, and worker binary availability
+│   ├── fsops/ — implements safe, receipt-bounded file system operations including bounded reads, DLP sanitization, atomic edits, and delegation context resolution
 │   ├── harness/ — enforces worker execution boundaries, permission profiles, role constraints, and prompt safety scanning
-│   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness
+│   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness observability per DEBT-29
 │   ├── hooks/ — provides lifecycle hook implementations for g8s orchestrator workers
-│   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s,
+│   ├── initwiz/ — provides interactive and headless onboarding wizards for g8s, auto-detecting installed AI IDEs and generating MCP configuration blocks
 │   ├── ladder/ — implements the quality-ladder failure classification, policy escalation, and telemetry gauges
-│   ├── lane/ — implements ALDC Layer 1 gate-lane routing and Layer 2 Jev-assisted
+│   ├── lane/ — implements ALDC Layer 1 gate-lane routing and Layer 2 Jev-assisted ambiguity resolution (issue #514, ADR-0024 S6-3, SCORECARD S-6)
 │   ├── lessons/ — implements schema, append-only ledger, and fail-closed machine checks for retrospective lessons
-│   ├── lockfile/ — provides non-blocking exclusive advisory file locks used
-│   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over
+│   ├── lockfile/ — provides non-blocking exclusive advisory file locks used to arbitrate concurrent supervisor sessions over one checkout (#393)
+│   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over stdio using newline-delimited JSON-RPC 2.0 (DELTA-04)
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
-│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits
-│   ├── pathutil/ — provides cross-platform path resolution for g8s data,
-│   ├── process/ — provides cross-platform process discovery, inspection, and
-│   ├── provider/ — implements native discovery and concurrency governance
-│   ├── receipt/ — implements zero-trust write receipts for delegated
-│   ├── reflex/ — implements a System 1 non-autoregressive decision gate
-│   ├── registry/ — provides a cross-platform wrapper around Windows registry operations
+│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (agy CLI wrapper) and internal/controlplane (SQLite WAL task store)
+│   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
+│   ├── process/ — provides cross-platform process discovery, inspection, and termination primitives for g8s lifecycle management per DEBT-36
+│   ├── provider/ — implements native discovery and concurrency governance for external AI worker binaries, per DELTA-05 (spec/openspec/05-provider-and-resource-pool-spec.md)
+│   ├── receipt/ — implements zero-trust write receipts for delegated workspace mutations
+│   ├── reflex/ — implements a System 1 non-autoregressive decision gate for g8s subagent mutation triage, write receipt fast-pathing, and instant circuit-breaking on sandbox escapes
+│   ├── registry/ — provides a cross-platform wrapper around Windows registry operations for installer detection, path validation, and system environment checks
 │   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
 │   ├── routing/ — routes tasks to providers, models, and roles using deterministic rules and optional LLM assistance
-│   ├── runtime/ — provides runtime verification utilities for executable identity
+│   ├── runtime/ — provides runtime verification utilities for executable identity and process management
 │   ├── search/ — implements a native cross-platform file discovery and content search engine
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
 │   ├── service/ — manages the g8s background worker as an OS daemon
 │   ├── settings/ — manages persistent, atomic user and system configurations for g8s
-│   ├── signing/ — provides code signing and signature verification primitives
+│   ├── signing/ — provides code signing and signature verification primitives for g8s binaries and installation packages across supported operating systems
 │   ├── sleep/ — manages operator away cycles, tracks background execution events, and generates wake-up briefings
-│   ├── state/ — implements pure FSM transition validation and append-only event logging
+│   ├── state/ — implements pure FSM transition validation and append-only event logging across all g8s lifecycle domains per DEBT-31
 │   ├── supervisor/ — coordinates the fix loop across planning, role enforcement, worker execution, review, and RCA
 │   ├── telemetry/ — ingests execution trace events, distills failure patterns, and provides preflight context injection
-│   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s
+│   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s utilizing SQLite FTS5 with BM25 ranking to index and retrieve Tri-Anchor contextual distillation records
 │   ├── verifier/ — implements verifier-class registry and acceptance verification (issue #515, SCORECARD S-7)
-│   ├── watch/ — implements the blocking watch primitive (#371): poll a
-│   ├── worker/ — provides worker lifecycle supervision, execution containment,
+│   ├── watch/ — implements the blocking watch primitive (#371): poll a condition until it reaches a terminal state, then emit a verdict
+│   ├── worker/ — provides worker lifecycle supervision, execution containment, and background heartbeat emission shims per DELTA-29
 │   └── ...                 # supporting packages
 ├── offer.go                # root package: go:embed glue for the offer/ bundle + spec-sync gate scripts
 ├── assets/                 # Logo and release artwork
@@ -286,7 +371,7 @@ g8s/
 ├── schemas/                # JSON schemas (task, receipt, result)
 ├── scripts/                # Public installer (scripts/install.sh curl entrypoint)
 ├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)
-├── spec/openspec/          # OpenSpec deltas (DELTA-01..24)
+├── spec/openspec/          # OpenSpec deltas (DELTA-01..25)
 ├── tools/                  # CI helper scripts (pre-push gates, SAST, release)
 ├── .g8s/                   # Declarative governance registries (models, effort, lanes, trust)
 ├── .semgrep/               # Offline AST security & explicit-error rules (g8s-rules.yml)
@@ -294,6 +379,8 @@ g8s/
 ```
 <!-- structure:end -->
 
-## License
+---
 
-Distributed under the **MIT License**. Copyright (c) 2026 TamLD. See [LICENSE](LICENSE) for details. Dual-licensed variants: [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE-2.0](LICENSE-APACHE-2.0), [LICENSE-DISCLAIMER.md](LICENSE-DISCLAIMER.md).
+## 10. License
+
+Distributed under the **MIT License**. Copyright (c) 2026 TamLD. See [LICENSE](LICENSE) for details.

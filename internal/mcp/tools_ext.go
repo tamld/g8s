@@ -526,6 +526,7 @@ type llmCallArgs struct {
 	Model       string   `json:"model"`
 	Prompt      string   `json:"prompt"`
 	System      string   `json:"system"`
+	Effort      string   `json:"effort"`
 	MaxTokens   int      `json:"max_tokens"`
 	Temperature *float64 `json:"temperature"`
 	Timeout     string   `json:"timeout"`
@@ -585,6 +586,7 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 	hp := provider.NewHTTPProviderFromConfig(*entry)
 	opts := provider.ExecuteOptions{
 		SystemPrompt: a.System,
+		Effort:       a.Effort,
 		MaxTokens:    a.MaxTokens,
 		Temperature:  a.Temperature,
 	}

@@ -28,7 +28,7 @@ FAILED=0
 echo "==> Running Documentation ↔ Code Contract Checks..."
 
 # 1. Orchestrator FSM States Contract
-echo "--> [1/11] Verifying Orchestrator FSM states contract..."
+echo "--> [1/12] Verifying Orchestrator FSM states contract..."
 EXPECTED_ORCH_STATES=("PLAN" "SPAWN" "MONITOR" "RECEIPT" "MERGE" "ESCALATE" "CANCEL" "CONFLICT")
 for state in "${EXPECTED_ORCH_STATES[@]}"; do
     if ! grep -qi "OrchestratorState$state" internal/state/state.go; then
@@ -42,7 +42,7 @@ for state in "${EXPECTED_ORCH_STATES[@]}"; do
 done
 
 # 2. Task FSM States Contract
-echo "--> [2/11] Verifying Task FSM states contract..."
+echo "--> [2/12] Verifying Task FSM states contract..."
 EXPECTED_TASK_STATES=("QUEUED" "LEASED" "RUNNING" "NEEDS_INFO" "BLOCKED" "SUCCEEDED" "FAILED" "CANCELLED")
 for state in "${EXPECTED_TASK_STATES[@]}"; do
     clean_state="${state//_/}"
@@ -53,7 +53,7 @@ for state in "${EXPECTED_TASK_STATES[@]}"; do
 done
 
 # 3. Go Version Contract
-echo "--> [3/11] Verifying Go version consistency across SSoT docs..."
+echo "--> [3/12] Verifying Go version consistency across SSoT docs..."
 GO_MOD_VER=$(grep -E '^go ' go.mod | awk '{print $2}')
 if [ -z "$GO_MOD_VER" ]; then
     echo "::error::Unable to determine go version in go.mod"
@@ -82,7 +82,7 @@ else
 fi
 
 # 4. Receipt Verification Contract
-echo "--> [4/11] Verifying Receipt Verifier layer contract..."
+echo "--> [4/12] Verifying Receipt Verifier layer contract..."
 if [ ! -f "internal/orchestrator/verify.go" ]; then
     echo "::error::internal/orchestrator/verify.go missing (ReceiptVerifier layer contract)"
     FAILED=$((FAILED + 1))
@@ -97,7 +97,7 @@ if ! grep -q "StdoutEnvelopeVerifier" internal/orchestrator/verify.go; then
 fi
 
 # 5. Doc Unowned TODO Check
-echo "--> [5/11] Checking for unowned TODO/FIXME in documentation..."
+echo "--> [5/12] Checking for unowned TODO/FIXME in documentation..."
 UNOWNED_DOC_TODOS=$(grep -rnE '(^|[[:space:]])//\s*(TODO|FIXME|XXX)' docs/ spec/ 2>/dev/null | grep -v 'OWNER=' | grep -v '`//' || true)
 if [ -n "$UNOWNED_DOC_TODOS" ]; then
     echo "::error::Found unowned TODO/FIXME in documentation:"
@@ -106,7 +106,7 @@ if [ -n "$UNOWNED_DOC_TODOS" ]; then
 fi
 
 # 6. OpenSpec File Link & Registry Bi-Directional Consistency
-echo "--> [6/11] Verifying OpenSpec registry bi-directional consistency..."
+echo "--> [6/12] Verifying OpenSpec registry bi-directional consistency..."
 while IFS= read -r link; do
     if [ ! -f "spec/openspec/$link" ]; then
         echo "::error::spec/openspec/README.md references missing spec file: spec/openspec/$link"
@@ -141,7 +141,7 @@ done
 
 # 7. Session-type marker contract (ADR-0022 §6, #397): every campaign ledger
 #    declares which session type produced it — T1 (strategy) or T2 (execution).
-echo "--> [7/11] Verifying session-type markers (ADR-0022)..."
+echo "--> [7/12] Verifying session-type markers (ADR-0022)..."
 for ledger in plans/*/plan.md plans/handoffs/*.md; do
     [ -e "$ledger" ] || continue
     if ! grep -qE '\*\*Session type\*\*: *T[12]' "$ledger"; then
@@ -154,7 +154,7 @@ done
 # 8. Spec↔code sync contract (S6-1 G1, #420): every scenario in an
 #    APPLIED/ACCEPTED delta must be pinned to a real Go test with zero
 #    grandfathered warnings.
-echo "--> [8/11] Verifying spec↔code sync (ADR-0024 G1)..."
+echo "--> [8/12] Verifying spec↔code sync (ADR-0024 G1)..."
 SYNC_OUT=$(bash "$SCRIPT_DIR/ci_spec_code_sync.sh" 2>&1) || {
     echo "$SYNC_OUT"
     FAILED=$((FAILED + 1))
@@ -167,7 +167,7 @@ fi
 
 # 9. Structure regen contract (S6-1 G2, #420): the README Project Structure
 #    region must match a fresh render from the live filesystem.
-echo "--> [9/11] Verifying README structure sync (ADR-0024 G2)..."
+echo "--> [9/12] Verifying README structure sync (ADR-0024 G2)..."
 if ! bash "$SCRIPT_DIR/ci_structure_sync.sh" 2>&1; then
     FAILED=$((FAILED + 1))
 fi
@@ -176,7 +176,7 @@ fi
 #     never be TRACKED at the repository root — the tree a fresh clone sees
 #     is the product surface. Local-only junk is a session cleanup matter;
 #     committed junk fails this gate.
-echo "--> [10/11] Verifying root hygiene (no tracked build artifacts)..."
+echo "--> [10/12] Verifying root hygiene (no tracked build artifacts)..."
 HYGIENE_VIOLATIONS=$( { git ls-files '*.out' '*.test' '*.exe' 'g8s.exe' \
     '*.patch' '*.orig' '*.bak' 'go.work.bak' '.g8s-drain-*' 'worktrees/*' 'dist/*'; } 2>/dev/null)
 if [ -n "$HYGIENE_VIOLATIONS" ]; then
@@ -188,7 +188,7 @@ fi
 # 11. SAST Triad & Linter Configuration Contract (Anti-Stale Guard):
 #     Ensures gosec remains enabled in .golangci.yml, Semgrep rules and gate
 #     script remain wired in pre_push.sh & quality.yml, and CodeQL workflow exists.
-echo "--> [11/11] Verifying SAST Triad (Gosec + Semgrep + CodeQL) contract..."
+echo "--> [11/12] Verifying SAST Triad (Gosec + Semgrep + CodeQL) contract..."
 for req_linter in errcheck gosec govet ineffassign staticcheck unused; do
     if ! grep -qE "^[[:space:]]*-[[:space:]]*${req_linter}\b" .golangci.yml; then
         echo "::error::.golangci.yml is missing required enabled linter: ${req_linter}"
@@ -209,6 +209,25 @@ if ! grep -qF "ci_semgrep_check.sh" tools/pre_push.sh; then
     echo "::error::tools/pre_push.sh does not invoke tools/ci_semgrep_check.sh"
     FAILED=$((FAILED + 1))
 fi
+
+# 12. Zero-Stale Manifest Contract (Issue #638):
+#     Ensures every path referenced in manifest.json exists on disk.
+echo "--> [12/12] Verifying manifest.json path-existence (zero-stale contract)..."
+while IFS= read -r fpath; do
+    if [ ! -e "$fpath" ]; then
+        echo "::error::manifest.json references non-existent path: $fpath"
+        FAILED=$((FAILED + 1))
+    fi
+done < <(python3 -c "
+import json
+data = json.load(open('manifest.json'))
+for section in ['governance', 'declarative_registries', 'documentation_index', 'schemas']:
+    for p in data.get(section, {}).values():
+        print(p)
+for s in data.get('specifications', []):
+    if 'path' in s:
+        print(s['path'])
+")
 
 if [ "$FAILED" -gt 0 ]; then
     echo ""

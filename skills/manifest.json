@@ -22,7 +22,9 @@
         "references/operating-contract.md",
         "references/security-redaction-playbook.md",
         "references/binary-admission.md",
-        "references/anti-patterns.md"
+        "references/anti-patterns.md",
+        "references/operational-hard-lessons.md",
+        "references/doc-standard.md"
       ],
       "assets": [
         "assets/pilot-record.schema.json",

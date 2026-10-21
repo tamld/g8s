@@ -145,7 +145,8 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
    - Direct synchronous CLI execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
    - Durable worker queue execution: `./bin/g8s submit --provider 9router --model <combo>` + `./bin/g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope`.
    - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
-   - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
+   - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
+   - **Two-Layer Separation Rule**: Public repo mechanism (`openai`/`anthropic`/`9router`, standard combos/wildcards, `http://127.0.0.1:20128/v1`) vs. local untracked operator policy (`~/.config/g8s/providers.json` & `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
 
 ---
 

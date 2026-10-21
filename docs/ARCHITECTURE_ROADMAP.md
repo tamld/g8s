@@ -81,7 +81,7 @@ The evolution of g8s is tracked across time-ordered phases, OpenSpec deltas, Git
 | **2** | **Resilience, Hardening & DX/AX** | DELTA-13 (DX/AX Wizard & Auto-repair)<br>DELTA-14 (Core Hardening) | #77, #78, #79, #80 | #76, #81, #89, #98, #99, #102 | **Done** |
 | **3** | **Orchestrator FSM, Lego Blocks & Quality Gates** | DELTA-15 (FSM Lifecycle)<br>DELTA-17 (Receipt Lake Wiring)<br>DELTA-18 (AIC Orchestration)<br>DELTA-19 (Lego Mounts)<br>Concern A/B/C Fix Loop | #82, #83, #84, #85, #86, #87, #91, #92, #93, #94, #95, #96, #97, #107, #112, #113, #114 | #100, #101, #103, #104, #105, #106, #108, #109, #110, #111, #115, #117 | **Done** |
 | **4** | **Lifecycle Hygiene, Heartbeats & Worktree Tooling** | DEBT-28 (Lifecycle Cleanup)<br>DEBT-29 (Worker Heartbeats)<br>DEBT-30 (Unified JSON Envelope)<br>DEBT-32 (Auto-cleanup Hook)<br>DEBT-36 (Process Lister & Kill)<br>DEBT-37 (Worktree Helpers)<br>DEBT-38 (Cross-Platform Audit) | #118, #119, #120, #124, #130, #138, #141 | #121, #122, #128, #129, #131, #132, #133, #134, #135, #136, #139, #140 | **Done** |
-| **5** | **FSM Validation, Providers & Packaging** | DEBT-31 (Pure FSM Validator)<br>DEBT-33 (Architecture Roadmap)<br>DEBT-34 (Layer-Ownership Gate)<br>DEBT-35 (Adaptive Polling & Escalation)<br>DEBT-40..51 (Windows, Signing, Memory, Catalog)<br>DEBT-52 (Orca Pluggable Providers)<br>DEBT-53 (Dual Licensing)<br>DEBT-54/55 (Worktree & Session Hygiene) | #123, #125, #126, #127, #168, #169, #170, #172, #173, #174, #175, #176, #182, #185 | #142, #164, #168, #169, #170, #172, #173, #174, #175, #177, #178, #179, #180, #182, #184, #186 | **Done** |
+| **5** | **FSM Validation, Providers & Packaging** | DEBT-31 (Pure FSM Validator)<br>DEBT-33 (Architecture Roadmap)<br>DEBT-34 (Layer-Ownership Gate)<br>DEBT-35 (Adaptive Polling & Escalation)<br>DEBT-40..51 (Windows, Signing, Memory, Catalog)<br>DEBT-52 (Orca Pluggable Providers)<br>DEBT-53 (Single MIT License)<br>DEBT-54/55 (Worktree & Session Hygiene) | #123, #125, #126, #127, #168, #169, #170, #172, #173, #174, #175, #176, #182, #185 | #142, #164, #168, #169, #170, #172, #173, #174, #175, #177, #178, #179, #180, #182, #184, #186 | **Done** |
 | **6** | **Active Roadmap & Governance Initiatives** | DEBT-56 (CI/CD Concurrency Controls)<br>DEBT-57 (PR Path Scoping & Verify Gate)<br>DEBT-58 (Crash Survival Harness)<br>DEBT-62 (Worker Boundary Enforcement)<br>DEBT-63 (AGY Worker Policy)<br>DEBT-64 (CI Bypass Guard) | #194, #195, #196, #208, #209, #210, #211 | Active Sprint | **In Progress** |
 
 ### Complete PR Mapping Index
@@ -243,11 +243,13 @@ This catalog details known failure modes in multi-agent autonomous execution loo
 
 ---
 
-## 7. Next Actions & Strategic Queue
+## 7. Next Actions & Release Roadmap
 
-The active engineering queue is prioritized according to the following progression:
+The release progression is evidence-gated and strictly decoupled from calendar deadlines:
 
-1. **DEBT-31 (#123)**: `internal/state` package — pure FSM transition validator and append-only event log.
-2. **DEBT-34 (#126)**: Layer-ownership CI gate enforcing modular package dependency isolation.
-3. **DEBT-35 (#127)**: Adaptive polling and silence-escalation mechanism in supervisor event loop.
-4. **v0.5.0 Distribution**: Fleet coordination over mTLS and distributed lock consensus.
+| Version Milestone | Scope & Grounded Milestones | Status |
+| :--- | :--- | :---: |
+| **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed operator mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
+| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
+| **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

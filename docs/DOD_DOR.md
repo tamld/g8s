@@ -97,3 +97,12 @@ Both `F0` (Supervisor) and `F1` (Worker) run on stochastic LLMs; neither is trus
 3. **Zero Dropped or Unattributed Files (`G3`)**: `applied` and `deleted` blob hashes in the worktree match the delivered commit tree (`HEAD^{tree}`) 1-for-1; `untracked_in_worktree == 0` and `unattributed_in_main == 0`.
 4. **Live CI & Reversibility Tier Gate (`T0–T4`)**: All forge CI checks are terminal `pass` (`pending == 0`, `failing == 0`); `T3` trust-boundary touches pass dual independent verification; `T4` irreversible actions stop for explicit PiC approval.
 5. **Universal Config-Driven LLM & 9Router Gate (`DELTA-25`)**: All `api_call` providers wire cleanly to `g8s llm-call --worker-envelope`, with zero hardcoded provider execution branches in `internal/worker`, valid model-effort catalog mapping in `.g8s/agent-models.yml`, and live discovery parity (`g8s providers discover`).
+
+## 5. Release Milestones & Grounded Roadmap (v0.18.0 – v0.21.0+)
+
+| Milestone | Scope & Delivered Capabilities | Status |
+| :--- | :--- | :---: |
+| **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
+| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
+| **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

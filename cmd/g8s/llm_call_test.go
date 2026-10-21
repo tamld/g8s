@@ -278,11 +278,33 @@ func TestProvidersDiscoverLiveModels(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
+	tempDir := t.TempDir()
+	providersPath := filepath.Join(tempDir, "providers.json")
+	providerJSON := fmt.Sprintf(`{
+		"version": "1.0",
+		"providers": [
+			{
+				"name": "9router",
+				"class": "api_call",
+				"protocol": "9router",
+				"base_url": "%s/v1",
+				"base_url_env": "NINEROUTER_URL",
+				"allow_unlisted_models": true
+			}
+		]
+	}`, mockServer.URL)
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0600); err != nil {
+		t.Fatalf("write providers.json: %v", err)
+	}
+
 	cmd := exec.Command(binPath, "providers", "discover",
 		"--provider", "9router",
 		"--json",
 	)
-	cmd.Env = isolatedEnv("NINEROUTER_URL=" + mockServer.URL + "/v1")
+	cmd.Env = isolatedEnv(
+		"G8S_PROVIDERS="+providersPath,
+		"NINEROUTER_URL="+mockServer.URL+"/v1",
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("providers discover failed: %v\nOutput: %s", err, string(out))

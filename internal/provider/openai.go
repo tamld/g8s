@@ -233,6 +233,12 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 }
 
 func (p *OpenAIProvider) spawnAnthropic(ctx context.Context, spec Spec) (Handle, error) {
+	if spec.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, spec.Timeout)
+		defer cancel()
+	}
+
 	baseURL := p.EffectiveBaseURL()
 	var endpoint string
 	if strings.HasSuffix(baseURL, "/v1") {
@@ -337,21 +343,37 @@ func (p *OpenAIProvider) spawnAnthropic(ctx context.Context, spec Spec) (Handle,
 }
 
 func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, error) {
+	if spec.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, spec.Timeout)
+		defer cancel()
+	}
+
 	baseURL := p.EffectiveBaseURL()
 	endpoint := baseURL + "/chat/completions"
 
 	reqBody := map[string]any{
 		"model":    spec.Model,
 		"messages": buildMessages(spec),
-	}
-	if spec.Timeout > 0 {
-		reqBody["timeout"] = int(spec.Timeout.Seconds())
+		"stream":   false,
 	}
 	if spec.MaxTokens > 0 {
 		reqBody["max_tokens"] = spec.MaxTokens
 	}
 	if spec.Temperature != nil {
 		reqBody["temperature"] = *spec.Temperature
+	}
+	if spec.Effort != "" {
+		effort := strings.ToLower(strings.TrimSpace(spec.Effort))
+		switch effort {
+		case "xhigh", "max", "ultra":
+			effort = "high"
+		case "minimal":
+			effort = "low"
+		}
+		if effort == "low" || effort == "medium" || effort == "high" {
+			reqBody["reasoning_effort"] = effort
+		}
 	}
 
 	body, err := json.Marshal(reqBody)

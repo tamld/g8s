@@ -66,7 +66,6 @@ func Catalog() []CatalogEntry {
 				"deep-coding",
 				"fast-agent",
 				"docs-retriever",
-				"butler-free-sre",
 				"gpt-4o-mini",
 				"claude-3.5-sonnet",
 				"gemini-2.0-flash",

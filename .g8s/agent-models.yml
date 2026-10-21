@@ -188,7 +188,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever, butler-free-sre) and sticky round-robin prompt caching"
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever) and sticky round-robin prompt caching"
     models:
       - id: reasoning-free
         supported_efforts: [low, medium, high]
@@ -203,8 +203,5 @@ providers:
         supported_efforts: [minimal, low, medium, high]
         default_effort: medium
       - id: docs-retriever
-        supported_efforts: [low, medium, high]
-        default_effort: medium
-      - id: butler-free-sre
         supported_efforts: [low, medium, high]
         default_effort: medium

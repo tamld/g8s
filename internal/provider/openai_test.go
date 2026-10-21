@@ -39,14 +39,14 @@ func TestOpenAIProvider_AvailableAndAuth(t *testing.T) {
 }
 
 func TestOpenAIProvider_SpawnSuccess(t *testing.T) {
+	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		if r.URL.Path == "/chat/completions" {
-			var req map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
@@ -73,6 +73,7 @@ func TestOpenAIProvider_SpawnSuccess(t *testing.T) {
 		Model:   "gpt-4o-mini",
 		Brief:   "Review this module",
 		Timeout: 5 * time.Second,
+		Effort:  "xhigh",
 	}
 
 	handle, err := p.Spawn(context.Background(), spec)
@@ -90,6 +91,81 @@ func TestOpenAIProvider_SpawnSuccess(t *testing.T) {
 	}
 	if receipt.Stdout != "Synthesized code patch output" {
 		t.Fatalf("unexpected stdout: %s", receipt.Stdout)
+	}
+
+	// Verify protocol requirements (#636):
+	// 1. stream is explicitly false
+	if streamVal, ok := gotReq["stream"].(bool); !ok || streamVal != false {
+		t.Errorf("expected stream: false in reqBody, got: %v", gotReq["stream"])
+	}
+	// 2. timeout must NOT be in JSON request body
+	if _, ok := gotReq["timeout"]; ok {
+		t.Errorf("timeout must NOT be in JSON request body, got: %v", gotReq["timeout"])
+	}
+	// 3. reasoning_effort normalized: "xhigh" -> "high"
+	if effortVal, ok := gotReq["reasoning_effort"].(string); !ok || effortVal != "high" {
+		t.Errorf("expected reasoning_effort: high, got: %v", gotReq["reasoning_effort"])
+	}
+}
+
+func TestOpenAIProvider_ReasoningEffortNormalization(t *testing.T) {
+	testCases := []struct {
+		inputEffort string
+		wantEffort  string
+		wantPresent bool
+	}{
+		{"minimal", "low", true},
+		{"low", "low", true},
+		{"medium", "medium", true},
+		{"high", "high", true},
+		{"xhigh", "high", true},
+		{"max", "high", true},
+		{"ultra", "high", true},
+		{"unsupported_level", "", false},
+		{"", "", false},
+	}
+
+	for _, tc := range testCases {
+		var gotReq map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/models" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.URL.Path == "/chat/completions" {
+				_ = json.NewDecoder(r.Body).Decode(&gotReq)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"choices": [{"message": {"role": "assistant", "content": "ok"}}]}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+
+		p := NewOpenAIProvider("test-ai", srv.URL, "")
+		spec := Spec{
+			Model:  "test-model",
+			Brief:  "prompt",
+			Effort: tc.inputEffort,
+		}
+
+		h, err := p.Spawn(context.Background(), spec)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("effort %q: Spawn failed: %v", tc.inputEffort, err)
+		}
+		_, _ = h.Wait(context.Background())
+		srv.Close()
+
+		if !tc.wantPresent {
+			if _, ok := gotReq["reasoning_effort"]; ok {
+				t.Errorf("effort %q: expected reasoning_effort absent, got %v", tc.inputEffort, gotReq["reasoning_effort"])
+			}
+		} else {
+			if got, ok := gotReq["reasoning_effort"].(string); !ok || got != tc.wantEffort {
+				t.Errorf("effort %q: got reasoning_effort %q, want %q", tc.inputEffort, got, tc.wantEffort)
+			}
+		}
 	}
 }
 
