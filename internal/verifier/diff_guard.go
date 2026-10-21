@@ -69,8 +69,10 @@ var (
 		},
 	}
 
-	// Tier-0 Advisory patterns: silent error swallowing in production Go files.
-	tier0EmptyErrIfRegex = regexp.MustCompile(`^\s*if\s+err\s*!=\s*nil\s*\{\s*\}\s*$`)
+	// Tier-0 Advisory patterns: silent error swallowing, hollow placeholders, and trivial assertions (#644).
+	tier0EmptyErrIfRegex         = regexp.MustCompile(`^\s*if\s+err\s*!=\s*nil\s*\{\s*\}\s*$`)
+	tier0TheaterPlaceholderRegex = regexp.MustCompile(`(?i)(?:\bFILL IN HERE\b|<Empty>|\[Insert Here\]|panic\("(?:todo|not implemented))`)
+	tier0TrivialAssertRegex      = regexp.MustCompile(`(?:assert\.True\s*\(\s*t\s*,\s*true\s*\)|require\.True\s*\(\s*t\s*,\s*true\s*\)|assert\.Nil\s*\(\s*t\s*,\s*nil\s*\)|if\s+true\s*==\s*true\b)`)
 )
 
 // ParseUnifiedDiffAddedLines extracts only added lines (+) and their 1-indexed
@@ -144,6 +146,7 @@ func EvaluateNetDelta(ctx context.Context, diffText string, allowedPaths []strin
 		}
 
 		isProdGo := strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go")
+		isTestGo := strings.HasSuffix(file, "_test.go")
 
 		for _, added := range lines {
 			trimmed := strings.TrimSpace(added.Text)
@@ -197,6 +200,28 @@ func EvaluateNetDelta(ctx context.Context, diffText string, allowedPaths []strin
 					Line:     added.Line,
 					Severity: "advisory",
 					Message:  "empty 'if err != nil {}' block swallows error silently",
+				})
+			}
+
+			// 4. Check Tier-0 hollow theater placeholders (#644)
+			if tier0TheaterPlaceholderRegex.MatchString(added.Text) {
+				advisories = append(advisories, DiffAdvisory{
+					RuleID:   "TIER0-THEATER-PLACEHOLDER",
+					File:     file,
+					Line:     added.Line,
+					Severity: "advisory",
+					Message:  "hollow theater placeholder or unimplemented panic in added line",
+				})
+			}
+
+			// 5. Check Tier-0 trivial tautological assertions in Go test files (#644)
+			if isTestGo && tier0TrivialAssertRegex.MatchString(added.Text) {
+				advisories = append(advisories, DiffAdvisory{
+					RuleID:   "TIER0-TRIVIAL-ASSERT",
+					File:     file,
+					Line:     added.Line,
+					Severity: "advisory",
+					Message:  "tautological test assertion provides zero verification signal",
 				})
 			}
 		}

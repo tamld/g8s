@@ -44,19 +44,31 @@ type DiagnosticResult struct {
 	Details string `json:"details,omitempty"`
 }
 
+// CapabilityEntry represents the availability of an optional runtime capability (#645).
+// VerificationState distinguishes live-probed capabilities ("probed") from static
+// configuration/environment presence ("configured_unprobed") or missing items ("absent").
+type CapabilityEntry struct {
+	Name              string `json:"name"`
+	Available         bool   `json:"available"`
+	VerificationState string `json:"verification_state,omitempty"` // "probed" | "configured_unprobed" | "absent"
+	Detail            string `json:"detail,omitempty"`
+}
+
 // DoctorReport contains all executed health and sanity checks.
 type DoctorReport struct {
-	OverallStatus string             `json:"overall_status"` // HEALTHY, DEGRADED, UNHEALTHY
-	Platform      string             `json:"platform"`
-	GoRuntime     string             `json:"go_runtime"`
-	ZeroCGO       bool               `json:"zero_cgo"`
-	Scope         string             `json:"scope,omitempty"`
-	ConfigDir     string             `json:"config_dir,omitempty"`
-	DataDir       string             `json:"data_dir,omitempty"`
-	CacheDir      string             `json:"cache_dir,omitempty"`
-	DatabasePath  string             `json:"database_path,omitempty"`
-	Checks        []DiagnosticResult `json:"checks"`
-	AppliedFixes  []string           `json:"applied_fixes,omitempty"`
+	OverallStatus    string             `json:"overall_status"`              // HEALTHY, DEGRADED, UNHEALTHY
+	CapabilityStatus string             `json:"capability_status,omitempty"` // FULL, PARTIAL, MINIMAL (#645)
+	Capabilities     []CapabilityEntry  `json:"capabilities,omitempty"`      // Optional capability matrix (#645)
+	Platform         string             `json:"platform"`
+	GoRuntime        string             `json:"go_runtime"`
+	ZeroCGO          bool               `json:"zero_cgo"`
+	Scope            string             `json:"scope,omitempty"`
+	ConfigDir        string             `json:"config_dir,omitempty"`
+	DataDir          string             `json:"data_dir,omitempty"`
+	CacheDir         string             `json:"cache_dir,omitempty"`
+	DatabasePath     string             `json:"database_path,omitempty"`
+	Checks           []DiagnosticResult `json:"checks"`
+	AppliedFixes     []string           `json:"applied_fixes,omitempty"`
 }
 
 // Doctor provides diagnostic health and environment checks.
@@ -335,7 +347,88 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 		}
 	}
 
+	report.CapabilityStatus, report.Capabilities = EvaluateCapabilities(report.Checks)
+
 	return report
+}
+
+// EvaluateCapabilities derives the non-breaking capability_status (FULL, PARTIAL, MINIMAL)
+// and optional capability matrix from executed diagnostic checks (#645).
+func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry) {
+	sqliteOK := false
+	ripgrepOK := false
+	workerCLIOK := false
+	var workerCLIDetail string
+	apiGatewayOK := false
+	var apiGatewayDetail string
+
+	for _, chk := range checks {
+		switch {
+		case (chk.Name == "Database State" || chk.Name == "Database Connectivity") && chk.Status == "OK":
+			sqliteOK = true
+		case chk.Name == "Search Engine" && strings.Contains(chk.Message, "ripgrep turbo available"):
+			ripgrepOK = true
+		case (strings.HasPrefix(chk.Name, "Worker CLI (") || chk.Name == "Worker Binary (AGY_BIN)") && chk.Status == "OK" && !strings.Contains(chk.Message, "not found"):
+			workerCLIOK = true
+			if workerCLIDetail == "" {
+				workerCLIDetail = chk.Name
+			} else {
+				workerCLIDetail += ", " + chk.Name
+			}
+		case chk.Name == "Providers File" && chk.Status == "OK" && strings.Contains(chk.Message, "loaded cleanly"):
+			apiGatewayOK = true
+			apiGatewayDetail = chk.Message + " (static config only; run 'g8s providers discover' to probe live reachability/quota)"
+		case chk.Name == "Provider Registry" && chk.Status == "OK" && !apiGatewayOK:
+			if os.Getenv("NINEROUTER_URL") != "" || os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != "" {
+				apiGatewayOK = true
+				apiGatewayDetail = "environment API endpoint/credentials present (static env only; run 'g8s providers discover' to probe live reachability/quota)"
+			}
+		}
+	}
+
+	gitOK := false
+	gitDetail := "git not found in PATH"
+	if gitPath, err := exec.LookPath("git"); err == nil {
+		gitOK = true
+		gitDetail = gitPath
+	}
+
+	rgDetail := "pure-Go search active (optional rg absent)"
+	if ripgrepOK {
+		rgDetail = "ripgrep turbo active"
+	}
+	if !workerCLIOK {
+		workerCLIDetail = "no external worker CLI in PATH"
+	}
+	if !apiGatewayOK {
+		apiGatewayDetail = "built-in defaults only (providers.json not configured)"
+	}
+
+	stateFor := func(ok bool, probed bool) string {
+		if !ok {
+			return "absent"
+		}
+		if probed {
+			return "probed"
+		}
+		return "configured_unprobed"
+	}
+
+	caps := []CapabilityEntry{
+		{Name: "sqlite_wal", Available: sqliteOK, VerificationState: stateFor(sqliteOK, true), Detail: "pure-Go SQLite WAL controlplane"},
+		{Name: "git_worktree", Available: gitOK, VerificationState: stateFor(gitOK, true), Detail: gitDetail},
+		{Name: "worker_cli", Available: workerCLIOK, VerificationState: stateFor(workerCLIOK, true), Detail: workerCLIDetail},
+		{Name: "api_gateway", Available: apiGatewayOK, VerificationState: stateFor(apiGatewayOK, false), Detail: apiGatewayDetail},
+		{Name: "ripgrep_turbo", Available: ripgrepOK, VerificationState: stateFor(ripgrepOK, true), Detail: rgDetail},
+	}
+
+	status := "MINIMAL"
+	if sqliteOK && gitOK && (workerCLIOK || apiGatewayOK) && ripgrepOK {
+		status = "FULL"
+	} else if sqliteOK && (gitOK || workerCLIOK || apiGatewayOK) {
+		status = "PARTIAL"
+	}
+	return status, caps
 }
 
 func checkDatabase(dbPath string) DiagnosticResult {

@@ -18,6 +18,7 @@ import (
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 )
@@ -149,12 +150,14 @@ func runLLMCall(args []string) {
 
 	var contextFileList []string
 	if strings.TrimSpace(*contextFilesFlag) != "" {
+		hydrateTaskAddDirsEnv()
+		explicitReceipt := strings.TrimSpace(*receiptIDFlag) != ""
 		rcID, scope, dErr := fsops.ResolveDelegationContext(*receiptIDFlag, *scopeRootFlag, false)
 		if dErr != nil {
 			exitRuntime("llm-call", "", *traceID, cli.CodeHarness, dErr, "Delegation boundary violation", *jsonl)
 		}
 		var allowedPaths []string
-		if rcID != "" {
+		if rcID != "" && explicitReceipt {
 			rcDbPath, rErr := receiptDatabasePath()
 			if rErr != nil {
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("locate receipt database: %w", rErr), "Ensure G8S_STATE_DIR is set properly", *jsonl)
@@ -396,6 +399,15 @@ func runLLMCall(args []string) {
 		}
 	}
 
+	modelResolved := rc.ModelResolved
+	if modelResolved == "" {
+		modelResolved = modelID
+	}
+
+	if envTaskID := strings.TrimSpace(os.Getenv("G8S_TASK_ID")); envTaskID != "" && !*workerEnvelopeFlag {
+		recordF2CallTelemetry(envTaskID, *traceID, entry.Name, modelID, modelResolved, rc.DurationMs, rc.InputTokens, rc.OutputTokens, rc.TotalTokens, len(contextFileList), len(appliedFiles))
+	}
+
 	if isWorkerEnvelope {
 		durationSec := float64(rc.DurationMs) / 1000.0
 		if durationSec == 0 {
@@ -424,10 +436,6 @@ func runLLMCall(args []string) {
 	}
 
 	if *jsonMode || *jsonl {
-		modelResolved := rc.ModelResolved
-		if modelResolved == "" {
-			modelResolved = modelID
-		}
 		data := map[string]any{
 			"provider":        entry.Name,
 			"model_requested": modelID,
@@ -454,4 +462,41 @@ func runLLMCall(args []string) {
 	if !strings.HasSuffix(rc.Stdout, "\n") {
 		fmt.Println()
 	}
+}
+
+func recordF2CallTelemetry(taskID, traceID, providerName, modelRequested, modelResolved string, durationMs int64, inputTokens, outputTokens, totalTokens, contextFilesCount, appliedFilesCount int) {
+	safeTaskID := filepath.Base(strings.TrimSpace(taskID))
+	if safeTaskID == "" || safeTaskID == "." || safeTaskID == ".." || strings.ContainsAny(safeTaskID, `/\`) {
+		return
+	}
+	stateDir := pathutil.DefaultStateDir()
+	f2Dir := filepath.Join(stateDir, "f2_telemetry")
+	if err := os.MkdirAll(f2Dir, 0o700); err != nil {
+		return
+	}
+	lineObj := map[string]any{
+		"task_id":             safeTaskID,
+		"trace_id":            traceID,
+		"provider":            providerName,
+		"model_requested":     modelRequested,
+		"model_resolved":      modelResolved,
+		"duration_ms":         durationMs,
+		"input_tokens":        inputTokens,
+		"output_tokens":       outputTokens,
+		"total_tokens":        totalTokens,
+		"context_files_count": contextFilesCount,
+		"applied_files_count": appliedFilesCount,
+		"recorded_at":         time.Now().UTC().Format(time.RFC3339),
+	}
+	b, err := json.Marshal(lineObj)
+	if err != nil {
+		return
+	}
+	fPath := filepath.Join(f2Dir, safeTaskID+".jsonl")
+	f, err := os.OpenFile(fPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(b, '\n'))
 }

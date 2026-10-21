@@ -128,6 +128,8 @@ func runSearch(args []string) {
 		roots = fs.Args()[1:]
 	}
 
+	hydrateTaskAddDirsEnv()
+	explicitReceipt := strings.TrimSpace(*receiptID) != ""
 	resReceiptID, resScopeRoot, err := fsops.ResolveDelegationContext(*receiptID, *scopeRoot, false)
 	if err != nil {
 		exitRuntime("search", "", *traceID, cli.CodeHarness, err, "Delegation boundary violation", *jsonl)
@@ -149,7 +151,7 @@ func runSearch(args []string) {
 
 	var allowedPaths []string
 	cleanReceiptID := strings.TrimSpace(*receiptID)
-	if cleanReceiptID != "" {
+	if cleanReceiptID != "" && explicitReceipt {
 		rcDbPath, err := receiptDatabasePath()
 		if err != nil {
 			exitRuntime("search", "", *traceID, cli.CodeDenied, fmt.Errorf("locate receipt database: %w", err), "Ensure G8S_STATE_DIR is set properly", *jsonl)

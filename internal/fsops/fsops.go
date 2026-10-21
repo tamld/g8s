@@ -165,16 +165,33 @@ func verifySubScope(childScope, ceilingScope string) error {
 	return nil
 }
 
+func splitScopeRoots(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 // ResolveDelegationContext checks environment variables and flags to determine
 // the active receipt ID and scope root, preventing privilege escalation.
 // When G8S_SCOPE_ROOT (or G8S_TIER=F1/F2) is set, the environment scope acts
 // as an immutable ceiling: flagScopeRoot may preserve or narrow it, but never
-// expand beyond it (#598).
+// expand beyond it (#598). Comma-separated roots in G8S_SCOPE_ROOT and
+// G8S_ADD_DIRS (for read-only operations) are supported for multi-repo fan-out (#643).
 func ResolveDelegationContext(flagReceiptID, flagScopeRoot string, isMutation bool) (receiptID string, scopeRoot string, err error) {
 	envTier := strings.TrimSpace(os.Getenv("G8S_TIER"))
 	envPerm := strings.TrimSpace(os.Getenv("G8S_PERMISSION"))
 	envReceipt := strings.TrimSpace(os.Getenv("G8S_RECEIPT_ID"))
 	envScope := strings.TrimSpace(os.Getenv("G8S_SCOPE_ROOT"))
+	envAddDirs := strings.TrimSpace(os.Getenv("G8S_ADD_DIRS"))
 	isDelegatedTier := strings.EqualFold(envTier, "F1") || strings.EqualFold(envTier, "F2")
 
 	if isMutation && (envPerm == "read_only" || envPerm == "automation_read") {
@@ -193,12 +210,29 @@ func ResolveDelegationContext(flagReceiptID, flagScopeRoot string, isMutation bo
 		return "", "", fmt.Errorf("tier=%s environment requires a write receipt for file mutation", envTier)
 	}
 
-	if envScope != "" {
+	scopeRoots := splitScopeRoots(envScope)
+	addDirRoots := splitScopeRoots(envAddDirs)
+	ceilingRoots := scopeRoots
+	if !isMutation && len(addDirRoots) > 0 {
+		ceilingRoots = append(append([]string(nil), scopeRoots...), addDirRoots...)
+	}
+
+	if len(ceilingRoots) > 0 {
 		if flagScopeRoot == "" {
-			scopeRoot = envScope
+			scopeRoot = ceilingRoots[0]
 		} else {
-			if err := verifySubScope(flagScopeRoot, envScope); err != nil {
-				return "", "", fmt.Errorf("scope_root mismatch: flag %q escapes delegated worker environment scope root %q (%v)", flagScopeRoot, envScope, err)
+			matched := false
+			var lastErr error
+			for _, ceiling := range ceilingRoots {
+				if err := verifySubScope(flagScopeRoot, ceiling); err == nil {
+					matched = true
+					break
+				} else {
+					lastErr = err
+				}
+			}
+			if !matched {
+				return "", "", fmt.Errorf("scope_root mismatch: flag %q escapes delegated worker environment scope root %q (%v)", flagScopeRoot, envScope, lastErr)
 			}
 			scopeRoot = flagScopeRoot
 		}

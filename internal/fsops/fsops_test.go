@@ -95,6 +95,46 @@ func TestResolveDelegationContext(t *testing.T) {
 			t.Fatalf("unexpected values: rcpt=%s scope=%s", rcpt, scope)
 		}
 	})
+
+	t.Run("multi-root G8S_SCOPE_ROOT and G8S_ADD_DIRS delegation (#643)", func(t *testing.T) {
+		base := t.TempDir()
+		worktreeDir := filepath.Join(base, "worktree")
+		siblingDir := filepath.Join(base, "sibling-tuneflow")
+		outsideDir := filepath.Join(base, "outside")
+		for _, d := range []string{worktreeDir, siblingDir, outsideDir} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		t.Setenv("G8S_PERMISSION", "workspace_write")
+		t.Setenv("G8S_RECEIPT_ID", "rc-multi")
+		t.Setenv("G8S_SCOPE_ROOT", worktreeDir)
+		t.Setenv("G8S_ADD_DIRS", siblingDir)
+
+		// Read-only operation against G8S_ADD_DIRS sibling repo succeeds
+		_, scopeRead, err := ResolveDelegationContext("", siblingDir, false)
+		if err != nil {
+			t.Fatalf("expected read against G8S_ADD_DIRS sibling repo to succeed, got %v", err)
+		}
+		if scopeRead != siblingDir {
+			t.Fatalf("expected scopeRead=%s, got %s", siblingDir, scopeRead)
+		}
+
+		// Mutation against G8S_ADD_DIRS (not in G8S_SCOPE_ROOT) is rejected
+		if _, _, err := ResolveDelegationContext("rc-multi", siblingDir, true); err == nil {
+			t.Fatal("expected mutation against G8S_ADD_DIRS outside G8S_SCOPE_ROOT to be rejected")
+		}
+
+		// Comma-separated G8S_SCOPE_ROOT allows mutation in either root, but rejects outsideDir
+		t.Setenv("G8S_SCOPE_ROOT", worktreeDir+","+siblingDir)
+		if _, scopeMut, err := ResolveDelegationContext("rc-multi", siblingDir, true); err != nil || scopeMut != siblingDir {
+			t.Fatalf("expected comma-separated G8S_SCOPE_ROOT to allow siblingDir, got scope=%s err=%v", scopeMut, err)
+		}
+		if _, _, err := ResolveDelegationContext("rc-multi", outsideDir, false); err == nil {
+			t.Fatal("expected outsideDir to be rejected")
+		}
+	})
 }
 
 func TestVerifyScope(t *testing.T) {

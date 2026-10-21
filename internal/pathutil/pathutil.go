@@ -45,10 +45,28 @@ func joinPathForOS(goos string, elem ...string) string {
 	return "/" + strings.Join(parts, "/")
 }
 
+func isPortableVal(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 // DefaultStateDir returns the platform-specific default state directory.
+// Priority (#645): G8S_STATE_DIR -> Portable Mode (G8S_PORTABLE=1 / PORTABLE_MODE=1 / .portable marker) -> OS/XDG default.
 func DefaultStateDir() string {
 	if env := os.Getenv("G8S_STATE_DIR"); env != "" {
 		return env
+	}
+	if isPortableVal(os.Getenv("G8S_PORTABLE")) || isPortableVal(os.Getenv("PORTABLE_MODE")) {
+		if exe, err := os.Executable(); err == nil && exe != "" {
+			return filepath.Join(filepath.Dir(exe), "state")
+		}
+		return filepath.Join(".", ".g8s-state")
+	}
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		exeDir := filepath.Dir(exe)
+		if info, statErr := os.Stat(filepath.Join(exeDir, ".portable")); statErr == nil && !info.IsDir() {
+			return filepath.Join(exeDir, "state")
+		}
 	}
 	return stateDir()
 }
@@ -227,9 +245,27 @@ func LogsDirForOS(goos string, envGetter func(string) string, homeDir string) st
 }
 
 // StateDirForOS resolves state directory for a specific target OS and environment map.
-func StateDirForOS(goos string, envGetter func(string) string, homeDir string) string {
+func StateDirForOS(goos string, envGetter func(string) string, homeDir string, exeDir ...string) string {
 	if envGetter == nil {
 		envGetter = os.Getenv
+	}
+	if env := envGetter("G8S_STATE_DIR"); env != "" {
+		return env
+	}
+	resolvedExeDir := ""
+	if len(exeDir) > 0 {
+		resolvedExeDir = strings.TrimSpace(exeDir[0])
+	}
+	if isPortableVal(envGetter("G8S_PORTABLE")) || isPortableVal(envGetter("PORTABLE_MODE")) {
+		if resolvedExeDir != "" {
+			return joinPathForOS(goos, resolvedExeDir, "state")
+		}
+		return ".g8s-state"
+	}
+	if resolvedExeDir != "" {
+		if info, err := os.Stat(filepath.Join(resolvedExeDir, ".portable")); err == nil && !info.IsDir() {
+			return joinPathForOS(goos, resolvedExeDir, "state")
+		}
 	}
 
 	switch goos {

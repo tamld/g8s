@@ -921,3 +921,83 @@ func TestParseBriefDoDItems(t *testing.T) {
 		t.Errorf("jsonItems = %+v", jsonItems)
 	}
 }
+
+func TestVerifyF2TelemetrySummaryAndLessonInjection(t *testing.T) {
+	tempState := t.TempDir()
+	t.Setenv("G8S_STATE_DIR", tempState)
+
+	// 1. Write 2 F2 telemetry records for task-f2-test (#643)
+	f2Dir := filepath.Join(tempState, "f2_telemetry")
+	if err := os.MkdirAll(f2Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f2Lines := `{"task_id":"task-f2-test","model_requested":"reasoning-free","model_resolved":"cx/gpt-5.4-mini","duration_ms":1200,"total_tokens":450}
+{"task_id":"task-f2-test","model_requested":"fast-agent","model_resolved":"glm-4.7","duration_ms":800,"total_tokens":350}
+`
+	if err := os.WriteFile(filepath.Join(f2Dir, "task-f2-test.jsonl"), []byte(f2Lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Write 2 ratified lessons in ledger.jsonl (#644):
+	//    - les-644-1 matches the failure context (TestSomething / verifier.go)
+	//    - les-644-unrelated is in the same class ("go-unit") but for an unrelated scenario ("unrelated_dns_socket_poll")
+	ledgerPath := filepath.Join(tempState, "ledger.jsonl")
+	ratifiedLessonJSON := `{"id":"les-644-1","round_id":"r1","author_class":"go-unit","reviewed_classes":["go-unit"],"observation":{"text":"F1 worker broke TestSomething in verifier.go by swallowing errors","cited_events":[{"event_id":"ev-1","task_id":"t-1","event_type":"task_failed","claim":"TestSomething failed"}]},"recommendation":"Always return explicit wrapped errors and check all test branches","recommendation_is_llm_opinion":true,"status":"ratified"}` + "\n" +
+		`{"id":"les-644-unrelated","round_id":"r1","author_class":"go-unit","reviewed_classes":["go-unit"],"observation":{"text":"DNS socket poll timeout in isolated proxy","cited_events":[{"event_id":"ev-2","task_id":"t-2","event_type":"task_failed","claim":"dns_poll_timeout"}]},"recommendation":"Use mock resolver in proxy unit tests","recommendation_is_llm_opinion":true,"status":"ratified"}` + "\n"
+	if err := os.WriteFile(ledgerPath, []byte(ratifiedLessonJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	regYAML := []byte(`
+classes:
+  - name: go-unit
+    status: hard
+    founding_catch: "#644 test lesson injection"
+    priority: 10
+    paths:
+      - "internal/verifier/**"
+    checks:
+      - type: go-test
+        packages:
+          - "./internal/verifier"
+`)
+
+	vf := NewVerifier(
+		WithRegistryData(regYAML),
+		WithLessonsLedgerPath(ledgerPath),
+		WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+			return []byte("--- FAIL: TestSomething (0.01s)\nFAIL\n"), nil, 1, nil
+		}),
+		WithTelemetrySink(func(taskID string, verdict Verdict) {}),
+	)
+
+	verdict, err := vf.Verify(TaskRef{
+		ID:           "task-f2-test",
+		ReceiptID:    "rc-643",
+		AllowedPaths: []string{"internal/verifier/verifier.go"},
+	}, TaskRef{ID: "f0-supervisor"})
+	if err != nil {
+		t.Fatalf("Verify error: %v", err)
+	}
+	if verdict.Outcome != OutcomeFail {
+		t.Fatalf("expected OutcomeFail, got %s", verdict.Outcome)
+	}
+	if verdict.F2Summary == nil {
+		t.Fatal("expected non-nil F2Summary on Verdict")
+	}
+	if verdict.F2Summary.TotalCalls != 2 || verdict.F2Summary.TotalTokens != 800 || verdict.F2Summary.TotalDurationMs != 2000 {
+		t.Fatalf("unexpected F2Summary metrics: %+v", verdict.F2Summary)
+	}
+	if len(verdict.F2Summary.ModelsUsed) != 2 || verdict.F2Summary.ModelsUsed[0] != "cx/gpt-5.4-mini" || verdict.F2Summary.ModelsUsed[1] != "glm-4.7" {
+		t.Fatalf("unexpected F2Summary.ModelsUsed: %+v", verdict.F2Summary.ModelsUsed)
+	}
+	if verdict.F2Summary.TelemetrySHA256 == "" {
+		t.Fatal("expected non-empty F2Summary.TelemetrySHA256 for audit drill-down")
+	}
+	if len(verdict.InjectedLessons) != 1 {
+		t.Fatalf("expected strictly 1 relevant injected lesson (filtering out same-class unrelated lesson), got %+v", verdict.InjectedLessons)
+	}
+	if verdict.InjectedLessons[0].ID != "les-644-1" || verdict.InjectedLessons[0].MatchedSignal == "" || !strings.Contains(verdict.InjectedLessons[0].WrongApproach, "swallowing errors") {
+		t.Fatalf("unexpected InjectedLessons[0]: %+v", verdict.InjectedLessons[0])
+	}
+}
