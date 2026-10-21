@@ -781,6 +781,16 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if strings.Contains(req.ScopeRoot, "..") {
+		apiError(w, http.StatusForbidden, "path traversal is not allowed")
+		return
+	}
+	for _, rPath := range req.Roots {
+		if strings.Contains(rPath, "..") {
+			apiError(w, http.StatusForbidden, "path traversal is not allowed")
+			return
+		}
+	}
 	if !req.FilesOnly && req.Pattern == "" {
 		apiError(w, http.StatusBadRequest, "pattern is required unless files_only is true")
 		return
@@ -828,17 +838,23 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if strings.TrimSpace(req.Path) == "" {
+	reqPath := req.Path
+	reqScopeRoot := req.ScopeRoot
+	if strings.Contains(reqPath, "..") || strings.Contains(reqScopeRoot, "..") {
+		apiError(w, http.StatusForbidden, "path traversal is not allowed")
+		return
+	}
+	if strings.TrimSpace(reqPath) == "" {
 		apiError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, false)
+	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, reqScopeRoot, false)
 	if status != 0 {
 		apiError(w, status, errMsg)
 		return
 	}
 	res, err := fsops.Read(r.Context(), fsops.ReadOptions{
-		Path:         req.Path,
+		Path:         reqPath,
 		ScopeRoot:    scopeRoot,
 		StartLine:    req.StartLine,
 		EndLine:      req.EndLine,
@@ -873,25 +889,31 @@ func (s *Server) handleFSEdit(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if strings.TrimSpace(req.Path) == "" || req.OldString == "" {
+	reqPath := req.Path
+	reqScopeRoot := req.ScopeRoot
+	if strings.Contains(reqPath, "..") || strings.Contains(reqScopeRoot, "..") {
+		apiError(w, http.StatusForbidden, "path traversal is not allowed")
+		return
+	}
+	if strings.TrimSpace(reqPath) == "" || req.OldString == "" {
 		apiError(w, http.StatusBadRequest, "path and old_string are required")
 		return
 	}
-	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, req.ScopeRoot, true)
+	scopeRoot, allowedPaths, status, errMsg := s.resolveFSDelegation(req.ReceiptID, reqScopeRoot, true)
 	if status != 0 {
 		apiError(w, status, errMsg)
 		return
 	}
-	if status, errMsg := preflightFSEdit(r.Context(), req.Path, scopeRoot, allowedPaths, req.IfSHA256); status != 0 {
+	if status, errMsg := preflightFSEdit(r.Context(), reqPath, scopeRoot, allowedPaths, req.IfSHA256); status != 0 {
 		apiError(w, status, errMsg)
 		return
 	}
-	if status, errMsg := s.consumeFSReceipt(req.ReceiptID, req.ScopeRoot); status != 0 {
+	if status, errMsg := s.consumeFSReceipt(req.ReceiptID, reqScopeRoot); status != 0 {
 		apiError(w, status, errMsg)
 		return
 	}
 	res, err := fsops.Edit(r.Context(), fsops.EditOptions{
-		Path:         req.Path,
+		Path:         reqPath,
 		ScopeRoot:    scopeRoot,
 		OldString:    req.OldString,
 		NewString:    req.NewString,

@@ -1,3 +1,4 @@
+schema_version: "verifier-classes.v1"
 # Verifier Classes Configuration (issue #515 / Wave H1, SCORECARD S-7)
 # Maps task write-scope paths to machine verification check bundles.
 

@@ -105,6 +105,9 @@ func runLLMCall(args []string) {
 	authEnvFlag := fs.String("auth-env", "", "optional auth env var override")
 	applyFilesFlag := fs.Bool("apply-files", false, "apply fenced file blocks from LLM response to workspace")
 	workerEnvelopeFlag := fs.Bool("worker-envelope", false, "emit single-line worker result JSON envelope on stdout")
+	contextFilesFlag := fs.String("context-files", "", "comma-separated file paths to hydrate as bounded context relative to scope root")
+	scopeRootFlag := fs.String("scope-root", "", "base directory for context files and write scope")
+	receiptIDFlag := fs.String("receipt-id", "", "write receipt ID for delegation boundary validation")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: g8s llm-call [flags]")
@@ -142,6 +145,63 @@ func runLLMCall(args []string) {
 
 	if strings.TrimSpace(prompt) == "" {
 		exitUsage("llm-call", "prompt", *traceID, "prompt must be provided via --prompt, --prompt-file, or stdin", "Specify --prompt <text> or --prompt-file <path>", *jsonl)
+	}
+
+	var contextFileList []string
+	if strings.TrimSpace(*contextFilesFlag) != "" {
+		rcID, scope, dErr := fsops.ResolveDelegationContext(*receiptIDFlag, *scopeRootFlag, false)
+		if dErr != nil {
+			exitRuntime("llm-call", "", *traceID, cli.CodeHarness, dErr, "Delegation boundary violation", *jsonl)
+		}
+		var allowedPaths []string
+		if rcID != "" {
+			rcDbPath, rErr := receiptDatabasePath()
+			if rErr != nil {
+				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("locate receipt database: %w", rErr), "Ensure G8S_STATE_DIR is set properly", *jsonl)
+			}
+			rcMgr, mErr := receipt.NewReceiptManager(rcDbPath, nil)
+			if mErr != nil {
+				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("open receipt database: %w", mErr), "Ensure receipt database is accessible", *jsonl)
+			}
+			defer rcMgr.Close()
+
+			rec, vErr := rcMgr.VerifyReceipt(rcID)
+			if vErr != nil {
+				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("verify receipt %s: %w", rcID, vErr), "Provide a valid receipt ID", *jsonl)
+			}
+			if rec.Consumed {
+				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("receipt %s already consumed", rcID), "Provide a fresh write receipt", *jsonl)
+			}
+			allowedPaths = rec.AllowedPaths
+		}
+
+		parts := strings.Split(*contextFilesFlag, ",")
+		var contextBlocks strings.Builder
+		for _, rawPath := range parts {
+			p := strings.TrimSpace(rawPath)
+			if p == "" {
+				continue
+			}
+			readPath := p
+			if !filepath.IsAbs(p) && scope != "" && scope != "." {
+				if _, vErr := fsops.VerifyScope(p, scope, nil); vErr != nil {
+					readPath = filepath.Join(scope, p)
+				}
+			}
+			res, rErr := fsops.Read(context.Background(), fsops.ReadOptions{
+				Path:         readPath,
+				ScopeRoot:    scope,
+				AllowedPaths: allowedPaths,
+			})
+			if rErr != nil {
+				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("read context file %q: %w", p, rErr), "Ensure context file is within scope and allowed paths", *jsonl)
+			}
+			_, _ = fmt.Fprintf(&contextBlocks, "--- FILE: %s (sha256: %s) ---\n%s\n", p, res.SHA256, res.Content)
+			contextFileList = append(contextFileList, p)
+		}
+		if contextBlocks.Len() > 0 {
+			prompt = contextBlocks.String() + prompt
+		}
 	}
 
 	timeoutDur, err := time.ParseDuration(*timeoutFlag)
@@ -378,6 +438,9 @@ func runLLMCall(args []string) {
 			"output_tokens":   rc.OutputTokens,
 			"total_tokens":    rc.TotalTokens,
 			"applied_files":   appliedFiles,
+		}
+		if len(contextFileList) > 0 {
+			data["context_files"] = contextFileList
 		}
 		env := cli.NewEnvelope("llm_call", "llm-call", "", data)
 		env.TraceID = *traceID

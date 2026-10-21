@@ -229,6 +229,7 @@ All shipped, tagged, and verified on GitHub Releases:
 | [x] DELTA-25 / ADR-0034 | Universal Config-Driven LLM Consumer & Multi-Protocol Gateway: multi-protocol `api_call` (`openai`, `anthropic`, `9router`), direct CLI `g8s llm-call`, worker queue bridge via `g8s llm-call --worker-envelope`, live model discovery `g8s providers discover` | P0 | ✅ Complete |
 | [x] 9Router SWE Fleet | Standardized SWE combo catalog (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcard matching (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml` and `internal/provider/catalog.go` | P0 | ✅ Complete |
 | [x] F0 Cognitive Purity | Brain vs Hands division: F0 consumes structured `RoundReceiptSchema` and gate verdicts while delegating raw log hunting and janitor operations to F1 workers (`agy` and `9router` combos); updated supervisor skills and charters | P0 | ✅ Complete |
+| [x] #641 | Repository Security Hardening & Mode-3 Returns: Resolved all 15 GitHub Code Scanning alerts (`go/path-injection`, `actions/unpinned-tag`, `actions/missing-workflow-permissions`), upgraded Go toolchain floor to `1.26.10` (`GO-2026-6809`), added `--context-files` file context hydration (Mode-3 #16), and unified `.g8s/*.yml` `schema_version` across Offer Bundle profile seeds (Mode-3 #15, #17) | P0 | ✅ Complete |
 
 ---
 

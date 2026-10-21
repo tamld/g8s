@@ -17,7 +17,7 @@ Source: issue #442.
 
 - M1: **5/5 original target repos onboarded** (`tamld-llm-wiki`, `defense-in-depth`, `aegis`, `tuneflow`, `hash-checker`) across all 4 domain profiles, plus `homelab-proxmox` as an extra infra repo (target ≥3/5 **HIT** 2026-10-06, completed 2026-10-18)
 - M2: **6/6 first-audits caught ≥1 real `[CODE]`-cited issue day-one** (`tamld-llm-wiki` ~135 findings, `defense-in-depth` 5+ CLI/doc drifts, `aegis` 4 stale artifacts + repo-name drift, `homelab-proxmox` 1 dead link + 4 missing service dirs, `tuneflow` 5 code↔doc/script drifts, `hash-checker` 1 verified doc↔CI drift (3 of 5 worker findings rejected on F0 verification)) — metric **SATISFIED** across all waves
-- M3: **14/2 contribution packets shipped back to `g8s`** (target ≥2 **SATISFIED**):
+- M3: **17/2 contribution packets shipped back to `g8s`** (target ≥2 **SATISFIED**):
   1. `#566`: Worker `(model, effort)` realignment + empty-provider claim affinity (from `aegis` Wave 3)
   2. `#567`: Sibling `.g8s/effort-classes.yml` resolution from `--scope-root` in `g8s submit` (from `aegis` Wave 3; verified live on `homelab-proxmox` & `tuneflow`)
   3. `#569`: `g8s deliver` deletion propagation from worktree to target repository (from `aegis` Wave 3)
@@ -32,6 +32,9 @@ Source: issue #442.
   12. `tools/ci_structure_sync.sh`: Non-Go `docs/README.md` taxonomy coverage verification — when `go.mod` is absent and `docs/README.md` exists, verifies every first-level `docs/<subdir>/` directory is documented in `docs/README.md` (verified live on `tuneflow#148` covering 9 `docs/` directories)
   13. `cmd/g8s/deliver.go`: `--prune-worktree` flag on `g8s deliver` to atomically remove the isolated worktree (`wt-<hash>`) and temporary `wt/<task-id>` branch after receipt-verified file delivery
   14. `#617` (partial, PR #618): `g8s deliver` accepts a receipt already consumed by the same task after wall-clock expiry, plus `--receipt-id` override; `g8s offer init` now scaffolds `.g8s/verifier-classes.yml` (from Wave-1 cross-repo dogfood). Session-pool worktree cleanup (criterion 1) is still open — #617 reopened.
+  15. `#641` (Mode-3 from `tuneflow`/`defense-in-depth`/`aegis`/`hash-checker`/`homelab-proxmox` 9router audit): Unified `schema_version` (`"trust-boundaries.v1"`, `"lane-bundles.v1"`, `"verifier-classes.v1"`) across all Offer Bundle profile seeds (`offer/profiles/seeds/*.yml`, `cmd/g8s/offer.go`) and `tools/f0/appeasement.go` G4 config key whitelist.
+  16. `#641` (Mode-3 from 9router cross-repo worker dogfooding): Added `--context-files` bounded file context hydration (via `fsops.Read` + DLP redaction) to `g8s llm-call` and `g8s_llm_call` MCP tool so HTTP LLM gateways (`9router`/`openai`/`anthropic`) can audit/mutate repository files without external shell interpolation.
+  17. `#641` (Mode-3 from `aegis` `.g8s/lane-bundles.yml` audit): Quoted numeric hotfix lane key `"0":` in `.g8s/lane-bundles.yml` so YAML parsers treat all lane identifiers uniformly as strings.
   - Not counted as sibling Mode-3 returns: `#611` (sa-006 probe now checks the `fsops.Edit` result and final file content — found by red-team review of PR #604, an internal finding) and `#614` (`conv.Run` cleans up `blind/*` worktrees/branches — a g8s self-hygiene finding from its own test suite).
 - M4: retention clock starts 2026-10-05 (3-month check ~2027-01-05; 0 gate removals across all 4 onboarded repositories)
 
@@ -50,6 +53,24 @@ Source: issue #442.
 - **Quota Law A (Pure Write / Template Generation)**: `2–9 files/worker`, `19.5s – 51.2s`, `26K – 50K` tokens (`100%` first-attempt completion when prompt forbids directory exploration).
 - **Quota Law B (Code + Unit Test Mutation)**: `2–3 files/worker`, `68.3s – 149.0s`, `81K – 187K` tokens (`100%` first-attempt completion).
 - **Quota Law C (Parallel Host Ceiling)**: `2–4 concurrent F1 workers` across 2 sibling repositories (`1-2 workers/repo` with disjoint `WriteReceipt` globs and `RepoWorktreeIsolator`).
+
+## Empirical v0.19.0 9router Cross-Repo Audit Round (5 Sibling Repositories)
+
+During the `v0.19.0` release cycle, five live worker audit dispatches were executed across all onboarded sibling repositories using `9router` (`cx/gpt-6-luna` combo):
+
+| Repository | Profile | Task ID | Model | Duration | Total Tokens | Findings / Returns |
+|------------|---------|---------|-------|----------|--------------|-------------------|
+| `tuneflow` | utility | `16c4d69a` | `cx/gpt-6-luna` via 9router | `5.09s` | `1,157` | Audited Offer Bundle scaffolding & `.g8s/` registries; contributed to Mode-3 return #15 (`schema_version` unification) |
+| `defense-in-depth` | security | `ec7929b3` | `cx/gpt-6-luna` via 9router | `6.96s` | `1,235` | Verified cross-repo security policy sync; contributed to Mode-3 return #15 (`schema_version` unification) |
+| `aegis` | infra | `d27c246c` | `cx/gpt-6-luna` via 9router | `7.38s` | `1,147` | Flagged numeric hotfix lane key `"0":` in `.g8s/lane-bundles.yml`; produced Mode-3 return #17 and contributed to #15 |
+| `hash-checker` | utility | `ce2feca4` | `cx/gpt-6-luna` via 9router | `6.93s` | `1,146` | Audited verifier-classes config and Offer Bundle seed consistency; contributed to Mode-3 return #15 |
+| `homelab-proxmox` | infra | — | `cx/gpt-6-luna` via 9router | — | — | Validated infra-profile registry consistency; verified cross-repo worker dogfooding pattern |
+
+### Mode-3 Returns Produced from the Audit Round
+
+1. **Mode-3 Return #15**: Across `tuneflow`, `defense-in-depth`, `aegis`, `hash-checker`, and `homelab-proxmox`, audits identified divergent and missing `schema_version` values across Offer Bundle seeds (`offer/profiles/seeds/*.yml`), `cmd/g8s/offer.go`, and the `tools/f0/appeasement.go` G4 config key whitelist. Fixed by unifying on `"trust-boundaries.v1"`, `"lane-bundles.v1"`, and `"verifier-classes.v1"`.
+2. **Mode-3 Return #16**: The pure HTTP gateway nature of `9router` (and OpenAI/Anthropic gateways) highlighted that remote LLMs without local tool loops cannot read repository files without shell interpolation. Added `--context-files` bounded file context hydration (via `fsops.Read` + DLP redaction) to `g8s llm-call` and `g8s_llm_call` MCP tool.
+3. **Mode-3 Return #17**: The `aegis` audit caught an unquoted numeric key (`0:`) in `.g8s/lane-bundles.yml` causing YAML parsers to parse the key as an integer rather than a string identifier. Fixed by quoting `"0":` across all lane registries.
 
 ## Cross-project pattern review (falsification check — campaign close 2026-10-14)
 

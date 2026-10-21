@@ -40,6 +40,10 @@
 1. `g8s llm-call` MUST allow direct synchronous LLM calls against any configured `api_call` provider (`--provider`, `--model`, `--prompt`, `--prompt-file`, `--system`, `--effort`, `--json`).
 2. `g8s worker` MUST wire `api_call` providers (unless `disable_queue_exec: true`) to `g8s llm-call --worker-envelope`, capturing response text, resolved model, and token usage in the task result envelope.
 3. Because HTTP `api_call` requests do not expose local shell/filesystem tools to the remote model, `supplied_text` (`tool_policy: "none"`) and `read_only` contracts are enforced by construction.
+4. **Bounded File Context Hydration (`--context-files` / `context_files`)**:
+   - `g8s llm-call` MUST support `--context-files <paths>` (comma-separated or repeated) and the `g8s_llm_call` MCP tool MUST support `context_files` (`[]string`).
+   - Each path MUST be read in-process via `fsops.Read`, strictly enforcing `ScopeRoot`, `WriteReceipt.AllowedPaths` (when under receipt enforcement), and DLP secret redaction.
+   - Each file's content MUST be prepended to the user prompt with the header `--- FILE: <path> (sha256: <hash>) ---` before dispatching the request to the HTTP provider gateway, allowing remote LLMs to inspect or mutate repository files without external shell interpolation.
 
 ### R4 — Catalog & Effort Registration (`.g8s/agent-models.yml`)
 1. `.g8s/agent-models.yml` MUST include provider `9router` with `effort_style: named`, `field: reasoning_effort`, `default_effort: high`, and the 5 canonical combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`).
