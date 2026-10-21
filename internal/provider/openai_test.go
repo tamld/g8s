@@ -468,7 +468,7 @@ func TestOpenAIProvider_Spawn_AnthropicProtocol(t *testing.T) {
 	if gotBody["system"] != "You are an expert" {
 		t.Errorf("body system = %v", gotBody["system"])
 	}
-	if int(gotBody["max_tokens"].(float64)) != 2048 {
+	if mt, ok := gotBody["max_tokens"].(float64); !ok || int(mt) != 2048 {
 		t.Errorf("body max_tokens = %v", gotBody["max_tokens"])
 	}
 }

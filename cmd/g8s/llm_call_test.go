@@ -121,10 +121,10 @@ func TestLLMCallQueueWorkerExecution(t *testing.T) {
 	tempDir := t.TempDir()
 	stateDir := filepath.Join(tempDir, "state")
 	configDir := filepath.Join(tempDir, "config")
-	if err := os.MkdirAll(stateDir, 0700); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatalf("mkdir state: %v", err)
 	}
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestLLMCallQueueWorkerExecution(t *testing.T) {
 			}
 		]
 	}`, mockServer.URL)
-	if err := os.WriteFile(providersPath, []byte(providerJSON), 0600); err != nil {
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write providers.json: %v", err)
 	}
 
@@ -293,7 +293,7 @@ func TestProvidersDiscoverLiveModels(t *testing.T) {
 			}
 		]
 	}`, mockServer.URL)
-	if err := os.WriteFile(providersPath, []byte(providerJSON), 0600); err != nil {
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
 		t.Fatalf("write providers.json: %v", err)
 	}
 

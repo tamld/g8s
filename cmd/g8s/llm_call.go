@@ -228,7 +228,7 @@ func runLLMCall(args []string) {
 		}
 	}
 
-	isWorkerEnvelope := *workerEnvelopeFlag || (!(*jsonMode || *jsonl) && os.Getenv("G8S_TASK_ID") != "")
+	isWorkerEnvelope := *workerEnvelopeFlag || (!*jsonMode && !*jsonl && os.Getenv("G8S_TASK_ID") != "")
 	if *workerEnvelopeFlag {
 		isWorkerEnvelope = true
 	}

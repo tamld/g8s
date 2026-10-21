@@ -30,9 +30,9 @@ type ProviderEntry struct {
 	Class               string            `json:"class"`
 	Name                string            `json:"name"`
 	DefaultModel        string            `json:"default_model,omitempty"`
-	Protocol            string            `json:"protocol,omitempty"`              // "openai" (default), "anthropic", "9router"
+	Protocol            string            `json:"protocol,omitempty"` // "openai" (default), "anthropic", "9router"
 	BaseURL             string            `json:"base_url,omitempty"`
-	BaseURLEnv          string            `json:"base_url_env,omitempty"`          // optional env var overriding base_url at runtime (e.g. "NINEROUTER_URL")
+	BaseURLEnv          string            `json:"base_url_env,omitempty"` // optional env var overriding base_url at runtime (e.g. "NINEROUTER_URL")
 	AuthEnv             string            `json:"auth_env,omitempty"`
 	Headers             map[string]string `json:"headers,omitempty"`               // optional static HTTP headers
 	AllowUnlistedModels bool              `json:"allow_unlisted_models,omitempty"` // allow arbitrary upstream model IDs (e.g. nvidia/*, cc/*) when provider is explicitly targeted

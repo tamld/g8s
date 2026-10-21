@@ -1148,7 +1148,7 @@ func TestMCPLLMCallTool(t *testing.T) {
 		if output["output"] != "Hello from fast-agent mock" {
 			t.Errorf("expected output Hello from fast-agent mock, got %v", output["output"])
 		}
-		if int(output["total_tokens"].(float64)) != 18 {
+		if tot, ok := output["total_tokens"].(float64); !ok || int(tot) != 18 {
 			t.Errorf("expected total_tokens 18, got %v", output["total_tokens"])
 		}
 	})
