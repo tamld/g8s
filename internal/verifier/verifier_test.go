@@ -938,9 +938,12 @@ func TestVerifyF2TelemetrySummaryAndLessonInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. Write a ratified lesson in ledger.jsonl (#644)
+	// 2. Write 2 ratified lessons in ledger.jsonl (#644):
+	//    - les-644-1 matches the failure context (TestSomething / verifier.go)
+	//    - les-644-unrelated is in the same class ("go-unit") but for an unrelated scenario ("unrelated_dns_socket_poll")
 	ledgerPath := filepath.Join(tempState, "ledger.jsonl")
-	ratifiedLessonJSON := `{"id":"les-644-1","round_id":"r1","author_class":"go-unit","reviewed_classes":["go-unit"],"observation":{"text":"F1 worker swallowed errors in diff_guard","cited_events":[{"event_id":"ev-1","task_id":"t-1","event_type":"task_failed","claim":"exit code 1"}]},"recommendation":"Always return explicit wrapped errors and check all test branches","recommendation_is_llm_opinion":true,"status":"ratified"}` + "\n"
+	ratifiedLessonJSON := `{"id":"les-644-1","round_id":"r1","author_class":"go-unit","reviewed_classes":["go-unit"],"observation":{"text":"F1 worker broke TestSomething in verifier.go by swallowing errors","cited_events":[{"event_id":"ev-1","task_id":"t-1","event_type":"task_failed","claim":"TestSomething failed"}]},"recommendation":"Always return explicit wrapped errors and check all test branches","recommendation_is_llm_opinion":true,"status":"ratified"}` + "\n" +
+		`{"id":"les-644-unrelated","round_id":"r1","author_class":"go-unit","reviewed_classes":["go-unit"],"observation":{"text":"DNS socket poll timeout in isolated proxy","cited_events":[{"event_id":"ev-2","task_id":"t-2","event_type":"task_failed","claim":"dns_poll_timeout"}]},"recommendation":"Use mock resolver in proxy unit tests","recommendation_is_llm_opinion":true,"status":"ratified"}` + "\n"
 	if err := os.WriteFile(ledgerPath, []byte(ratifiedLessonJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -988,10 +991,13 @@ classes:
 	if len(verdict.F2Summary.ModelsUsed) != 2 || verdict.F2Summary.ModelsUsed[0] != "cx/gpt-5.4-mini" || verdict.F2Summary.ModelsUsed[1] != "glm-4.7" {
 		t.Fatalf("unexpected F2Summary.ModelsUsed: %+v", verdict.F2Summary.ModelsUsed)
 	}
-	if len(verdict.InjectedLessons) != 1 {
-		t.Fatalf("expected 1 injected lesson on failed check, got %+v", verdict.InjectedLessons)
+	if verdict.F2Summary.TelemetrySHA256 == "" {
+		t.Fatal("expected non-empty F2Summary.TelemetrySHA256 for audit drill-down")
 	}
-	if verdict.InjectedLessons[0].ID != "les-644-1" || !strings.Contains(verdict.InjectedLessons[0].WrongApproach, "swallowed errors") {
+	if len(verdict.InjectedLessons) != 1 {
+		t.Fatalf("expected strictly 1 relevant injected lesson (filtering out same-class unrelated lesson), got %+v", verdict.InjectedLessons)
+	}
+	if verdict.InjectedLessons[0].ID != "les-644-1" || verdict.InjectedLessons[0].MatchedSignal == "" || !strings.Contains(verdict.InjectedLessons[0].WrongApproach, "swallowing errors") {
 		t.Fatalf("unexpected InjectedLessons[0]: %+v", verdict.InjectedLessons[0])
 	}
 }

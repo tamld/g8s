@@ -45,10 +45,13 @@ type DiagnosticResult struct {
 }
 
 // CapabilityEntry represents the availability of an optional runtime capability (#645).
+// VerificationState distinguishes live-probed capabilities ("probed") from static
+// configuration/environment presence ("configured_unprobed") or missing items ("absent").
 type CapabilityEntry struct {
-	Name      string `json:"name"`
-	Available bool   `json:"available"`
-	Detail    string `json:"detail,omitempty"`
+	Name              string `json:"name"`
+	Available         bool   `json:"available"`
+	VerificationState string `json:"verification_state,omitempty"` // "probed" | "configured_unprobed" | "absent"
+	Detail            string `json:"detail,omitempty"`
 }
 
 // DoctorReport contains all executed health and sanity checks.
@@ -374,11 +377,11 @@ func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry)
 			}
 		case chk.Name == "Providers File" && chk.Status == "OK" && strings.Contains(chk.Message, "loaded cleanly"):
 			apiGatewayOK = true
-			apiGatewayDetail = chk.Message
+			apiGatewayDetail = chk.Message + " (static config only; run 'g8s providers discover' to probe live reachability/quota)"
 		case chk.Name == "Provider Registry" && chk.Status == "OK" && !apiGatewayOK:
 			if os.Getenv("NINEROUTER_URL") != "" || os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != "" {
 				apiGatewayOK = true
-				apiGatewayDetail = "environment API endpoint/credentials active"
+				apiGatewayDetail = "environment API endpoint/credentials present (static env only; run 'g8s providers discover' to probe live reachability/quota)"
 			}
 		}
 	}
@@ -401,12 +404,22 @@ func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry)
 		apiGatewayDetail = "built-in defaults only (providers.json not configured)"
 	}
 
+	stateFor := func(ok bool, probed bool) string {
+		if !ok {
+			return "absent"
+		}
+		if probed {
+			return "probed"
+		}
+		return "configured_unprobed"
+	}
+
 	caps := []CapabilityEntry{
-		{Name: "sqlite_wal", Available: sqliteOK, Detail: "pure-Go SQLite WAL controlplane"},
-		{Name: "git_worktree", Available: gitOK, Detail: gitDetail},
-		{Name: "worker_cli", Available: workerCLIOK, Detail: workerCLIDetail},
-		{Name: "api_gateway", Available: apiGatewayOK, Detail: apiGatewayDetail},
-		{Name: "ripgrep_turbo", Available: ripgrepOK, Detail: rgDetail},
+		{Name: "sqlite_wal", Available: sqliteOK, VerificationState: stateFor(sqliteOK, true), Detail: "pure-Go SQLite WAL controlplane"},
+		{Name: "git_worktree", Available: gitOK, VerificationState: stateFor(gitOK, true), Detail: gitDetail},
+		{Name: "worker_cli", Available: workerCLIOK, VerificationState: stateFor(workerCLIOK, true), Detail: workerCLIDetail},
+		{Name: "api_gateway", Available: apiGatewayOK, VerificationState: stateFor(apiGatewayOK, false), Detail: apiGatewayDetail},
+		{Name: "ripgrep_turbo", Available: ripgrepOK, VerificationState: stateFor(ripgrepOK, true), Detail: rgDetail},
 	}
 
 	status := "MINIMAL"

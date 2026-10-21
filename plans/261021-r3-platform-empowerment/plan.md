@@ -43,7 +43,7 @@ created: 2026-10-21
   - **D1.1**: Unblock read-only operations (`g8s read`, `g8s search`, `g8s llm-call --context-files`) when `G8S_RECEIPT_ID` is inherited in the environment unless `--receipt-id` is explicitly passed on the CLI.
   - **D1.2**: Support comma-separated ceiling roots in `G8S_SCOPE_ROOT` and `G8S_ADD_DIRS` inside `fsops.ResolveDelegationContext` (mutations require matching a root in `G8S_SCOPE_ROOT`; read-only operations accept any root in `G8S_SCOPE_ROOT` or `G8S_ADD_DIRS`). Export `G8S_ADD_DIRS` in `internal/worker/worker.go`.
   - **D1.3**: When `g8s llm-call` executes while `G8S_TASK_ID` is set in the environment, append a compact JSONL record (`task_id`, `trace_id`, `provider`, `model`, `duration_ms`, `input_tokens`, `output_tokens`, `total_tokens`, `context_files_count`, `applied_files_count`, `timestamp`) to `$G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl`.
-  - **D1.4**: In `internal/verifier/verifier.go`, aggregate `$G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl` into `Verdict.F2Summary` (`*F2TelemetrySummary`: `total_calls`, `models_used`, `total_tokens`, `total_duration_ms`) so F0 gets cryptographic proof of F2 fan-out with zero context bloat.
+  - **D1.4**: In `internal/verifier/verifier.go`, aggregate `$G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl` into `Verdict.F2Summary` (`*F2TelemetrySummary`: `total_calls`, `models_used`, `total_tokens`, `total_duration_ms`, `telemetry_sha256`) so F0 gets an observational telemetry digest of F2 fan-out (with SHA-256 audit link to the raw JSONL) without context bloat.
 
 ### Phase 2: Issue `#644` — Perimeter Anti-Theater Net-Delta Guards & Point-of-Failure Lesson Injection
 - **Files**:
@@ -53,7 +53,7 @@ created: 2026-10-21
   - **D2.1**: Extend `EvaluateNetDelta` in `internal/verifier/diff_guard.go` with advisory checks:
     - `TIER0-THEATER-PLACEHOLDER` for added lines containing hollow scaffolding markers (`FILL IN HERE`, `<Empty>`, `[Insert Here]`, `panic("TODO`, `panic("not implemented`) while ignoring owned `TODO(#123)` comments.
     - `TIER0-TRIVIAL-ASSERT` in `*_test.go` files for tautological assertions (`assert.True(t, true)`, `require.True(t, true)`, `assert.Nil(t, nil)`, `if true == true`).
-  - **D2.2**: In `internal/verifier/verifier.go`, when a verification run produces `OutcomeFail` or non-empty `Advisories`, query ratified lessons from the lessons ledger (`docs/lessons/ledger.jsonl` or `WithLessonsLedgerPath`) matching the verifier class and attach `InjectedLessons []InjectedLessonHint` (`id`, `author_class`, `observation`, `recommendation`) to `Verdict`.
+  - **D2.2**: In `internal/verifier/verifier.go`, when a verification run produces `OutcomeFail` or non-empty `Advisories`, query ratified lessons from the lessons ledger (`docs/lessons/ledger.jsonl` or `WithLessonsLedgerPath`) matching both the verifier class AND the specific failure/advisory signals (`extractFailureSignals`), attaching `InjectedLessons []InjectedLessonHint` (`id`, `author_class`, `matched_signal`, `wrong_approach`, `correct_approach`) to `Verdict`.
 
 ### Phase 3: Issue `#645` — Non-Breaking `capability_status` Matrix in `g8s doctor`, `.portable` State Resolution & Playbook
 - **Files**:
@@ -61,6 +61,6 @@ created: 2026-10-21
   - `internal/pathutil/pathutil.go`, `internal/pathutil/pathutil_test.go`
   - `skills/g8s-supervisor/references/multi-worker-fanout.md`
 - **Deliverables**:
-  - **D3.1**: Add `CapabilityStatus` (`FULL` | `PARTIAL` | `MINIMAL`) and `Capabilities []CapabilityEntry` to `doctor.DoctorReport` without changing `OverallStatus: "HEALTHY"` when core checks pass.
+  - **D3.1**: Add `CapabilityStatus` (`FULL` | `PARTIAL` | `MINIMAL`) and `Capabilities []CapabilityEntry` (with `verification_state: "probed" | "configured_unprobed" | "absent"`) to `doctor.DoctorReport` without changing `OverallStatus: "HEALTHY"` when core checks pass.
   - **D3.2**: Update `pathutil.DefaultStateDir()` and `pathutil.StateDirForOS()` to honor `G8S_PORTABLE=1` / `PORTABLE_MODE=1` (or a `.portable` marker file next to the executable) after `G8S_STATE_DIR` and before OS/XDG defaults.
   - **D3.3**: Document the `T0..T3` Horizontal vs. Deep-Vertical Multi-Agent Tournament Playbook in `skills/g8s-supervisor/references/multi-worker-fanout.md` and sync to `~/.agents/skills/g8s-supervisor/references/multi-worker-fanout.md`.

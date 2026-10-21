@@ -317,8 +317,16 @@ func TestEvaluateCapabilitiesNonBreaking(t *testing.T) {
 		{Name: "Worker CLI (agy)", Status: "OK", Message: "Available in PATH at /usr/local/bin/agy"},
 		{Name: "Providers File", Status: "OK", Message: "1 provider(s) loaded cleanly from providers.json"},
 	}
-	statusFull, _ := EvaluateCapabilities(checksFull)
+	statusFull, capsFull := EvaluateCapabilities(checksFull)
 	if statusFull != "FULL" {
 		t.Fatalf("expected FULL when all capabilities present, got %s", statusFull)
+	}
+	for _, c := range capsFull {
+		if c.Name == "api_gateway" && c.VerificationState != "configured_unprobed" {
+			t.Fatalf("expected api_gateway VerificationState='configured_unprobed', got %q", c.VerificationState)
+		}
+		if c.Name == "sqlite_wal" && c.VerificationState != "probed" {
+			t.Fatalf("expected sqlite_wal VerificationState='probed', got %q", c.VerificationState)
+		}
 	}
 }

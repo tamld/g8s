@@ -138,19 +138,23 @@ type CheckResult struct {
 }
 
 // F2TelemetrySummary aggregates ADR-0032 depth-2 (F1 -> F2) subagent invocations
-// into a compact digest without polluting F0's context window (#643).
+// into an observational telemetry digest without polluting F0's context window (#643).
+// Note: This is observational runtime telemetry (with SHA-256 over the local JSONL log
+// for drill-down auditability), not a cryptographic attestation of upstream model execution.
 type F2TelemetrySummary struct {
 	TotalCalls      int      `json:"total_calls"`
 	ModelsUsed      []string `json:"models_used,omitempty"`
 	TotalTokens     int      `json:"total_tokens"`
 	TotalDurationMs int64    `json:"total_duration_ms"`
+	TelemetrySHA256 string   `json:"telemetry_sha256,omitempty"`
 }
 
 // InjectedLessonHint surfaces a ratified retrospective lesson at the point of
-// verification failure or advisory trigger (#644).
+// verification failure or advisory trigger when its failure context matches (#644).
 type InjectedLessonHint struct {
 	ID              string `json:"id"`
 	AuthorClass     string `json:"author_class,omitempty"`
+	MatchedSignal   string `json:"matched_signal,omitempty"`
 	WrongApproach   string `json:"wrong_approach"`
 	CorrectApproach string `json:"correct_approach"`
 }
@@ -687,7 +691,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 
 	var injectedLessons []InjectedLessonHint
 	if outcome == OutcomeFail || len(allAdvisories) > 0 {
-		injectedLessons = v.loadInjectedLessons(class.Name)
+		injectedLessons = v.loadInjectedLessons(class.Name, allDiagnostics, allAdvisories, checkResults, target.AllowedPaths)
 	}
 
 	verdict := Verdict{
@@ -771,10 +775,60 @@ func loadF2TelemetrySummary(taskID string) *F2TelemetrySummary {
 		summary.ModelsUsed = append(summary.ModelsUsed, m)
 	}
 	sort.Strings(summary.ModelsUsed)
+	sum := sha256.Sum256(data)
+	summary.TelemetrySHA256 = hex.EncodeToString(sum[:])
 	return &summary
 }
 
-func (v *Verifier) loadInjectedLessons(className string) []InjectedLessonHint {
+func extractFailureSignals(diagnostics []FailureDiagnostic, advisories []DiffAdvisory, checks []CheckResult, allowedPaths []string) []string {
+	seen := make(map[string]struct{})
+	var signals []string
+	addToken := func(tok string) {
+		tok = strings.ToLower(strings.Trim(tok, " \t\r\n.,:;()[]{}\"'`"))
+		if len(tok) < 3 {
+			return
+		}
+		switch tok {
+		case "the", "and", "for", "with", "from", "that", "this", "fail", "failed", "error", "test", "exit", "code":
+			return
+		}
+		if _, ok := seen[tok]; !ok {
+			seen[tok] = struct{}{}
+			signals = append(signals, tok)
+		}
+	}
+
+	for _, adv := range advisories {
+		addToken(adv.RuleID)
+		addToken(filepath.Base(adv.File))
+		for _, w := range strings.Fields(adv.Message) {
+			addToken(w)
+		}
+	}
+	for _, diag := range diagnostics {
+		addToken(diag.Test)
+		addToken(diag.Target)
+		for _, w := range strings.Fields(diag.Summary) {
+			addToken(w)
+		}
+	}
+	for _, chk := range checks {
+		if !chk.OK {
+			addToken(chk.Type)
+			addToken(chk.Target)
+			for _, w := range strings.Fields(chk.Detail) {
+				addToken(w)
+			}
+		}
+	}
+	for _, p := range allowedPaths {
+		addToken(filepath.Base(p))
+		addToken(filepath.Base(filepath.Dir(p)))
+	}
+	return signals
+}
+
+func (v *Verifier) loadInjectedLessons(className string, diagnostics []FailureDiagnostic, advisories []DiffAdvisory, checks []CheckResult, allowedPaths []string) []InjectedLessonHint {
 	ledgerPath := strings.TrimSpace(v.lessonsLedgerPath)
 	if ledgerPath == "" {
 		ledgerPath = strings.TrimSpace(os.Getenv("G8S_LESSONS_LEDGER"))
@@ -792,7 +846,17 @@ func (v *Verifier) loadInjectedLessons(className string) []InjectedLessonHint {
 		return nil
 	}
 
-	var hints []InjectedLessonHint
+	signals := extractFailureSignals(diagnostics, advisories, checks, allowedPaths)
+	if len(signals) == 0 {
+		return nil
+	}
+
+	type scoredHint struct {
+		hint  InjectedLessonHint
+		score int
+	}
+	var scored []scoredHint
+
 	for _, item := range items {
 		if item.Status != lessons.StatusRatified {
 			continue
@@ -817,12 +881,45 @@ func (v *Verifier) loadInjectedLessons(className string) []InjectedLessonHint {
 		if wrong == "" || correct == "" {
 			continue
 		}
-		hints = append(hints, InjectedLessonHint{
-			ID:              item.ID,
-			AuthorClass:     item.AuthorClass,
-			WrongApproach:   wrong,
-			CorrectApproach: correct,
+
+		corpus := strings.ToLower(wrong + " " + correct)
+		for _, ce := range item.Observation.CitedEvents {
+			corpus += " " + strings.ToLower(ce.Claim) + " " + strings.ToLower(ce.EventType)
+		}
+
+		score := 0
+		var firstSignal string
+		for _, sig := range signals {
+			if strings.Contains(corpus, sig) {
+				score++
+				if firstSignal == "" {
+					firstSignal = sig
+				}
+			}
+		}
+		if score == 0 {
+			continue
+		}
+
+		scored = append(scored, scoredHint{
+			score: score,
+			hint: InjectedLessonHint{
+				ID:              item.ID,
+				AuthorClass:     item.AuthorClass,
+				MatchedSignal:   firstSignal,
+				WrongApproach:   wrong,
+				CorrectApproach: correct,
+			},
 		})
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	var hints []InjectedLessonHint
+	for _, s := range scored {
+		hints = append(hints, s.hint)
 		if len(hints) >= lessons.DefaultRoundBudget {
 			break
 		}

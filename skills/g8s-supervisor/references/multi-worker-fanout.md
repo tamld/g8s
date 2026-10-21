@@ -58,9 +58,9 @@ that returns un-cited impressions failed its role, even if the text is useful.
 
 6. T0..T3 MULTI-AGENT TOURNAMENT (Broad Horizontal vs. Deep Vertical F0 → F1 → F2)
      T0 (F0 Scope & Brief Freeze): Issue disjoint WriteReceipts + G8S_ADD_DIRS multi-root ceilings (#643)
-     T1 (F1 → F2 Dialectical Fan-Out): F1 middle managers spawn cross-family F2 subagents (REA / Proponent / Skeptic / Synthesizer) via g8s llm-call; depth-2 telemetry recorded in $G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl
-     T2 (Jev System-1 Sensor + F0 Cross-Examination): Run g8s reflex triage on F1 blueprints; F0 debates F1 on architecture-critical claims
-     T3 (Perimeter Verification & Commitment): Run g8s verify --task <id> --json (checks DoDMatrix, f2_summary, anti-theater net-delta guards #644, and ratified lesson injection) before merging
+     T1 (F1 → F2 Dialectical Fan-Out): F1 middle managers spawn cross-family F2 subagents (REA / Proponent / Skeptic / Synthesizer) via g8s llm-call; depth-2 observational telemetry recorded in $G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl
+     T2 (Blind Independent Review → Jev Triage → Adversarial Comparison): Reviewer evaluates requirements and code independently BEFORE seeing F0's verdict or Jev's heuristic score; disagreements are resolved by counterexamples or executable tests, never by model concession
+     T3 (Perimeter Verification & Drill-Down Audit): Run g8s verify --task <id> --json (checks DoDMatrix, f2_summary observational digest + telemetry_sha256, anti-theater net-delta guards #644, and signal-matched ratified lesson injection); F0 drills down into primary evidence (RawLogPath, worktree diff, source files) whenever conflicts or anomalies arise
 ```
 
 ### Horizontal vs. Deep-Vertical Tournament Modes
@@ -70,7 +70,15 @@ that returns un-cited impressions failed its role, even if the text is useful.
 | **Topology** | `1 F0 → m F1 (1 per repo/subsystem) → n F2` | `1 F0 → k F1 (Domain Leads: UX, Security, Deploy) → n F2` |
 | **Target Scope** | Multiple sibling repos or large disjoint packages | Single target repository (`--add-dir <repo>`) with deep domain slices |
 | **F2 Roles** | Concept Harvester, Feasibility Auditor, Red-Team Skeptic, Blueprint Synthesizer | REA Researcher, Red-Team Skeptic, Code Implementer, Acceptance Verifier |
-| **F0 Context Firewall** | F0 reads only sealed F1 handoffs + `RoundReceiptSchema` (`f2_summary`) | F0 orchestrates multi-round debate/verification via `BriefSchema` ↔ `RoundReceiptSchema` without reading raw logs |
+| **F0 Context & Drill-Down** | F0 reads sealed F1 handoffs + `RoundReceiptSchema` (`f2_summary`) by default; drills down to raw source/logs on conflict | F0 orchestrates multi-round debate/verification via `BriefSchema` ↔ `RoundReceiptSchema`, drilling down to primary evidence whenever contradictions appear |
+
+### Methodological & Epistemic Guardrails (GPT 6.1 Sol Ultra Audit)
+
+1. **Blind Independent Review (Anti-Sycophancy)**: Never feed F0's preferred conclusion or Jev's heuristic score into an F1/F2 reviewer's initial prompt. First collect an independent evaluation from requirements + code; only then compare competing arguments. A model conceding (`"F0 and Jev are right"`) is not proof — only a counterexample or executable test arbitrates.
+2. **Jev Calibration & Decision Delta Tracking**: Scores like `breach_prob = 0.05` from `g8s reflex triage` are uncalibrated model heuristics, not validated incident probabilities. Track: (a) which decision Jev changed, (b) whether the changed decision reduced escaped defects/rework, and (c) whether net cost decreased.
+3. **Default Summary, Mandatory Drill-Down on Conflict**: F0 reads `RoundReceiptSchema` by default to preserve context budget, but F0 is NEVER forbidden from inspecting primary source files, worktree diffs, `RawLogPath`, or `$G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl` when contradictions or high-risk changes occur.
+4. **Git-Tracked Wiki vs. Scoped AgentMemory & Conditional Re-open**: Architectural knowledge and decision rationale belong in Git-tracked Wiki/ADRs; `AgentMemory` (`vault.db` / `memory.db`) holds scoped operational heuristics with lifecycle decay. Deferred proposals use `deferred_with_reopen_criteria` rather than `"rejected permanently"`.
+5. **Controlled Empirical Comparison**: Evaluate multi-tier (`F0 → F1 → F2`) orchestration against a simpler baseline under equal budget by measuring: accepted deliverables, escaped defects, rework time, F0 context consumption, and post-interruption recovery.
 
 Shapes 1–3 and 5 are supervisor-side N submits (default). Shape 4 uses the worker
 loop's own bounded pool (#394) — one process, N isolated attempts.
