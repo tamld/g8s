@@ -102,11 +102,11 @@ jobs:
       - name: Setup Go (1.25 for golangci-lint compatibility with go.mod)
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
 
       - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
         if: env.CI_LANE != 'docs'
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: latest
           args: --timeout=10m
@@ -433,7 +433,7 @@ jobs:
         if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
 
       - name: go vet (Windows)
         if: env.CI_LANE != 'docs'
@@ -478,7 +478,7 @@ jobs:
         if: env.CI_LANE != 'docs'
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
 
       - name: Verify Cross-Platform Compilation
         if: env.CI_LANE != 'docs'

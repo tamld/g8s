@@ -14,7 +14,7 @@ pre-push-fast:
 	@bash tools/pre_push.sh --fast
 
 lint:
-	@GOWORK=off GOTOOLCHAIN=go1.26.9 golangci-lint run ./...
+	@GOWORK=off GOTOOLCHAIN=go1.26.10 golangci-lint run ./...
 	@bash tools/ci_semgrep_check.sh
 
 sast:

@@ -11,7 +11,7 @@
 Both `README.md` and `README.vi.md` MUST strictly conform to the 10-section structure. Internal engineering issues, WIP commits, test file citations, and transitory debugging details belong in internal PRs or campaign ledgers (`plans/`), NEVER in public README surfaces.
 
 The 10 Canonical Sections:
-1. **Header, Badges & Language Switcher**: Product identity, logo, static badges (`License: MIT`, `Go-1.26.9`, `Platform`, `Release`), and clean English / Tiếng Việt toggle.
+1. **Header, Badges & Language Switcher**: Product identity, logo, static badges (`License: MIT`, `Go-1.26.10`, `Platform`, `Release`), and clean English / Tiếng Việt toggle.
 2. **Overview & Why g8s?**: Core problem statement, high-impact *Without g8s vs. With g8s* comparative table, and concise Core Terminology table (Brain, Worker, Task, Receipt, Attempt, Evidence Lake).
 3. **Architecture & Execution Lifecycle**: 3-Tier F0/F1/F2 architectural diagram and clean 5-step execution flow (Submit -> Lease -> Contain -> Verify -> Seal).
 4. **Core Capabilities**: Clean 5-domain capability matrix (Zero-Trust Containment, Durable Task Queue, Native Cross-Platform Agent I/O, Universal LLM Call Consumer, Decoupled Knowledge Vault).
