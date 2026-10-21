@@ -31,6 +31,9 @@ type Provider interface {
 type Spec struct {
 	Brief        string        `json:"brief"`
 	Model        string        `json:"model,omitempty"`
+	Effort       string        `json:"effort,omitempty"`
+	MaxTokens    int           `json:"max_tokens,omitempty"`
+	Temperature  *float64      `json:"temperature,omitempty"`
 	AddDirs      []string      `json:"add_dirs,omitempty"`
 	SystemPrompt string        `json:"system_prompt,omitempty"`
 	Timeout      time.Duration `json:"timeout,omitempty"`
@@ -42,14 +45,18 @@ type Spec struct {
 
 // Receipt records the outcome of a worker subprocess execution.
 type Receipt struct {
-	TaskID     string   `json:"task_id,omitempty"`
-	Provider   string   `json:"provider"`
-	Status     string   `json:"status"` // "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"
-	Stdout     string   `json:"stdout,omitempty"`
-	Stderr     string   `json:"stderr,omitempty"`
-	ExitCode   int      `json:"exit_code"`
-	DurationMs int64    `json:"duration_ms"`
-	Violations []string `json:"violations,omitempty"`
+	TaskID        string   `json:"task_id,omitempty"`
+	Provider      string   `json:"provider"`
+	Status        string   `json:"status"` // "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"
+	Stdout        string   `json:"stdout,omitempty"`
+	Stderr        string   `json:"stderr,omitempty"`
+	ExitCode      int      `json:"exit_code"`
+	DurationMs    int64    `json:"duration_ms"`
+	Violations    []string `json:"violations,omitempty"`
+	ModelResolved string   `json:"model_resolved,omitempty"`
+	InputTokens   int      `json:"input_tokens,omitempty"`
+	OutputTokens  int      `json:"output_tokens,omitempty"`
+	TotalTokens   int      `json:"total_tokens,omitempty"`
 }
 
 // Handle represents a running worker subprocess.

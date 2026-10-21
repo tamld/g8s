@@ -290,6 +290,9 @@ type SubmitTaskRequest struct {
 	Role            string          `json:"role,omitempty"`
 	Permission      string          `json:"permission,omitempty"`
 	Model           string          `json:"model,omitempty"`
+	Provider        string          `json:"provider,omitempty"`
+	Effort          string          `json:"effort,omitempty"`
+	ScopeRoot       string          `json:"scope_root,omitempty"`
 	Timeout         string          `json:"timeout,omitempty"`
 	AddDirs         []string        `json:"add_dirs,omitempty"`
 	SkipPermissions bool            `json:"skip_permissions,omitempty"`

@@ -182,3 +182,26 @@ providers:
       - id: gemini-3.8-flash-high
         supported_efforts: [high]
         default_effort: high
+
+  9router:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: high
+    mandatory: false
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever) and sticky round-robin prompt caching"
+    models:
+      - id: reasoning-free
+        supported_efforts: [low, medium, high]
+        default_effort: high
+      - id: reasoning-high
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: high
+      - id: deep-coding
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+      - id: fast-agent
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: medium
+      - id: docs-retriever
+        supported_efforts: [low, medium, high]
+        default_effort: medium

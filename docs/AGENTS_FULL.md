@@ -116,6 +116,7 @@ Incoming Task:
 | **DELTA-22** | [`22-brief-dor-floor-spec.md`](../spec/openspec/22-brief-dor-floor-spec.md) | `internal/brief` | APPLIED |
 | **DELTA-23** | [`23-native-agent-io-spec.md`](../spec/openspec/23-native-agent-io-spec.md) | `internal/fsops`, `internal/search` | APPLIED |
 | **DELTA-24** | [`24-differential-governance-hitl-spec.md`](../spec/openspec/24-differential-governance-hitl-spec.md) | `internal/vault`, `internal/verifier`, `internal/telemetry` | APPLIED |
+| **DELTA-25** | [`25-config-driven-llm-consumer-spec.md`](../spec/openspec/25-config-driven-llm-consumer-spec.md) | `internal/config`, `internal/provider`, `cmd/g8s` | IMPLEMENTED |
 
 ---
 
@@ -138,6 +139,14 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
 4. **System-1 Reflex (`Jev` / TypeSafe) & Cognitive Harness (`wiki.py`)**:
    - **Jev (TypeSafe SystemOne)**: Operates at L1 Pre-Mutation Triage (`./bin/g8s reflex triage`), Router Assist (`G8S_ROUTER_MODE=jev_assisted`), and L3 Post-Run Output Quality / Memory Promotion Gate while preserving **Sensor ≠ Decider**. Never emit raw API keys in JSON outputs or logs.
    - **Offer Bundle (`offer/`) & `wiki.py`**: Sibling repositories adopt `g8s` via [`offer/ONBOARDING.md`](../offer/ONBOARDING.md) and return sanitized Mode 3 packets. Align session state with Second Brain governance via `~/.local/bin/wiki.py orient`.
+5. **F0 Cognitive Purity & Information Firewall (`ADR-0033` Phase 06b + Wave B)**:
+   - F0 operates strictly as Brain (reasoning, brief authoring, consuming `RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`). F0 NEVER manually hunts raw CI logs, scans disk bloat, or runs procedural janitor tasks. All log-hunting, CI failure extraction, and file sync tasks are delegated to F1 workers.
+6. **Universal Config-Driven LLM Call Consumer & `9router` Integration (`DELTA-25`, `v0.19.0`)**:
+   - Direct synchronous CLI execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
+   - Durable worker queue execution: `./bin/g8s submit --provider 9router --model <combo>` + `./bin/g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope`.
+   - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
+   - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
+   - **Two-Layer Separation Rule**: Public repo mechanism (`openai`/`anthropic`/`9router`, standard combos/wildcards, `http://127.0.0.1:20128/v1`) vs. local untracked operator policy (`~/.config/g8s/providers.json` & `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
 
 ---
 

@@ -750,3 +750,108 @@ func TestDelegatedScopeContainment_Issue598(t *testing.T) {
 		}
 	})
 }
+
+func TestSelectJSON(t *testing.T) {
+	jsonDoc := []byte(`{
+		"cmd": "test",
+		"data": {
+			"receipt_id": "rc-42",
+			"count": 100,
+			"active": true,
+			"empty_val": null,
+			"items": [
+				{"id": "item-1", "name": "alpha"},
+				{"id": "item-2", "name": "beta"}
+			]
+		},
+		"matches": [
+			{"file": "foo.go", "line": 10},
+			{"file": "bar.go", "line": 25}
+		],
+		"tags": ["go", "security"]
+	}`)
+
+	t.Run("nested fields and dot indexing", func(t *testing.T) {
+		val, err := SelectJSON(jsonDoc, ".data.receipt_id")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if val != `"rc-42"` {
+			t.Fatalf("expected %q, got %q", `"rc-42"`, val)
+		}
+
+		val2, err := SelectJSON(jsonDoc, "data.items.0.name")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if val2 != `"alpha"` {
+			t.Fatalf("expected %q, got %q", `"alpha"`, val2)
+		}
+
+		val3, err := SelectJSON(jsonDoc, "data.items[1].id")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if val3 != `"item-2"` {
+			t.Fatalf("expected %q, got %q", `"item-2"`, val3)
+		}
+	})
+
+	t.Run("primitives and null", func(t *testing.T) {
+		valNum, err := SelectJSON(jsonDoc, "data.count")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if valNum != "100" {
+			t.Fatalf("expected 100, got %s", valNum)
+		}
+
+		valBool, err := SelectJSON(jsonDoc, "data.active")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if valBool != "true" {
+			t.Fatalf("expected true, got %s", valBool)
+		}
+
+		valNull, err := SelectJSON(jsonDoc, "data.empty_val")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if valNull != "null" {
+			t.Fatalf("expected null, got %s", valNull)
+		}
+	})
+
+	t.Run("array projection", func(t *testing.T) {
+		valProj, err := SelectJSON(jsonDoc, "matches[].file")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if valProj != `["foo.go","bar.go"]` {
+			t.Fatalf("expected [\"foo.go\",\"bar.go\"], got %s", valProj)
+		}
+	})
+
+	t.Run("root selector", func(t *testing.T) {
+		valRoot, err := SelectJSON(jsonDoc, ".")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(valRoot, `"rc-42"`) {
+			t.Fatalf("expected root json containing rc-42, got %s", valRoot)
+		}
+	})
+
+	t.Run("errors on empty input or invalid selector", func(t *testing.T) {
+		if _, err := SelectJSON([]byte(""), "data"); err == nil {
+			t.Fatal("expected error on empty json")
+		}
+		if _, err := SelectJSON([]byte("{bad-json"), "data"); err == nil {
+			t.Fatal("expected error on malformed json")
+		}
+		if _, err := SelectJSON(jsonDoc, "data.nonexistent"); err == nil {
+			t.Fatal("expected error on missing field")
+		}
+	})
+}

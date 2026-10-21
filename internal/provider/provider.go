@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -348,7 +349,7 @@ func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 		}
 		switch entry.Class {
 		case "api_call":
-			cfg.HealthProbeURL = entry.BaseURL
+			cfg.HealthProbeURL = entry.EffectiveBaseURL()
 			cfg.AuthEnv = entry.AuthEnv
 		default: // platform_dispatch
 			cfg.Binary = entry.Name
@@ -367,13 +368,21 @@ func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 func (r *PoolRegistry) SelectForModel(ctx context.Context, modelID string) (string, func(), error) {
 	r.mu.Lock()
 	candidates := make([]string, 0, 2)
+	lowered := strings.ToLower(modelID)
 	for name := range r.states {
 		st := r.states[name]
 		serves := false
 		for _, m := range st.cfg.Models {
-			if m.ID == modelID {
+			if strings.EqualFold(m.ID, modelID) {
 				serves = true
 				break
+			}
+			if strings.HasSuffix(m.ID, "/*") || strings.HasSuffix(m.ID, "*") {
+				prefix := strings.TrimSuffix(strings.ToLower(m.ID), "*")
+				if strings.HasPrefix(lowered, prefix) {
+					serves = true
+					break
+				}
 			}
 		}
 		if serves && st.last.Status == StatusReady {
@@ -408,10 +417,34 @@ func (r *PoolRegistry) probeHTTP(ctx context.Context, url string) HealthStatus {
 		return StatusUnavailable
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return StatusDegraded
+	if resp.StatusCode == http.StatusOK {
+		return StatusReady
 	}
-	return StatusReady
+
+	cleanURL := strings.TrimRight(url, "/")
+	if strings.HasSuffix(cleanURL, "/v1") {
+		// Try cleanURL + "/models"
+		if reqModels, err := http.NewRequestWithContext(ctx, http.MethodGet, cleanURL+"/models", nil); err == nil {
+			if respModels, err := r.httpClient.Do(reqModels); err == nil {
+				defer respModels.Body.Close()
+				if respModels.StatusCode == http.StatusOK {
+					return StatusReady
+				}
+			}
+		}
+		// Try cleanURL root + "/api/health"
+		root := strings.TrimSuffix(cleanURL, "/v1")
+		if reqHealth, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/health", nil); err == nil {
+			if respHealth, err := r.httpClient.Do(reqHealth); err == nil {
+				defer respHealth.Body.Close()
+				if respHealth.StatusCode == http.StatusOK {
+					return StatusReady
+				}
+			}
+		}
+	}
+
+	return StatusDegraded
 }
 
 // GetProvider returns the most recently observed snapshot for name.

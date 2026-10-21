@@ -117,7 +117,7 @@ EOF
     "commit": "a255bd5",
     "date": "2026-09-27"
   },
-  "license": "MIT OR Apache-2.0"
+  "license": "MIT"
 }
 EOF
 

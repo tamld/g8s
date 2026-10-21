@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -220,6 +221,8 @@ func main() {
 		runWake(os.Args[2:])
 	case "providers":
 		runProviders(os.Args[2:])
+	case "llm-call":
+		runLLMCall(os.Args[2:])
 	case "autopilot":
 		runAutopilot(os.Args[2:])
 	case "serve":
@@ -313,8 +316,14 @@ func runPermissions(args []string) {
 	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 }
 
-// runProviders lists detected AI agent CLI providers and their availability status.
+// runProviders lists detected AI agent CLI providers and their availability status,
+// or discovers live models when invoked as 'g8s providers discover'.
 func runProviders(args []string) {
+	if len(args) > 0 && args[0] == "discover" {
+		runProvidersDiscover(args[1:])
+		return
+	}
+
 	fs := flag.NewFlagSet("providers", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
@@ -323,6 +332,26 @@ func runProviders(args []string) {
 	}
 
 	reg := provider.NewRegistry()
+
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			if cfgFile, loadErr := config.Load(providersPath); loadErr == nil && cfgFile != nil {
+				for _, entry := range cfgFile.Providers {
+					if entry.Class == "api_call" {
+						reg.Register(provider.NewHTTPProviderFromConfig(entry))
+					}
+				}
+			}
+		}
+	}
+
 	statuses := reg.List(context.Background())
 
 	if *jsonMode || *jsonl {
@@ -346,6 +375,136 @@ func runProviders(args []string) {
 		td = append(td, []string{st.Name, st.Status, bin, detail})
 	}
 	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
+}
+
+func runProvidersDiscover(args []string) {
+	fs := flag.NewFlagSet("providers discover", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	providerFlag := fs.String("provider", "", "provider name to discover models from (e.g. 9router)")
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	_ = actor
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		exitUsage("providers", "discover", *traceID, err.Error(), "usage: g8s providers discover [--provider <name>] [--json]", *jsonl)
+	}
+
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	var cfgFile *config.File
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			cfgFile, _ = config.Load(providersPath)
+		}
+	}
+
+	var targetEntries []config.ProviderEntry
+	if *providerFlag != "" {
+		if cfgFile != nil {
+			if p, ok := config.FindProvider(cfgFile, *providerFlag); ok && p.Class == "api_call" {
+				targetEntries = append(targetEntries, *p)
+			}
+		}
+		if len(targetEntries) == 0 {
+			if strings.EqualFold(*providerFlag, "9router") {
+				targetEntries = append(targetEntries, config.ProviderEntry{
+					Class:               "api_call",
+					Name:                "9router",
+					Protocol:            "9router",
+					BaseURL:             "http://localhost:20128/v1",
+					BaseURLEnv:          "NINEROUTER_URL",
+					AuthEnv:             "OPENAI_API_KEY",
+					AllowUnlistedModels: true,
+				})
+			} else {
+				exitUsage("providers", "discover", *traceID, fmt.Sprintf("provider %q not found or not an api_call provider", *providerFlag), "Declare provider in providers.json or use 9router", *jsonl)
+			}
+		}
+	} else {
+		if cfgFile != nil {
+			for _, p := range cfgFile.Providers {
+				if p.Class == "api_call" {
+					targetEntries = append(targetEntries, p)
+				}
+			}
+		}
+		if len(targetEntries) == 0 {
+			targetEntries = append(targetEntries, config.ProviderEntry{
+				Class:               "api_call",
+				Name:                "9router",
+				Protocol:            "9router",
+				BaseURL:             "http://localhost:20128/v1",
+				BaseURLEnv:          "NINEROUTER_URL",
+				AuthEnv:             "OPENAI_API_KEY",
+				AllowUnlistedModels: true,
+			})
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type discoveryResult struct {
+		Provider string   `json:"provider"`
+		Models   []string `json:"models"`
+		Error    string   `json:"error,omitempty"`
+	}
+	var results []discoveryResult
+
+	for _, entry := range targetEntries {
+		p := provider.NewHTTPProviderFromConfig(entry)
+		models, err := p.DiscoverModels(ctx)
+		res := discoveryResult{
+			Provider: entry.Name,
+			Models:   models,
+		}
+		if err != nil {
+			res.Error = err.Error()
+			if len(targetEntries) == 1 {
+				exitRuntime("providers", "discover", *traceID, cli.CodeRuntime, fmt.Errorf("provider %s discover failed: %w", entry.Name, err), "", *jsonl)
+			}
+		}
+		results = append(results, res)
+	}
+
+	if *jsonMode || *jsonl {
+		var data any
+		if len(results) == 1 {
+			data = map[string]any{
+				"provider": results[0].Provider,
+				"models":   results[0].Models,
+			}
+		} else {
+			data = map[string]any{
+				"providers": results,
+			}
+		}
+		env := cli.NewEnvelope("models_discovery", "providers", "discover", data)
+		env.TraceID = *traceID
+		if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
+			exitRuntime("providers", "discover", *traceID, cli.CodeIO, err, "", *jsonl)
+		}
+		return
+	}
+
+	for _, res := range results {
+		if len(results) > 1 {
+			fmt.Printf("[%s]\n", res.Provider)
+		}
+		if res.Error != "" {
+			fmt.Printf("  Error: %s\n", res.Error)
+			continue
+		}
+		for _, m := range res.Models {
+			fmt.Println(m)
+		}
+	}
 }
 
 // runMCPServer serves the stdio JSON-RPC MCP surface until stdin closes.
@@ -1518,6 +1677,7 @@ func printUsage() {
 	fmt.Println("  roles        List registered worker roles")
 	fmt.Println("  permissions  List registered permission profiles")
 	fmt.Println("  providers    List detected agent providers and availability status")
+	fmt.Println("  llm-call     Direct synchronous LLM call consumer against configured providers")
 	fmt.Println("  autopilot    Manage cron-based supervisor trigger (g8s autopilot start|status|trigger)")
 	fmt.Println("  serve        Run daemon mode with HTTP API server (g8s serve [--address :8080])")
 	fmt.Println("  verify       Run verifier-class acceptance checks on a task (g8s verify --task <id>)")
@@ -1588,7 +1748,31 @@ func runWorker(args []string) {
 					}
 				case "api_call":
 					if entry.Name != "" {
-						apiCallNames[entry.Name] = true
+						if entry.DisableQueueExec {
+							apiCallNames[entry.Name] = true
+						} else if len(entry.Args) > 0 {
+							providerTemplates[entry.Name] = entry.Args
+							for _, m := range entry.Models {
+								modelTemplates[m.ID] = entry.Args
+							}
+						} else if selfExe, exeErr := os.Executable(); exeErr == nil {
+							tmpl := []string{
+								selfExe, "llm-call",
+								"--worker-envelope",
+								"--provider", entry.Name,
+								"--model", "{model}",
+								"--timeout", "{timeout}",
+								"--prompt", "{prompt}",
+							}
+							providerTemplates[entry.Name] = tmpl
+							for _, m := range entry.Models {
+								if !strings.Contains(m.ID, "*") {
+									modelTemplates[m.ID] = tmpl
+								}
+							}
+						} else {
+							apiCallNames[entry.Name] = true
+						}
 					}
 				}
 			}

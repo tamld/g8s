@@ -28,7 +28,7 @@ var (
 		"verifier-classes": {"classes", "verifier_classes", "version"},
 		"lane-bundles":     {"bundles", "lanes", "version"},
 		"effort-classes":   {"classes", "effort_classes", "default_effort", "version"},
-		"agent-models":     {"providers", "models", "version"},
+		"agent-models":     {"schema_version", "catalog_version", "verified_at", "sources", "providers", "models", "version"},
 	}
 )
 

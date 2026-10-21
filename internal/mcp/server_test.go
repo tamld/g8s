@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,7 +193,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 	want := []string{
 		"g8s_run", "g8s_submit", "g8s_get", "g8s_receipt_issue", "g8s_self_awareness", "g8s_blast_radius",
 		"g8s_dispatch", "g8s_list_tasks", "g8s_cancel_task", "g8s_list_roles", "g8s_list_permissions",
-		"g8s_search", "g8s_read", "g8s_edit",
+		"g8s_search", "g8s_read", "g8s_edit", "g8s_select", "g8s_llm_call",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))
@@ -995,4 +997,185 @@ func TestMCPEditRequiresReceiptAndEnforcesScope(t *testing.T) {
 	if rpcErr == nil || !strings.Contains(rpcErr.Message, "outside receipt allowed_paths") {
 		t.Fatalf("expected out-of-scope rejection, got %+v", rpcErr)
 	}
+}
+
+func TestMCPSelectTool(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+
+	rawJSON := `{"data":{"receipt_id":"rc-99","items":[{"name":"foo"},{"name":"bar"}]}}`
+
+	t.Run("select dot path", func(t *testing.T) {
+		res, rpcErr := callTool(t, s, "g8s_select", map[string]any{
+			"input":    rawJSON,
+			"selector": ".data.receipt_id",
+		})
+		if rpcErr != nil {
+			t.Fatalf("unexpected rpc error: %+v", rpcErr)
+		}
+		var output struct {
+			Selector string `json:"selector"`
+			Value    string `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(res), &output); err != nil {
+			t.Fatalf("decode output %s: %v", res, err)
+		}
+		if output.Selector != ".data.receipt_id" || output.Value != "rc-99" {
+			t.Fatalf("unexpected select result: %+v", output)
+		}
+	})
+
+	t.Run("select array dot indexing", func(t *testing.T) {
+		res, rpcErr := callTool(t, s, "g8s_select", map[string]any{
+			"input":    rawJSON,
+			"selector": "data.items.0.name",
+		})
+		if rpcErr != nil {
+			t.Fatalf("unexpected rpc error: %+v", rpcErr)
+		}
+		var output struct {
+			Selector string `json:"selector"`
+			Value    string `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(res), &output); err != nil {
+			t.Fatalf("decode output: %v", err)
+		}
+		if output.Value != "foo" {
+			t.Fatalf("expected foo, got %s", output.Value)
+		}
+	})
+
+	t.Run("invalid params on empty selector or input", func(t *testing.T) {
+		_, rpcErr := callTool(t, s, "g8s_select", map[string]any{
+			"input":    "",
+			"selector": "data",
+		})
+		if rpcErr == nil || rpcErr.Code != codeInvalidParams {
+			t.Fatalf("expected invalid params, got %+v", rpcErr)
+		}
+
+		_, rpcErr = callTool(t, s, "g8s_select", map[string]any{
+			"input":    rawJSON,
+			"selector": "data.missing",
+		})
+		if rpcErr == nil || rpcErr.Code != codeInvalidParams {
+			t.Fatalf("expected invalid params on missing field, got %+v", rpcErr)
+		}
+	})
+}
+
+func TestMCPLLMCallTool(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"id": "fast-agent"}},
+			})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model": "fast-agent",
+				"choices": []map[string]any{
+					{
+						"message": map[string]string{
+							"role":    "assistant",
+							"content": "Hello from fast-agent mock",
+						},
+					},
+				},
+				"usage": map[string]int{
+					"prompt_tokens":     12,
+					"completion_tokens": 6,
+					"total_tokens":      18,
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer mockServer.Close()
+
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "providers.json")
+	cfgContent := fmt.Sprintf(`{
+  "providers": [
+    {
+      "class": "api_call",
+      "name": "test-provider",
+      "protocol": "openai",
+      "base_url": %q,
+      "slots": 2,
+      "default_model": "fast-agent",
+      "models": [
+        {"id": "fast-agent"}
+      ]
+    }
+  ]
+}`, mockServer.URL)
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatalf("write providers config: %v", err)
+	}
+
+	t.Setenv("G8S_PROVIDERS_CONFIG", cfgPath)
+
+	s, _, _, _ := newTestServer(t)
+
+	t.Run("call by provider and prompt", func(t *testing.T) {
+		res, rpcErr := callTool(t, s, "g8s_llm_call", map[string]any{
+			"provider": "test-provider",
+			"prompt":   "ping",
+		})
+		if rpcErr != nil {
+			t.Fatalf("unexpected rpc error: %+v", rpcErr)
+		}
+		var output map[string]any
+		if err := json.Unmarshal([]byte(res), &output); err != nil {
+			t.Fatalf("decode output %s: %v", res, err)
+		}
+		if output["provider"] != "test-provider" {
+			t.Errorf("expected provider test-provider, got %v", output["provider"])
+		}
+		if output["protocol"] != "openai" {
+			t.Errorf("expected protocol openai, got %v", output["protocol"])
+		}
+		if output["requested_model"] != "fast-agent" {
+			t.Errorf("expected requested_model fast-agent, got %v", output["requested_model"])
+		}
+		if output["resolved_model"] != "fast-agent" {
+			t.Errorf("expected resolved_model fast-agent, got %v", output["resolved_model"])
+		}
+		if output["output"] != "Hello from fast-agent mock" {
+			t.Errorf("expected output Hello from fast-agent mock, got %v", output["output"])
+		}
+		if tot, ok := output["total_tokens"].(float64); !ok || int(tot) != 18 {
+			t.Errorf("expected total_tokens 18, got %v", output["total_tokens"])
+		}
+	})
+
+	t.Run("call by model without explicit provider", func(t *testing.T) {
+		res, rpcErr := callTool(t, s, "g8s_llm_call", map[string]any{
+			"model":  "fast-agent",
+			"prompt": "test model routing",
+		})
+		if rpcErr != nil {
+			t.Fatalf("unexpected rpc error: %+v", rpcErr)
+		}
+		var output map[string]any
+		if err := json.Unmarshal([]byte(res), &output); err != nil {
+			t.Fatalf("decode output: %v", err)
+		}
+		if output["provider"] != "test-provider" {
+			t.Errorf("expected provider test-provider, got %v", output["provider"])
+		}
+	})
+
+	t.Run("rejects missing prompt", func(t *testing.T) {
+		_, rpcErr := callTool(t, s, "g8s_llm_call", map[string]any{
+			"provider": "test-provider",
+		})
+		if rpcErr == nil || rpcErr.Code != codeInvalidParams {
+			t.Fatalf("expected invalid params on missing prompt, got %+v", rpcErr)
+		}
+	})
 }

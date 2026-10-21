@@ -166,6 +166,9 @@ All shipped, tagged, and verified on GitHub Releases:
 | v0.16.0 (2026-10-07) | Provider-neutral effort optimization (#550/#556/#557), effort-class registry (#558), signal-based effort demotion (#564), Quality Ladder CLI & diagnosis dispatch (#561/#563), baked-name realignment (#568) |
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (DELTA-23: search, read, edit, --select), F0/F1/F2 recursive containment (ADR-0032), Offer Bundle Wave 1–4 rollout (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims |
 | v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): append-only evidence ledger, signed operator mandates (T0–T4), commit/merge gates G0–G7, agent hooks, circuit breaker, lossless verify firewall |
+| v0.19.0 (2026-10-21) | Universal Config-Driven LLM Call Consumer & Multi-Model Gateway ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25): direct CLI invocation (g8s llm-call), queue bridge via g8s llm-call --worker-envelope, live model discovery g8s providers discover, standardized SWE combos (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever), 16-tool MCP server, single MIT license, and F0 Cognitive Purity |
+| v0.20.0 (Planned — Issue #639) | Test Suite Execution Optimization & Empirical PRI Lane Routing (>=90% first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation |
+| v0.21.0+ (Planned — Pre-1.0 Burn-In) | 90-day Multi-Repo Offer Retention (SCORECARD.md M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (v1.0.0 is gated on empirical burn-in evidence, not calendar dates) |
 
 ---
 
@@ -218,7 +221,27 @@ All shipped, tagged, and verified on GitHub Releases:
 
 ---
 
-### v1.0.0 — GA Release
-**Target**: 2026-12-15  
-**Criteria**: All P0/P1 issues resolved, ≥6 months homelab stability, enterprise security signoff, distributed fleet mTLS, migration guide from Python baseline published.
+### v0.19.0 — Universal Config-Driven LLM Consumer, 9Router Multi-Model Fleet & F0 Cognitive Purity (Completed 2026-10-21)
+**Delivered**: 2026-10-21
+
+| Issue / Item | Description | Priority | Status |
+|--------------|-------------|----------|--------|
+| [x] DELTA-25 / ADR-0034 | Universal Config-Driven LLM Consumer & Multi-Protocol Gateway: multi-protocol `api_call` (`openai`, `anthropic`, `9router`), direct CLI `g8s llm-call`, worker queue bridge via `g8s llm-call --worker-envelope`, live model discovery `g8s providers discover` | P0 | ✅ Complete |
+| [x] 9Router SWE Fleet | Standardized SWE combo catalog (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcard matching (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml` and `internal/provider/catalog.go` | P0 | ✅ Complete |
+| [x] F0 Cognitive Purity | Brain vs Hands division: F0 consumes structured `RoundReceiptSchema` and gate verdicts while delegating raw log hunting and janitor operations to F1 workers (`agy` and `9router` combos); updated supervisor skills and charters | P0 | ✅ Complete |
+
+---
+
+### v0.20.0 — Test Suite Execution Optimization, PRI Lane Routing & Industry Security Alignment (Planned — Issue #639)
+**Scope**:
+- Test suite execution optimization and empirical PRI lane routing (`>=90%` first-attempt pass).
+- Industry security standards alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM generation).
+- Cross-platform packaging hardening & internal package consolidation.
+
+---
+
+### v0.21.0+ — Multi-Repo Offer Retention & Pre-1.0 Burn-In (Planned)
+**Scope**:
+- 90-day multi-repo offer retention (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions).
+- Formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates).
 

@@ -60,7 +60,16 @@ func Catalog() []CatalogEntry {
 			BaseURL:     "http://localhost:20128/v1",
 			AuthEnv:     "OPENAI_API_KEY",
 			InstallHint: "Install from https://github.com/decolua/9router (runs at localhost:20128)",
-			Models:      []string{"gpt-4o-mini", "claude-3.5-sonnet", "gemini-2.0-flash"},
+			Models: []string{
+				"reasoning-free",
+				"reasoning-high",
+				"deep-coding",
+				"fast-agent",
+				"docs-retriever",
+				"gpt-4o-mini",
+				"claude-3.5-sonnet",
+				"gemini-2.0-flash",
+			},
 		},
 	}
 }

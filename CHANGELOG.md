@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-21
+
+### Added
+
+- Universal Config-Driven LLM Call Consumer & Multi-Model Integration (`DELTA-25`, `ADR-0034`):
+  - Direct synchronous CLI execution via `g8s llm-call` with multi-protocol support (`openai`, `anthropic`, `9router`), reasoning effort, token limits, secret-sanitized outputs, and write-receipt guarded file block application (`--apply-files`).
+  - Worker queue execution bridge wiring `api_call` providers to `g8s llm-call --worker-envelope` in `cmd/g8s/main.go`, enabling full durable queue dispatch (`g8s submit --provider 9router --model reasoning-free` + `g8s worker --once`) with automatic upstream failover, token accounting, and `agyResult` supervisor collection.
+  - Live model discovery via `g8s providers discover [--provider <name>] [--json]` querying `/v1/models` across configured `api_call` gateways.
+  - Standardized SWE combo catalog for `9router` (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
+  - Protocol compatibility fix in `internal/provider/openai.go` (#636): added `"stream": false`, removed `"timeout"` from HTTP request body in favor of `context.WithTimeout`, and normalized reasoning effort levels.
+  - Unified single MIT License across repository (#638), retiring dual-license disclaimers.
+  - Multi-line package doc sync in `tools/ci_structure_sync.sh` and zero-stale manifest path guard in `tools/ci_doc_contract_check.sh`.
+  - Scrubbed homelab/LAN coupling, enforcing Two-Layer Separation Rule (public repo mechanism vs. local untracked operator policy).
+  - F0 Cognitive Purity & Information Firewall (`ADR-0033` Phase 06b + Wave B): F0 operates strictly as Brain (reasoning, brief authoring, consuming `RoundReceiptSchema` and `f0` gate verdicts), completely isolated from raw CI/test logs and operational janitor tasks, which are delegated to F1 workers (`agy` and `9router` combos).
+
 ## [0.18.0] - 2026-10-21
 
 ### Added

@@ -1,7 +1,7 @@
 // Package mcp implements the g8s Model Context Protocol (MCP) server over
 // stdio using newline-delimited JSON-RPC 2.0 (DELTA-04).
 //
-// The server exposes eleven tools that let a Brain-tier client (Claude Desktop,
+// The server exposes sixteen tools that let a Brain-tier client (Claude Desktop,
 // Cursor, Codex, Windsurf) drive the g8s runtime:
 //
 //	g8s_run             synchronous task execution (Phase 4 supervisor dependency)
@@ -15,6 +15,11 @@
 //	g8s_cancel_task     request cooperative cancellation of a durable task
 //	g8s_list_roles      enumerate registered role profiles
 //	g8s_list_permissions enumerate permission profiles with MCP enablement metadata
+//	g8s_search          native pure-Go repository search engine (DELTA-22/23)
+//	g8s_read            bounded file reader with SHA-256 fingerprint (DELTA-23)
+//	g8s_edit            atomic file editor with CAS SHA-256 (DELTA-23)
+//	g8s_select          native pure-Go JSON dot-path selector (DELTA-23)
+//	g8s_llm_call        direct synchronous LLM invocation (DELTA-25)
 //
 // Dependencies are injected as narrow local interfaces so this package stays
 // decoupled from concrete store types and remains trivially testable. Per the
@@ -153,10 +158,12 @@ func (s *Server) RegisterTools() error {
 		"g8s_search":           s.searchTool,
 		"g8s_read":             s.readTool,
 		"g8s_edit":             s.editTool,
+		"g8s_select":           s.selectTool,
+		"g8s_llm_call":         s.llmCallTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
-		{Name: "g8s_submit", Description: "Queue a durable background task in the SQLite-backed control plane.", InputSchema: json.RawMessage(`{"type":"object","properties":{"idempotency_key":{"type":"string"},"payload":{"type":"object"},"priority":{"type":"integer"},"max_attempts":{"type":"integer"},"model":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"no_sandbox":{"type":"boolean"},"add_dirs":{"type":"array","items":{"type":"string"}}},"required":["idempotency_key","payload"]}`)},
+		{Name: "g8s_submit", Description: "Queue a durable background task in the SQLite-backed control plane.", InputSchema: json.RawMessage(`{"type":"object","properties":{"idempotency_key":{"type":"string"},"payload":{"type":"object"},"priority":{"type":"integer"},"max_attempts":{"type":"integer"},"model":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"provider":{"type":"string"},"effort":{"type":"string"},"scope_root":{"type":"string"},"no_sandbox":{"type":"boolean"},"add_dirs":{"type":"array","items":{"type":"string"}}},"required":["idempotency_key","payload"]}`)},
 		{Name: "g8s_get", Description: "Fetch sanitized task status by task id.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}`)},
 		{Name: "g8s_receipt_issue", Description: "Issue a path-scoped, single-use write receipt (TTL seconds, max 3600).", InputSchema: json.RawMessage(`{"type":"object","properties":{"allowed_paths":{"type":"array","items":{"type":"string"}},"ttl_seconds":{"type":"integer"}},"required":["allowed_paths"]}`)},
 		{Name: "g8s_self_awareness", Description: "Report discovered providers, model availability, and concurrency slots.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
@@ -169,6 +176,8 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_search", Description: "Native pure-Go repository search engine (regex/literal/file-list) with gitignore and receipt-scope support.", InputSchema: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"roots":{"type":"array","items":{"type":"string"}},"fixed_strings":{"type":"boolean"},"ignore_case":{"type":"boolean"},"globs":{"type":"array","items":{"type":"string"}},"files_only":{"type":"boolean"},"max_results":{"type":"integer"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}}}`)},
 		{Name: "g8s_read", Description: "Native pure-Go bounded file reader with line-range slicing, binary guard, SHA-256 fingerprint, and receipt-scope validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"},"max_bytes":{"type":"integer"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path"]}`)},
 		{Name: "g8s_edit", Description: "Native pure-Go atomic file editor with exact-match replacement, CAS SHA-256 precondition, CRLF/LF preservation, and mandatory write-receipt validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"if_sha256":{"type":"string"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path","old_string"]}`)},
+		{Name: "g8s_select", Description: "Native pure-Go JSON dot-path selector (replaces jq; DELTA-23).", InputSchema: json.RawMessage(`{"type":"object","properties":{"input":{"type":"string","description":"Raw JSON string to query"},"selector":{"type":"string","description":"Dot-path selector (e.g. .data.receipt_id or items.0.name)"}},"required":["input","selector"]}`)},
+		{Name: "g8s_llm_call", Description: "Invoke any configured api_call LLM provider/gateway (OpenAI, Anthropic, 9router) from providers.json (DELTA-25).", InputSchema: json.RawMessage(`{"type":"object","properties":{"provider":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"system":{"type":"string"},"effort":{"type":"string"},"max_tokens":{"type":"integer"},"temperature":{"type":"number"},"timeout":{"type":"string"}},"required":["prompt"]}`)},
 	}
 	return nil
 }
@@ -299,6 +308,9 @@ type submitArgs struct {
 	Model          string          `json:"model"`
 	Role           string          `json:"role"`
 	Permission     string          `json:"permission"`
+	Provider       string          `json:"provider"`
+	Effort         string          `json:"effort"`
+	ScopeRoot      string          `json:"scope_root"`
 	NoSandbox      bool            `json:"no_sandbox"`
 	AddDirs        []string        `json:"add_dirs"`
 }
@@ -331,6 +343,9 @@ func (s *Server) submitTool(ctx context.Context, args json.RawMessage) (any, *js
 		Model:          a.Model,
 		Role:           a.Role,
 		Permission:     a.Permission,
+		Provider:       a.Provider,
+		Effort:         a.Effort,
+		ScopeRoot:      a.ScopeRoot,
 		AddDirs:        a.AddDirs,
 	})
 	if err != nil {

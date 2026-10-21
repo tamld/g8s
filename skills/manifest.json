@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "g8s vendored skills manifest",
   "description": "Operator skills shipped with the g8s repository. Each entry is a loadable skill directory: copy (or symlink) it into your agent platform's skill directory (e.g. ~/.agents/skills/) to install. Version and changelog live inside each SKILL.md frontmatter.",
-  "updated": "2026-09-27",
+  "updated": "2026-10-21",
   "skills": [
     {
       "name": "g8s-supervisor",
-      "version": "4.1.0",
+      "version": "4.3.0",
       "entry": "skills/g8s-supervisor/SKILL.md",
       "domain": "orchestration",
       "risk_level": "medium",
@@ -22,7 +22,9 @@
         "references/operating-contract.md",
         "references/security-redaction-playbook.md",
         "references/binary-admission.md",
-        "references/anti-patterns.md"
+        "references/anti-patterns.md",
+        "references/operational-hard-lessons.md",
+        "references/doc-standard.md"
       ],
       "assets": [
         "assets/pilot-record.schema.json",

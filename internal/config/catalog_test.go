@@ -168,16 +168,32 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	if cat.SchemaVersion != CurrentCatalogSchemaVersion {
 		t.Fatalf("SchemaVersion = %q, want %q", cat.SchemaVersion, CurrentCatalogSchemaVersion)
 	}
-	if len(cat.Providers) != 8 {
-		t.Fatalf("got %d providers, want 8", len(cat.Providers))
+	if len(cat.Providers) != 9 {
+		t.Fatalf("got %d providers, want 9", len(cat.Providers))
 	}
 
 	totalModels := 0
 	for _, prov := range cat.Providers {
 		totalModels += len(prov.Models)
 	}
-	if totalModels != 31 {
-		t.Fatalf("got %d total models across providers, want 31", totalModels)
+	if totalModels != 36 {
+		t.Fatalf("got %d total models across providers, want 36", totalModels)
+	}
+
+	// Spot-check 9router
+	nine, ok := cat.FindProvider("9router")
+	if !ok {
+		t.Fatal("9router provider missing in default catalog")
+	}
+	if nine.EffortStyle != EffortStyleNamed {
+		t.Errorf("9router effort_style = %q, want %q", nine.EffortStyle, EffortStyleNamed)
+	}
+	rf, ok := nine.FindModel("reasoning-free")
+	if !ok {
+		t.Fatal("reasoning-free missing in 9router provider")
+	}
+	if rf.DefaultEffort != EffortHigh {
+		t.Errorf("reasoning-free default_effort = %q, want %q", rf.DefaultEffort, EffortHigh)
 	}
 
 	// Spot-check agy
