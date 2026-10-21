@@ -314,3 +314,41 @@ func TestSQLiteURI(t *testing.T) {
 		})
 	}
 }
+
+func TestStateDirPortableMode(t *testing.T) {
+	exeDir := t.TempDir()
+
+	// 1. G8S_PORTABLE=1 resolves to <exeDir>/state when G8S_STATE_DIR is unset
+	gotPortableEnv := StateDirForOS("linux", func(k string) string {
+		if k == "G8S_PORTABLE" {
+			return "1"
+		}
+		return ""
+	}, "/home/alice", exeDir)
+	wantPortable := joinPathForOS("linux", exeDir, "state")
+	if filepath.Clean(gotPortableEnv) != filepath.Clean(wantPortable) {
+		t.Fatalf("expected G8S_PORTABLE=1 state dir %s, got %s", wantPortable, gotPortableEnv)
+	}
+
+	// 2. .portable marker file next to executable resolves to <exeDir>/state
+	markerPath := filepath.Join(exeDir, ".portable")
+	if err := os.WriteFile(markerPath, []byte("portable\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gotMarker := StateDirForOS("darwin", func(string) string { return "" }, "/Users/alice", exeDir)
+	if filepath.Clean(gotMarker) != filepath.Clean(wantPortable) {
+		t.Fatalf("expected .portable marker state dir %s, got %s", wantPortable, gotMarker)
+	}
+
+	// 3. G8S_STATE_DIR always takes highest precedence over .portable
+	explicitDir := "/custom/explicit-state"
+	gotExplicit := StateDirForOS("darwin", func(k string) string {
+		if k == "G8S_STATE_DIR" {
+			return explicitDir
+		}
+		return ""
+	}, "/Users/alice", exeDir)
+	if gotExplicit != explicitDir {
+		t.Fatalf("expected G8S_STATE_DIR %s to win over .portable, got %s", explicitDir, gotExplicit)
+	}
+}

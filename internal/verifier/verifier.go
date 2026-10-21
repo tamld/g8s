@@ -26,6 +26,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/tamld/g8s/internal/lessons"
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -135,26 +137,46 @@ type CheckResult struct {
 	Detail string `json:"detail"`
 }
 
+// F2TelemetrySummary aggregates ADR-0032 depth-2 (F1 -> F2) subagent invocations
+// into a compact digest without polluting F0's context window (#643).
+type F2TelemetrySummary struct {
+	TotalCalls      int      `json:"total_calls"`
+	ModelsUsed      []string `json:"models_used,omitempty"`
+	TotalTokens     int      `json:"total_tokens"`
+	TotalDurationMs int64    `json:"total_duration_ms"`
+}
+
+// InjectedLessonHint surfaces a ratified retrospective lesson at the point of
+// verification failure or advisory trigger (#644).
+type InjectedLessonHint struct {
+	ID              string `json:"id"`
+	AuthorClass     string `json:"author_class,omitempty"`
+	WrongApproach   string `json:"wrong_approach"`
+	CorrectApproach string `json:"correct_approach"`
+}
+
 // Verdict encapsulates the complete machine acceptance decision.
 type Verdict struct {
-	Class              string              `json:"class"`
-	Registered         bool                `json:"registered"`
-	Status             Status              `json:"status"`
-	Outcome            Outcome             `json:"outcome"`
-	Checks             []CheckResult       `json:"checks"`
-	Advisories         []DiffAdvisory      `json:"advisories,omitempty"`
-	DormantReawakened  []string            `json:"dormant_reawakened,omitempty"`
-	OverrideReason     string              `json:"override_reason,omitempty"`
-	Scope              bool                `json:"scope"`
-	RecordedAt         time.Time           `json:"recorded_at"`
-	WorktreeDir        string              `json:"worktree_dir,omitempty"`
-	TreeSHA            string              `json:"tree_sha,omitempty"`
-	RawLogPath         string              `json:"raw_log_path,omitempty"`
-	RawLogSHA256       string              `json:"raw_log_sha256,omitempty"`
-	TestsRan           int                 `json:"tests_ran"`
-	TestsFailed        int                 `json:"tests_failed"`
-	FailureDiagnostics []FailureDiagnostic `json:"failure_diagnostics,omitempty"`
-	DoDMatrix          []DoDItemStatus     `json:"dod_matrix,omitempty"`
+	Class              string               `json:"class"`
+	Registered         bool                 `json:"registered"`
+	Status             Status               `json:"status"`
+	Outcome            Outcome              `json:"outcome"`
+	Checks             []CheckResult        `json:"checks"`
+	Advisories         []DiffAdvisory       `json:"advisories,omitempty"`
+	DormantReawakened  []string             `json:"dormant_reawakened,omitempty"`
+	OverrideReason     string               `json:"override_reason,omitempty"`
+	Scope              bool                 `json:"scope"`
+	RecordedAt         time.Time            `json:"recorded_at"`
+	WorktreeDir        string               `json:"worktree_dir,omitempty"`
+	TreeSHA            string               `json:"tree_sha,omitempty"`
+	RawLogPath         string               `json:"raw_log_path,omitempty"`
+	RawLogSHA256       string               `json:"raw_log_sha256,omitempty"`
+	TestsRan           int                  `json:"tests_ran"`
+	TestsFailed        int                  `json:"tests_failed"`
+	FailureDiagnostics []FailureDiagnostic  `json:"failure_diagnostics,omitempty"`
+	DoDMatrix          []DoDItemStatus      `json:"dod_matrix,omitempty"`
+	F2Summary          *F2TelemetrySummary  `json:"f2_summary,omitempty"`
+	InjectedLessons    []InjectedLessonHint `json:"injected_lessons,omitempty"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.
@@ -346,14 +368,22 @@ type TelemetrySink func(taskID string, verdict Verdict)
 
 // Verifier coordinates class resolution, check execution, self-grade protection, and telemetry.
 type Verifier struct {
-	registry      *Registry
-	runner        CommandRunner
-	repoRoot      string
-	telemetrySink TelemetrySink
+	registry          *Registry
+	runner            CommandRunner
+	repoRoot          string
+	telemetrySink     TelemetrySink
+	lessonsLedgerPath string
 }
 
 // Option configures a Verifier instance.
 type Option func(*Verifier)
+
+// WithLessonsLedgerPath overrides the path to the ratified lessons JSONL ledger (#644).
+func WithLessonsLedgerPath(path string) Option {
+	return func(v *Verifier) {
+		v.lessonsLedgerPath = path
+	}
+}
 
 // WithRegistry sets a pre-configured Registry.
 func WithRegistry(r *Registry) Option {
@@ -464,6 +494,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			Scope:       false,
 			RecordedAt:  now,
 			WorktreeDir: target.WorktreeDir,
+			F2Summary:   loadF2TelemetrySummary(target.ID),
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -497,6 +528,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			Scope:       false,
 			RecordedAt:  now,
 			WorktreeDir: target.WorktreeDir,
+			F2Summary:   loadF2TelemetrySummary(target.ID),
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -653,6 +685,11 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		}
 	}
 
+	var injectedLessons []InjectedLessonHint
+	if outcome == OutcomeFail || len(allAdvisories) > 0 {
+		injectedLessons = v.loadInjectedLessons(class.Name)
+	}
+
 	verdict := Verdict{
 		Class:              class.Name,
 		Registered:         registered,
@@ -671,6 +708,8 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		TestsFailed:        totalTestsFailed,
 		FailureDiagnostics: allDiagnostics,
 		DoDMatrix:          dodMatrix,
+		F2Summary:          loadF2TelemetrySummary(target.ID),
+		InjectedLessons:    injectedLessons,
 	}
 
 	targetGitDir := repoRoot
@@ -683,6 +722,112 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 
 	v.emitTelemetry(target.ID, verdict)
 	return verdict, nil
+}
+
+func loadF2TelemetrySummary(taskID string) *F2TelemetrySummary {
+	safeTaskID := filepath.Base(strings.TrimSpace(taskID))
+	if safeTaskID == "" || safeTaskID == "." || safeTaskID == ".." || strings.ContainsAny(safeTaskID, `/\`) {
+		return nil
+	}
+	stateDir := pathutil.DefaultStateDir()
+	fPath := filepath.Join(stateDir, "f2_telemetry", safeTaskID+".jsonl")
+	data, err := os.ReadFile(fPath)
+	if err != nil {
+		return nil
+	}
+
+	var summary F2TelemetrySummary
+	modelSet := make(map[string]struct{})
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			ModelRequested string `json:"model_requested"`
+			ModelResolved  string `json:"model_resolved"`
+			DurationMs     int64  `json:"duration_ms"`
+			TotalTokens    int    `json:"total_tokens"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		summary.TotalCalls++
+		summary.TotalTokens += rec.TotalTokens
+		summary.TotalDurationMs += rec.DurationMs
+		m := strings.TrimSpace(rec.ModelResolved)
+		if m == "" {
+			m = strings.TrimSpace(rec.ModelRequested)
+		}
+		if m != "" {
+			modelSet[m] = struct{}{}
+		}
+	}
+	if summary.TotalCalls == 0 {
+		return nil
+	}
+	for m := range modelSet {
+		summary.ModelsUsed = append(summary.ModelsUsed, m)
+	}
+	sort.Strings(summary.ModelsUsed)
+	return &summary
+}
+
+func (v *Verifier) loadInjectedLessons(className string) []InjectedLessonHint {
+	ledgerPath := strings.TrimSpace(v.lessonsLedgerPath)
+	if ledgerPath == "" {
+		ledgerPath = strings.TrimSpace(os.Getenv("G8S_LESSONS_LEDGER"))
+	}
+	if ledgerPath == "" {
+		if v.repoRoot != "" {
+			ledgerPath = filepath.Join(v.repoRoot, "docs", "lessons", "ledger.jsonl")
+		} else {
+			ledgerPath = filepath.Join("docs", "lessons", "ledger.jsonl")
+		}
+	}
+
+	items, err := lessons.NewLedger(ledgerPath).Load()
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+
+	var hints []InjectedLessonHint
+	for _, item := range items {
+		if item.Status != lessons.StatusRatified {
+			continue
+		}
+		matched := len(item.ReviewedClasses) == 0 || strings.EqualFold(item.AuthorClass, className)
+		if !matched {
+			for _, rc := range item.ReviewedClasses {
+				if rc == "*" || strings.EqualFold(rc, className) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			continue
+		}
+		wrong := strings.TrimSpace(item.Observation.Text)
+		if wrong == "" && len(item.Observation.CitedEvents) > 0 {
+			wrong = strings.TrimSpace(item.Observation.CitedEvents[0].Claim)
+		}
+		correct := strings.TrimSpace(item.Recommendation)
+		if wrong == "" || correct == "" {
+			continue
+		}
+		hints = append(hints, InjectedLessonHint{
+			ID:              item.ID,
+			AuthorClass:     item.AuthorClass,
+			WrongApproach:   wrong,
+			CorrectApproach: correct,
+		})
+		if len(hints) >= lessons.DefaultRoundBudget {
+			break
+		}
+	}
+	return hints
 }
 
 type scriptCheckResult struct {

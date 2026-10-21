@@ -157,3 +157,37 @@ classes:
 		t.Fatalf("expected hard invariant violation detail, got %+v", verdictHard.Checks)
 	}
 }
+
+func TestEvaluateNetDeltaTheaterPlaceholdersAndTrivialAsserts(t *testing.T) {
+	diff := `--- a/internal/worker/worker.go
++++ b/internal/worker/worker.go
+@@ -10,0 +11,3 @@
++	// TODO(#644): legitimate owned issue tracking comment must pass
++	panic("TODO: implement later")
++	msg := "FILL IN HERE"
+--- a/internal/worker/worker_test.go
++++ b/internal/worker/worker_test.go
+@@ -20,0 +21,2 @@
++	assert.True(t, true)
++	assert.Nil(t, nil)
+`
+	hard, advs := EvaluateNetDelta(context.Background(), diff, []string{"internal/worker/**"}, nil)
+	if len(hard) != 0 {
+		t.Fatalf("expected 0 hard violations, got %+v", hard)
+	}
+	if len(advs) != 4 {
+		t.Fatalf("expected 4 advisories (2 theater placeholders + 2 trivial asserts, ignoring owned TODO comment), got %d: %+v", len(advs), advs)
+	}
+	var theaterCount, trivialCount int
+	for _, a := range advs {
+		switch a.RuleID {
+		case "TIER0-THEATER-PLACEHOLDER":
+			theaterCount++
+		case "TIER0-TRIVIAL-ASSERT":
+			trivialCount++
+		}
+	}
+	if theaterCount != 2 || trivialCount != 2 {
+		t.Fatalf("expected 2 TIER0-THEATER-PLACEHOLDER and 2 TIER0-TRIVIAL-ASSERT, got theater=%d trivial=%d (%+v)", theaterCount, trivialCount, advs)
+	}
+}

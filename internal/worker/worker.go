@@ -800,6 +800,9 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if spawnDir != "" {
 		childEnv = append(childEnv, "G8S_SCOPE_ROOT="+spawnDir)
 	}
+	if len(req.AddDirs) > 0 {
+		childEnv = append(childEnv, "G8S_ADD_DIRS="+strings.Join(req.AddDirs, ","))
+	}
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,

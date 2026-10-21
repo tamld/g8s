@@ -143,8 +143,8 @@ func runDoctor(args []string) {
 	}
 
 	pterm.DefaultHeader.WithFullWidth().Println("g8s Doctor Diagnostics")
-	fmt.Printf("Platform: %s | Runtime: %s | Zero-CGO: %t | Status: %s\n\n",
-		report.Platform, report.GoRuntime, report.ZeroCGO, report.OverallStatus)
+	fmt.Printf("Platform: %s | Runtime: %s | Zero-CGO: %t | Status: %s | Capabilities: %s\n\n",
+		report.Platform, report.GoRuntime, report.ZeroCGO, report.OverallStatus, report.CapabilityStatus)
 
 	if len(report.AppliedFixes) > 0 {
 		pterm.Info.Println("Applied Self-Healing Fixes:")

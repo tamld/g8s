@@ -15,12 +15,13 @@ import (
 )
 
 func resolveReceiptAllowedPaths(cmdName, flagReceiptID, flagScopeRoot string, isMutation, jsonl bool) (string, []string) {
+	explicitReceipt := strings.TrimSpace(flagReceiptID) != ""
 	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
 	if err != nil {
 		exitRuntime(cmdName, "", "", cli.CodeHarness, err, "Delegation boundary violation", jsonl)
 	}
 
-	if receiptID != "" {
+	if receiptID != "" && (isMutation || explicitReceipt) {
 		rcDbPath, err := receiptDatabasePath()
 		if err != nil {
 			exitRuntime(cmdName, "", "", cli.CodeDenied, fmt.Errorf("locate receipt database: %w", err), "Ensure G8S_STATE_DIR is set properly", jsonl)

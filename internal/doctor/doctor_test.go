@@ -289,3 +289,36 @@ func TestRunAttentionCheck(t *testing.T) {
 		t.Errorf("expected recommendation for default actor, got %q", rep3.Questions[2].Answer)
 	}
 }
+
+func TestEvaluateCapabilitiesNonBreaking(t *testing.T) {
+	// 1. Minimal checks (only SQLite WAL, no worker CLI, no ripgrep, no providers.json)
+	t.Setenv("NINEROUTER_URL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	checksPartial := []DiagnosticResult{
+		{Name: "Database Connectivity", Status: "OK", Message: "SQLite WAL database healthy"},
+		{Name: "Search Engine", Status: "OK", Message: "Native Go search engine active (optional ripgrep CLI not found in PATH)"},
+		{Name: "Worker CLI (agy)", Status: "OK", Message: "Optional worker CLI not found in PATH"},
+		{Name: "Providers File", Status: "OK", Message: "providers.json absent (legacy default is legal; built-in providers active)"},
+	}
+	status, caps := EvaluateCapabilities(checksPartial)
+	if status != "PARTIAL" && status != "MINIMAL" {
+		t.Fatalf("expected PARTIAL or MINIMAL when optional CLIs/rg absent, got %s", status)
+	}
+	if len(caps) != 5 {
+		t.Fatalf("expected 5 capability entries, got %d: %+v", len(caps), caps)
+	}
+
+	// 2. Full capability checks
+	checksFull := []DiagnosticResult{
+		{Name: "Database Connectivity", Status: "OK", Message: "SQLite WAL database healthy"},
+		{Name: "Search Engine", Status: "OK", Message: "Native Go search engine active; ripgrep turbo available at /usr/bin/rg"},
+		{Name: "Worker CLI (agy)", Status: "OK", Message: "Available in PATH at /usr/local/bin/agy"},
+		{Name: "Providers File", Status: "OK", Message: "1 provider(s) loaded cleanly from providers.json"},
+	}
+	statusFull, _ := EvaluateCapabilities(checksFull)
+	if statusFull != "FULL" {
+		t.Fatalf("expected FULL when all capabilities present, got %s", statusFull)
+	}
+}

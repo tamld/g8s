@@ -55,7 +55,22 @@ that returns un-cited impressions failed its role, even if the text is useful.
      Phase 1..K (parallel F1 builders): disjoint WriteReceipts (e.g. data/script vs assets/audio vs scenes/ui)
      Phase K+1 (independent F1 verifier, Author != Reviewer): multi-gate check (Gate A content/spec, Gate B visual/structural, Gate C runtime/output)
      join: supervisor verifies all gate stamps + SHA-256 chain before HITL acceptance
+
+6. T0..T3 MULTI-AGENT TOURNAMENT (Broad Horizontal vs. Deep Vertical F0 → F1 → F2)
+     T0 (F0 Scope & Brief Freeze): Issue disjoint WriteReceipts + G8S_ADD_DIRS multi-root ceilings (#643)
+     T1 (F1 → F2 Dialectical Fan-Out): F1 middle managers spawn cross-family F2 subagents (REA / Proponent / Skeptic / Synthesizer) via g8s llm-call; depth-2 telemetry recorded in $G8S_STATE_DIR/f2_telemetry/<task_id>.jsonl
+     T2 (Jev System-1 Sensor + F0 Cross-Examination): Run g8s reflex triage on F1 blueprints; F0 debates F1 on architecture-critical claims
+     T3 (Perimeter Verification & Commitment): Run g8s verify --task <id> --json (checks DoDMatrix, f2_summary, anti-theater net-delta guards #644, and ratified lesson injection) before merging
 ```
+
+### Horizontal vs. Deep-Vertical Tournament Modes
+
+| Dimension | Mode A: Broad Horizontal (`Đánh diện rộng`) | Mode B: Deep Vertical (`Đánh diện chuyên sâu`) |
+|---|---|---|
+| **Topology** | `1 F0 → m F1 (1 per repo/subsystem) → n F2` | `1 F0 → k F1 (Domain Leads: UX, Security, Deploy) → n F2` |
+| **Target Scope** | Multiple sibling repos or large disjoint packages | Single target repository (`--add-dir <repo>`) with deep domain slices |
+| **F2 Roles** | Concept Harvester, Feasibility Auditor, Red-Team Skeptic, Blueprint Synthesizer | REA Researcher, Red-Team Skeptic, Code Implementer, Acceptance Verifier |
+| **F0 Context Firewall** | F0 reads only sealed F1 handoffs + `RoundReceiptSchema` (`f2_summary`) | F0 orchestrates multi-round debate/verification via `BriefSchema` ↔ `RoundReceiptSchema` without reading raw logs |
 
 Shapes 1–3 and 5 are supervisor-side N submits (default). Shape 4 uses the worker
 loop's own bounded pool (#394) — one process, N isolated attempts.
