@@ -86,6 +86,14 @@ func TestSelectPath(t *testing.T) {
 		if gotTag != "go" {
 			t.Fatalf("expected go, got %q", gotTag)
 		}
+
+		gotDotIndex, err := SelectPath(jsonDoc, "data.items.0.name")
+		if err != nil {
+			t.Fatalf("unexpected error for dot index: %v", err)
+		}
+		if gotDotIndex != "alpha" {
+			t.Fatalf("expected alpha, got %q", gotDotIndex)
+		}
 	})
 
 	t.Run("array projection matches[].file", func(t *testing.T) {

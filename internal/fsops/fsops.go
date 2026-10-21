@@ -7,9 +7,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -548,4 +551,141 @@ func lookupJITWhisper(ctx context.Context, relPath string) []string {
 		return nil
 	}
 	return vault.FormatJITWhisper(records)
+}
+
+// SelectJSON evaluates a JSON dot-path selector against raw JSON bytes
+// and returns the matching value formatted as a valid JSON string (DELTA-23).
+func SelectJSON(rawJSON []byte, expr string) (string, error) {
+	trimmedJSON := strings.TrimSpace(string(rawJSON))
+	if trimmedJSON == "" {
+		return "", fmt.Errorf("empty JSON input")
+	}
+	var root any
+	dec := json.NewDecoder(bytes.NewReader([]byte(trimmedJSON)))
+	dec.UseNumber()
+	if err := dec.Decode(&root); err != nil {
+		return "", fmt.Errorf("invalid json: %w", err)
+	}
+
+	node, err := evalJSONNode(root, strings.TrimSpace(expr))
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(node)
+	if err != nil {
+		return "", fmt.Errorf("marshal selected node: %w", err)
+	}
+	return string(b), nil
+}
+
+func evalJSONNode(curr any, expr string) (any, error) {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, ".") {
+		expr = strings.TrimSpace(strings.TrimPrefix(expr, "."))
+	}
+	if expr == "" {
+		return curr, nil
+	}
+
+	for expr != "" {
+		if strings.HasPrefix(expr, ".") {
+			expr = strings.TrimSpace(strings.TrimPrefix(expr, "."))
+			if expr == "" {
+				return curr, nil
+			}
+		}
+
+		if strings.HasPrefix(expr, "[") {
+			closeIdx := strings.Index(expr, "]")
+			if closeIdx == -1 {
+				return nil, fmt.Errorf("unmatched '[' in selector expression %q", expr)
+			}
+			inside := strings.TrimSpace(expr[1:closeIdx])
+			remaining := strings.TrimSpace(expr[closeIdx+1:])
+
+			if inside == "" {
+				// Array projection: []
+				slice, ok := curr.([]any)
+				if !ok {
+					return nil, fmt.Errorf("cannot project across non-array (%T)", curr)
+				}
+				results := make([]any, 0, len(slice))
+				for _, item := range slice {
+					res, err := evalJSONNode(item, remaining)
+					if err != nil {
+						return nil, err
+					}
+					results = append(results, res)
+				}
+				return results, nil
+			}
+
+			idx, err := strconv.Atoi(inside)
+			if err != nil {
+				return nil, fmt.Errorf("invalid array index %q", inside)
+			}
+			slice, ok := curr.([]any)
+			if !ok {
+				return nil, fmt.Errorf("cannot index non-array (%T)", curr)
+			}
+			if idx < 0 || idx >= len(slice) {
+				return nil, fmt.Errorf("index %d out of bounds (len %d)", idx, len(slice))
+			}
+			curr = slice[idx]
+			expr = remaining
+			continue
+		}
+
+		// Field extraction
+		end := len(expr)
+		dotIdx := strings.Index(expr, ".")
+		bracketIdx := strings.Index(expr, "[")
+
+		if dotIdx != -1 && bracketIdx != -1 {
+			if dotIdx < bracketIdx {
+				end = dotIdx
+			} else {
+				end = bracketIdx
+			}
+		} else if dotIdx != -1 {
+			end = dotIdx
+		} else if bracketIdx != -1 {
+			end = bracketIdx
+		}
+
+		fieldName := strings.TrimSpace(expr[:end])
+		if fieldName == "" {
+			return nil, fmt.Errorf("empty field name in selector expression")
+		}
+		expr = strings.TrimSpace(expr[end:])
+
+		if slice, ok := curr.([]any); ok {
+			idx, err := strconv.Atoi(fieldName)
+			if err != nil {
+				return nil, fmt.Errorf("cannot access non-integer index %q on array (%T)", fieldName, curr)
+			}
+			if idx < 0 || idx >= len(slice) {
+				return nil, fmt.Errorf("index %d out of bounds (len %d)", idx, len(slice))
+			}
+			curr = slice[idx]
+			continue
+		}
+
+		obj, ok := curr.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("cannot access field %q on non-object (%T)", fieldName, curr)
+		}
+		val, exists := obj[fieldName]
+		if !exists {
+			keys := make([]string, 0, len(obj))
+			for k := range obj {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			return nil, fmt.Errorf("field %q not found (available keys: [%s])", fieldName, strings.Join(keys, ", "))
+		}
+		curr = val
+	}
+
+	return curr, nil
 }

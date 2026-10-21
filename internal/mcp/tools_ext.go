@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/search"
 )
@@ -495,4 +498,115 @@ func (s *Server) editTool(ctx context.Context, args json.RawMessage) (any, *json
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}
 	return res, nil
+}
+
+type selectArgs struct {
+	Input    string `json:"input"`
+	Selector string `json:"selector"`
+}
+
+// selectTool executes native pure-Go JSON dot-path selection (DELTA-23).
+func (s *Server) selectTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a selectArgs
+	if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Input) == "" || strings.TrimSpace(a.Selector) == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_select requires input and selector"}
+	}
+	val, err := fsops.SelectJSON([]byte(a.Input), a.Selector)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("select error: %v", err)}
+	}
+	return map[string]any{
+		"selector": a.Selector,
+		"value":    json.RawMessage(val),
+	}, nil
+}
+
+type llmCallArgs struct {
+	Provider    string   `json:"provider"`
+	Model       string   `json:"model"`
+	Prompt      string   `json:"prompt"`
+	System      string   `json:"system"`
+	MaxTokens   int      `json:"max_tokens"`
+	Temperature *float64 `json:"temperature"`
+	Timeout     string   `json:"timeout"`
+}
+
+// llmCallTool executes a direct synchronous LLM call against configured providers (DELTA-25).
+func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a llmCallArgs
+	if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Prompt) == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_llm_call requires prompt"}
+	}
+	cfg, err := config.LoadProvidersConfig()
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("load providers config: %v", err)}
+	}
+	var entry *config.ProviderEntry
+	if a.Provider != "" {
+		p, ok := cfg.FindProvider(a.Provider)
+		if !ok {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("provider %q not found", a.Provider)}
+		}
+		entry = p
+	} else {
+		p, err := cfg.ResolveProviderForModel(a.Model)
+		if err != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
+		}
+		entry = p
+	}
+	if entry == nil || !entry.SupportsDirectExecution() {
+		name := "<nil>"
+		if entry != nil {
+			name = entry.Name
+		}
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("provider %s does not support direct execution", name)}
+	}
+	model := a.Model
+	if model == "" {
+		model = entry.DefaultModel
+	}
+	if model == "" && len(entry.Models) > 0 {
+		model = entry.Models[0].ID
+	}
+	if !entry.ServesModel(model) {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("provider %q does not serve model %q", entry.Name, model)}
+	}
+
+	callTimeout := 60 * time.Second
+	if a.Timeout != "" {
+		if dur, parseErr := time.ParseDuration(a.Timeout); parseErr == nil && dur > 0 {
+			callTimeout = dur
+		}
+	}
+	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+
+	hp := provider.NewHTTPProviderFromConfig(*entry)
+	opts := provider.ExecuteOptions{
+		SystemPrompt: a.System,
+		MaxTokens:    a.MaxTokens,
+		Temperature:  a.Temperature,
+	}
+	start := time.Now()
+	res, err := hp.ExecuteWithResult(callCtx, a.Prompt, model, opts)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("llm call failed: %v", err)}
+	}
+	durationMs := res.DurationMs
+	if durationMs == 0 {
+		durationMs = time.Since(start).Milliseconds()
+	}
+
+	return map[string]any{
+		"provider":          entry.Name,
+		"protocol":          entry.EffectiveProtocol(),
+		"requested_model":   model,
+		"resolved_model":    res.ResolvedModel,
+		"output":            res.Output,
+		"prompt_tokens":     res.PromptTokens,
+		"completion_tokens": res.CompletionTokens,
+		"total_tokens":      res.TotalTokens,
+		"duration_ms":       durationMs,
+	}, nil
 }

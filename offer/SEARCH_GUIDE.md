@@ -104,7 +104,7 @@ To eliminate external OS tool dependencies (`rg`, `grep`, `find`, `sed -i`, `awk
 | **Search & File Discovery** | `rg`, `grep -rn`, `find . -name` | `g8s search [-F] [-i] [-g glob] [--files] <pattern> [path...]` | `g8s_search` | `POST /api/v1/fs/search` |
 | **Bounded File Read + SHA-256** | `cat`, `head`, `tail`, `sed -n 'M,Np'` | `g8s read --lines M:N [--max-bytes B] <file>` | `g8s_read` | `POST /api/v1/fs/read` |
 | **Atomic CAS File Edit** | `sed -i`, `awk`, `perl -pi`, `cat <<EOF >` | `g8s edit --old <str> --new <str> [--all] [--if-sha256 <h>] <file>` | `g8s_edit` | `POST /api/v1/fs/edit` |
-| **JSON Field Extraction** | `jq -r`, `python3 -c "import json..."` | `g8s <cmd> --select .data.field` or `g8s select <expr>` | *(JSON-RPC native)* | *(JSON REST native)* |
+| **JSON Field Extraction** | `jq -r`, `python3 -c "import json..."` | `g8s <cmd> --select .data.field` or `g8s select <expr>` | `g8s_select` | *(JSON REST native)* |
 
 ### 5.1. F0 / F1 / F2 Cognitive & Capability Enforcement (`G8S_TIER=F1`)
 

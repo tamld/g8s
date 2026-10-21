@@ -124,6 +124,18 @@ func evalPath(curr any, expr string) (string, error) {
 		}
 		expr = strings.TrimSpace(expr[end:])
 
+		if slice, ok := curr.([]any); ok {
+			idx, err := strconv.Atoi(fieldName)
+			if err != nil {
+				return "", fmt.Errorf("cannot access non-integer index %q on array (%T)", fieldName, curr)
+			}
+			if idx < 0 || idx >= len(slice) {
+				return "", fmt.Errorf("index %d out of bounds (len %d)", idx, len(slice))
+			}
+			curr = slice[idx]
+			continue
+		}
+
 		obj, ok := curr.(map[string]any)
 		if !ok {
 			return "", fmt.Errorf("cannot access field %q on non-object (%T)", fieldName, curr)

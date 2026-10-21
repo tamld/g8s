@@ -257,6 +257,9 @@ func (p *OpenAIProvider) spawnAnthropic(ctx context.Context, spec Spec) (Handle,
 	if spec.SystemPrompt != "" {
 		reqBody["system"] = spec.SystemPrompt
 	}
+	if spec.Temperature != nil {
+		reqBody["temperature"] = *spec.Temperature
+	}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -346,6 +349,9 @@ func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, er
 	}
 	if spec.MaxTokens > 0 {
 		reqBody["max_tokens"] = spec.MaxTokens
+	}
+	if spec.Temperature != nil {
+		reqBody["temperature"] = *spec.Temperature
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -498,4 +504,54 @@ func (h *immediateHandle) Cancel(_ context.Context) error { return nil }
 
 func (h *immediateHandle) StdoutStream() io.ReadCloser {
 	return io.NopCloser(bytes.NewReader([]byte(h.stdout)))
+}
+
+// ExecuteOptions configures a direct call via ExecuteWithResult.
+type ExecuteOptions struct {
+	SystemPrompt string
+	MaxTokens    int
+	Temperature  *float64
+	Effort       string
+}
+
+// ExecuteResult represents the result of a direct LLM execution.
+type ExecuteResult struct {
+	Output           string `json:"output"`
+	ResolvedModel    string `json:"resolved_model"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	DurationMs       int64  `json:"duration_ms"`
+}
+
+// ExecuteWithResult executes a prompt synchronously and returns structured metrics.
+func (p *OpenAIProvider) ExecuteWithResult(ctx context.Context, prompt, model string, opts ExecuteOptions) (*ExecuteResult, error) {
+	spec := Spec{
+		Brief:        prompt,
+		Model:        model,
+		Effort:       opts.Effort,
+		MaxTokens:    opts.MaxTokens,
+		Temperature:  opts.Temperature,
+		SystemPrompt: opts.SystemPrompt,
+	}
+	handle, err := p.Spawn(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := handle.Wait(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resolvedModel := rc.ModelResolved
+	if resolvedModel == "" {
+		resolvedModel = model
+	}
+	return &ExecuteResult{
+		Output:           rc.Stdout,
+		ResolvedModel:    resolvedModel,
+		PromptTokens:     rc.InputTokens,
+		CompletionTokens: rc.OutputTokens,
+		TotalTokens:      rc.TotalTokens,
+		DurationMs:       rc.DurationMs,
+	}, nil
 }

@@ -33,6 +33,7 @@ type Spec struct {
 	Model        string        `json:"model,omitempty"`
 	Effort       string        `json:"effort,omitempty"`
 	MaxTokens    int           `json:"max_tokens,omitempty"`
+	Temperature  *float64      `json:"temperature,omitempty"`
 	AddDirs      []string      `json:"add_dirs,omitempty"`
 	SystemPrompt string        `json:"system_prompt,omitempty"`
 	Timeout      time.Duration `json:"timeout,omitempty"`

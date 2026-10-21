@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -28,6 +29,7 @@ type ModelEntry struct {
 type ProviderEntry struct {
 	Class               string            `json:"class"`
 	Name                string            `json:"name"`
+	DefaultModel        string            `json:"default_model,omitempty"`
 	Protocol            string            `json:"protocol,omitempty"`              // "openai" (default), "anthropic", "9router"
 	BaseURL             string            `json:"base_url,omitempty"`
 	BaseURLEnv          string            `json:"base_url_env,omitempty"`          // optional env var overriding base_url at runtime (e.g. "NINEROUTER_URL")
@@ -44,6 +46,11 @@ type ProviderEntry struct {
 	// are substituted verbatim into the exec argv; templates never
 	// originate from task payloads.
 	Args []string `json:"args,omitempty"`
+}
+
+// SupportsDirectExecution reports whether the provider can be called directly (api_call class).
+func (p ProviderEntry) SupportsDirectExecution() bool {
+	return p.Class == classAPICall
 }
 
 // EffectiveBaseURL returns the resolved base URL, checking BaseURLEnv first.
@@ -255,8 +262,33 @@ func Load(path string) (*File, error) {
 				return nil, fmt.Errorf("provider %d (%s): %w", i, p.Name, err)
 			}
 		}
+		if f.Providers[i].DefaultModel == "" && len(f.Providers[i].Models) > 0 {
+			f.Providers[i].DefaultModel = f.Providers[i].Models[0].ID
+		}
 	}
 	return &f, nil
+}
+
+// LoadProvidersConfig loads the provider configuration from the environment
+// or standard config locations:
+//  1. G8S_PROVIDERS_CONFIG
+//  2. G8S_PROVIDERS
+//  3. ~/.config/g8s/providers.json
+func LoadProvidersConfig() (*File, error) {
+	path := os.Getenv("G8S_PROVIDERS_CONFIG")
+	if path == "" {
+		path = os.Getenv("G8S_PROVIDERS")
+	}
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			path = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	if path == "" {
+		return nil, errors.New("no provider config path configured")
+	}
+	return Load(path)
 }
 
 // FindProvider finds a provider by name (case-insensitive) in the given File.
@@ -271,6 +303,16 @@ func FindProvider(f *File, name string) (*ProviderEntry, bool) {
 		}
 	}
 	return nil, false
+}
+
+// FindProvider finds a provider by name (case-insensitive) on *File.
+func (f *File) FindProvider(name string) (*ProviderEntry, bool) {
+	return FindProvider(f, name)
+}
+
+// ResolveProviderForModel resolves a provider for the given model ID on *File.
+func (f *File) ResolveProviderForModel(modelID string) (*ProviderEntry, error) {
+	return ResolveProviderForModel(f, "", modelID)
 }
 
 // ResolveProviderForModel resolves a provider entry from f by explicit providerName
