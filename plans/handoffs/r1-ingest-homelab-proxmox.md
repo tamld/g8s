@@ -4,8 +4,8 @@
 
 > **Handoff Type**: F1 Middle Manager Synthesis & Advisory Report  
 > **Target Deliverable**: `plans/handoffs/r1-ingest-homelab-proxmox.md`  
-> **Source Sibling Repository**: `/Users/tamld/Documents/github/homelab-proxmox`  
-> **Evaluation Base**: `/Users/tamld/Documents/github/g8s`  
+> **Source Sibling Repository**: `$HOME/Documents/github/homelab-proxmox`  
+> **Evaluation Base**: `$HOME/Documents/github/g8s`  
 > **WriteReceipt ID**: `970858a9-d1ed-4d57-bee9-6d4a4583a4ba`  
 > **Execution Timestamp**: 2026-10-21T13:43:00Z  
 

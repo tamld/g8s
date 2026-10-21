@@ -5,8 +5,8 @@
 **Document ID**: `plans/handoffs/r1-ingest-aegis.md`  
 **Author**: F1 High-Reasoning Middle Manager (`3c95c1d2-d52f-45f9-a126-e31407452f77`)  
 **Authorized WriteReceipt**: `ed4a3f75-77fb-4efc-88a2-41caa46a925b`  
-**Target Sibling Repository**: `/Users/tamld/Documents/github/aegis`  
-**Host Platform**: `/Users/tamld/Documents/github/g8s`  
+**Target Sibling Repository**: `$HOME/Documents/github/aegis`  
+**Host Platform**: `$HOME/Documents/github/g8s`  
 **Date**: 2026-10-21  
 
 ---
@@ -137,21 +137,21 @@ To ensure clean architectural separation and adhere to g8s's Two-Layer Separatio
 In strict accordance with F0's strategic directive, we actively protect `g8s` from cognitive shackles and architectural bloat. The following mechanisms from `aegis` are **firmly rejected** from entering the `g8s` core engine:
 
 ### Rejection 1: The 7-State / 14-State Workflow FSM & Risk-Priced Tiers
-- **Aegis Source**: [`docs/specs/FSM.md`](file:///Users/tamld/Documents/github/aegis/docs/specs/FSM.md), [`ops/ag-cli/core/workflow.ts`](file:///Users/tamld/Documents/github/aegis/ops/ag-cli/core/workflow.ts)
+- **Aegis Source**: [`docs/specs/FSM.md`](../aegis/docs/specs/FSM.md), [`ops/ag-cli/core/workflow.ts`](../aegis/ops/ag-cli/core/workflow.ts)
 - **Concrete Technical Reason for Rejection**:
   1. *Destroys Cognitive Velocity*: Forcing an AI agent through sequential state transitions (`INIT → PLANNING → EXECUTING → VERIFYING → REFLECTING → FINALIZING → DONE`) introduces massive latency, token churn, and repetitive handoffs.
   2. *AST Blast-Radius Fragility*: Calculating blast radius by parsing TypeScript AST import trees (`code-review-graph` / TypeScript compiler API) is language-specific, slow, and cannot be compiled into a lean, zero-CGO Go binary.
   3. *Redundant*: `g8s` already handles task dispatch, CAS leasing, and result verification via clean, stateless CLI/MCP primitives (`g8s submit`, `g8s worker`, `g8s verify`). Adding an FSM layer violates Law 1 and Law 3.
 
 ### Rejection 2: Memory-Enforced Blocker Gates ("Lesson Existed -> Gate Blocks Repeat")
-- **Aegis Source**: [`ops/ag-cli/services/zero-theater-guard.ts:147-160`](file:///Users/tamld/Documents/github/aegis/ops/ag-cli/services/zero-theater-guard.ts#L147-L160)
+- **Aegis Source**: [`ops/ag-cli/services/zero-theater-guard.ts:147-160`](../aegis/ops/ag-cli/services/zero-theater-guard.ts#L147-L160)
 - **Concrete Technical Reason for Rejection**:
   1. *Perverse Penalty on Adaptation*: Blocking an agent's submission because a vector or text search matched a historical lesson assumes the agent is making the identical mistake. In reality, agents frequently employ novel patterns that contain similar keywords or touch the same subsystem.
   2. *External DB Dependency*: Querying PostgreSQL/pgvector or maintaining large SQLite FTS indices in the critical verification path violates the zero-dependency philosophy.
   3. *Philosophical Misalignment*: Memory should **inform and guide** (via context injection), never **act as a blunt censor**.
 
 ### Rejection 3: Hard-Blocking Plan-Diff Verifier (`diff ⊆ plan`)
-- **Aegis Source**: [`ops/ag-cli/services/plan-diff-verifier.ts:28-42`](file:///Users/tamld/Documents/github/aegis/ops/ag-cli/services/plan-diff-verifier.ts#L28-L42)
+- **Aegis Source**: [`ops/ag-cli/services/plan-diff-verifier.ts:28-42`](../aegis/ops/ag-cli/services/plan-diff-verifier.ts#L28-L42)
 - **Concrete Technical Reason for Rejection**:
   1. *Kills Autonomous Discovery*: Engineering requires iteration. An agent discovering a necessary refactor or bugfix mid-implementation should not be failed because the file was not declared in the upfront markdown plan.
   2. *Goodhart's Law Bait*: Agents learn to game `diff ⊆ plan` by declaring wildcards or over-broad file lists in their plans, turning the plan into meaningless compliance prose.

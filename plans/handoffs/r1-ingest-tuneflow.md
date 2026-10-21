@@ -3,10 +3,10 @@
 > **Session type**: T1 (strategy)
 
 **Author**: F1 Middle Manager (High-Reasoning Supervisor Delegate)  
-**Assigned Worktree**: `/Users/tamld/.local/state/g8s-sess-r1-tuneflow/worktrees/wt-882762eb`  
+**Assigned Worktree**: `$HOME/.local/state/g8s-sess-r1-tuneflow/worktrees/wt-882762eb`  
 **WriteReceipt ID**: `1db079e8-f14c-4603-9208-95bbcd29eb56` (Target: `plans/handoffs/r1-ingest-tuneflow.md`)  
-**Source Repository**: `/Users/tamld/Documents/github/tuneflow` (`v2.5.0`, Sibling Repo, Onboarded Wave 4)  
-**Target Platform**: `/Users/tamld/Documents/github/g8s` (Pure-Go, Zero-CGO, Single-Binary Agent Execution Platform)  
+**Source Repository**: `$HOME/Documents/github/tuneflow` (`v2.5.0`, Sibling Repo, Onboarded Wave 4)  
+**Target Platform**: `$HOME/Documents/github/g8s` (Pure-Go, Zero-CGO, Single-Binary Agent Execution Platform)  
 **Date**: 2026-10-21  
 
 ---

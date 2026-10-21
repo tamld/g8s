@@ -3,8 +3,8 @@
 > **Session type**: T1 (strategy)
 
 > **Document Type**: F1 High-Reasoning Middle Manager Round 1 Synthesis & Handoff  
-> **Source Sibling Repository**: `/Users/tamld/Documents/github/defense-in-depth` (v1.0.0-rc.1, TypeScript/Node.js)  
-> **Target Platform**: `/Users/tamld/Documents/github/g8s` (Pure-Go, Zero-CGO, Single Binary Agent Execution Platform)  
+> **Source Sibling Repository**: `$HOME/Documents/github/defense-in-depth` (v1.0.0-rc.1, TypeScript/Node.js)  
+> **Target Platform**: `$HOME/Documents/github/g8s` (Pure-Go, Zero-CGO, Single Binary Agent Execution Platform)  
 > **Author**: F1 Middle Manager (`bc75fd9c-7911-4225-b4c4-ae83054f1791`)  
 > **WriteReceipt ID**: `20c2430f-de65-4039-acb0-0d9919124685`  
 > **Scope**: `plans/handoffs/r1-ingest-defense-in-depth.md`  
@@ -285,5 +285,5 @@ A unit test in `internal/verifier/verifier_test.go` verifying that when a task f
 ## 6. Boundary & Completion Verification
 
 - **Receipt Scope Verification**: Modifying strictly `plans/handoffs/r1-ingest-defense-in-depth.md` within worktree `wt-9b9bf4e1`.
-- **Zero Contamination**: No core files in `/Users/tamld/Documents/github/g8s` or sibling repo `/Users/tamld/Documents/github/defense-in-depth` were modified.
+- **Zero Contamination**: No core files in `$HOME/Documents/github/g8s` or sibling repo `$HOME/Documents/github/defense-in-depth` were modified.
 - **Ready for F0 Review**: Handing off to F0 Supervisor for Round 2 review and Blueprint approval.

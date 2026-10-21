@@ -7,8 +7,8 @@
 - **Task ID**: `9d5c7651-ab04-4e4a-86e4-5b9b054c5ccc`
 - **Write Receipt ID**: `db071ecc-23c0-4336-80f7-0e460d29d4f9`
 - **Scope Target**: `plans/handoffs/r1-ingest-hash-checker.md`
-- **Sibling Target**: `/Users/tamld/Documents/github/hash-checker` (Rust 1.88+, `egui`, `clap`)
-- **Host Target**: `/Users/tamld/Documents/github/g8s` (Pure-Go, Zero-CGO, Single-Binary Agent Execution & LLM Call Platform)
+- **Sibling Target**: `$HOME/Documents/github/hash-checker` (Rust 1.88+, `egui`, `clap`)
+- **Host Target**: `$HOME/Documents/github/g8s` (Pure-Go, Zero-CGO, Single-Binary Agent Execution & LLM Call Platform)
 - **Date**: 2026-10-21
 
 ---
