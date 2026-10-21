@@ -342,7 +342,16 @@ func runSubmit(args []string) {
 	}
 
 	if effectiveToolPolicy == "none" {
-		if !dispatch.SupportsNoModelToolsPolicy(effectiveProvider, "agy") {
+		isAPICall := strings.EqualFold(effectiveProvider, "9router")
+		if !isAPICall && manifest != nil {
+			for _, p := range manifest.Providers {
+				if strings.EqualFold(p.Name, effectiveProvider) && p.Class == "api_call" {
+					isAPICall = true
+					break
+				}
+			}
+		}
+		if !isAPICall && !dispatch.SupportsNoModelToolsPolicy(effectiveProvider, "agy") {
 			exitUsage("submit", "provider", *traceID, fmt.Sprintf("provider %q does not support tool_policy=none (only agy supports runtime-enforced supplied_text)", effectiveProvider), "Use a provider that supports tool_policy=none (e.g. agy)", *jsonl)
 		}
 	}

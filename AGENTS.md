@@ -59,6 +59,13 @@ Do NOT randomly scan the entire repository or the `reference/` directory. Follow
 5. **Native Cross-Platform Agent I/O (`DELTA-23` / [`offer/SEARCH_GUIDE.md`](offer/SEARCH_GUIDE.md))**:
    - Prefer native pure-Go `./bin/g8s search` (replaces `rg`/`grep`/`find`), `./bin/g8s read --lines M:N` (replaces `cat`/`head`/`tail`/`sed -n`), `./bin/g8s edit --old ... --new ... [--if-sha256 ...]` (replaces `sed -i`/`awk`), and `--select <dot.path>` (replaces `jq`) across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
    - F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT` (passed down to F2 subagents), enforcing `WriteReceipt.AllowedPaths` in-process on every mutation.
+6. **F0 Cognitive Purity & Information Firewall (`ADR-0033` Phase 06b + Wave B)**:
+   - F0 operates strictly as Brain (reasoning, brief authoring, consuming `RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`). F0 NEVER manually hunts raw CI logs, scans disk bloat, or runs procedural janitor tasks. All log-hunting, CI failure extraction, and file sync tasks are delegated to F1 workers.
+7. **Universal Config-Driven LLM Call Consumer & `9router` Integration (`DELTA-25`, `v0.19.0`)**:
+   - Direct synchronous CLI execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
+   - Durable worker queue execution: `./bin/g8s submit --provider 9router --model <combo>` + `./bin/g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope`.
+   - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
+   - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
 
 ---
 

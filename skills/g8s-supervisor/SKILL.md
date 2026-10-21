@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.2.0
-last_updated: "2026-10-14"
+version: 4.3.0
+last_updated: "2026-10-21"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -62,7 +62,7 @@ task receipt (operator mandate 2026-09-27).
 Read `references/hard-boundary.md` for every mode. Load only the chosen mode.
 Verified delegation boundary: see [ADR-0033](../../docs/decisions/0033-f0-verified-delegation.md) for evidence-gated autonomy (T1–T3 supersede synchronous HITL; T4 requires PiC approval).
 
-## F0 Evidence Toolkit (ADR-0033)
+## F0 Evidence Toolkit (ADR-0033 & Wave B)
 
 *Axiom: "Freedom on the road, toll at the booth — zero hard gates during exploration or F1 dispatch; deterministic hard gates at commitment points."*
 
@@ -70,12 +70,35 @@ The F0 supervisor evidence toolkit (`tools/f0`) provides machine-checkable verif
 
 - `f0 run -- <cmd...>`: wraps test/verify/deliver commands, records tamper-evident evidence (`ev-xxxxxxxx`) into the per-repo ledger, enforces G5 vacuous-pass guard (`items_checked == 0 => VACUOUS`).
 - `f0 status [--repo <path>] [--pr <N>] [--report-block]`: read-only ground truth viewer and trusted status block generator (`<!-- f0:status -->`).
-- `f0 gate check --repo <path> --action <merge|close|publish> (--pr <N> | --head-sha <S> --base <B>)`: deterministic commitment-point gate evaluating G0 (mandate), G1 (head evidence), G2 (forge CI), G3 (provenance), and G6 (claim citations).
+- `f0 gate check --repo <path> --action <merge|close|publish> (--pr <N> | --head-sha <S> --base <B>)`: deterministic commitment-point gate evaluating G0 (mandate), G1 (head evidence), G2 (forge CI), G3 (provenance), G4 (gate-appeasement detector, #625), G6 (claim citations), and G7 (per-criterion issue-closure gate, #626).
+- `f0 execute merge --pr <N>`: T2 merge executor with post-merge verification (#627).
+- `f0 verify-independent`: T3 independent worktree second verifier (#628).
+- `f0 breaker status|reset`: error-budget circuit breaker monitoring and threshold reset (#629).
+- `f0 digest`: read-only audit & session digest generation (#630).
+- `<!-- f0:bundle -->`: portable ground-truth bundle ensuring `TreeSHA` equivalence and tamper-evident receipts across platforms.
 - `f0 waive`: records scoped CI waivers tied to an open same-repo issue in the global ledger (debits error budget).
 - `f0 manual`: tags un-attributed files as intentional supervisor edits (debits error budget unless `manual_free`).
 - `f0 mandate`: views, checks, or mints campaign mandates (`~/.local/state/g8s/f0/mandate.json` cache + global ledger).
 - `f0 anchor`: publishes or verifies external ledger head anchors (`F0-Ledger-Head: <seq>:<hash>`) in commit trailers or comments.
 - `f0 audit`: scans default-branch commit history for merge/squash commits lacking verified gate entries or anchor trailers.
+
+## F0 Cognitive Purity & Information Firewall (Brain vs. Hands)
+
+Under `ADR-0033` (Phase 06b + Wave B), F0 enforces a strict **Cognitive Firewall**:
+1. **Brain vs. Hands Division**:
+   - F0 ONLY reasons, authors `BriefSchema` / `Spec`, reads structured receipts (`RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`), and makes commitment-point decisions (`T0`–`T4`).
+   - F0 NEVER manually hunts raw CI logs, scans disk bloat, runs verbose test suites, or executes procedural janitor tasks in F0's context window.
+2. **Lossless-Signal / Zero-Noise Delegation**:
+   - All log-hunting, CI failure extraction, documentation sync, formatting, and file editing are delegated to F1 workers (`agy` or `9router` combos: `fast-agent`, `butler-free-sre`, `docs-retriever`, `reasoning-free`, `deep-coding`).
+   - Raw logs are isolated to disk at `$G8S_STATE_DIR/logs/verify-<task>-<ts>.log`, while F0 consumes only the compact, structured verdict.
+
+## Universal Config-Driven LLM Call Consumer & 9Router Fleet (DELTA-25, v0.19.0)
+
+With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer for any remote HTTP LLM gateway declared in `providers.json` or `.g8s/agent-models.yml`:
+- **Direct CLI Invocation**: `g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
+- **Worker Queue Execution**: `g8s submit --provider 9router --model <combo>` + `g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope` with duration, usage, and response capture.
+- **Live Model Discovery**: `g8s providers discover [--provider 9router] [--json]` queries live `/v1/models` from upstream.
+- **Multi-Model SWE Fleet**: Standard combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) and prefix globs (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) provide high-availability upstream failover with zero vendor lock-in.
 
 ## The six laws
 

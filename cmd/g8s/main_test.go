@@ -103,7 +103,7 @@ func TestPrintUsageMentionsEveryLiveCommand(t *testing.T) {
 	commands := []string{
 		"submit", "get", "resume", "tasks", "cancel", "lineage", "children",
 		"receipt", "doctor", "init", "config", "completion", "service",
-		"analyze", "vault", "worker", "mcp", "roles", "permissions", "providers",
+		"analyze", "vault", "worker", "mcp", "roles", "permissions", "providers", "llm-call",
 		"version", "orchestrate", "orchestrate-aic", "supervisor-metrics",
 		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "migrate", "status",
 	}
@@ -165,6 +165,7 @@ func TestAllSubcommandsHelp(t *testing.T) {
 		"roles",
 		"permissions",
 		"providers",
+		"llm-call",
 		"submit",
 		"get",
 		"resume",

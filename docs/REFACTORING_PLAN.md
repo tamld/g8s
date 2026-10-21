@@ -166,6 +166,7 @@ All shipped, tagged, and verified on GitHub Releases:
 | v0.16.0 (2026-10-07) | Provider-neutral effort optimization (#550/#556/#557), effort-class registry (#558), signal-based effort demotion (#564), Quality Ladder CLI & diagnosis dispatch (#561/#563), baked-name realignment (#568) |
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (DELTA-23: search, read, edit, --select), F0/F1/F2 recursive containment (ADR-0032), Offer Bundle Wave 1–4 rollout (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims |
 | v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): append-only evidence ledger, signed operator mandates (T0–T4), commit/merge gates G0–G7, agent hooks, circuit breaker, lossless verify firewall |
+| v0.19.0 (2026-10-21) | Universal Config-Driven LLM Call Consumer & 9Router Multi-Model Gateway ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25): direct CLI invocation (g8s llm-call), queue bridge via g8s llm-call --worker-envelope, live model discovery g8s providers discover, standardized SWE combos (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever, butler-free-sre), and F0 Cognitive Purity |
 
 ---
 
@@ -215,6 +216,17 @@ All shipped, tagged, and verified on GitHub Releases:
 | [x] #616 | Runtime `--tool-policy none` and `supplied_text` permission profile boundary | P1 | ✅ Complete |
 | [x] #617 | Worker pool worktree and temporary branch cleanup on pool termination | P1 | ✅ Complete |
 | [x] #632 & #633 | Telemetry preflight eligibility filter (`occurrences >= 2`) and pattern lowercasing | P1 | ✅ Complete |
+
+---
+
+### v0.19.0 — Universal Config-Driven LLM Consumer, 9Router Multi-Model Fleet & F0 Cognitive Purity (Completed 2026-10-21)
+**Delivered**: 2026-10-21
+
+| Issue / Item | Description | Priority | Status |
+|--------------|-------------|----------|--------|
+| [x] DELTA-25 / ADR-0034 | Universal Config-Driven LLM Consumer & Multi-Protocol Gateway: multi-protocol `api_call` (`openai`, `anthropic`, `9router`), direct CLI `g8s llm-call`, worker queue bridge via `g8s llm-call --worker-envelope`, live model discovery `g8s providers discover` | P0 | ✅ Complete |
+| [x] 9Router SWE Fleet | Standardized SWE combo catalog (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) and prefix wildcard matching (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml` and `internal/provider/catalog.go` | P0 | ✅ Complete |
+| [x] F0 Cognitive Purity | Brain vs Hands division: F0 consumes structured `RoundReceiptSchema` and gate verdicts while delegating raw log hunting and janitor operations to F1 workers (`agy` and `9router` combos); updated supervisor skills and charters | P0 | ✅ Complete |
 
 ---
 

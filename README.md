@@ -59,8 +59,10 @@ g8s is a single static binary (pure Go, zero CGO) that lets a high-tier orchestr
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Shipped in v0.14.0 – v0.18.0
+## Shipped in v0.14.0 – v0.19.0
 
+- **Universal Config-Driven LLM Consumer & 9Router Multi-Model Fleet ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `v0.19.0`, `DELTA-25`)**: direct synchronous CLI execution via `g8s llm-call`, durable queue consumption via `g8s submit --provider 9router --model <combo>` + `g8s worker`, live model discovery via `g8s providers discover`, and standardized SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) with prefix matching.
+- **F0 Cognitive Purity & Information Firewall ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md) Phase 06b + Wave B, `v0.19.0`)**: Brain vs. Hands strict division; F0 consumes only structured `RoundReceiptSchema` and gate verdicts while F1 handles log hunting and file synchronization.
 - **F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), `v0.18.0`, Epic #620)**: hash-chained evidence ledger (`f0 run`, `f0 status`), signed operator mandates (`T0`–`T4`), merge/commit gates `G0`–`G7` (`f0 gate check`), agent hooks (`f0 hook pre-tool|stop`), portable ground-truth bundles, gate-appeasement detection (G4), issue-closure gate (G7), and error-budget circuit breaker.
 - **Native cross-platform Agent I/O (`DELTA-23`, `v0.17.0`)**: pure-Go `g8s search` (replaces `rg`/`grep`/`find`), `g8s read` (bounded line-range reader with SHA-256 digest), `g8s edit` (atomic compare-and-swap editor preserving CRLF/LF and enforcing `WriteReceipt.AllowedPaths`), and `--select` / `g8s select` (zero-dependency JSON dot-path extractor replacing `jq`), with full parity across CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), and HTTP (`/api/v1/fs/*`).
 - **F0 / F1 / F2 recursive containment (`ADR-0032`, `v0.17.0`)**: F1 workers automatically inherit `G8S_TIER=F1`, `G8S_RECEIPT_ID`, and `G8S_SCOPE_ROOT`, binding all F1 and F2 file mutations to the task's Write Receipt in-process.
@@ -213,6 +215,7 @@ Every commit passes **dual-pass CI**: `CGO_ENABLED=0` (pure-Go vet + tests) and 
 | v0.16.0 (2026-10-07) | Effort optimization: provider-neutral effort manifest (`named`/`budget`/`baked-name` adapters), task-class→effort mapping, quality ladder & per-class cost telemetry (#550, #568, #570) | **Done** |
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), F0/F1/F2 recursive containment (#587, #593), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims | **Done** |
 | v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): hash-chained evidence ledger, signed mandates (T0–T4), gates G0–G7, agent hooks, circuit breaker, lossless verify firewall | **Done** |
+| v0.19.0 (2026-10-21) | Universal Config-Driven LLM Consumer, 9Router Multi-Model Fleet & F0 Cognitive Purity ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25) | **Done** |
 | v1.0.0 (2026-12-15) | GA: 6-month homelab stability, enterprise security signoff, distributed fleet mTLS | Planned |
 
 ## Project Structure

@@ -48,6 +48,13 @@
   * Enforce reversibility tiers `T0` (Observation/F1 dispatch), `T1` (Branch push/PR/Issue close), `T2` (Standard merge), `T3` (Trust-boundary merge requiring dual independent verification), and `T4` (Irreversible/Sovereign actions requiring explicit synchronous PiC approval).
   * Enforce deterministic commitment checks: completeness of `dod_matrix` (`all D1..Dn == MET`), `tree_sha`/`head_sha` non-vacuous test evidence (`G1`/`G5`), forge CI completion (`G2`), worktree-to-commit blob provenance (`G3`), and issue-closure criterion completeness (`G7`).
 
+* **FR-10 (Universal Config-Driven LLM Consumer & Multi-Model 9Router Fleet, `DELTA-25`, ADR-0034)**:
+  * Declarative provider config in `providers.json` supporting `api_call` with `openai`, `anthropic`, and `9router` protocols, runtime `base_url_env`, static `headers`, and wildcard/prefix model matching (`allow_unlisted_models`).
+  * Direct synchronous execution via `g8s llm-call` supporting `--provider`, `--model`, `--prompt`, `--prompt-file`, `--system`, `--timeout`, `--effort`, `--max-tokens`, `--base-url`, `--protocol`, `--auth-env`, `--apply-files`, and `--worker-envelope`.
+  * Native queue execution bridge in `g8s worker` wiring `api_call` providers to `g8s llm-call --worker-envelope`, capturing duration, token usage (`input_tokens`, `output_tokens`, `total_tokens`), and response text into `agyResult` format.
+  * Live model discovery via `g8s providers discover [--provider <name>] [--json]` querying `/v1/models`.
+  * Catalog registration of standardized 9router SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) in `.g8s/agent-models.yml`.
+
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.
 * **NFR-2 (Memory Footprint)**: Idle daemon memory consumption < 15MB RAM.

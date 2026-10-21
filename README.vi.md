@@ -40,8 +40,10 @@ g8s là một binary tĩnh thuần Go (zero CGO) cho phép orchestrator tầng c
 | **attempt** | một lần chạy cụ thể của task |
 | **signal** | dòng sự kiện báo "task đã kết thúc" trong `signals/tasks.jsonl` |
 
-## Đã ship trong v0.14.0 – v0.18.0
+## Đã ship trong v0.14.0 – v0.19.0
 
+- **Universal Config-Driven LLM Consumer & Multi-Model 9Router ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `v0.19.0`, `DELTA-25`)**: thực thi CLI đồng bộ trực tiếp qua `g8s llm-call`, tiêu thụ queue bền vững qua `g8s submit --provider 9router --model <combo>` + `g8s worker`, khám phá model trực tiếp qua `g8s providers discover`, và danh mục combo SWE chuẩn hóa (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `butler-free-sre`) với khớp tiền tố linh hoạt.
+- **F0 Cognitive Purity & Information Firewall ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md) Phase 06b + Wave B, `v0.19.0`)**: Phân định nghiêm ngặt Não (F0) và Tay (F1); F0 chỉ tiêu thụ `RoundReceiptSchema` và kết quả gate có cấu trúc, cách ly hoàn toàn khỏi log thô CI/kiểm thử.
 - **F0 Verified Delegation & Zero-Trust Control Plane ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), `v0.18.0`, Epic #620)**: sổ cái bằng chứng hash-chain (`f0 run`, `f0 status`), ủy quyền mandate ký số (`T0`–`T4`), cổng cam kết merge/commit `G0`–`G7` (`f0 gate check`), hook agent (`f0 hook pre-tool|stop`), gói PR bundle độc lập môi trường, phát hiện né gate (G4), cổng tiêu chí đóng issue (G7), và circuit breaker ngắt lỗi.
 - **Native Agent I/O đa nền tảng (`DELTA-23`, `v0.17.0`)**: `g8s search` (thay `rg`/`grep`/`find`), `g8s read` (đọc dòng giới hạn kèm SHA-256), `g8s edit` (chỉnh sửa nguyên tử compare-and-swap bảo toàn CRLF/LF và kiểm soát `WriteReceipt.AllowedPaths`), và `--select` / `g8s select` (trích xuất JSON dot-path thay `jq`), đồng nhất trên CLI, MCP (`g8s_search`, `g8s_read`, `g8s_edit`), và HTTP (`/api/v1/fs/*`).
 - **Containment đệ quy F0 / F1 / F2 (`ADR-0032`, `v0.17.0`)**: F1 worker tự động kế thừa `G8S_TIER=F1`, `G8S_RECEIPT_ID`, và `G8S_SCOPE_ROOT`, khóa mọi thao tác ghi file của F1 và F2 vào phạm vi Write Receipt ngay trong tiến trình.
@@ -165,6 +167,7 @@ Mọi commit qua **CI kép**: `CGO_ENABLED=0` (vet + test thuần Go) và `CGO_E
 | v0.16.0 (2026-10-07) | Tối ưu effort: manifest effort trung hòa provider (adapter `named`/`budget`/`baked-name`), ánh xạ lớp việc→effort, thang chất lượng & telemetry chi phí theo lớp (#550, #568, #570) | **Xong** |
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (`DELTA-23`: `search`, `read`, `edit`, `--select`), containment đệ quy F0/F1/F2 (#587, #593), triển khai Offer Bundle Wave 1–4 & giao nhận liên repo (#442, #569), chuẩn hóa OpenSpec DELTA-01..23 & 50/50 claims | **Xong** |
 | v0.18.0 (2026-10-21) | F0 Verified Delegation ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md), Epic #620): sổ cái bằng chứng, mandate T0–T4, gates G0–G7, hook agent, circuit breaker, lossless verify firewall | **Xong** |
+| v0.19.0 (2026-10-21) | Universal Config-Driven LLM Consumer, 9Router Multi-Model Fleet & F0 Cognitive Purity ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25) | **Xong** |
 | v1.0.0 (2026-12-15) | GA: 6 tháng ổn định homelab, signoff bảo mật doanh nghiệp, fleet mTLS | Kế hoạch |
 
 ## Giấy phép

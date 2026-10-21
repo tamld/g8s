@@ -3,7 +3,7 @@
   "name": "g8s",
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "go_version": "1.26.9",
   "latest_release": {
     "tag": "v0.18.0",
@@ -243,6 +243,12 @@
       "title": "Differential Governance, Spatial JIT Whisper, Net-Delta Diff Guard & Sovereign HITL Calibration",
       "path": "spec/openspec/24-differential-governance-hitl-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-25",
+      "title": "Universal Config-Driven LLM Call Consumer & 9Router Multi-Model Gateway",
+      "path": "spec/openspec/25-config-driven-llm-consumer-spec.md",
+      "status": "IMPLEMENTED"
     }
   ],
   "milestones": {

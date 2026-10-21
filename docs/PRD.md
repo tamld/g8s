@@ -19,6 +19,6 @@
    * **Worker (`F1`) Trust via Physical Containment**: Locked into isolated git worktrees and path-scoped single-use `WriteReceipt`s (`AllowedPaths`).
    * **Supervisor (`F0`) Trust via Information Firewall & Boundary Schemas**: F0 never touches raw execution logs. Iteration rounds are free in count/topology, while Go code strictly enforces `BriefSchema` (`D1..Dn` downward) and `RoundReceiptSchema` (lossless failure/DoD signal upward, zero mechanical noise) at every round boundary and commitment gate (`T0–T4`).
 3. **Decoupled Memory & Pure-Go Knowledge Vault**: Sub-millisecond FTS5 + BM25 ranked indexing of Tri-Anchor distillation records (`internal/vault`).
-4. **Pluggable CLI Providers**: Universal adapter layer supporting `agy`, `claude`, `gemini`, `ollama`, and custom shell scripts without locking safety invariants to any single provider's hooks.
+4. **Pluggable CLI Providers & Universal Config-Driven LLM Consumer (`DELTA-25`)**: Universal adapter layer supporting `agy`, `claude`, `gemini`, `ollama`, and direct HTTP `api_call` gateways (`9router` multi-model combos, OpenAI-compatible `/v1/chat/completions`, Anthropic `/v1/messages`) with live model discovery (`g8s providers discover`) and direct synchronous CLI execution (`g8s llm-call`).
 5. **Durable SQLite WAL Control Plane**: Atomic CAS leases, task deduplication via idempotency keys, heartbeat leases, retry ceilings, and parent-child task lineage.
 6. **Stdio MCP Server & Daemon Manager**: Native JSON-RPC MCP server + built-in macOS `launchd`, Linux `systemd`, and Windows Service integration.
