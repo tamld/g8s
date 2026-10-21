@@ -5,8 +5,10 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // ModelEntry describes one callable model exposed by a provider.
@@ -24,12 +26,17 @@ type ModelEntry struct {
 
 // ProviderEntry is one operator-declared provider in the registry file.
 type ProviderEntry struct {
-	Class   string       `json:"class"`
-	Name    string       `json:"name"`
-	BaseURL string       `json:"base_url,omitempty"`
-	AuthEnv string       `json:"auth_env,omitempty"`
-	Models  []ModelEntry `json:"models"`
-	Slots   int          `json:"slots,omitempty"`
+	Class               string            `json:"class"`
+	Name                string            `json:"name"`
+	Protocol            string            `json:"protocol,omitempty"`              // "openai" (default), "anthropic", "9router"
+	BaseURL             string            `json:"base_url,omitempty"`
+	BaseURLEnv          string            `json:"base_url_env,omitempty"`          // optional env var overriding base_url at runtime (e.g. "NINEROUTER_URL")
+	AuthEnv             string            `json:"auth_env,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`               // optional static HTTP headers
+	AllowUnlistedModels bool              `json:"allow_unlisted_models,omitempty"` // allow arbitrary upstream model IDs (e.g. nvidia/*, cc/*) when provider is explicitly targeted
+	DisableQueueExec    bool              `json:"disable_queue_exec,omitempty"`    // opt-out of queue execution for api_call providers
+	Models              []ModelEntry      `json:"models"`
+	Slots               int               `json:"slots,omitempty"`
 
 	// Args optionally declares an operator-defined invocation template for
 	// platform_dispatch binaries that do not speak the g8s dispatch
@@ -37,6 +44,46 @@ type ProviderEntry struct {
 	// are substituted verbatim into the exec argv; templates never
 	// originate from task payloads.
 	Args []string `json:"args,omitempty"`
+}
+
+// EffectiveBaseURL returns the resolved base URL, checking BaseURLEnv first.
+func (p ProviderEntry) EffectiveBaseURL() string {
+	if p.BaseURLEnv != "" {
+		if envVal := os.Getenv(p.BaseURLEnv); envVal != "" {
+			return strings.TrimRight(envVal, "/")
+		}
+	}
+	return strings.TrimRight(p.BaseURL, "/")
+}
+
+// EffectiveProtocol returns the normalized protocol ("openai", "anthropic", "9router").
+// Defaults to "openai" if empty.
+func (p ProviderEntry) EffectiveProtocol() string {
+	proto := strings.ToLower(strings.TrimSpace(p.Protocol))
+	if proto == "" {
+		return "openai"
+	}
+	return proto
+}
+
+// ServesModel reports whether the provider serves the given model ID.
+func (p ProviderEntry) ServesModel(modelID string) bool {
+	if p.AllowUnlistedModels {
+		return true
+	}
+	lowered := strings.ToLower(modelID)
+	for _, m := range p.Models {
+		if strings.EqualFold(m.ID, modelID) {
+			return true
+		}
+		if strings.HasSuffix(m.ID, "/*") || strings.HasSuffix(m.ID, "*") {
+			prefix := strings.TrimSuffix(strings.ToLower(m.ID), "*")
+			if strings.HasPrefix(lowered, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // File is the root shape of providers.json.
@@ -174,12 +221,19 @@ func Load(path string) (*File, error) {
 		return nil, fmt.Errorf("parse provider config: %w", err)
 	}
 	for i, p := range f.Providers {
+		if p.Protocol != "" {
+			proto := strings.ToLower(strings.TrimSpace(p.Protocol))
+			if proto != "openai" && proto != "anthropic" && proto != "9router" {
+				return nil, fmt.Errorf("provider %d (%s): unknown protocol %q (want openai, anthropic, or 9router)", i, p.Name, p.Protocol)
+			}
+		}
+
 		switch p.Class {
 		case classAPICall:
-			if p.BaseURL == "" {
+			if p.BaseURL == "" && p.BaseURLEnv == "" {
 				return nil, fmt.Errorf("provider %d (%s): base_url is required for api_call entries", i, p.Name)
 			}
-			if len(p.Models) == 0 {
+			if len(p.Models) == 0 && !p.AllowUnlistedModels {
 				return nil, fmt.Errorf("provider %d (%s): at least one model is required", i, p.Name)
 			}
 			if p.Slots < 1 {
@@ -189,7 +243,7 @@ func Load(path string) (*File, error) {
 			if p.Name == "" {
 				return nil, fmt.Errorf("provider %d: name is required for platform_dispatch entries", i)
 			}
-			if len(p.Models) == 0 {
+			if len(p.Models) == 0 && !p.AllowUnlistedModels {
 				return nil, fmt.Errorf("provider %d (%s): at least one model is required", i, p.Name)
 			}
 		default:
@@ -203,4 +257,45 @@ func Load(path string) (*File, error) {
 		}
 	}
 	return &f, nil
+}
+
+// FindProvider finds a provider by name (case-insensitive) in the given File.
+func FindProvider(f *File, name string) (*ProviderEntry, bool) {
+	if f == nil {
+		return nil, false
+	}
+	trimmed := strings.TrimSpace(name)
+	for i := range f.Providers {
+		if strings.EqualFold(f.Providers[i].Name, trimmed) {
+			return &f.Providers[i], true
+		}
+	}
+	return nil, false
+}
+
+// ResolveProviderForModel resolves a provider entry from f by explicit providerName
+// (if non-empty) or by checking which provider ServesModel(modelID).
+func ResolveProviderForModel(f *File, providerName, modelID string) (*ProviderEntry, error) {
+	if f == nil {
+		return nil, errors.New("provider config is nil")
+	}
+	if providerName != "" {
+		p, ok := FindProvider(f, providerName)
+		if !ok {
+			return nil, fmt.Errorf("provider %q not found", providerName)
+		}
+		if modelID != "" && !p.ServesModel(modelID) {
+			return nil, fmt.Errorf("provider %q does not serve model %q", providerName, modelID)
+		}
+		return p, nil
+	}
+	if modelID != "" {
+		for i := range f.Providers {
+			if f.Providers[i].ServesModel(modelID) {
+				return &f.Providers[i], nil
+			}
+		}
+		return nil, fmt.Errorf("no provider found serving model %q", modelID)
+	}
+	return nil, errors.New("either provider name or model ID must be specified")
 }

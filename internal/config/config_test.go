@@ -290,3 +290,309 @@ func TestLoadAcceptsValidEffortMetadata(t *testing.T) {
 		t.Errorf("model 2 mismatch: %+v", models[2])
 	}
 }
+
+func TestProviderEntry_EffectiveBaseURL(t *testing.T) {
+	p1 := ProviderEntry{BaseURL: "http://example.com/v1/"}
+	if got := p1.EffectiveBaseURL(); got != "http://example.com/v1" {
+		t.Fatalf("want http://example.com/v1, got %q", got)
+	}
+
+	p2 := ProviderEntry{
+		BaseURL:    "http://fallback.com/v1",
+		BaseURLEnv: "TEST_G8S_CUSTOM_BASE_URL",
+	}
+	if got := p2.EffectiveBaseURL(); got != "http://fallback.com/v1" {
+		t.Fatalf("want fallback url when env unset, got %q", got)
+	}
+
+	t.Setenv("TEST_G8S_CUSTOM_BASE_URL", "http://override.com:20128/v1///")
+	if got := p2.EffectiveBaseURL(); got != "http://override.com:20128/v1" {
+		t.Fatalf("want override url trimmed, got %q", got)
+	}
+}
+
+func TestProviderEntry_EffectiveProtocol(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "openai"},
+		{"   ", "openai"},
+		{"openai", "openai"},
+		{"OPENAI", "openai"},
+		{"Anthropic", "anthropic"},
+		{"9router", "9router"},
+		{" 9ROUTER ", "9router"},
+	}
+	for _, tc := range tests {
+		p := ProviderEntry{Protocol: tc.input}
+		if got := p.EffectiveProtocol(); got != tc.want {
+			t.Errorf("EffectiveProtocol(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestProviderEntry_ServesModel(t *testing.T) {
+	p := ProviderEntry{
+		Models: []ModelEntry{
+			{ID: "gpt-4o"},
+			{ID: "nvidia/*"},
+			{ID: "openrouter/anthropic/*"},
+			{ID: "cc*"},
+		},
+	}
+
+	// Exact match (case insensitive)
+	if !p.ServesModel("gpt-4o") {
+		t.Error("expected gpt-4o to match")
+	}
+	if !p.ServesModel("GPT-4O") {
+		t.Error("expected GPT-4O case insensitive match")
+	}
+
+	// Prefix glob matching
+	if !p.ServesModel("nvidia/nemotron-4-340b") {
+		t.Error("expected nvidia/* to match nvidia/nemotron-4-340b")
+	}
+	if !p.ServesModel("NVIDIA/Llama-3.1") {
+		t.Error("expected nvidia/* case insensitive match")
+	}
+	if !p.ServesModel("openrouter/anthropic/claude-3.5-sonnet") {
+		t.Error("expected openrouter/anthropic/* match")
+	}
+	if !p.ServesModel("cc/gpt-4") {
+		t.Error("expected cc* match")
+	}
+
+	// Non-matches
+	if p.ServesModel("claude-3-opus") {
+		t.Error("expected claude-3-opus to not match")
+	}
+	if p.ServesModel("meta/llama-3") {
+		t.Error("expected meta/llama-3 to not match")
+	}
+
+	// AllowUnlistedModels
+	pUnlisted := ProviderEntry{
+		AllowUnlistedModels: true,
+	}
+	if !pUnlisted.ServesModel("any-arbitrary-model") {
+		t.Error("expected AllowUnlistedModels to serve any model")
+	}
+}
+
+func TestLoad_ProtocolValidation(t *testing.T) {
+	for _, proto := range []string{"openai", "anthropic", "9router", "OPENAI", " 9router "} {
+		path := writeTemp(t, `{
+			"providers": [{
+				"class": "api_call",
+				"name": "p1",
+				"protocol": "`+proto+`",
+				"base_url": "http://example.com/v1",
+				"models": [{"id": "m1"}],
+				"slots": 1
+			}]
+		}`)
+		f, err := Load(path)
+		if err != nil {
+			t.Fatalf("expected protocol %q to be accepted: %v", proto, err)
+		}
+		if len(f.Providers) != 1 {
+			t.Fatalf("expected 1 provider")
+		}
+	}
+
+	invalidPath := writeTemp(t, `{
+		"providers": [{
+			"class": "api_call",
+			"name": "p-bad",
+			"protocol": "cohere",
+			"base_url": "http://example.com/v1",
+			"models": [{"id": "m1"}],
+			"slots": 1
+		}]
+	}`)
+	_, err := Load(invalidPath)
+	if err == nil {
+		t.Fatal("expected error for invalid protocol")
+	}
+	if !strings.Contains(err.Error(), "unknown protocol") {
+		t.Fatalf("error should mention unknown protocol: %v", err)
+	}
+}
+
+func TestLoad_BaseURLEnvSatisfiesBaseURL(t *testing.T) {
+	path := writeTemp(t, `{
+		"providers": [{
+			"class": "api_call",
+			"name": "nine-env",
+			"base_url_env": "NINEROUTER_URL",
+			"models": [{"id": "m1"}],
+			"slots": 2
+		}]
+	}`)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with base_url_env should succeed without base_url: %v", err)
+	}
+	p := f.Providers[0]
+	if p.BaseURL != "" {
+		t.Errorf("base_url should be empty: %q", p.BaseURL)
+	}
+	if p.BaseURLEnv != "NINEROUTER_URL" {
+		t.Errorf("base_url_env mismatch: %q", p.BaseURLEnv)
+	}
+}
+
+func TestLoad_ExtendedFields(t *testing.T) {
+	path := writeTemp(t, `{
+		"providers": [{
+			"class": "api_call",
+			"name": "nine-all",
+			"protocol": "9router",
+			"base_url": "http://127.0.0.1:20128/v1",
+			"base_url_env": "NINEROUTER_URL",
+			"headers": {"X-Custom-Header": "custom-val"},
+			"allow_unlisted_models": true,
+			"disable_queue_exec": true,
+			"slots": 4,
+			"models": [{"id": "reasoning-free"}]
+		}]
+	}`)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	p := f.Providers[0]
+	if p.Protocol != "9router" {
+		t.Errorf("protocol = %q", p.Protocol)
+	}
+	if p.Headers["X-Custom-Header"] != "custom-val" {
+		t.Errorf("headers mismatch: %+v", p.Headers)
+	}
+	if !p.AllowUnlistedModels {
+		t.Errorf("allow_unlisted_models should be true")
+	}
+	if !p.DisableQueueExec {
+		t.Errorf("disable_queue_exec should be true")
+	}
+}
+
+func TestFindProvider(t *testing.T) {
+	if _, ok := FindProvider(nil, "any"); ok {
+		t.Error("expected false for nil File")
+	}
+
+	f := &File{
+		Providers: []ProviderEntry{
+			{Name: "9router", Class: "api_call"},
+			{Name: "agy", Class: "platform_dispatch"},
+		},
+	}
+
+	p, ok := FindProvider(f, "9router")
+	if !ok || p == nil || p.Name != "9router" {
+		t.Fatalf("FindProvider(9router) failed: ok=%v, p=%+v", ok, p)
+	}
+
+	p, ok = FindProvider(f, "AGY")
+	if !ok || p == nil || p.Name != "agy" {
+		t.Fatalf("FindProvider(AGY) case-insensitive failed: ok=%v, p=%+v", ok, p)
+	}
+
+	if _, ok := FindProvider(f, "non-existent"); ok {
+		t.Error("expected false for non-existent provider")
+	}
+}
+
+func TestResolveProviderForModel(t *testing.T) {
+	if _, err := ResolveProviderForModel(nil, "p", "m"); err == nil {
+		t.Error("expected error for nil File")
+	}
+
+	f := &File{
+		Providers: []ProviderEntry{
+			{
+				Name:  "nine-router",
+				Class: "api_call",
+				Models: []ModelEntry{
+					{ID: "reasoning-free"},
+					{ID: "nvidia/*"},
+				},
+			},
+			{
+				Name:  "agy",
+				Class: "platform_dispatch",
+				Models: []ModelEntry{
+					{ID: "gemini-3.8-flash-high"},
+				},
+			},
+			{
+				Name:                "wildcard-prov",
+				Class:               "api_call",
+				AllowUnlistedModels: true,
+			},
+		},
+	}
+
+	// 1. By explicit provider name and model ID
+	p, err := ResolveProviderForModel(f, "nine-router", "reasoning-free")
+	if err != nil || p == nil || p.Name != "nine-router" {
+		t.Fatalf("Resolve explicit match failed: %v, p=%+v", err, p)
+	}
+
+	// 2. By explicit provider name with glob model match
+	p, err = ResolveProviderForModel(f, "nine-router", "nvidia/nemotron")
+	if err != nil || p == nil || p.Name != "nine-router" {
+		t.Fatalf("Resolve explicit glob match failed: %v, p=%+v", err, p)
+	}
+
+	// 3. By explicit provider name only (empty model)
+	p, err = ResolveProviderForModel(f, "agy", "")
+	if err != nil || p == nil || p.Name != "agy" {
+		t.Fatalf("Resolve explicit name only failed: %v, p=%+v", err, p)
+	}
+
+	// 4. By model ID only
+	p, err = ResolveProviderForModel(f, "", "gemini-3.8-flash-high")
+	if err != nil || p == nil || p.Name != "agy" {
+		t.Fatalf("Resolve model ID match failed: %v, p=%+v", err, p)
+	}
+
+	// 5. By model ID only matching glob
+	p, err = ResolveProviderForModel(f, "", "nvidia/anything")
+	if err != nil || p == nil || p.Name != "nine-router" {
+		t.Fatalf("Resolve model ID glob match failed: %v, p=%+v", err, p)
+	}
+
+	// 6. Explicit provider not found
+	_, err = ResolveProviderForModel(f, "ghost", "")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not found error: %v", err)
+	}
+
+	// 7. Explicit provider doesn't serve model
+	_, err = ResolveProviderForModel(f, "agy", "gpt-4o")
+	if err == nil || !strings.Contains(err.Error(), "does not serve") {
+		t.Fatalf("expected does not serve error: %v", err)
+	}
+
+	// 8. Model ID matches unlisted models provider
+	p, err = ResolveProviderForModel(f, "wildcard-prov", "arbitrary-new-model")
+	if err != nil || p.Name != "wildcard-prov" {
+		t.Fatalf("expected wildcard-prov to serve arbitrary model: %v", err)
+	}
+
+	// 9. No provider serves model
+	fNoWildcard := &File{Providers: f.Providers[:2]}
+	_, err = ResolveProviderForModel(fNoWildcard, "", "unserved-model")
+	if err == nil || !strings.Contains(err.Error(), "no provider found") {
+		t.Fatalf("expected no provider found error: %v", err)
+	}
+
+	// 10. Both empty
+	_, err = ResolveProviderForModel(f, "", "")
+	if err == nil {
+		t.Fatal("expected error when both provider name and model ID are empty")
+	}
+}
