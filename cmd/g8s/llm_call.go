@@ -150,6 +150,7 @@ func runLLMCall(args []string) {
 
 	var contextFileList []string
 	if strings.TrimSpace(*contextFilesFlag) != "" {
+		hydrateTaskAddDirsEnv()
 		explicitReceipt := strings.TrimSpace(*receiptIDFlag) != ""
 		rcID, scope, dErr := fsops.ResolveDelegationContext(*receiptIDFlag, *scopeRootFlag, false)
 		if dErr != nil {

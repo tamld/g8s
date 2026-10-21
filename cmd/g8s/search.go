@@ -128,6 +128,7 @@ func runSearch(args []string) {
 		roots = fs.Args()[1:]
 	}
 
+	hydrateTaskAddDirsEnv()
 	explicitReceipt := strings.TrimSpace(*receiptID) != ""
 	resReceiptID, resScopeRoot, err := fsops.ResolveDelegationContext(*receiptID, *scopeRoot, false)
 	if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,11 +11,48 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/receipt"
 )
 
+func hydrateTaskAddDirsEnv() {
+	if strings.TrimSpace(os.Getenv("G8S_ADD_DIRS")) != "" {
+		return
+	}
+	taskID := strings.TrimSpace(os.Getenv("G8S_TASK_ID"))
+	if taskID == "" {
+		return
+	}
+	dbPath, err := databasePath()
+	if err != nil || dbPath == "" {
+		return
+	}
+	if _, statErr := os.Stat(dbPath); statErr != nil {
+		return
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		return
+	}
+	defer store.Close()
+
+	task, err := store.GetTask(context.Background(), taskID)
+	if err != nil || task == nil || len(task.Request) == 0 {
+		return
+	}
+	var req struct {
+		AddDirs []string `json:"add_dirs"`
+	}
+	if err := json.Unmarshal(task.Request, &req); err == nil && len(req.AddDirs) > 0 {
+		_ = os.Setenv("G8S_ADD_DIRS", strings.Join(req.AddDirs, ","))
+	}
+}
+
 func resolveReceiptAllowedPaths(cmdName, flagReceiptID, flagScopeRoot string, isMutation, jsonl bool) (string, []string) {
+	if !isMutation {
+		hydrateTaskAddDirsEnv()
+	}
 	explicitReceipt := strings.TrimSpace(flagReceiptID) != ""
 	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
 	if err != nil {
