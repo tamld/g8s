@@ -1,0 +1,139 @@
+{
+  "providers": [
+    {
+      "class": "api_call",
+      "name": "cliproxyapi",
+      "protocol": "openai",
+      "base_url": "http://127.0.0.1:8317/v1",
+      "base_url_env": "CLIPROXYAPI_URL",
+      "auth_env": "CLIPROXY_API_KEY",
+      "default_model": "gemini-2.5-pro",
+      "allow_unlisted_models": true,
+      "slots": 4,
+      "models": [
+        {
+          "id": "gemini-2.5-pro",
+          "context_window": 1000000,
+          "effort_style": "named",
+          "supported_efforts": ["low", "medium", "high"],
+          "default_effort": "high"
+        },
+        {
+          "id": "claude-sonnet-4-5",
+          "context_window": 200000
+        }
+      ]
+    },
+    {
+      "class": "api_call",
+      "name": "9router",
+      "protocol": "9router",
+      "base_url": "http://127.0.0.1:20128/v1",
+      "base_url_env": "NINEROUTER_URL",
+      "auth_env": "OPENAI_API_KEY",
+      "default_model": "reasoning-high",
+      "allow_unlisted_models": true,
+      "slots": 6,
+      "models": [
+        {
+          "id": "reasoning-high",
+          "context_window": 200000,
+          "effort_style": "named",
+          "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
+          "default_effort": "high"
+        },
+        {
+          "id": "reasoning-free",
+          "context_window": 128000,
+          "effort_style": "named",
+          "supported_efforts": ["low", "medium", "high"],
+          "default_effort": "high"
+        }
+      ]
+    },
+    {
+      "class": "api_call",
+      "name": "openrouter",
+      "protocol": "openai",
+      "base_url": "https://openrouter.ai/api/v1",
+      "auth_env": "OPENROUTER_API_KEY",
+      "default_model": "anthropic/claude-sonnet-4.5",
+      "allow_unlisted_models": true,
+      "slots": 4,
+      "models": [
+        {
+          "id": "anthropic/claude-sonnet-4.5",
+          "context_window": 200000
+        },
+        {
+          "id": "deepseek/deepseek-r1",
+          "context_window": 128000
+        }
+      ]
+    },
+    {
+      "class": "api_call",
+      "name": "openai",
+      "protocol": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "auth_env": "OPENAI_API_KEY",
+      "default_model": "gpt-5.5",
+      "allow_unlisted_models": true,
+      "slots": 4,
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "context_window": 200000,
+          "effort_style": "named",
+          "supported_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+          "default_effort": "medium"
+        }
+      ]
+    },
+    {
+      "class": "api_call",
+      "name": "anthropic",
+      "protocol": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "auth_env": "ANTHROPIC_API_KEY",
+      "default_model": "claude-sonnet-5-5",
+      "allow_unlisted_models": true,
+      "slots": 4,
+      "models": [
+        {
+          "id": "claude-sonnet-5-5",
+          "context_window": 200000,
+          "effort_style": "named",
+          "supported_efforts": ["low", "medium", "high", "xhigh"],
+          "default_effort": "high"
+        }
+      ]
+    },
+    {
+      "class": "platform_dispatch",
+      "name": "claude",
+      "default_model": "claude-sonnet-5-5",
+      "allow_unlisted_models": true,
+      "models": [
+        {
+          "id": "claude-sonnet-5-5",
+          "context_window": 200000
+        }
+      ]
+    },
+    {
+      "class": "platform_dispatch",
+      "name": "agy",
+      "default_model": "gemini-3.8-flash-high",
+      "models": [
+        {
+          "id": "gemini-3.8-flash-high",
+          "context_window": 1000000,
+          "effort_style": "baked-name",
+          "supported_efforts": ["high"],
+          "default_effort": "high"
+        }
+      ]
+    }
+  ]
+}

@@ -37,23 +37,74 @@ type T3Verdict struct {
 	Reason           string `json:"reason"`
 }
 
+// SelectIndependentProviders returns all unique available providers that are independent
+// from F0's provider, preserving order. F0's provider, "none", and "" are excluded.
+func SelectIndependentProviders(f0Provider string, available []string) []string {
+	normF0 := strings.ToLower(strings.TrimSpace(f0Provider))
+	seen := make(map[string]bool)
+	var out []string
+	for _, p := range available {
+		trimmed := strings.TrimSpace(p)
+		normP := strings.ToLower(trimmed)
+		if normP == "" || normP == "none" || normP == normF0 {
+			continue
+		}
+		if seen[normP] {
+			continue
+		}
+		seen[normP] = true
+		out = append(out, trimmed)
+	}
+	return out
+}
+
 // SelectIndependentProvider chooses an available provider that is independent from F0's provider.
 // Provider names are normalized (trimmed and lowercased). F0's provider, "none", and "" are excluded.
 // The first matching independent provider is returned.
 func SelectIndependentProvider(f0Provider string, available []string) (string, bool) {
-	normF0 := strings.ToLower(strings.TrimSpace(f0Provider))
-	for _, p := range available {
-		trimmed := strings.TrimSpace(p)
-		normP := strings.ToLower(trimmed)
-		if normP == "" || normP == "none" {
-			continue
-		}
-		if normP == normF0 {
-			continue
-		}
-		return trimmed, true
+	candidates := SelectIndependentProviders(f0Provider, available)
+	if len(candidates) == 0 {
+		return "", false
 	}
-	return "", false
+	return candidates[0], true
+}
+
+var t3IdentityPrefixes = []string{
+	"author:",
+	"commit:",
+	"co-authored-by:",
+	"signed-off-by:",
+	"reviewed-by:",
+	"task-id:",
+	"receipt-id:",
+	"worker-id:",
+}
+
+// sanitizeT3Diff strips author, commit, and worker self-report metadata lines from a diff
+// before sending it to an independent T3 verifier (SoC: Blind Sanitization).
+func sanitizeT3Diff(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	lines := strings.Split(diff, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Strip added/context commit trailer or header lines carrying identity metadata
+		check := strings.TrimSpace(strings.TrimLeft(trimmed, "+-/#* "))
+		lower := strings.ToLower(check)
+		skip := false
+		for _, prefix := range t3IdentityPrefixes {
+			if strings.HasPrefix(lower, prefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // RunT3Verification executes the T3 independent second verifier workflow (#628).
@@ -88,34 +139,45 @@ func RunT3Verification(opts T3VerifyOptions) (T3Verdict, error) {
 			diffCmd = exec.Command("git", "-C", absRepo, "diff", baseRef, headSHA)
 			diffOut, _ = diffCmd.Output()
 		}
-		diff = string(diffOut)
+		diff = sanitizeT3Diff(string(diffOut))
 	}
 
 	var selectedVerifier string
 	var passed bool
 	var detail string
 	var verifierRan bool
+	var allProvidersErrored bool
 
-	independentProvider, ok := SelectIndependentProvider(opts.F0Provider, opts.AvailableProviders)
-	if ok && opts.ProviderRunner != nil {
-		selectedVerifier = independentProvider
-		p, d, err := opts.ProviderRunner(independentProvider, absRepo, diff)
-		if err != nil {
-			p = false
-			if d == "" {
-				d = err.Error()
+	candidates := SelectIndependentProviders(opts.F0Provider, opts.AvailableProviders)
+	if len(candidates) > 0 && opts.ProviderRunner != nil {
+		allProvidersErrored = true
+		for _, candidate := range candidates {
+			selectedVerifier = candidate
+			p, d, runErr := opts.ProviderRunner(candidate, absRepo, diff)
+			verifierRan = true
+			if runErr == nil {
+				// Substantive verdict (PASS or VETO) from a reachable independent provider; do not shop for another verdict.
+				allProvidersErrored = false
+				passed = p
+				detail = d
+				break
 			}
+			// Infrastructure/unreachable error on this candidate; try next candidate in failover chain.
+			passed = false
+			if d == "" {
+				d = runErr.Error()
+			}
+			detail = d
 		}
-		passed = p
-		detail = d
-		verifierRan = true
-	} else if opts.EvalProbeRunner != nil {
+	}
+
+	if (!verifierRan || allProvidersErrored) && opts.EvalProbeRunner != nil {
 		selectedVerifier = "eval-probes"
-		p, d, err := opts.EvalProbeRunner(absRepo)
-		if err != nil {
+		p, d, probeErr := opts.EvalProbeRunner(absRepo)
+		if probeErr != nil {
 			p = false
 			if d == "" {
-				d = err.Error()
+				d = probeErr.Error()
 			}
 		}
 		passed = p
@@ -211,16 +273,24 @@ func defaultT3ProviderRunner(provider, repoDir, diff string) (bool, string, erro
 		g8sBin = "g8s"
 	}
 
-	truncatedDiff := diff
+	truncatedDiff := sanitizeT3Diff(diff)
 	if len(truncatedDiff) > 12000 {
 		truncatedDiff = truncatedDiff[:12000]
 	}
-	prompt := fmt.Sprintf("Review this git diff as an independent second verifier. Inspect for critical safety, regression, or correctness issues. If acceptable, output 'VERDICT: PASS'. If vetoing, output 'VETO' or 'FAIL' with reasons.\n\nDiff:\n%s", truncatedDiff)
+	prompt := fmt.Sprintf("Review this sanitized git diff as an independent blind second verifier. Inspect for critical safety, regression, or correctness issues. If acceptable, output 'VERDICT: PASS'. If vetoing, output 'VETO' or 'FAIL' with reasons.\n\nDiff:\n%s", truncatedDiff)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, g8sBin, "llm-call", "--provider", provider, "--model", "reasoning-high", "--prompt", prompt, "--json")
+	cmdArgs := []string{"llm-call", "--provider", provider}
+	if envModel := strings.TrimSpace(os.Getenv("G8S_T3_MODEL")); envModel != "" {
+		cmdArgs = append(cmdArgs, "--model", envModel)
+	} else if strings.EqualFold(provider, "9router") {
+		cmdArgs = append(cmdArgs, "--model", "reasoning-high")
+	}
+	cmdArgs = append(cmdArgs, "--prompt", prompt, "--json")
+
+	cmd := exec.CommandContext(ctx, g8sBin, cmdArgs...)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
@@ -264,6 +334,33 @@ func defaultT3EvalProbeRunner(repoDir string) (bool, string, error) {
 	return true, "g8s eval probes passed", nil
 }
 
+// loadConfiguredProviderNames reads provider names from a providers.json file.
+func loadConfiguredProviderNames(path string) []string {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Providers []struct {
+			Name string `json:"name"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil
+	}
+	var names []string
+	for _, p := range cfg.Providers {
+		name := strings.TrimSpace(p.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // WireDefaultT3Options configures default provider settings and runners if not already set.
 func WireDefaultT3Options(opts *T3VerifyOptions) {
 	if opts == nil {
@@ -273,7 +370,14 @@ func WireDefaultT3Options(opts *T3VerifyOptions) {
 		opts.F0Provider = "agy"
 	}
 	if len(opts.AvailableProviders) == 0 {
-		opts.AvailableProviders = []string{"9router", "claude", "agy"}
+		if cfgPath := strings.TrimSpace(os.Getenv("G8S_PROVIDERS")); cfgPath != "" {
+			if configured := loadConfiguredProviderNames(cfgPath); len(configured) > 0 {
+				opts.AvailableProviders = configured
+			}
+		}
+		if len(opts.AvailableProviders) == 0 {
+			opts.AvailableProviders = []string{"9router", "claude", "agy"}
+		}
 	}
 	if opts.ProviderRunner == nil {
 		opts.ProviderRunner = defaultT3ProviderRunner
@@ -339,6 +443,13 @@ func verifyT3Command(args []string) int {
 				p = strings.TrimSpace(p)
 				if p != "" {
 					opts.AvailableProviders = append(opts.AvailableProviders, p)
+				}
+			}
+		} else if os.Getenv("G8S_PROVIDERS") == "" {
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				defaultCfg := filepath.Join(home, ".config", "g8s", "providers.json")
+				if configured := loadConfiguredProviderNames(defaultCfg); len(configured) > 0 {
+					opts.AvailableProviders = configured
 				}
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tamld/g8s/internal/cli"
@@ -23,18 +24,46 @@ type testEnvelope struct {
 	At         string          `json:"at"`
 }
 
+var (
+	sharedBinOnce sync.Once
+	sharedBinDir  string
+	sharedBinPath string
+	sharedBinErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedBinDir != "" {
+		_ = os.RemoveAll(sharedBinDir)
+	}
+	os.Exit(code)
+}
+
 func buildG8sBinary(t *testing.T) string {
 	t.Helper()
-	tempDir := t.TempDir()
-	binPath := filepath.Join(tempDir, "g8s")
-	if runtime.GOOS == "windows" {
-		binPath += ".exe"
+	sharedBinOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "g8s-test-shared-bin-*")
+		if err != nil {
+			sharedBinErr = err
+			return
+		}
+		sharedBinDir = dir
+		binPath := filepath.Join(dir, "g8s")
+		if runtime.GOOS == "windows" {
+			binPath += ".exe"
+		}
+		cmd := exec.Command("go", "build", "-o", binPath, ".")
+		if out, bErr := cmd.CombinedOutput(); bErr != nil {
+			sharedBinErr = bErr
+			_ = out
+			return
+		}
+		sharedBinPath = binPath
+	})
+	if sharedBinErr != nil {
+		t.Fatalf("build g8s: %v", sharedBinErr)
 	}
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build g8s: %v\nOutput: %s", err, string(out))
-	}
-	return binPath
+	return sharedBinPath
 }
 
 func TestUnifiedEnvelopeCommands(t *testing.T) {

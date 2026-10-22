@@ -62,8 +62,8 @@ func TestFeatureVerify_JSON(t *testing.T) {
 	if !report.Valid {
 		t.Errorf("expected report.Valid == true, got false. Errors: %v", report.Errors)
 	}
-	if report.FeatureCount != 10 {
-		t.Errorf("expected 10 features, got %d", report.FeatureCount)
+	if report.FeatureCount != 14 {
+		t.Errorf("expected 14 features, got %d", report.FeatureCount)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestFeatureList_TextAndJSON(t *testing.T) {
 	if err := json.Unmarshal(outJSON, &features); err != nil {
 		t.Fatalf("failed to parse list JSON: %v\nOutput: %s", err, string(outJSON))
 	}
-	if len(features) != 10 {
-		t.Errorf("expected 10 features, got %d", len(features))
+	if len(features) != 14 {
+		t.Errorf("expected 14 features, got %d", len(features))
 	}
 }
 

@@ -241,14 +241,36 @@ func runLLMCall(args []string) {
 	}
 
 	if entry.Name == "" {
-		if strings.EqualFold(*providerFlag, "9router") || *baseURLFlag != "" || *providerFlag == "" {
+		if strings.EqualFold(*providerFlag, "cliproxyapi") || strings.EqualFold(*providerFlag, "cliproxy") {
+			proto := *protocolFlag
+			if proto == "" {
+				proto = "openai"
+			}
+			bURL := *baseURLFlag
+			if bURL == "" {
+				bURL = "http://127.0.0.1:8317/v1"
+			}
+			entry = config.ProviderEntry{
+				Class:               "api_call",
+				Name:                *providerFlag,
+				Protocol:            proto,
+				BaseURL:             bURL,
+				BaseURLEnv:          "CLIPROXYAPI_URL",
+				AuthEnv:             "CLIPROXY_API_KEY",
+				AllowUnlistedModels: true,
+			}
+		} else if strings.EqualFold(*providerFlag, "9router") || *baseURLFlag != "" || *providerFlag == "" {
 			name := *providerFlag
 			if name == "" {
 				name = "9router"
 			}
 			proto := *protocolFlag
 			if proto == "" {
-				proto = "9router"
+				if strings.EqualFold(name, "9router") {
+					proto = "9router"
+				} else {
+					proto = "openai"
+				}
 			}
 			bURL := *baseURLFlag
 			if bURL == "" {
@@ -267,7 +289,7 @@ func runLLMCall(args []string) {
 			if resolveErr == nil {
 				resolveErr = fmt.Errorf("provider %q not found", *providerFlag)
 			}
-			exitUsage("llm-call", "provider", *traceID, resolveErr.Error(), "Declare provider in providers.json or use --provider 9router / --base-url", *jsonl)
+			exitUsage("llm-call", "provider", *traceID, resolveErr.Error(), "Declare provider in providers.json or use --provider 9router / cliproxyapi / --base-url", *jsonl)
 		}
 	}
 
@@ -284,10 +306,14 @@ func runLLMCall(args []string) {
 
 	modelID := *modelFlag
 	if modelID == "" {
-		if len(entry.Models) > 0 {
+		if strings.TrimSpace(entry.DefaultModel) != "" {
+			modelID = strings.TrimSpace(entry.DefaultModel)
+		} else if len(entry.Models) > 0 {
 			modelID = entry.Models[0].ID
+		} else if strings.EqualFold(entry.Name, "9router") || entry.Protocol == "9router" {
+			modelID = "reasoning-free"
 		} else {
-			exitUsage("llm-call", "model", *traceID, "model ID must be specified via --model", "Specify --model", *jsonl)
+			exitUsage("llm-call", "model", *traceID, "model ID must be specified via --model or default_model in providers.json", "Specify --model", *jsonl)
 		}
 	}
 

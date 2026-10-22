@@ -462,3 +462,78 @@ func TestLLMCallContextFiles(t *testing.T) {
 		t.Fatalf("expected out-of-scope --context-files to fail")
 	}
 }
+
+func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+
+	var requestedModel string
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gemini-2.5-pro"}]}`))
+		case "/v1/chat/completions":
+			var reqBody struct {
+				Model string `json:"model"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			requestedModel = reqBody.Model
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"chatcmpl-cliproxy","model":"gemini-2.5-pro","choices":[{"message":{"role":"assistant","content":"CLIPROXY_OK"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	// 1. Zero-config cliproxyapi with CLIPROXYAPI_URL env
+	cmdZero := exec.Command(binPath, "llm-call",
+		"--provider", "cliproxyapi",
+		"--model", "gemini-2.5-pro",
+		"--prompt", "Ping cliproxyapi",
+		"--json",
+	)
+	cmdZero.Env = isolatedEnv("CLIPROXYAPI_URL=" + mockServer.URL + "/v1")
+	outZero, err := cmdZero.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zero-config cliproxyapi failed: %v\nOutput: %s", err, string(outZero))
+	}
+	if !strings.Contains(string(outZero), "CLIPROXY_OK") {
+		t.Errorf("expected CLIPROXY_OK in output, got %s", string(outZero))
+	}
+
+	// 2. Custom provider in providers.json using default_model without --model flag
+	providersPath := filepath.Join(tempDir, "providers.json")
+	providerJSON := fmt.Sprintf(`{
+		"providers": [
+			{
+				"name": "cliproxyapi",
+				"class": "api_call",
+				"protocol": "openai",
+				"slots": 2,
+				"base_url": "%s/v1",
+				"default_model": "gemini-2.5-pro",
+				"allow_unlisted_models": true
+			}
+		]
+	}`, mockServer.URL)
+	if err := os.WriteFile(providersPath, []byte(providerJSON), 0o600); err != nil {
+		t.Fatalf("write providers.json: %v", err)
+	}
+
+	requestedModel = ""
+	cmdDef := exec.Command(binPath, "llm-call",
+		"--provider", "cliproxyapi",
+		"--prompt", "Ping via default_model",
+		"--json",
+	)
+	cmdDef.Env = isolatedEnv("G8S_PROVIDERS=" + providersPath)
+	outDef, err := cmdDef.CombinedOutput()
+	if err != nil {
+		t.Fatalf("default_model resolution failed: %v\nOutput: %s", err, string(outDef))
+	}
+	if requestedModel != "gemini-2.5-pro" {
+		t.Errorf("expected requestedModel gemini-2.5-pro from default_model, got %q", requestedModel)
+	}
+}

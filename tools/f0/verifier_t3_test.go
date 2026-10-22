@@ -450,3 +450,106 @@ func TestWireDefaultT3Options(t *testing.T) {
 	// Case 3: Nil options safety
 	WireDefaultT3Options(nil)
 }
+
+func TestRunT3Verification_MultiProviderFailoverAndProbeFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir, _, headSHA := setupTestGitRepo(t)
+
+	// Subcase A: 9router is unreachable (returns err), automatically fails over to cliproxyapi which passes!
+	var tried []string
+	optsFailover := T3VerifyOptions{
+		RepoDir:            repoDir,
+		HeadSHA:            headSHA,
+		BaseRef:            "main",
+		F0Provider:         "agy",
+		AvailableProviders: []string{"9router", "cliproxyapi", "claude"},
+		ProviderRunner: func(provider, repoDir, diff string) (bool, string, error) {
+			tried = append(tried, provider)
+			if provider == "9router" {
+				return false, "", errors.New("connection refused at 127.0.0.1:20128")
+			}
+			if provider == "cliproxyapi" {
+				return true, "cliproxyapi independent review passed", nil
+			}
+			return false, "unexpected provider", nil
+		},
+	}
+
+	verdict, err := RunT3Verification(optsFailover)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if verdict.Status != "PASS" || !verdict.Approved {
+		t.Fatalf("expected PASS after failover to cliproxyapi, got %+v", verdict)
+	}
+	if verdict.SelectedVerifier != "cliproxyapi" {
+		t.Fatalf("expected SelectedVerifier cliproxyapi, got %q", verdict.SelectedVerifier)
+	}
+	if len(tried) != 2 || tried[0] != "9router" || tried[1] != "cliproxyapi" {
+		t.Fatalf("expected tried=[9router cliproxyapi], got %v", tried)
+	}
+
+	// Subcase B: All LLM providers unreachable, falls back to EvalProbeRunner!
+	probeCalled := false
+	optsOfflineFallback := T3VerifyOptions{
+		RepoDir:            repoDir,
+		HeadSHA:            headSHA,
+		BaseRef:            "main",
+		F0Provider:         "agy",
+		AvailableProviders: []string{"9router", "cliproxyapi"},
+		ProviderRunner: func(provider, repoDir, diff string) (bool, string, error) {
+			return false, "", errors.New("gateway offline")
+		},
+		EvalProbeRunner: func(r string) (bool, string, error) {
+			probeCalled = true
+			return true, "offline deterministic eval probes passed", nil
+		},
+	}
+
+	verdictOffline, err := RunT3Verification(optsOfflineFallback)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !probeCalled {
+		t.Fatalf("expected EvalProbeRunner fallback when all providers error out")
+	}
+	if verdictOffline.Status != "PASS" || verdictOffline.SelectedVerifier != "eval-probes" {
+		t.Fatalf("expected PASS via eval-probes, got %+v", verdictOffline)
+	}
+}
+
+func TestSanitizeT3DiffAndProvidersConfigLoad(t *testing.T) {
+	rawDiff := strings.Join([]string{
+		"diff --git a/foo.go b/foo.go",
+		"Author: F1 Worker <worker@g8s.local>",
+		"+// Co-Authored-By: Claude <noreply@anthropic.com>",
+		"+// Task-ID: 12345-67890",
+		"+// Receipt-ID: rcpt-999",
+		"+func Add(a, b int) int { return a + b }",
+	}, "\n")
+
+	sanitized := sanitizeT3Diff(rawDiff)
+	if strings.Contains(sanitized, "Author:") ||
+		strings.Contains(sanitized, "Co-Authored-By:") ||
+		strings.Contains(sanitized, "Task-ID:") ||
+		strings.Contains(sanitized, "Receipt-ID:") {
+		t.Fatalf("expected identity lines stripped from T3 diff, got:\n%s", sanitized)
+	}
+	if !strings.Contains(sanitized, "func Add(a, b int) int") {
+		t.Fatalf("expected code line preserved in T3 diff, got:\n%s", sanitized)
+	}
+
+	// Verify G8S_PROVIDERS auto-populates AvailableProviders in WireDefaultT3Options
+	tmpFile := t.TempDir() + "/providers.json"
+	cfgJSON := `{"providers":[{"name":"cliproxyapi"},{"name":"openrouter"},{"name":"agy"}]}`
+	if err := os.WriteFile(tmpFile, []byte(cfgJSON), 0o600); err != nil {
+		t.Fatalf("write temp providers.json: %v", err)
+	}
+	t.Setenv("G8S_PROVIDERS", tmpFile)
+
+	var opts T3VerifyOptions
+	WireDefaultT3Options(&opts)
+	if len(opts.AvailableProviders) != 3 || opts.AvailableProviders[0] != "cliproxyapi" || opts.AvailableProviders[1] != "openrouter" {
+		t.Fatalf("expected [cliproxyapi openrouter agy] from G8S_PROVIDERS, got %v", opts.AvailableProviders)
+	}
+}

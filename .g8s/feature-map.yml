@@ -1,7 +1,8 @@
 schema_version: "1.0"
 # g8s Declarative End-to-End Feature Map (.g8s/feature-map.yml)
-# Maps functional feature nodes to SRS requirements, OpenSpec deltas, code paths,
-# invariants, visible tests, verifier classes, and acyclic blast radius graphs.
+# Maps 14 single-responsibility functional feature nodes to SRS requirements,
+# OpenSpec deltas, code paths, invariants, visible tests, verifier classes,
+# and acyclic blast radius graphs.
 
 features:
   - id: "FEAT-CONTROLPLANE-01"
@@ -109,29 +110,60 @@ features:
 
   - id: "FEAT-LLMCALL-01"
     title: "Universal Config-Driven LLM Consumer & Multi-Model Fleet"
-    persona_story: "As a heterogeneous agent team, I need a config-driven LLM call adapter supporting multiple protocols and gateways so that tasks can route to optimal model backends."
+    persona_story: "As a heterogeneous agent team, I need a provider-agnostic LLM call adapter supporting CLIProxyAPI, OpenRouter, OpenAI, Anthropic, and 9router so that tasks route cleanly without vendor lock-in."
     srs_reqs:
       - "FR-10"
     openspec_delta: "DELTA-25"
     code_paths:
       - "internal/provider/**"
+      - "internal/config/**"
       - "internal/conv/**"
       - "internal/reflex/**"
+      - "cmd/g8s/llm_call.go"
+      - "offer/templates/providers.example.json"
     invariants:
-      - "OpenAI, Anthropic, and 9router protocol conformance"
+      - "OpenAI, Anthropic, CLIProxyAPI, and 9router protocol conformance"
+      - "DefaultModel resolution chain (--model -> entry.DefaultModel -> entry.Models[0].ID)"
       - "Two-layer public mechanism vs local policy separation"
     visible_tests:
       - "internal/provider/provider_test.go"
+      - "internal/config/config_test.go"
+      - "cmd/g8s/llm_call_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
         - "FEAT-WORKER-01"
       direct_consumers:
+        - "FEAT-ROUTING-LANE-01"
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-ROUTING-LANE-01"
+    title: "Deterministic Effort-Class, Lane & Registry Routing"
+    persona_story: "As a supervisor router, I need declarative effort-class and gate-lane routing so that task complexity maps deterministically to verifier classes and model effort budgets."
+    srs_reqs:
+      - "FR-5"
+      - "FR-10"
+    openspec_delta: "DELTA-05"
+    code_paths:
+      - "internal/routing/**"
+      - "internal/lane/**"
+      - "internal/registry/**"
+      - "internal/settings/**"
+    invariants:
+      - "Deterministic effort-class and ALDC gate-lane routing"
+      - "Seeded verifier and boundary registry validation"
+    visible_tests:
+      - "internal/registry/registry_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-LLMCALL-01"
+      direct_consumers:
         - "FEAT-PLATFORM-CLI-01"
 
   - id: "FEAT-VERIFY-01"
-    title: "Worktree-Targeted Verification & Lossless DoD Receipts"
-    persona_story: "As a verification gate, I need worktree-targeted non-vacuous test execution and lossless DoD receipts so that supervisor verdicts are backed by deterministic evidence."
+    title: "Worktree-Targeted Verification & Mechanical DoD Receipts"
+    persona_story: "As a verification gate, I need worktree-targeted non-vacuous test execution and mechanically verified DoD matrices so that worker self-reports cannot bypass evidence checks."
     srs_reqs:
       - "FR-8"
     openspec_delta: "DELTA-21"
@@ -142,8 +174,8 @@ features:
       - "internal/diffintel/**"
       - "internal/codeintel/**"
     invariants:
-      - "Worktree-targeted verification"
-      - "Non-vacuous test execution check"
+      - "Worktree-targeted non-vacuous test execution"
+      - "EvaluateDoDMatrix rejects unverified worker self-report claims"
     visible_tests:
       - "internal/verifier/verifier_test.go"
     verifier_class: "test"
@@ -152,12 +184,40 @@ features:
         - "FEAT-CONTROLPLANE-01"
         - "FEAT-WORKER-01"
       direct_consumers:
+        - "FEAT-BLIND-VERIFY-01"
         - "FEAT-F0-GATE-01"
         - "FEAT-PLATFORM-CLI-01"
 
+  - id: "FEAT-BLIND-VERIFY-01"
+    title: "3-Layer Anonymous / Blind Verification & Seeded Mutant Canary"
+    persona_story: "As an epistemic audit harness, I need out-of-worktree holdout execution, double-blind sanitized review packets, and seeded mutant canary checks so that evaluation awareness and sycophancy are eliminated."
+    srs_reqs:
+      - "FR-8"
+      - "FR-9"
+    openspec_delta: "DELTA-21"
+    code_paths:
+      - "internal/verifier/blind_packet.go"
+      - "internal/verifier/canary.go"
+      - "cmd/g8s/verify.go"
+      - "skills/**"
+    invariants:
+      - "Out-of-worktree holdout execution (--holdout-dir) without leaking tests into F1 worktree"
+      - "Sanitized BlindReviewPacket strips worker identity, rationale, and self-reports"
+      - "Seeded mutant canary check fails closed if holdout suite passes on mutated source"
+    visible_tests:
+      - "internal/verifier/blind_packet_test.go"
+      - "internal/verifier/canary_test.go"
+      - "cmd/g8s/verify_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-VERIFY-01"
+      direct_consumers:
+        - "FEAT-F0-GATE-01"
+
   - id: "FEAT-F0-GATE-01"
     title: "Verified Delegation & Commitment-Point Gates T0-T4"
-    persona_story: "As a system architect, I need T0-T4 reversibility tiers and commitment gates G0-G7 so that high-blast mutations require rigorous evidence before merge."
+    persona_story: "As a system architect, I need T0-T4 reversibility tiers, commitment gates G0-G7, and provider-agnostic T3 independent verification with offline probe fallback."
     srs_reqs:
       - "FR-9"
     openspec_delta: "DELTA-24"
@@ -170,15 +230,17 @@ features:
       - "internal/review/**"
       - "tools/f0/**"
     invariants:
-      - "Reversibility tiers T0-T4 enforcement"
-      - "Commitment checks G0-G7"
+      - "Reversibility tiers T0-T4 and commitment checks G0-G7"
+      - "Provider-agnostic T3 failover chain with blind diff sanitization and EvalProbeRunner fallback"
     visible_tests:
       - "internal/supervisor/supervisor_test.go"
+      - "tools/f0/verifier_t3_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
         - "FEAT-VERIFY-01"
+        - "FEAT-BLIND-VERIFY-01"
       direct_consumers: []
 
   - id: "FEAT-VAULT-MEMORY-01"
@@ -204,45 +266,87 @@ features:
         - "FEAT-CONTROLPLANE-01"
       direct_consumers: []
 
-  - id: "FEAT-PLATFORM-CLI-01"
-    title: "Platform CLI, MCP Server, Daemon Service & Diagnostics"
-    persona_story: "As an operator or agent developer, I need a unified CLI, MCP server, daemon service, and diagnostics so that platform control is easily discoverable and verifiable."
+  - id: "FEAT-MCP-DAEMON-01"
+    title: "MCP JSON-RPC Server & Cross-Platform Daemon Service"
+    persona_story: "As an IDE or external agent host, I need a stdio JSON-RPC 2.0 MCP server and cross-platform HTTP daemon service so that g8s tools integrate seamlessly over standard protocols."
     srs_reqs:
       - "FR-5"
       - "FR-6"
+    openspec_delta: "DELTA-05"
+    code_paths:
+      - "internal/mcp/**"
+      - "internal/server/**"
+      - "internal/service/**"
+      - "cmd/g8s/serve.go"
+    invariants:
+      - "Stdio JSON-RPC 2.0 MCP server conformance"
+      - "Cross-platform daemon service lifecycle"
+    visible_tests:
+      - "internal/mcp/server_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-FSOPS-01"
+      direct_consumers:
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-DOCTOR-DIAG-01"
+    title: "Platform Diagnostics, Telemetry & Workspace Hygiene"
+    persona_story: "As an operator, I need automated health diagnostics, telemetry, and worktree cleanup so that local environment drift and orphaned worktrees are detected and remediated."
+    srs_reqs:
       - "NFR-1"
       - "NFR-2"
     openspec_delta: "DELTA-05"
     code_paths:
-      - "cmd/g8s/**"
-      - "internal/cli/**"
-      - "internal/mcp/**"
-      - "internal/server/**"
-      - "internal/service/**"
       - "internal/doctor/**"
       - "internal/telemetry/**"
-      - "internal/settings/**"
-      - "internal/config/**"
-      - "internal/registry/**"
-      - "internal/routing/**"
-      - "internal/lane/**"
-      - "internal/initwiz/**"
-      - "internal/completion/**"
       - "internal/cleanup/**"
       - "internal/analyzer/**"
+      - "cmd/g8s/doctor.go"
+      - "cmd/g8s/cleanup.go"
+      - "cmd/g8s/cleanup_worktrees.go"
     invariants:
-      - "Stdio JSON-RPC 2.0 MCP server"
-      - "Cross-platform daemon service lifecycle"
+      - "Non-destructive environment readiness probing"
+      - "Safe worktree and state hygiene cleanup"
+    visible_tests:
+      - "cmd/g8s/cleanup_test.go"
+      - "cmd/g8s/cleanup_worktrees_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+      direct_consumers:
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-PLATFORM-CLI-01"
+    title: "Core Operator CLI Surface & Onboarding Wizard"
+    persona_story: "As an operator or agent developer, I need a unified CLI envelope, interactive onboarding wizard, and shell completion so that platform commands are consistent and machine-readable."
+    srs_reqs:
+      - "FR-5"
+      - "NFR-1"
+    openspec_delta: "DELTA-05"
+    code_paths:
+      - "cmd/g8s/**"
+      - "internal/cli/**"
+      - "internal/initwiz/**"
+      - "internal/completion/**"
+    invariants:
+      - "Deterministic JSON/JSONL CLI output envelopes"
+      - "Zero-trust delegation flag validation"
     visible_tests:
       - "cmd/g8s/main_test.go"
-      - "internal/mcp/server_test.go"
+      - "cmd/g8s/envelope_commands_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
         - "FEAT-WORKER-01"
         - "FEAT-LLMCALL-01"
+        - "FEAT-ROUTING-LANE-01"
         - "FEAT-VERIFY-01"
+        - "FEAT-MCP-DAEMON-01"
+        - "FEAT-DOCTOR-DIAG-01"
       direct_consumers:
         - "FEAT-FEATUREMAP-01"
 
@@ -261,6 +365,7 @@ features:
       - "DAG acyclicity check"
     visible_tests:
       - "internal/featuremap/featuremap_test.go"
+      - "cmd/g8s/feature_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
