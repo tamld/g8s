@@ -764,7 +764,7 @@ func TestVerifyCLI_StandaloneFeatureHoldoutAndCanary(t *testing.T) {
 
 	scriptPath := filepath.Join(tempHoldoutDir, "holdout_verify.sh")
 	scriptContent := "#!/bin/sh\nexit 0\n"
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("failed to write holdout script: %v", err)
 	}
 

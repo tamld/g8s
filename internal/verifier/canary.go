@@ -81,9 +81,10 @@ func InjectSyntheticMutant(src []byte, filename string) ([]byte, string, bool) {
 		if loc := reBoolTrue.FindStringIndex(line); loc != nil {
 			orig := line[loc[0]:loc[1]]
 			rep := "false"
-			if orig == "True" {
+			switch orig {
+			case "True":
 				rep = "False"
-			} else if orig == "TRUE" {
+			case "TRUE":
 				rep = "FALSE"
 			}
 			lines[i] = line[:loc[0]] + rep + line[loc[1]:]
@@ -99,9 +100,10 @@ func InjectSyntheticMutant(src []byte, filename string) ([]byte, string, bool) {
 		if loc := reBoolFalse.FindStringIndex(line); loc != nil {
 			orig := line[loc[0]:loc[1]]
 			rep := "true"
-			if orig == "False" {
+			switch orig {
+			case "False":
 				rep = "True"
-			} else if orig == "FALSE" {
+			case "FALSE":
 				rep = "TRUE"
 			}
 			lines[i] = line[:loc[0]] + rep + line[loc[1]:]
@@ -252,7 +254,7 @@ func RunCanaryCheck(
 			if fi, err := os.Stat(path); err == nil {
 				targetMode = fi.Mode()
 			} else {
-				targetMode = 0644
+				targetMode = 0o644
 			}
 			break
 		}

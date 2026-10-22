@@ -91,3 +91,25 @@ During the `v0.19.0` release cycle, five live worker audit dispatches were execu
 | 3. patrol unattended round | automation-87f06732 first scheduled fire = Monday 2026-10-12 | **PASS** (patrol active across `g8s`, `defense-in-depth`, `aegis`) |
 
 **Verdict: PASS on all rollout falsification criteria (M1=4/4 existing repos, M2=4/4 day-one catches, M3=13/2 Mode-3 returns merged).** Meta-evidence: convergent defect discovery (#566 found independently by both sessions within the same hour, from two doors, neither seeing the other's books) = context independence demonstrated, not declared.
+
+## TuneFlow Deep Vertical Phase 2 — Declarative Feature Map & 3-Layer Blind Verification Loop (2026-10-22, Issues #648–#652)
+
+Following the implementation of the pre-`v0.19.0` verification hardening suite (`#648` `EvaluateDoDMatrix` mechanical evidence guard & `f0 verify-t3` live runner wiring, `#649` `.g8s/feature-map.yml` DAG & blast-radius routing, `#650` 3-Layer Blind Verification Loop, and `#651` 6-Module Verification Skills Suite), Phase 2 dogfooding was executed against `TuneFlow` (commit `7152e13` on top of `1f9355e`):
+
+1. **Declarative Feature Map Validation (`g8s feature verify --json`)**:
+   - Authored `.g8s/feature-map.yml` in `TuneFlow` (via F1 task `6d210755-1fd4-4eec-8521-8765dc322c14`, receipt `ad82852f-eab7-499a-b254-88023f087369`) mapping all 5 end-to-end features (`valid: true, feature_count: 5`, zero orphan paths, zero DAG cycles).
+2. **3-Layer Blind Verification Matrix (`--holdout-dir`, `--blind-packet`, `--canary-mutant`)**:
+
+| Feature ID | SRS Reqs | Transitive Consumers | Holdout (`--holdout-dir`) | Canary (`--canary-mutant`) | Mutated Target (`js_strict_eq_flip`) | Blind Packet ID | Verdict |
+| :--- | :--- | :--- | :---: | :---: | :--- | :--- | :---: |
+| `FEAT-TF-UX-SINGLE-FRAME` | `REQ-FUNC-01`, `REQ-FUNC-03` | — | `true` | `CanaryCaught=true` | `scripts/ci-ux-qa-gate.js` | `brp-00e0a10d378a` | **PASS** |
+| `FEAT-TF-ELDERLY-QUEUE` | `REQ-FUNC-01`, `REQ-FUNC-04` | `FEAT-TF-UX-SINGLE-FRAME` | `true` | `CanaryCaught=true` | `public/js/app.js` | `brp-21931835afc8` | **PASS** |
+| `FEAT-TF-MACOS-STREAM` | `REQ-FUNC-02`, `REQ-FUNC-04` | `FEAT-TF-ELDERLY-QUEUE`, `FEAT-TF-UX-SINGLE-FRAME` | `true` | `CanaryCaught=true` | `src/routes/api.js` | `brp-3d2a64e49010` | **PASS** |
+| `FEAT-TF-SECURITY-SSRF-LRU` | `REQ-FUNC-01`, `REQ-FUNC-02` | `FEAT-TF-MACOS-STREAM`, `FEAT-TF-ELDERLY-QUEUE`, `FEAT-TF-UX-SINGLE-FRAME` | `true` | `CanaryCaught=true` | `src/utils/validator.js` | `brp-aa62f26b5c9c` | **PASS** |
+| `FEAT-TF-DOCTOR-LOG` | `REQ-FUNC-01`, `REQ-FUNC-02` | `FEAT-TF-MACOS-STREAM`, `FEAT-TF-ELDERLY-QUEUE`, `FEAT-TF-UX-SINGLE-FRAME` | `true` | `CanaryCaught=true` | `src/utils/logger.js` | `brp-272eaf9696dd` | **PASS** |
+
+3. **Full-Stack & macOS Native Gates Verified**:
+   - `g8s-ux-visual-gate` (`node scripts/ci-ux-qa-gate.js`): Single Focus Frame geometry (`getComputedStyle` / `outlineStyle`), WCAG AAA contrast, and elderly touch targets (`>= 44px`).
+   - `g8s-sec-gate` (`node scripts/ci-sast-gate.js` + `node scripts/ci-dast-gate.js`): Zero-trust SSRF private-IP rejection, path traversal containment, and HTTP security headers.
+   - Native macOS `WKWebView`/`AVFoundation` 512KB chunked-Range MP3 streaming (`206 Partial Content`), `TUNEFLOW_DESKTOP_LOCAL=1` loopback auto-admin, and `OperationalLogger` (`tuneflow.log` 5MB rotation).
+

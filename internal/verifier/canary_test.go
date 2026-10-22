@@ -99,7 +99,7 @@ func TestCanary_RunCheck_MutantCaught(t *testing.T) {
 	tempDir := t.TempDir()
 	srcFile := filepath.Join(tempDir, "auth.go")
 	origContent := []byte("package auth\n\nfunc IsAdmin(role string) bool {\n\treturn role == \"admin\"\n}\n")
-	if err := os.WriteFile(srcFile, origContent, 0644); err != nil {
+	if err := os.WriteFile(srcFile, origContent, 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestCanary_RunCheck_MutantSurvived_Veto(t *testing.T) {
 	tempDir := t.TempDir()
 	srcFile := filepath.Join(tempDir, "handler.go")
 	origContent := []byte("package handler\n\nfunc Handle() bool {\n\treturn true\n}\n")
-	if err := os.WriteFile(srcFile, origContent, 0644); err != nil {
+	if err := os.WriteFile(srcFile, origContent, 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -195,17 +195,17 @@ func TestCanary_RunCheck_MutantSurvived_Veto(t *testing.T) {
 func TestCanary_RunCheck_GlobResolutionAndSkipTests(t *testing.T) {
 	tempDir := t.TempDir()
 	subDir := filepath.Join(tempDir, "pkg", "auth")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatalf("failed to mkdir: %v", err)
 	}
 
 	// Create a test file (which must be skipped) and a source file
 	testFile := filepath.Join(subDir, "auth_test.go")
-	_ = os.WriteFile(testFile, []byte("package auth\nfunc TestAuth() { if 1 == 1 {} }"), 0644)
+	_ = os.WriteFile(testFile, []byte("package auth\nfunc TestAuth() { if 1 == 1 {} }"), 0o644)
 
 	srcFile := filepath.Join(subDir, "auth.go")
 	origContent := []byte("package auth\nfunc Valid() bool {\n\treturn true\n}\n")
-	_ = os.WriteFile(srcFile, origContent, 0644)
+	_ = os.WriteFile(srcFile, origContent, 0o644)
 
 	ctx := context.Background()
 	result := RunCanaryCheck(ctx, tempDir, []string{"pkg/auth/**"}, func(ctx context.Context, targetDir string) (bool, string, error) {

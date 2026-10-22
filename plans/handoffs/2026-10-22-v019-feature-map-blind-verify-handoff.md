@@ -88,7 +88,7 @@ All `v0.19.0` verification components must enforce these four epistemic laws:
 
 ## 4. Current State of `TuneFlow` Deep Vertical Dogfooding
 
-- **Active Worktree Path**: `/Users/tamld/.local/state/g8s-sess-tf-ux-qa/worktrees/wt-56415a1a`
+- **Active Worktree Path**: `$HOME/.local/state/g8s-sess-tf-ux-qa/worktrees/wt-56415a1a`
 - **Current HEAD Commit**: `1f9355e` (`feat(macos,stream,logs): 512KB chunked range streaming, local desktop auto-admin, and operational logger`)
 - **Completed Dogfooding Rounds (Rounds 1–4)**:
   1. **Round 1 — Core Resilience & Security**: Elderly Queue Recovery (`public/app.js`), SSRF private-IP blocking & bounded LRU cache (`src/services/`), and `tuneflow doctor` CLI health diagnostics.
@@ -99,8 +99,8 @@ All `v0.19.0` verification components must enforce these four epistemic laws:
      - Enabled `TUNEFLOW_DESKTOP_LOCAL=1` loopback auto-admin for the native macOS desktop app wrapper.
      - Added structured operational logging (`src/utils/logger.js`) with rotation and diagnostic tracing.
 - **Live Installed macOS App & Logs**:
-  - App Bundle: `/Users/tamld/Applications/TuneFlow.app`
-  - Operational Log File: `/Users/tamld/Library/Application Support/TuneFlow/logs/tuneflow.log`
+  - App Bundle: `$HOME/Applications/TuneFlow.app`
+  - Operational Log File: `$HOME/Library/Application Support/TuneFlow/logs/tuneflow.log`
 
 ---
 
@@ -110,7 +110,7 @@ Copy-paste the following sequence at the start of the next F0 Supervisor session
 
 ```bash
 # 1. Orient & verify repo health (Lesson #6: Rebuild First)
-cd /Users/tamld/Documents/github/g8s
+cd $HOME/Documents/github/g8s
 ~/.local/bin/wiki.py orient
 make local
 ./bin/g8s doctor --json

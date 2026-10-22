@@ -156,7 +156,7 @@ The verification output produces a machine-readable JSON verdict complying with 
   "verdict": "PASS",
   "pass_rate": 1.0,
   "generated_scenarios_count": 96,
-  "holdout_path": "/Users/tamld/.local/state/g8s-sess-v019-blind-verify/holdout/feature-delta26",
+  "holdout_path": "$HOME/.local/state/g8s-sess-v019-blind-verify/holdout/feature-delta26",
   "dimensions_covered": [
     "Boundary Values",
     "Empty/Nil Inputs",
