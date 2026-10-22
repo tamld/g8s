@@ -6,7 +6,7 @@
   "version": "0.19.0",
   "go_version": "1.26.10",
   "latest_release": {
-    "tag": "v0.18.0",
+    "tag": "v0.19.0",
     "commit": "0f07738",
     "date": "2026-10-16"
   },
