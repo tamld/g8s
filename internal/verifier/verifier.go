@@ -120,13 +120,20 @@ type FailureDiagnostic struct {
 
 // TaskRef references a task and its write delegation scope.
 type TaskRef struct {
-	ID             string          `json:"id"`
-	ReceiptID      string          `json:"receipt_id,omitempty"`
-	AllowedPaths   []string        `json:"allowed_paths,omitempty"`
-	OverrideReason string          `json:"override_reason,omitempty"`
-	WorktreeDir    string          `json:"worktree_dir,omitempty"`
-	DoDItems       []BriefDoDItem  `json:"dod_items,omitempty"`
-	ReportedDoD    []DoDItemStatus `json:"reported_dod,omitempty"`
+	ID                  string          `json:"id"`
+	ReceiptID           string          `json:"receipt_id,omitempty"`
+	AllowedPaths        []string        `json:"allowed_paths,omitempty"`
+	OverrideReason      string          `json:"override_reason,omitempty"`
+	WorktreeDir         string          `json:"worktree_dir,omitempty"`
+	DoDItems            []BriefDoDItem  `json:"dod_items,omitempty"`
+	ReportedDoD         []DoDItemStatus `json:"reported_dod,omitempty"`
+	FeatureID           string          `json:"feature_id,omitempty"`
+	HoldoutDir          string          `json:"holdout_dir,omitempty"`
+	ExtraChecks         []Check         `json:"extra_checks,omitempty"`
+	Invariants          []string        `json:"invariants,omitempty"`
+	SpecContract        string          `json:"spec_contract,omitempty"`
+	GenerateBlindPacket bool            `json:"generate_blind_packet,omitempty"`
+	RunCanaryMutant     bool            `json:"run_canary_mutant,omitempty"`
 }
 
 // CheckResult represents the outcome of a single check execution.
@@ -181,6 +188,11 @@ type Verdict struct {
 	DoDMatrix          []DoDItemStatus      `json:"dod_matrix,omitempty"`
 	F2Summary          *F2TelemetrySummary  `json:"f2_summary,omitempty"`
 	InjectedLessons    []InjectedLessonHint `json:"injected_lessons,omitempty"`
+	FeatureID          string               `json:"feature_id,omitempty"`
+	HoldoutChecksOK    *bool                `json:"holdout_checks_ok,omitempty"`
+	BlindReviewPacket  *BlindReviewPacket   `json:"blind_review_packet,omitempty"`
+	CanaryResult       *CanaryResult        `json:"canary_result,omitempty"`
+	VetoReason         string               `json:"veto_reason,omitempty"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.
@@ -488,7 +500,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	now := time.Now().UTC()
 
 	// Read-only or no receipt -> unregistered verdict (exit 0 / human acceptance floor)
-	if (target.ReceiptID == "" || len(target.AllowedPaths) == 0) && target.WorktreeDir == "" && len(target.DoDItems) == 0 {
+	if (target.ReceiptID == "" || len(target.AllowedPaths) == 0) && target.WorktreeDir == "" && len(target.DoDItems) == 0 && target.FeatureID == "" && strings.TrimSpace(target.HoldoutDir) == "" && len(target.ExtraChecks) == 0 {
 		verdict := Verdict{
 			Class:       "unregistered",
 			Registered:  false,
@@ -499,6 +511,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			RecordedAt:  now,
 			WorktreeDir: target.WorktreeDir,
 			F2Summary:   loadF2TelemetrySummary(target.ID),
+			FeatureID:   target.FeatureID,
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -522,7 +535,26 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		}
 	}
 
-	if !registered && target.WorktreeDir == "" && len(target.DoDItems) == 0 {
+	if len(target.ExtraChecks) > 0 {
+		class.Checks = append(class.Checks, target.ExtraChecks...)
+		if !registered {
+			registered = true
+			class.Name = "feature-verify"
+			class.Status = StatusAdvisory
+		}
+	}
+
+	if (target.FeatureID != "" || strings.TrimSpace(target.HoldoutDir) != "") && !registered {
+		registered = true
+		if class.Name == "" {
+			class.Name = "feature-verify"
+		}
+		if class.Status == "" {
+			class.Status = StatusAdvisory
+		}
+	}
+
+	if !registered && target.WorktreeDir == "" && len(target.DoDItems) == 0 && target.FeatureID == "" && strings.TrimSpace(target.HoldoutDir) == "" && len(target.ExtraChecks) == 0 {
 		verdict := Verdict{
 			Class:       "unregistered",
 			Registered:  false,
@@ -533,6 +565,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			RecordedAt:  now,
 			WorktreeDir: target.WorktreeDir,
 			F2Summary:   loadF2TelemetrySummary(target.ID),
+			FeatureID:   target.FeatureID,
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -638,6 +671,97 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		}
 	}
 
+	// Holdout checks execution
+	var holdoutChecksOK *bool
+	if strings.TrimSpace(target.HoldoutDir) != "" {
+		holdoutDir := strings.TrimSpace(target.HoldoutDir)
+		if !filepath.IsAbs(holdoutDir) && repoRoot != "" {
+			holdoutDir = filepath.Join(repoRoot, holdoutDir)
+		}
+		var holdoutChecks []CheckResult
+		var holdoutFailed bool
+		var scriptPaths []string
+		var hasGoTest bool
+
+		_ = filepath.Walk(holdoutDir, func(p string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() {
+				return nil
+			}
+			low := strings.ToLower(info.Name())
+			if strings.HasSuffix(low, ".sh") || strings.HasSuffix(low, ".js") || strings.HasSuffix(low, ".mjs") || strings.HasSuffix(low, ".py") {
+				scriptPaths = append(scriptPaths, p)
+			} else if strings.HasSuffix(low, "_test.go") {
+				hasGoTest = true
+			}
+			return nil
+		})
+		sort.Strings(scriptPaths)
+
+		for _, sp := range scriptPaths {
+			res := v.runScriptCheck(ctx, runner, sp)
+			res.checkResult.Type = "holdout"
+			holdoutChecks = append(holdoutChecks, res.checkResult)
+			checkResults = append(checkResults, res.checkResult)
+			if len(res.stdout) > 0 {
+				combinedLogs.Write(res.stdout)
+				if !bytes.HasSuffix(res.stdout, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			if len(res.stderr) > 0 {
+				combinedLogs.Write(res.stderr)
+				if !bytes.HasSuffix(res.stderr, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			if res.diagnostic != nil {
+				allDiagnostics = append(allDiagnostics, *res.diagnostic)
+			}
+			if strings.HasPrefix(res.checkResult.Detail, "runner error:") {
+				hasRunnerError = true
+			} else if !res.checkResult.OK {
+				holdoutFailed = true
+				hasCheckFailure = true
+			}
+		}
+
+		if hasGoTest {
+			res := v.runGoTestCheck(ctx, runner, []string{holdoutDir})
+			res.checkResult.Type = "holdout"
+			holdoutChecks = append(holdoutChecks, res.checkResult)
+			checkResults = append(checkResults, res.checkResult)
+			if len(res.stdout) > 0 {
+				combinedLogs.Write(res.stdout)
+				if !bytes.HasSuffix(res.stdout, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			if len(res.stderr) > 0 {
+				combinedLogs.Write(res.stderr)
+				if !bytes.HasSuffix(res.stderr, []byte("\n")) {
+					combinedLogs.WriteByte('\n')
+				}
+			}
+			totalTestsRan += res.testsRan
+			totalTestsFailed += res.testsFailed
+			if len(res.diagnostics) > 0 {
+				allDiagnostics = append(allDiagnostics, res.diagnostics...)
+			}
+			if strings.HasPrefix(res.checkResult.Detail, "runner error:") {
+				hasRunnerError = true
+			} else if !res.checkResult.OK {
+				holdoutFailed = true
+				hasCheckFailure = true
+			}
+		}
+
+		okVal := len(holdoutChecks) > 0 && !holdoutFailed
+		holdoutChecksOK = &okVal
+		if !okVal {
+			hasCheckFailure = true
+		}
+	}
+
 	// Determine overall outcome:
 	// Fail-open rule: check's runner error (infrastructure error) => outcome not-run
 	var outcome Outcome
@@ -650,6 +774,86 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		outcome = OutcomeFail
 	default:
 		outcome = OutcomePass
+	}
+
+	// Canary Check
+	var canaryResult *CanaryResult
+	var vetoReason string
+	if target.RunCanaryMutant {
+		candidateFiles := target.AllowedPaths
+		if len(candidateFiles) == 0 {
+			candidateFiles = []string{"."}
+		}
+		probeRunner := func(probeCtx context.Context, targetDir string) (bool, string, error) {
+			pRunner := v.runner
+			if pRunner == nil {
+				pRunner = defaultCommandRunner(targetDir)
+			}
+			if strings.TrimSpace(target.HoldoutDir) != "" {
+				hDir := strings.TrimSpace(target.HoldoutDir)
+				if !filepath.IsAbs(hDir) && targetDir != "" {
+					hDir = filepath.Join(targetDir, hDir)
+				}
+				var sPaths []string
+				var hGoTest bool
+				_ = filepath.Walk(hDir, func(p string, info os.FileInfo, err error) error {
+					if err != nil || info == nil || info.IsDir() {
+						return nil
+					}
+					low := strings.ToLower(info.Name())
+					if strings.HasSuffix(low, ".sh") || strings.HasSuffix(low, ".js") || strings.HasSuffix(low, ".mjs") || strings.HasSuffix(low, ".py") {
+						sPaths = append(sPaths, p)
+					} else if strings.HasSuffix(low, "_test.go") {
+						hGoTest = true
+					}
+					return nil
+				})
+				sort.Strings(sPaths)
+				for _, sp := range sPaths {
+					res := v.runScriptCheck(probeCtx, pRunner, sp)
+					if !res.checkResult.OK {
+						return false, fmt.Sprintf("holdout script %s caught mutant: %s", filepath.Base(sp), res.checkResult.Detail), nil
+					}
+				}
+				if hGoTest {
+					res := v.runGoTestCheck(probeCtx, pRunner, []string{hDir})
+					if !res.checkResult.OK {
+						return false, fmt.Sprintf("holdout go test caught mutant: %s", res.checkResult.Detail), nil
+					}
+				}
+				return true, "all holdout checks passed", nil
+			}
+
+			// If holdout not specified, re-run class.Checks
+			for _, chk := range class.Checks {
+				switch chk.Type {
+				case CheckTypeScript:
+					res := v.runScriptCheck(probeCtx, pRunner, chk.Run)
+					if !res.checkResult.OK {
+						return false, fmt.Sprintf("check %s caught mutant", chk.Run), nil
+					}
+				case CheckTypeGoTest:
+					pkgs := chk.Packages
+					if len(pkgs) == 0 {
+						pkgs = derivePackagesFromPaths(target.AllowedPaths)
+					}
+					if len(pkgs) > 0 {
+						res := v.runGoTestCheck(probeCtx, pRunner, pkgs)
+						if !res.checkResult.OK {
+							return false, fmt.Sprintf("go test caught mutant: %s", res.checkResult.Detail), nil
+						}
+					}
+				}
+			}
+			return true, "all checks passed", nil
+		}
+
+		cRes := RunCanaryCheck(ctx, repoRoot, candidateFiles, probeRunner)
+		canaryResult = &cRes
+		if !cRes.CanaryCaught {
+			outcome = OutcomeFail
+			vetoReason = VetoCanarySurvived
+		}
 	}
 
 	// Persist combined raw check logs
@@ -714,6 +918,15 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		DoDMatrix:          dodMatrix,
 		F2Summary:          loadF2TelemetrySummary(target.ID),
 		InjectedLessons:    injectedLessons,
+		FeatureID:          target.FeatureID,
+		HoldoutChecksOK:    holdoutChecksOK,
+		CanaryResult:       canaryResult,
+		VetoReason:         vetoReason,
+	}
+
+	if target.GenerateBlindPacket {
+		pkt := BuildBlindReviewPacket(target, repoRoot, "", combinedLogs.String(), outcome == OutcomePass, verdict.HoldoutChecksOK, checkResults)
+		verdict.BlindReviewPacket = &pkt
 	}
 
 	targetGitDir := repoRoot
