@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
 )
@@ -1724,5 +1725,93 @@ func TestWorkerChildEnvDelegation(t *testing.T) {
 	}
 	if envMap["G8S_SCOPE_ROOT"] == "" {
 		t.Errorf("expected non-empty G8S_SCOPE_ROOT")
+	}
+}
+
+func TestWorkerSuppliedTextToolPolicyEvidence(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+
+	env.runner.factory = func(opts SpawnOptions) Child {
+		child := newFakeChild(0)
+		agyStdout := strings.Join([]string{
+			`{"step_type":"CORTEX_STEP_TYPE_TOOL_CALL","toolCall":{"name":"run_command"},"tool_call_denied":"run_command"}`,
+			`{"type":"result","result":{"status":"SUCCESS","response":"Denied tool call as expected"}}`,
+		}, "\n") + "\n"
+		if opts.Stdout != nil {
+			_, _ = opts.Stdout.Write([]byte(agyStdout))
+		}
+		close(child.done)
+		return child
+	}
+
+	rawPayload, err := json.Marshal(map[string]any{
+		"prompt":      "attempt run_command once; expect denial",
+		"provider":    "agy",
+		"model":       "gemini-3.8-flash-high",
+		"role":        "collector",
+		"permission":  "supplied_text",
+		"tool_policy": "none",
+		"result_mode": "stdout",
+		"timeout":     "30s",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	task, err := env.store.SubmitTask(context.Background(), controlplane.SubmitTaskRequest{
+		IdempotencyKey: "idem-policy-evidence-653",
+		Payload:        rawPayload,
+		Model:          "gemini-3.8-flash-high",
+		Role:           "collector",
+		Permission:     "supplied_text",
+		Timeout:        "30s",
+		AddDirs:        []string{"."},
+		MaxAttempts:    1,
+	})
+	if err != nil {
+		t.Fatalf("SubmitTask failed: %v", err)
+	}
+
+	claimed, err := env.sup.RunOnce(context.Background(), RunOptions{
+		WorkerID:     "w-653",
+		LeaseSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected claimed task")
+	}
+
+	stored, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil || stored == nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if stored.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("State = %q, want %q", stored.State, controlplane.StateWorkerCompleted)
+	}
+
+	var res struct {
+		OfferedCount       *int                         `json:"offered_count"`
+		DeniedCount        *int                         `json:"denied_count"`
+		InvokedCount       *int                         `json:"invoked_count"`
+		ToolPolicyEvidence *dispatch.ToolPolicyEvidence `json:"tool_policy_evidence"`
+	}
+	if err := json.Unmarshal(stored.Result, &res); err != nil {
+		t.Fatalf("unmarshal stored.Result: %v (raw: %s)", err, string(stored.Result))
+	}
+	if res.ToolPolicyEvidence == nil {
+		t.Fatalf("expected non-nil tool_policy_evidence in stored.Result, got: %s", string(stored.Result))
+	}
+	if res.ToolPolicyEvidence.Policy != "none" || res.ToolPolicyEvidence.Adapter != "agy" || !res.ToolPolicyEvidence.Enforced {
+		t.Errorf("unexpected tool_policy_evidence header: %+v", res.ToolPolicyEvidence)
+	}
+	if res.ToolPolicyEvidence.Provider != "agy" || res.ToolPolicyEvidence.Model != "gemini-3.8-flash-high" {
+		t.Errorf("unexpected provider/model: %+v", res.ToolPolicyEvidence)
+	}
+	if res.ToolPolicyEvidence.OfferedCount != 1 || res.ToolPolicyEvidence.DeniedCount != 1 || res.ToolPolicyEvidence.InvokedCount != 0 {
+		t.Errorf("unexpected counts: %+v", res.ToolPolicyEvidence)
+	}
+	if res.OfferedCount == nil || *res.OfferedCount != 1 || res.DeniedCount == nil || *res.DeniedCount != 1 || res.InvokedCount == nil || *res.InvokedCount != 0 {
+		t.Errorf("expected top-level counts 1/1/0, got %+v", res)
 	}
 }

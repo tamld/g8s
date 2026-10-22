@@ -209,6 +209,10 @@ type taskRequest struct {
 	// ReceiptID carries the delegated-write receipt for workspace_write
 	// tasks; consumed exactly once on a successful attempt (#346).
 	ReceiptID string `json:"receipt_id,omitempty"`
+
+	// ToolPolicy configures model tool use ("" | "default" | "none") (#616/#635/#653).
+	ToolPolicy            string `json:"tool_policy,omitempty"`
+	ToolPolicyEvidenceLog string `json:"-"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -668,6 +672,18 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	if req.Permission == "" {
 		req.Permission = dispatch.DefaultPermission
+	}
+	if req.Permission == "supplied_text" && req.ToolPolicy == "" {
+		req.ToolPolicy = "none"
+	}
+	if req.ToolPolicy == "none" {
+		hookDir, evidenceLogPath, cleanupHook, hErr := dispatch.SetupToolPolicyNoneWorkspace()
+		if hErr != nil {
+			return nil, hErr
+		}
+		defer cleanupHook()
+		req.ToolPolicyEvidenceLog = evidenceLogPath
+		req.AddDirs = append(append([]string{}, req.AddDirs...), hookDir)
 	}
 
 	// Parse per-command timeout for process execution
@@ -1322,6 +1338,14 @@ func (s *Supervisor) collect(
 		durationSec = 0
 	}
 
+	var toolPolicyEvidence *dispatch.ToolPolicyEvidence
+	if req.ToolPolicy == "none" || req.Permission == "supplied_text" {
+		ev := dispatch.ExtractToolPolicyEvidence(stdoutText, stderrText, req.ToolPolicyEvidenceLog)
+		ev.Provider = firstNonEmpty(req.Provider, "agy")
+		ev.Model = req.Model
+		toolPolicyEvidence = &ev
+	}
+
 	switch {
 	case reason == "lease_lost" || strings.HasPrefix(reason, "lease_lost"):
 		return s.snapshot(ctx, taskID, runDir, promptPath)
@@ -1331,6 +1355,12 @@ func (s *Supervisor) collect(
 		env["duration_seconds"] = durationSec
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
+		}
+		if toolPolicyEvidence != nil {
+			env["tool_policy_evidence"] = toolPolicyEvidence
+			env["offered_count"] = toolPolicyEvidence.OfferedCount
+			env["denied_count"] = toolPolicyEvidence.DeniedCount
+			env["invoked_count"] = toolPolicyEvidence.InvokedCount
 		}
 		s.ingestTrace(telemetry.TraceEventTaskCancelled, taskID, nil, "cancelled by orchestrator")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
@@ -1348,6 +1378,12 @@ func (s *Supervisor) collect(
 		env["duration_seconds"] = durationSec
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
+		}
+		if toolPolicyEvidence != nil {
+			env["tool_policy_evidence"] = toolPolicyEvidence
+			env["offered_count"] = toolPolicyEvidence.OfferedCount
+			env["denied_count"] = toolPolicyEvidence.DeniedCount
+			env["invoked_count"] = toolPolicyEvidence.InvokedCount
 		}
 		s.ingestTrace(telemetry.TraceEventTaskTimeout, taskID, nil, "execution deadline exceeded")
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
@@ -1373,6 +1409,16 @@ func (s *Supervisor) collect(
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResult(rawResult, stdoutText, code)
 		success := code == 0 && wr.OK
+		if toolPolicyEvidence != nil && toolPolicyEvidence.InvokedCount > 0 {
+			wr.OK = false
+			wr.Status = "contract_violation"
+			wr.Reason = "model tool call invoked under tool_policy=none"
+			wr.ContractViolation = mustJSON(map[string]any{
+				"policy":        "tool_policy=none",
+				"invoked_count": toolPolicyEvidence.InvokedCount,
+			})
+			success = false
+		}
 
 		// L3 post-run Jev quality gate (#253/#371/#418): assess output quality
 		// before structural validation — catches hallucination that passes
@@ -1622,6 +1668,12 @@ func (s *Supervisor) collect(
 					"mode": "worktree",
 					"dir":  deliverableDir,
 				}
+			}
+			if toolPolicyEvidence != nil {
+				m["tool_policy_evidence"] = toolPolicyEvidence
+				m["offered_count"] = toolPolicyEvidence.OfferedCount
+				m["denied_count"] = toolPolicyEvidence.DeniedCount
+				m["invoked_count"] = toolPolicyEvidence.InvokedCount
 			}
 			resultJSON = mustJSON(m)
 		}
@@ -2235,6 +2287,7 @@ func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) [
 		SkipPermissions: req.SkipPermiss,
 		NoSandbox:       noSandbox,
 		Effort:          req.Effort,
+		ToolPolicy:      req.ToolPolicy,
 	})
 }
 

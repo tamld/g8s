@@ -562,10 +562,110 @@ type ToolPolicyEvidence struct {
 	Policy       string   `json:"policy"`  // "none"
 	Adapter      string   `json:"adapter"` // e.g. "agy"
 	Enforced     bool     `json:"enforced"`
+	Provider     string   `json:"provider,omitempty"`
+	Model        string   `json:"model,omitempty"`
 	OfferedCount int      `json:"offered_count"`
 	DeniedCount  int      `json:"denied_count"`
 	InvokedCount int      `json:"invoked_count"`
 	DeniedTools  []string `json:"denied_tools,omitempty"`
+}
+
+// SetupToolPolicyNoneWorkspace creates a temporary hook workspace containing
+// PreToolUse deny hooks for tool_policy=none (supplied_text) enforcement.
+func SetupToolPolicyNoneWorkspace() (hookDir string, evidenceLogPath string, cleanup func(), err error) {
+	tempDir, err := os.MkdirTemp("", "g8s-supplied-text-*")
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to create supplied_text hook workspace: %w", err)
+	}
+	cleanup = func() { _ = os.RemoveAll(tempDir) }
+	hookDir = tempDir
+	evidenceLogPath = filepath.Join(hookDir, "evidence.log")
+
+	agentsDir := filepath.Join(hookDir, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to create .agents directory: %w", err)
+	}
+
+	denyShScript := fmt.Sprintf(`#!/bin/sh
+INPUT=$(cat)
+TOOL=""
+if command -v python3 >/dev/null 2>&1; then
+    TOOL=$(echo "$INPUT" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    t = (d.get("toolCall") or {}).get("name") or (d.get("tool_call") or {}).get("name") or d.get("tool_name") or d.get("name") or ""
+    print(t)
+except Exception:
+    pass
+' 2>/dev/null)
+fi
+if [ -z "$TOOL" ]; then
+    TOOL=$(echo "$INPUT" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+if [ -z "$TOOL" ]; then
+    TOOL=$(echo "$INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+CLEAN=$(echo "$TOOL" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
+if [ -n "$CLEAN" ]; then
+    echo "$CLEAN" >> %q
+fi
+printf '{"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}\n'
+`, evidenceLogPath)
+
+	denyShPath := filepath.Join(agentsDir, "deny.sh")
+	if err := os.WriteFile(denyShPath, []byte(denyShScript), 0o600); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to write deny hook script: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "deny.sh"), []byte(denyShScript), 0o600); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to write deny hook script: %w", err)
+	}
+
+	denyBatScript := fmt.Sprintf(`@echo off
+setlocal
+echo model_tool >> %q
+echo {"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}
+`, evidenceLogPath)
+	denyBatPath := filepath.Join(agentsDir, "deny.bat")
+	if err := os.WriteFile(denyBatPath, []byte(denyBatScript), 0o600); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to write deny.bat hook script: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "deny.bat"), []byte(denyBatScript), 0o600); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to write deny.bat hook script: %w", err)
+	}
+
+	cmdHook := fmt.Sprintf("sh %q", denyShPath)
+	if runtime.GOOS == "windows" {
+		cmdHook = denyBatPath
+	}
+	hooksJSON := fmt.Sprintf(`{
+  "supplied_text": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": %q,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}`, cmdHook)
+	hooksJSONPath := filepath.Join(agentsDir, "hooks.json")
+	if err := os.WriteFile(hooksJSONPath, []byte(hooksJSON), 0o600); err != nil {
+		cleanup()
+		return "", "", nil, fmt.Errorf("failed to write hooks.json: %w", err)
+	}
+
+	return hookDir, evidenceLogPath, cleanup, nil
 }
 
 // ContractViolationReport summarizes read-only policy enforcement results.
@@ -655,91 +755,12 @@ func Run(opts RunOptions) (Result, error) {
 	var hookDir string
 	var evidenceLogPath string
 	if effectiveToolPolicy == "none" {
-		tempDir, err := os.MkdirTemp("", "g8s-supplied-text-*")
+		var cleanup func()
+		hookDir, evidenceLogPath, cleanup, err = SetupToolPolicyNoneWorkspace()
 		if err != nil {
-			return Result{}, fmt.Errorf("failed to create supplied_text hook workspace: %w", err)
+			return Result{}, err
 		}
-		defer os.RemoveAll(tempDir)
-		hookDir = tempDir
-		evidenceLogPath = filepath.Join(hookDir, "evidence.log")
-
-		agentsDir := filepath.Join(hookDir, ".agents")
-		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-			return Result{}, fmt.Errorf("failed to create .agents directory: %w", err)
-		}
-
-		denyShScript := fmt.Sprintf(`#!/bin/sh
-INPUT=$(cat)
-TOOL=""
-if command -v python3 >/dev/null 2>&1; then
-    TOOL=$(echo "$INPUT" | python3 -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    t = (d.get("toolCall") or {}).get("name") or (d.get("tool_call") or {}).get("name") or d.get("tool_name") or d.get("name") or ""
-    print(t)
-except Exception:
-    pass
-' 2>/dev/null)
-fi
-if [ -z "$TOOL" ]; then
-    TOOL=$(echo "$INPUT" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-fi
-if [ -z "$TOOL" ]; then
-    TOOL=$(echo "$INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-fi
-CLEAN=$(echo "$TOOL" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
-if [ -n "$CLEAN" ]; then
-    echo "$CLEAN" >> %q
-fi
-printf '{"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}\n'
-`, evidenceLogPath)
-
-		denyShPath := filepath.Join(agentsDir, "deny.sh")
-		if err := os.WriteFile(denyShPath, []byte(denyShScript), 0o600); err != nil {
-			return Result{}, fmt.Errorf("failed to write deny hook script: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(hookDir, "deny.sh"), []byte(denyShScript), 0o600); err != nil {
-			return Result{}, fmt.Errorf("failed to write deny hook script: %w", err)
-		}
-
-		denyBatScript := fmt.Sprintf(`@echo off
-setlocal
-echo model_tool >> %q
-echo {"decision":"deny","reason":"model tool calls disabled by supplied_text policy"}
-`, evidenceLogPath)
-		if err := os.WriteFile(filepath.Join(agentsDir, "deny.bat"), []byte(denyBatScript), 0o600); err != nil {
-			return Result{}, fmt.Errorf("failed to write deny.bat hook script: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(hookDir, "deny.bat"), []byte(denyBatScript), 0o600); err != nil {
-			return Result{}, fmt.Errorf("failed to write deny.bat hook script: %w", err)
-		}
-
-		cmdHook := "sh ./deny.sh"
-		if runtime.GOOS == "windows" {
-			cmdHook = "deny.bat"
-		}
-		hooksJSON := fmt.Sprintf(`{
-  "supplied_text": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": %q,
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}`, cmdHook)
-		hooksJSONPath := filepath.Join(agentsDir, "hooks.json")
-		if err := os.WriteFile(hooksJSONPath, []byte(hooksJSON), 0o600); err != nil {
-			return Result{}, fmt.Errorf("failed to write hooks.json: %w", err)
-		}
-
+		defer cleanup()
 		cmdAddDirs = append(append([]string{}, opts.AddDirs...), hookDir)
 	}
 
@@ -1102,6 +1123,11 @@ func processLineText(line string, evidence *ToolPolicyEvidence, seenDenied map[s
 	} else if m := toolInvokedRegex.FindStringSubmatch(line); len(m) > 1 {
 		evidence.InvokedCount++
 	}
+}
+
+// ExtractToolPolicyEvidence extracts tool-policy enforcement evidence from worker stdout/stderr and hook evidence log.
+func ExtractToolPolicyEvidence(stdout, stderr, evidenceLogPath string) ToolPolicyEvidence {
+	return extractToolPolicyEvidence(stdout, stderr, evidenceLogPath)
 }
 
 func extractToolPolicyEvidence(stdout, stderr, evidenceLogPath string) ToolPolicyEvidence {
