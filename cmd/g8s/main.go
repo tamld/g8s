@@ -229,6 +229,8 @@ func main() {
 		runServe(os.Args[2:])
 	case "verify":
 		runVerify(os.Args[2:])
+	case "feature":
+		runFeature(os.Args[2:])
 	case "lesson":
 		runLesson(os.Args[2:])
 	case "feedback":
@@ -1681,6 +1683,7 @@ func printUsage() {
 	fmt.Println("  autopilot    Manage cron-based supervisor trigger (g8s autopilot start|status|trigger)")
 	fmt.Println("  serve        Run daemon mode with HTTP API server (g8s serve [--address :8080])")
 	fmt.Println("  verify       Run verifier-class acceptance checks on a task (g8s verify --task <id>)")
+	fmt.Println("  feature      Declarative feature map validation and blast radius routing (g8s feature verify|inspect|list)")
 	fmt.Println("  ladder       Quality-ladder failure classification and escalation (g8s ladder status|advance|gauges)")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")

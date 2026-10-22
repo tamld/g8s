@@ -23,6 +23,19 @@ sanitized contribution packets (g8s-supervisor Mode 3).
    with POSIX `grep` fallback) pattern used in portable CI gates.
 5. **Native Cross-Platform Agent I/O & MCP Suite (`DELTA-23`)**: `g8s search`, `g8s read`, `g8s edit`, `g8s select` (CLI & MCP `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`) with in-process `WriteReceipt` enforcement.
 6. **Config-Driven Multi-Protocol LLM Consumer (`DELTA-25`)**: `g8s llm-call` and `g8s_llm_call` MCP tool allowing sibling repos to consume any `providers.json` HTTP gateway (`openai`, `anthropic`, `9router`).
+7. **Declarative Feature Map (`.g8s/feature-map.yml`)**: Single Source of Truth linking user stories, SRS requirements, OpenSpec deltas, code paths, invariants, and test suites with automated blast-radius routing and orphan detection.
+8. **3-Layer Blind Verification Loop**: Adversarial multi-layer gate defeating reviewer sycophancy, AI evaluation awareness, and test overfitting:
+   - *Layer 1 (Holdout Suite)*: Hidden out-of-worktree tests (`$G8S_STATE_DIR/holdout/<feature-id>`) mounted only during verification (`--holdout-dir`).
+   - *Layer 2 (Double-Blind Packet)*: Sanitized `BlindReviewPacket` stripping author identity, commit messages, and worker prose to force code-first falsification.
+   - *Layer 3 (Canary Mutant)*: Seeded mutant injection (`--canary-mutant`) proving reproduction and test non-vacuity before merge.
+9. **6-Module Verification Skills Suite**: Loadable verification engines registered in [`skills/manifest.json`](../skills/manifest.json):
+   - [`g8s-blind-verifier`](../skills/g8s-blind-verifier/SKILL.md): Double-blind counterexample and falsification review.
+   - [`g8s-red-prove`](../skills/g8s-red-prove/SKILL.md): Mechanical `Red -> Green` reproduction + mutation proof.
+   - [`g8s-scenario-matrix`](../skills/g8s-scenario-matrix/SKILL.md): 12-dimension edge matrix generator & holdout suites.
+   - [`g8s-ux-visual-gate`](../skills/g8s-ux-visual-gate/SKILL.md): Headless DOM bounding-box geometry, WCAG contrast & media verifier.
+   - [`g8s-sec-gate`](../skills/g8s-sec-gate/SKILL.md): Zero-trust SAST + live DAST probe runner for SSRF and trust boundaries.
+   - [`g8s-epistemic-audit`](../skills/g8s-epistemic-audit/SKILL.md): Claim decomposition & evidence-tier classifier enforcing the 4 Epistemic Laws.
+   - Master reference: [`skills/g8s-supervisor/references/verification-skills-suite.md`](../skills/g8s-supervisor/references/verification-skills-suite.md).
 
 ## Onboard in four steps
 

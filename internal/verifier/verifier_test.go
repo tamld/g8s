@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -851,7 +852,7 @@ func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
 
 	// 1. Complete reported items with all MET
 	reportedComplete := []DoDItemStatus{
-		{ID: "D1", Status: "MET", Evidence: "firewall active"},
+		{ID: "D1", Status: "MET", Evidence: "firewall.go:10 active (pass)"},
 		{ID: "D2", Status: "MET", Evidence: "tests green"},
 	}
 	matrix, ok := EvaluateDoDMatrix(items, reportedComplete, true, "sha1")
@@ -861,7 +862,7 @@ func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
 
 	// 2. Incomplete: D2 missing from reported
 	reportedIncomplete := []DoDItemStatus{
-		{ID: "D1", Status: "MET", Evidence: "firewall active"},
+		{ID: "D1", Status: "MET", Evidence: "firewall.go:10 active (pass)"},
 	}
 	matrix, ok = EvaluateDoDMatrix(items, reportedIncomplete, true, "sha1")
 	if ok {
@@ -890,6 +891,198 @@ func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
 	}
 	if matrix[0].Status != "UNMET" {
 		t.Errorf("matrix[0] should be UNMET, got %+v", matrix[0])
+	}
+}
+
+func TestEvaluateDoDMatrix_RejectsWorkerSelfReportWhenChecksFail(t *testing.T) {
+	items := []BriefDoDItem{
+		{ID: "D1", Description: "Implement firewall"},
+		{ID: "D2", Description: "Add tests"},
+	}
+
+	// Case 1: items > 0, reported has items marked MET with pass evidence, checksOK = false
+	reported := []DoDItemStatus{
+		{ID: "D1", Status: "MET", Evidence: "exit code 0, all pass"},
+	}
+	matrix, ok := EvaluateDoDMatrix(items, reported, false, "deadbeef12345678")
+	if ok {
+		t.Fatalf("expected EvaluateDoDMatrix to fail when checksOK is false")
+	}
+	if len(matrix) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(matrix))
+	}
+	if matrix[0].Status != "UNMET" || matrix[0].Evidence != "mechanical checks failed (worker self-report rejected)" {
+		t.Errorf("expected D1 UNMET with mechanical checks failed, got %+v", matrix[0])
+	}
+	if matrix[1].Status != "UNMET" || matrix[1].Evidence != "missing from reported DoD matrix" {
+		t.Errorf("expected D2 UNMET with missing from reported DoD matrix, got %+v", matrix[1])
+	}
+
+	// Case 2: items == 0, reported has items, checksOK = false
+	matrix0, ok0 := EvaluateDoDMatrix(nil, reported, false, "deadbeef12345678")
+	if ok0 {
+		t.Fatalf("expected EvaluateDoDMatrix to fail when checksOK is false with len(items) == 0")
+	}
+	if len(matrix0) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(matrix0))
+	}
+	if matrix0[0].Status != "UNMET" || !strings.Contains(matrix0[0].Evidence, "mechanical checks failed") {
+		t.Errorf("expected UNMET with unverified worker claim, got %+v", matrix0[0])
+	}
+}
+
+func TestEvaluateDoDMatrix_RejectsUnverifiedProseEvidence(t *testing.T) {
+	items := []BriefDoDItem{
+		{ID: "D1", Description: "Feature one"},
+		{ID: "D2", Description: "Feature two"},
+	}
+
+	proseCases := []string{
+		"done",
+		"completed",
+		"verified by worker",
+		"all good",
+		"met requirement",
+	}
+
+	for _, prose := range proseCases {
+		reported := []DoDItemStatus{
+			{ID: "D1", Status: "MET", Evidence: prose},
+			{ID: "D2", Status: "MET", Evidence: "internal/verifier/verifier.go:42 (pass)"},
+		}
+		matrix, ok := EvaluateDoDMatrix(items, reported, true, "logsha123456")
+		if ok {
+			t.Errorf("expected rejection of prose evidence %q, but got ok=true", prose)
+		}
+		if len(matrix) != 2 {
+			t.Fatalf("expected 2 matrix items, got %d", len(matrix))
+		}
+		if matrix[0].Status != "UNMET" {
+			t.Errorf("expected D1 UNMET for prose %q, got status %q", prose, matrix[0].Status)
+		}
+		expectedPrefix := fmt.Sprintf("unverified self-report prose: %s", prose)
+		if matrix[0].Evidence != expectedPrefix {
+			t.Errorf("expected evidence %q, got %q", expectedPrefix, matrix[0].Evidence)
+		}
+		if matrix[1].Status != "MET" {
+			t.Errorf("expected D2 to remain MET with mechanical evidence, got %q", matrix[1].Status)
+		}
+	}
+
+	// Verify valid mechanical anchors pass
+	validAnchors := []string{
+		"sha256:abcd",
+		"ev-1234",
+		"ok ",
+		"pass",
+		"exit code 0",
+		"main.go",
+		"script.sh",
+		"index.js",
+		"tool.py",
+		"config.yml",
+		"schema.yaml",
+		"data.json",
+		"README.md",
+		"unit test passed",
+		"logsha123456",
+		"ok",
+	}
+
+	for _, anchorEvidence := range validAnchors {
+		reported := []DoDItemStatus{
+			{ID: "D1", Status: "MET", Evidence: anchorEvidence},
+			{ID: "D2", Status: "MET", Evidence: anchorEvidence},
+		}
+		matrix, ok := EvaluateDoDMatrix(items, reported, true, "logsha123456")
+		if !ok {
+			t.Errorf("expected anchor %q to pass, got ok=false, matrix=%+v", anchorEvidence, matrix)
+		}
+	}
+
+	// len(items) == 0 with prose reported
+	repOnly := []DoDItemStatus{
+		{ID: "D1", Status: "MET", Evidence: "verified by worker"},
+	}
+	matrix0, ok0 := EvaluateDoDMatrix(nil, repOnly, true, "logsha123456")
+	if ok0 {
+		t.Errorf("expected len(items)==0 with prose to fail")
+	}
+	if matrix0[0].Status != "UNMET" {
+		t.Errorf("expected matrix0[0] UNMET, got %q", matrix0[0].Status)
+	}
+}
+
+func TestIsMechanicallyVerifiedEvidence(t *testing.T) {
+	if IsMechanicallyVerifiedEvidence("", "sha25612345") {
+		t.Errorf("empty evidence should return false")
+	}
+	if IsMechanicallyVerifiedEvidence("   ", "sha25612345") {
+		t.Errorf("whitespace evidence should return false")
+	}
+	if IsMechanicallyVerifiedEvidence("done", "sha25612345") {
+		t.Errorf("pure prose 'done' should return false")
+	}
+	if !IsMechanicallyVerifiedEvidence("ok", "") {
+		t.Errorf("'ok' should return true")
+	}
+	if !IsMechanicallyVerifiedEvidence("pass", "") {
+		t.Errorf("'pass' should return true")
+	}
+	if !IsMechanicallyVerifiedEvidence("sha25612_match", "sha25612345") {
+		t.Errorf("matching 8-char prefix of rawLogSHA should return true")
+	}
+}
+
+func TestRunScriptCheck_InterpreterDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	// create dummy script files
+	nodeScript := filepath.Join(tmpDir, "check.js")
+	pyScript := filepath.Join(tmpDir, "check.py")
+	shScript := filepath.Join(tmpDir, "check.sh")
+	_ = os.WriteFile(nodeScript, []byte("console.log('hi')"), 0o644)
+	_ = os.WriteFile(pyScript, []byte("print('hi')"), 0o644)
+	_ = os.WriteFile(shScript, []byte("echo hi"), 0o644)
+
+	var lastInterp, lastScript string
+	mockRunner := func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		lastInterp = name
+		if len(args) > 0 {
+			lastScript = args[0]
+		}
+		return []byte("ok"), nil, 0, nil
+	}
+
+	v := NewVerifier(WithRepoRoot(tmpDir))
+
+	// 1. .js suffix auto-detects node
+	res := v.runScriptCheck(context.Background(), mockRunner, "check.js")
+	if !res.checkResult.OK || lastInterp != "node" || lastScript != "check.js" {
+		t.Errorf("expected node for check.js, got interp=%s script=%s", lastInterp, lastScript)
+	}
+
+	// 2. .py suffix auto-detects python3
+	res = v.runScriptCheck(context.Background(), mockRunner, "check.py")
+	if !res.checkResult.OK || lastInterp != "python3" || lastScript != "check.py" {
+		t.Errorf("expected python3 for check.py, got interp=%s script=%s", lastInterp, lastScript)
+	}
+
+	// 3. explicit prefix "node "
+	res = v.runScriptCheck(context.Background(), mockRunner, "node check.js")
+	if !res.checkResult.OK || lastInterp != "node" || lastScript != "check.js" {
+		t.Errorf("expected stripped node prefix, got interp=%s script=%s", lastInterp, lastScript)
+	}
+
+	// 4. explicit prefix "python3 "
+	res = v.runScriptCheck(context.Background(), mockRunner, "python3 check.py")
+	if !res.checkResult.OK || lastInterp != "python3" || lastScript != "check.py" {
+		t.Errorf("expected stripped python3 prefix, got interp=%s script=%s", lastInterp, lastScript)
+	}
+
+	// 5. explicit prefix "sh "
+	res = v.runScriptCheck(context.Background(), mockRunner, "sh check.sh")
+	if !res.checkResult.OK || lastInterp != "sh" || lastScript != "check.sh" {
+		t.Errorf("expected stripped sh prefix, got interp=%s script=%s", lastInterp, lastScript)
 	}
 }
 

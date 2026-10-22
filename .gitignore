@@ -109,7 +109,11 @@ coverage.out
 
 # Sandbox runtime metadata (per session, never committed)
 .omo/
-.g8s/
+**/.g8s/
+!/.g8s/
+/.g8s/*
+!/.g8s/*.yml
+!/.g8s/coverage-baseline
 /g8s
 
 # Agent session metadata (per agent, never committed)

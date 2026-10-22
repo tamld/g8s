@@ -325,6 +325,7 @@ g8s/
 │   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning, and context slicing for high-precision, token-efficient subagent code reviews
 │   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported from reference/python/scripts/agy_dispatch.py
 │   ├── doctor/ — implements diagnostic sanity checks for g8s environment, security boundaries, permissions, and worker binary availability
+│   ├── featuremap/ — provides declarative end-to-end feature DAG loading, validation, and blast-radius routing
 │   ├── fsops/ — implements safe, receipt-bounded file system operations including bounded reads, DLP sanitization, atomic edits, and delegation context resolution
 │   ├── harness/ — enforces worker execution boundaries, permission profiles, role constraints, and prompt safety scanning
 │   ├── heartbeat/ — implements per-session worker heartbeat tracking and freshness observability per DEBT-29

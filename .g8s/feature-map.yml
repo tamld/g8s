@@ -1,0 +1,268 @@
+schema_version: "1.0"
+# g8s Declarative End-to-End Feature Map (.g8s/feature-map.yml)
+# Maps functional feature nodes to SRS requirements, OpenSpec deltas, code paths,
+# invariants, visible tests, verifier classes, and acyclic blast radius graphs.
+
+features:
+  - id: "FEAT-CONTROLPLANE-01"
+    title: "Durable SQLite Control Plane & State Machine"
+    persona_story: "As an autonomous agent, I need a durable SQLite WAL control plane with atomic CAS task transitions so that asynchronous workloads execute reliably across worker restarts."
+    srs_reqs:
+      - "FR-3"
+      - "NFR-3"
+    openspec_delta: "DELTA-03"
+    code_paths:
+      - "internal/controlplane/**"
+      - "internal/state/**"
+      - "internal/lockfile/**"
+      - "internal/heartbeat/**"
+    invariants:
+      - "State transitions follow pure WAL SQLite state machine"
+      - "Atomic CAS task claiming"
+    visible_tests:
+      - "internal/controlplane/store_test.go"
+      - "internal/state/state_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers:
+        - "FEAT-WORKER-01"
+        - "FEAT-VERIFY-01"
+        - "FEAT-F0-GATE-01"
+        - "FEAT-VAULT-MEMORY-01"
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-RECEIPT-01"
+    title: "Path-Scoped Single-Use Write Receipts"
+    persona_story: "As a security supervisor, I need single-use path-scoped write receipts so that worker mutations are cryptographically authorized and strictly confined to assigned paths."
+    srs_reqs:
+      - "FR-2"
+    openspec_delta: "DELTA-02"
+    code_paths:
+      - "internal/receipt/**"
+      - "internal/signing/**"
+    invariants:
+      - "Single-use consumption"
+      - "Path scope enforcement"
+    visible_tests:
+      - "internal/receipt/receipt_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers:
+        - "FEAT-FSOPS-01"
+        - "FEAT-WORKER-01"
+
+  - id: "FEAT-FSOPS-01"
+    title: "Pure-Go Native Cross-Platform Filesystem Agent I/O"
+    persona_story: "As an autonomous agent, I need pure-Go cross-platform filesystem operations so that file mutations obey receipt bounds without relying on external host shell binaries."
+    srs_reqs:
+      - "FR-4"
+      - "NFR-4"
+    openspec_delta: "DELTA-23"
+    code_paths:
+      - "internal/fsops/**"
+      - "internal/pathutil/**"
+      - "internal/search/**"
+    invariants:
+      - "Pure Go with zero external shell dependencies"
+      - "Receipt allowed_paths boundary enforcement"
+    visible_tests:
+      - "internal/fsops/fsops_test.go"
+      - "internal/search/search_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-RECEIPT-01"
+      direct_consumers: []
+
+  - id: "FEAT-WORKER-01"
+    title: "Worker Process Execution & Capability Harness"
+    persona_story: "As an execution harness, I need isolated process group supervision and credential redaction so that rogue subprocesses are cleanly reaped without leaking secrets."
+    srs_reqs:
+      - "FR-1"
+      - "FR-4"
+    openspec_delta: "DELTA-04"
+    code_paths:
+      - "internal/worker/**"
+      - "internal/process/**"
+      - "internal/harness/**"
+      - "internal/dispatch/**"
+      - "internal/hooks/**"
+      - "internal/runtime/**"
+      - "internal/sleep/**"
+    invariants:
+      - "Setpgid process group isolation"
+      - "Sensitive token sanitization"
+    visible_tests:
+      - "internal/worker/worker_test.go"
+      - "internal/process/lister_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-RECEIPT-01"
+      direct_consumers:
+        - "FEAT-LLMCALL-01"
+        - "FEAT-VERIFY-01"
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-LLMCALL-01"
+    title: "Universal Config-Driven LLM Consumer & Multi-Model Fleet"
+    persona_story: "As a heterogeneous agent team, I need a config-driven LLM call adapter supporting multiple protocols and gateways so that tasks can route to optimal model backends."
+    srs_reqs:
+      - "FR-10"
+    openspec_delta: "DELTA-25"
+    code_paths:
+      - "internal/provider/**"
+      - "internal/conv/**"
+      - "internal/reflex/**"
+    invariants:
+      - "OpenAI, Anthropic, and 9router protocol conformance"
+      - "Two-layer public mechanism vs local policy separation"
+    visible_tests:
+      - "internal/provider/provider_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-WORKER-01"
+      direct_consumers:
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-VERIFY-01"
+    title: "Worktree-Targeted Verification & Lossless DoD Receipts"
+    persona_story: "As a verification gate, I need worktree-targeted non-vacuous test execution and lossless DoD receipts so that supervisor verdicts are backed by deterministic evidence."
+    srs_reqs:
+      - "FR-8"
+    openspec_delta: "DELTA-21"
+    code_paths:
+      - "internal/verifier/**"
+      - "internal/watch/**"
+      - "internal/brief/**"
+      - "internal/diffintel/**"
+      - "internal/codeintel/**"
+    invariants:
+      - "Worktree-targeted verification"
+      - "Non-vacuous test execution check"
+    visible_tests:
+      - "internal/verifier/verifier_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-WORKER-01"
+      direct_consumers:
+        - "FEAT-F0-GATE-01"
+        - "FEAT-PLATFORM-CLI-01"
+
+  - id: "FEAT-F0-GATE-01"
+    title: "Verified Delegation & Commitment-Point Gates T0-T4"
+    persona_story: "As a system architect, I need T0-T4 reversibility tiers and commitment gates G0-G7 so that high-blast mutations require rigorous evidence before merge."
+    srs_reqs:
+      - "FR-9"
+    openspec_delta: "DELTA-24"
+    code_paths:
+      - "internal/supervisor/**"
+      - "internal/orchestrator/**"
+      - "internal/dialectic/**"
+      - "internal/autopilot/**"
+      - "internal/ladder/**"
+      - "internal/review/**"
+      - "tools/f0/**"
+    invariants:
+      - "Reversibility tiers T0-T4 enforcement"
+      - "Commitment checks G0-G7"
+    visible_tests:
+      - "internal/supervisor/supervisor_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-VERIFY-01"
+      direct_consumers: []
+
+  - id: "FEAT-VAULT-MEMORY-01"
+    title: "Decoupled Pure-Go Knowledge Vault & Memory Promotion"
+    persona_story: "As a learning cognitive system, I need pure-Go knowledge vault storage with FTS5 search and memory promotion so that operational lessons persist across sessions."
+    srs_reqs:
+      - "FR-7"
+    openspec_delta: "DELTA-10"
+    code_paths:
+      - "internal/vault/**"
+      - "internal/memory/**"
+      - "internal/lessons/**"
+      - "internal/context/**"
+    invariants:
+      - "SQLite FTS5 full-text search"
+      - "Second-brain promotion"
+    visible_tests:
+      - "internal/vault/vault_test.go"
+      - "internal/memory/adapter_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+      direct_consumers: []
+
+  - id: "FEAT-PLATFORM-CLI-01"
+    title: "Platform CLI, MCP Server, Daemon Service & Diagnostics"
+    persona_story: "As an operator or agent developer, I need a unified CLI, MCP server, daemon service, and diagnostics so that platform control is easily discoverable and verifiable."
+    srs_reqs:
+      - "FR-5"
+      - "FR-6"
+      - "NFR-1"
+      - "NFR-2"
+    openspec_delta: "DELTA-05"
+    code_paths:
+      - "cmd/g8s/**"
+      - "internal/cli/**"
+      - "internal/mcp/**"
+      - "internal/server/**"
+      - "internal/service/**"
+      - "internal/doctor/**"
+      - "internal/telemetry/**"
+      - "internal/settings/**"
+      - "internal/config/**"
+      - "internal/registry/**"
+      - "internal/routing/**"
+      - "internal/lane/**"
+      - "internal/initwiz/**"
+      - "internal/completion/**"
+      - "internal/cleanup/**"
+      - "internal/analyzer/**"
+    invariants:
+      - "Stdio JSON-RPC 2.0 MCP server"
+      - "Cross-platform daemon service lifecycle"
+    visible_tests:
+      - "cmd/g8s/main_test.go"
+      - "internal/mcp/server_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-WORKER-01"
+        - "FEAT-LLMCALL-01"
+        - "FEAT-VERIFY-01"
+      direct_consumers:
+        - "FEAT-FEATUREMAP-01"
+
+  - id: "FEAT-FEATUREMAP-01"
+    title: "Declarative Feature Map & Blast Radius Routing"
+    persona_story: "As a verification and routing harness, I need a declarative feature map and blast radius DAG so that task write scopes and test impacts are derived deterministically with zero package orphans."
+    srs_reqs:
+      - "FR-8"
+    openspec_delta: "DELTA-23"
+    code_paths:
+      - "internal/featuremap/**"
+      - "cmd/g8s/feature.go"
+      - "tools/ci_feature_map_sync.sh"
+    invariants:
+      - "Zero-orphan package coverage across internal/"
+      - "DAG acyclicity check"
+    visible_tests:
+      - "internal/featuremap/featuremap_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-PLATFORM-CLI-01"
+      direct_consumers: []

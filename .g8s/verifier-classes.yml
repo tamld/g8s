@@ -32,3 +32,34 @@ classes:
     checks:
       - type: go-test
         packages: [] # Rule: empty packages list derives packages from touched Go files (preferring non-test files when present, or test files if test-only)
+
+verification_skills:
+  - name: g8s-blind-verifier
+    entry: skills/g8s-blind-verifier/SKILL.md
+    layer: L2_blind_packet
+    gate_command: "./bin/g8s verify --blind --json"
+
+  - name: g8s-red-prove
+    entry: skills/g8s-red-prove/SKILL.md
+    layer: L3_canary_mutant
+    gate_command: "./bin/g8s verify --red-green --canary-mutant --json"
+
+  - name: g8s-scenario-matrix
+    entry: skills/g8s-scenario-matrix/SKILL.md
+    layer: L1_holdout_suite
+    gate_command: "./bin/g8s matrix gen --holdout-dir --json"
+
+  - name: g8s-ux-visual-gate
+    entry: skills/g8s-ux-visual-gate/SKILL.md
+    layer: L2_ux_visual
+    gate_command: "./bin/g8s verify-ux --json"
+
+  - name: g8s-sec-gate
+    entry: skills/g8s-sec-gate/SKILL.md
+    layer: L2_security_boundary
+    gate_command: "./bin/g8s sec probe --json"
+
+  - name: g8s-epistemic-audit
+    entry: skills/g8s-epistemic-audit/SKILL.md
+    layer: L0_epistemic_purity
+    gate_command: "./bin/g8s epistemic audit --json"

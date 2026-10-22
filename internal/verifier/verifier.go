@@ -785,11 +785,11 @@ func extractFailureSignals(diagnostics []FailureDiagnostic, advisories []DiffAdv
 	var signals []string
 	addToken := func(tok string) {
 		tok = strings.ToLower(strings.Trim(tok, " \t\r\n.,:;()[]{}\"'`"))
-		if len(tok) < 3 {
+		if len(tok) < 4 {
 			return
 		}
 		switch tok {
-		case "the", "and", "for", "with", "from", "that", "this", "fail", "failed", "error", "test", "exit", "code":
+		case "with", "from", "that", "this", "fail", "failed", "error", "test", "exit", "code", "file", "found", "such", "stat", "runner", "script", "docs", "under", "into", "when":
 			return
 		}
 		if _, ok := seen[tok]; !ok {
@@ -938,10 +938,38 @@ func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scr
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
+	interp := "bash"
+	cleanScript := strings.TrimSpace(scriptPath)
+	if strings.HasPrefix(cleanScript, "node ") {
+		interp = "node"
+		cleanScript = strings.TrimSpace(strings.TrimPrefix(cleanScript, "node "))
+	} else if strings.HasPrefix(cleanScript, "python3 ") {
+		interp = "python3"
+		cleanScript = strings.TrimSpace(strings.TrimPrefix(cleanScript, "python3 "))
+	} else if strings.HasPrefix(cleanScript, "python ") {
+		interp = "python"
+		cleanScript = strings.TrimSpace(strings.TrimPrefix(cleanScript, "python "))
+	} else if strings.HasPrefix(cleanScript, "bash ") {
+		interp = "bash"
+		cleanScript = strings.TrimSpace(strings.TrimPrefix(cleanScript, "bash "))
+	} else if strings.HasPrefix(cleanScript, "sh ") {
+		interp = "sh"
+		cleanScript = strings.TrimSpace(strings.TrimPrefix(cleanScript, "sh "))
+	}
+
+	if interp == "bash" {
+		lower := strings.ToLower(cleanScript)
+		if strings.HasSuffix(lower, ".js") || strings.HasSuffix(lower, ".mjs") || strings.HasSuffix(lower, ".cjs") {
+			interp = "node"
+		} else if strings.HasSuffix(lower, ".py") {
+			interp = "python3"
+		}
+	}
+
 	// Check if script exists if repoRoot is set
-	resolvedPath := scriptPath
-	if v.repoRoot != "" && !filepath.IsAbs(scriptPath) {
-		resolvedPath = filepath.Join(v.repoRoot, scriptPath)
+	resolvedPath := cleanScript
+	if v.repoRoot != "" && !filepath.IsAbs(cleanScript) {
+		resolvedPath = filepath.Join(v.repoRoot, cleanScript)
 	}
 
 	if _, err := os.Stat(resolvedPath); err != nil {
@@ -955,7 +983,7 @@ func (v *Verifier) runScriptCheck(ctx context.Context, runner CommandRunner, scr
 		}
 	}
 
-	stdout, stderr, exitCode, err := runner(timeoutCtx, "bash", scriptPath)
+	stdout, stderr, exitCode, err := runner(timeoutCtx, interp, cleanScript)
 	if err != nil {
 		return scriptCheckResult{
 			checkResult: CheckResult{
@@ -1357,19 +1385,81 @@ func ParseBriefDoDItems(dodMD string) []BriefDoDItem {
 	return items
 }
 
+// IsMechanicallyVerifiedEvidence checks whether the given evidence string contains
+// a mechanical verification anchor or log SHA reference rather than unverified self-report prose.
+func IsMechanicallyVerifiedEvidence(evidence string, rawLogSHA string) bool {
+	trimmed := strings.TrimSpace(evidence)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if lower == "ok" {
+		return true
+	}
+
+	anchors := []string{
+		"sha256:",
+		"ev-",
+		"ok ",
+		"pass",
+		"exit code 0",
+		".go",
+		".sh",
+		".js",
+		".py",
+		".yml",
+		".yaml",
+		".json",
+		".md",
+		"test",
+	}
+	for _, anchor := range anchors {
+		if strings.Contains(lower, anchor) {
+			return true
+		}
+	}
+
+	trimmedSHA := strings.TrimSpace(rawLogSHA)
+	if len(trimmedSHA) >= 8 {
+		lowerSHA := strings.ToLower(trimmedSHA)
+		prefix := lowerSHA[:8]
+		if strings.Contains(lower, prefix) || strings.Contains(lower, lowerSHA) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // EvaluateDoDMatrix evaluates 1-to-1 coverage of items against reported statuses.
 func EvaluateDoDMatrix(items []BriefDoDItem, reported []DoDItemStatus, checksOK bool, rawLogSHA string) ([]DoDItemStatus, bool) {
 	if len(items) == 0 {
 		if len(reported) == 0 {
-			return nil, true
+			return nil, checksOK
+		}
+		if !checksOK {
+			matrix := make([]DoDItemStatus, 0, len(reported))
+			for _, r := range reported {
+				matrix = append(matrix, DoDItemStatus{
+					ID:       r.ID,
+					Status:   "UNMET",
+					Evidence: fmt.Sprintf("unverified worker claim (%s): mechanical checks failed", r.Evidence),
+				})
+			}
+			return matrix, false
 		}
 		allMET := true
+		matrix := make([]DoDItemStatus, 0, len(reported))
 		for _, r := range reported {
-			if r.Status != "MET" || strings.TrimSpace(r.Evidence) == "" {
+			if !strings.EqualFold(r.Status, "MET") || !IsMechanicallyVerifiedEvidence(r.Evidence, rawLogSHA) {
+				r.Status = "UNMET"
 				allMET = false
+			} else {
+				r.Status = "MET"
 			}
+			matrix = append(matrix, r)
 		}
-		return reported, allMET
+		return matrix, allMET
 	}
 
 	if len(reported) == 0 {
@@ -1398,13 +1488,37 @@ func EvaluateDoDMatrix(items []BriefDoDItem, reported []DoDItemStatus, checksOK 
 		repMap[strings.ToUpper(strings.TrimSpace(r.ID))] = r
 	}
 
+	if !checksOK {
+		matrix := make([]DoDItemStatus, 0, len(items))
+		for _, item := range items {
+			normID := strings.ToUpper(strings.TrimSpace(item.ID))
+			evidence := "mechanical checks failed (worker self-report rejected)"
+			if _, ok := repMap[normID]; !ok {
+				evidence = "missing from reported DoD matrix"
+			}
+			matrix = append(matrix, DoDItemStatus{
+				ID:       item.ID,
+				Status:   "UNMET",
+				Evidence: evidence,
+			})
+		}
+		return matrix, false
+	}
+
 	allOK := true
 	matrix := make([]DoDItemStatus, 0, len(items))
 	for _, item := range items {
 		normID := strings.ToUpper(strings.TrimSpace(item.ID))
 		if r, ok := repMap[normID]; ok {
-			if r.Status != "MET" || strings.TrimSpace(r.Evidence) == "" {
+			if !strings.EqualFold(r.Status, "MET") {
+				r.Status = "UNMET"
 				allOK = false
+			} else if !IsMechanicallyVerifiedEvidence(r.Evidence, rawLogSHA) {
+				r.Status = "UNMET"
+				r.Evidence = fmt.Sprintf("unverified self-report prose: %s", r.Evidence)
+				allOK = false
+			} else {
+				r.Status = "MET"
 			}
 			matrix = append(matrix, r)
 		} else {

@@ -383,3 +383,70 @@ func TestVerifyT3Command_CLI(t *testing.T) {
 		t.Fatalf("expected VETO_ESCALATE verdict, got %+v", v)
 	}
 }
+
+func TestWireDefaultT3Options(t *testing.T) {
+	// Case 1: Empty options are populated with defaults
+	var emptyOpts T3VerifyOptions
+	WireDefaultT3Options(&emptyOpts)
+
+	if emptyOpts.F0Provider != "agy" {
+		t.Fatalf("expected F0Provider agy, got %q", emptyOpts.F0Provider)
+	}
+	expectedProviders := []string{"9router", "claude", "agy"}
+	if len(emptyOpts.AvailableProviders) != len(expectedProviders) {
+		t.Fatalf("expected %d available providers, got %v", len(expectedProviders), emptyOpts.AvailableProviders)
+	}
+	for i, p := range expectedProviders {
+		if emptyOpts.AvailableProviders[i] != p {
+			t.Fatalf("expected provider[%d] == %q, got %q", i, p, emptyOpts.AvailableProviders[i])
+		}
+	}
+	if emptyOpts.ProviderRunner == nil {
+		t.Fatalf("expected ProviderRunner to be non-nil")
+	}
+	if emptyOpts.EvalProbeRunner == nil {
+		t.Fatalf("expected EvalProbeRunner to be non-nil")
+	}
+
+	// Verify SelectIndependentProvider with populated defaults selects "9router" when F0 is "agy"
+	selected, ok := SelectIndependentProvider(emptyOpts.F0Provider, emptyOpts.AvailableProviders)
+	if !ok {
+		t.Fatalf("expected SelectIndependentProvider to succeed")
+	}
+	if selected != "9router" {
+		t.Fatalf("expected selected provider 9router, got %q", selected)
+	}
+
+	// Case 2: Preserves already-set fields if non-empty
+	customRunner := func(provider, repoDir, diff string) (bool, string, error) {
+		return true, "custom", nil
+	}
+	customProbe := func(repoDir string) (bool, string, error) {
+		return true, "custom probe", nil
+	}
+	customOpts := T3VerifyOptions{
+		F0Provider:         "custom-f0",
+		AvailableProviders: []string{"custom-f0", "custom-indep"},
+		ProviderRunner:     customRunner,
+		EvalProbeRunner:    customProbe,
+	}
+	WireDefaultT3Options(&customOpts)
+
+	if customOpts.F0Provider != "custom-f0" {
+		t.Fatalf("expected custom-f0, got %q", customOpts.F0Provider)
+	}
+	if len(customOpts.AvailableProviders) != 2 || customOpts.AvailableProviders[1] != "custom-indep" {
+		t.Fatalf("expected custom providers preserved, got %v", customOpts.AvailableProviders)
+	}
+	p, d, _ := customOpts.ProviderRunner("p", "r", "d")
+	if !p || d != "custom" {
+		t.Fatalf("expected custom ProviderRunner to be preserved")
+	}
+	pProbe, dProbe, _ := customOpts.EvalProbeRunner("r")
+	if !pProbe || dProbe != "custom probe" {
+		t.Fatalf("expected custom EvalProbeRunner to be preserved")
+	}
+
+	// Case 3: Nil options safety
+	WireDefaultT3Options(nil)
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -204,6 +205,84 @@ func RunT3Verification(opts T3VerifyOptions) (T3Verdict, error) {
 	return verdict, nil
 }
 
+func defaultT3ProviderRunner(provider, repoDir, diff string) (bool, string, error) {
+	g8sBin := filepath.Join(repoDir, "bin", "g8s")
+	if _, err := os.Stat(g8sBin); err != nil {
+		g8sBin = "g8s"
+	}
+
+	truncatedDiff := diff
+	if len(truncatedDiff) > 12000 {
+		truncatedDiff = truncatedDiff[:12000]
+	}
+	prompt := fmt.Sprintf("Review this git diff as an independent second verifier. Inspect for critical safety, regression, or correctness issues. If acceptable, output 'VERDICT: PASS'. If vetoing, output 'VETO' or 'FAIL' with reasons.\n\nDiff:\n%s", truncatedDiff)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, g8sBin, "llm-call", "--provider", provider, "--model", "reasoning-high", "--prompt", prompt, "--json")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	outStr := strings.TrimSpace(string(out))
+	if err != nil {
+		detail := outStr
+		if detail == "" {
+			detail = err.Error()
+		}
+		return false, detail, err
+	}
+
+	upper := strings.ToUpper(outStr)
+	if (strings.Contains(upper, "VETO") || strings.Contains(upper, "FAIL")) && !strings.Contains(upper, "VERDICT: PASS") {
+		return false, outStr, nil
+	}
+
+	return true, fmt.Sprintf("independent provider %s verified diff", provider), nil
+}
+
+func defaultT3EvalProbeRunner(repoDir string) (bool, string, error) {
+	g8sBin := filepath.Join(repoDir, "bin", "g8s")
+	if _, err := os.Stat(g8sBin); err != nil {
+		g8sBin = "g8s"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, g8sBin, "eval", "run", "--json")
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	outStr := strings.TrimSpace(string(out))
+	if err != nil {
+		detail := outStr
+		if detail == "" {
+			detail = err.Error()
+		}
+		return false, detail, err
+	}
+
+	return true, "g8s eval probes passed", nil
+}
+
+// WireDefaultT3Options configures default provider settings and runners if not already set.
+func WireDefaultT3Options(opts *T3VerifyOptions) {
+	if opts == nil {
+		return
+	}
+	if opts.F0Provider == "" {
+		opts.F0Provider = "agy"
+	}
+	if len(opts.AvailableProviders) == 0 {
+		opts.AvailableProviders = []string{"9router", "claude", "agy"}
+	}
+	if opts.ProviderRunner == nil {
+		opts.ProviderRunner = defaultT3ProviderRunner
+	}
+	if opts.EvalProbeRunner == nil {
+		opts.EvalProbeRunner = defaultT3EvalProbeRunner
+	}
+}
+
 func verifyT3Command(args []string) int {
 	var opts T3VerifyOptions
 	var jsonOutput bool
@@ -264,6 +343,8 @@ func verifyT3Command(args []string) int {
 			}
 		}
 	}
+
+	WireDefaultT3Options(&opts)
 
 	verdict, err := RunT3Verification(opts)
 	if err != nil {

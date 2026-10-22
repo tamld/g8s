@@ -91,6 +91,31 @@ Connect your agent runtime (Claude Desktop, Cursor, Codex) to `g8s mcp` to lever
 - `g8s_select`: In-process dot-path JSON extraction (replaces `jq`).
 - `g8s_llm_call`: Multi-protocol LLM proxy delegating to configured gateways.
 
+## Step 7 — Adopt Feature Map & the 3-Layer Blind Verification Loop
+
+To defend against AI evaluation awareness, test overfitting, and reviewer sycophancy, sibling projects can adopt `g8s`'s end-to-end verification architecture:
+
+### 1. Declarative Feature Map (`.g8s/feature-map.yml`)
+Maintain a machine-checkable traceability DAG connecting user stories to OpenSpec requirements, code paths, invariants, and test suites:
+- Auto-derive worker `WriteReceipt.AllowedPaths` directly from feature definitions.
+- Automatically verify downstream consumers using blast-radius routing (`g8s verify --feature <id>`).
+
+### 2. The 3-Layer Blind Verification Loop
+Run verification in three isolated tiers:
+- **Layer 1 (Holdout Suite)**: Store acceptance tests outside the worker worktree at `$G8S_STATE_DIR/holdout/<feature-id>`. Mount only during verification (`g8s verify --holdout-dir`).
+- **Layer 2 (Double-Blind Packet)**: Pass candidate patches through `BlindReviewPacket` stripping model identity, author information, and self-summary prose. Independent verifiers falsify code directly against invariants.
+- **Layer 3 (Canary Mutant Check)**: Inject synthetic regressions (`--canary-mutant`) into target code to ensure test harnesses catch intentional defects (`CanaryCaught == true`).
+
+### 3. Verification Skills Suite
+Copy or symlink modular verification charters from `skills/`:
+- [`g8s-blind-verifier`](../skills/g8s-blind-verifier/SKILL.md): Sanitized packet falsification review.
+- [`g8s-red-prove`](../skills/g8s-red-prove/SKILL.md): Mechanical `Red -> Green` reproduction + mutation proof.
+- [`g8s-scenario-matrix`](../skills/g8s-scenario-matrix/SKILL.md): 12-dimension edge matrix generator and holdouts.
+- [`g8s-ux-visual-gate`](../skills/g8s-ux-visual-gate/SKILL.md): Headless DOM geometry, contrast & media playback gate.
+- [`g8s-sec-gate`](../skills/g8s-sec-gate/SKILL.md): Zero-trust SAST + live DAST probe runner.
+- [`g8s-epistemic-audit`](../skills/g8s-epistemic-audit/SKILL.md): Claim decomposition & evidence-tier classifier enforcing the 4 Epistemic Laws.
+- Supervisor integration guide: [`skills/g8s-supervisor/references/verification-skills-suite.md`](../skills/g8s-supervisor/references/verification-skills-suite.md).
+
 ## Agent pull path (fastest — no git)
 
 An autonomous agent pulls the offer without cloning:

@@ -1,0 +1,125 @@
+schema_version: "1.0"
+# ==============================================================================
+# Feature Map Starter Template (.g8s/feature-map.yml)
+# ==============================================================================
+# This template is part of the g8s Offer Bundle for sibling repositories.
+#
+# PURPOSE:
+# The Feature Map is the declarative Single Source of Truth (SSoT) for:
+#   1. End-to-end traceability from SRS requirements to code paths & invariants.
+#   2. Blast-radius impact routing: determining which consumers require re-test
+#      when a component is modified.
+#   3. Zero-orphan package coverage: ensuring all internal packages belong to an
+#      explicit feature owner.
+#   4. Dynamic WriteReceipt scoping: deriving allowed edit paths for worker agents
+#      while strictly holding out private / holdout test suites.
+#
+# RULES FOR SIBLING REPOSITORIES:
+#   - schema_version MUST be "1.0".
+#   - Every internal package/module MUST be covered by at least one feature's code_paths.
+#   - The blast_radius dependency graph MUST be an acyclic directed graph (DAG).
+#   - depends_on lists prerequisite features this feature relies upon.
+#   - direct_consumers lists features that directly depend upon this feature.
+#   - invariants list critical architectural and security properties that must not break.
+#   - visible_tests lists test files or commands proving feature correctness.
+#   - holdout_tests (optional) lists test suites withheld from worker prompt visibility.
+# ==============================================================================
+
+features:
+  # ----------------------------------------------------------------------------
+  # Feature 1: Foundation / Core Subsystem
+  # ----------------------------------------------------------------------------
+  - id: "FEAT-CORE-01"
+    title: "Core Domain Logic & Data Models"
+    persona_story: "As a domain consumer, I need core state definitions and validation so that entity state remains consistent across mutations."
+    srs_reqs:
+      - "FR-CORE-01"
+    code_paths:
+      - "internal/core/**"
+      - "internal/models/**"
+    invariants:
+      - "Entities are validated prior to persistence"
+      - "No external I/O or database dependencies in pure domain models"
+    visible_tests:
+      - "internal/core/core_test.go"
+      - "internal/models/models_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers:
+        - "FEAT-STORAGE-01"
+        - "FEAT-SERVICE-01"
+
+  # ----------------------------------------------------------------------------
+  # Feature 2: Storage / Persistence Subsystem
+  # ----------------------------------------------------------------------------
+  - id: "FEAT-STORAGE-01"
+    title: "Durable Persistence & Transaction Engine"
+    persona_story: "As an application service, I need atomic transactions and durable persistence so that state transitions survive process restarts."
+    srs_reqs:
+      - "FR-STORAGE-01"
+    code_paths:
+      - "internal/storage/**"
+      - "internal/db/**"
+    invariants:
+      - "Database migrations run idempotently on startup"
+      - "All mutating operations execute inside atomic transactions"
+    visible_tests:
+      - "internal/storage/storage_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CORE-01"
+      direct_consumers:
+        - "FEAT-SERVICE-01"
+
+  # ----------------------------------------------------------------------------
+  # Feature 3: Service / Business Logic Subsystem
+  # ----------------------------------------------------------------------------
+  - id: "FEAT-SERVICE-01"
+    title: "Application Service Layer & Orchestration"
+    persona_story: "As an API controller or client, I need unified service workflows so that business rules are enforced consistently."
+    srs_reqs:
+      - "FR-SERVICE-01"
+    code_paths:
+      - "internal/service/**"
+      - "internal/workflow/**"
+    invariants:
+      - "Service operations return structured error types"
+      - "Access control permissions are checked before workflow execution"
+    visible_tests:
+      - "internal/service/service_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CORE-01"
+        - "FEAT-STORAGE-01"
+      direct_consumers:
+        - "FEAT-API-01"
+
+  # ----------------------------------------------------------------------------
+  # Feature 4: Interface / API / CLI Subsystem
+  # ----------------------------------------------------------------------------
+  - id: "FEAT-API-01"
+    title: "Public API Endpoints & CLI Interface"
+    persona_story: "As an external user or integration, I need stable HTTP endpoints and CLI commands to interact with system services."
+    srs_reqs:
+      - "FR-API-01"
+      - "NFR-PORTABILITY-01"
+    code_paths:
+      - "cmd/**"
+      - "internal/api/**"
+      - "internal/cli/**"
+    invariants:
+      - "JSON schemas validate all external input payloads"
+      - "CLI exits 0 on success and non-zero with structured error messages on failure"
+    visible_tests:
+      - "cmd/main_test.go"
+      - "internal/api/api_test.go"
+    holdout_tests:
+      - "internal/api/holdout_security_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-SERVICE-01"
+      direct_consumers: []
