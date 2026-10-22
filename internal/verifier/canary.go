@@ -276,7 +276,9 @@ func RunCanaryCheck(
 	restored := false
 	restore := func() {
 		if !restored {
-			_ = os.WriteFile(targetPath, origBytes, targetMode)
+			if err := os.WriteFile(targetPath, origBytes, targetMode); err != nil {
+				fmt.Fprintf(os.Stderr, "[canary] warning: failed to restore %s: %v\n", relFile, err)
+			}
 			restored = true
 		}
 	}

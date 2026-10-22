@@ -70,6 +70,9 @@ run_fallback_checks() {
 if command -v semgrep >/dev/null 2>&1; then
     echo "==> Running Semgrep SAST gate (--config .semgrep/g8s-rules.yml --metrics=off)..."
     semgrep scan --config "$RULES_FILE" --error --metrics=off "$TARGET_DIR"
+    if ! run_fallback_checks "$TARGET_DIR"; then
+        exit 1
+    fi
     echo "[SEMGREP-GATE] PASSED: Zero AST policy violations."
 else
     echo "==> Running Semgrep fallback structural gate (semgrep binary not in PATH)..."

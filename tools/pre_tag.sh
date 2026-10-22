@@ -170,7 +170,10 @@ check_ci_passes() {
     
     for workflow in "${required_workflows[@]}"; do
         local status
-        status=$(gh run list --workflow="$workflow" --branch=main --status=completed --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
+        status=$(gh run list --workflow="$workflow" --branch=main --status=completed --limit=1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)
+        if [ -z "$status" ]; then
+            status=$(gh run list --branch=main --status=completed --limit=40 --json workflowName,conclusion -q "[.[] | select(.workflowName == \"$workflow\")][0].conclusion" 2>/dev/null || echo "unknown")
+        fi
         if [ "$status" = "success" ]; then
             log_info "Workflow '$workflow': success"
         else

@@ -104,11 +104,11 @@ func (fm *FeatureMap) DeriveAllowedPaths(featureID string) ([]string, error) {
 
 	holdoutSet := make(map[string]bool)
 	for _, ht := range f.HoldoutTests {
-		holdoutSet[filepath.Clean(ht)] = true
+		holdoutSet[filepath.ToSlash(filepath.Clean(ht))] = true
 	}
 
 	isHoldout := func(p string) bool {
-		clean := filepath.Clean(p)
+		clean := filepath.ToSlash(filepath.Clean(p))
 		if holdoutSet[clean] {
 			return true
 		}
@@ -126,7 +126,7 @@ func (fm *FeatureMap) DeriveAllowedPaths(featureID string) ([]string, error) {
 		if p == "" || isHoldout(p) {
 			return
 		}
-		clean := filepath.Clean(p)
+		clean := filepath.ToSlash(filepath.Clean(p))
 		// retain /** glob convention if present in original
 		if strings.HasSuffix(p, "/**") && !strings.HasSuffix(clean, "/**") {
 			clean = clean + "/**"
