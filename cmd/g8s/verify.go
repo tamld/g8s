@@ -13,6 +13,7 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/featuremap"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/verifier"
 )
@@ -37,6 +38,11 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	asTaskFlag := fs.String("as-task", "", "caller task ID (self-grade guard)")
 	overrideReasonFlag := fs.String("override-reason", "", "F0 override rationale for advisory diff-guard signals (#595)")
 	briefFlag := fs.String("brief", "", "brief ID to load Definition of Done items from")
+	featureFlag := fs.String("feature", "", "feature ID from .g8s/feature-map.yml to verify (includes blast_radius.direct_consumers)")
+	repoFlag := fs.String("repo", "", "repository or worktree root directory")
+	holdoutDirFlag := fs.String("holdout-dir", "", "out-of-worktree holdout test directory")
+	blindPacketFlag := fs.Bool("blind-packet", false, "generate sanitized Double-Blind Review Packet")
+	canaryMutantFlag := fs.Bool("canary-mutant", false, "run Seeded Mutant Canary sensitivity check")
 
 	if err := fs.Parse(args); err != nil {
 		exitUsageWithWriter(stderr, "verify", "", *traceID, err.Error(), "", *jsonl)
@@ -47,42 +53,154 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	if taskID == "" && fs.NArg() > 0 {
 		taskID = fs.Arg(0)
 	}
-	if taskID == "" {
-		exitUsageWithWriter(stderr, "verify", "", *traceID, "usage: g8s verify --task <id> [--as-task <id>] [--brief <brief-id>] [--override-reason <text>]", "Provide a task ID", *jsonl)
-		return 2
-	}
 
-	dbPath := dbPathOverride
-	if dbPath == "" {
-		var err error
-		dbPath, err = databasePath()
-		if err != nil {
-			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeIO, err, "", *jsonl)
-			return 1
+	isStandaloneFeature := false
+	if taskID == "" {
+		if strings.TrimSpace(*featureFlag) != "" {
+			taskID = "feature-" + strings.TrimSpace(*featureFlag)
+			isStandaloneFeature = true
+		} else {
+			exitUsageWithWriter(stderr, "verify", "", *traceID, "usage: g8s verify --task <id> [--as-task <id>] [--brief <brief-id>] [--override-reason <text>]", "Provide a task ID", *jsonl)
+			return 2
 		}
 	}
 
-	store, err := controlplane.NewControlPlane(dbPath, nil)
-	if err != nil {
-		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
-		return 1
-	}
-	defer store.Close()
+	var target verifier.TaskRef
+	var targetRepoDir string
 
-	ctx := context.Background()
-	task, err := store.GetTask(ctx, taskID)
-	if err != nil {
-		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
-		return 1
-	}
-	if task == nil {
-		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("task %q not found", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
-		return 1
-	}
+	if isStandaloneFeature {
+		target = verifier.TaskRef{
+			ID:             taskID,
+			OverrideReason: strings.TrimSpace(*overrideReasonFlag),
+		}
+		if *briefFlag != "" {
+			dbPath := dbPathOverride
+			if dbPath == "" {
+				var err error
+				dbPath, err = databasePath()
+				if err != nil {
+					exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeIO, err, "", *jsonl)
+					return 1
+				}
+			}
 
-	target := verifier.TaskRef{
-		ID:             taskID,
-		OverrideReason: strings.TrimSpace(*overrideReasonFlag),
+			store, err := controlplane.NewControlPlane(dbPath, nil)
+			if err != nil {
+				exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+				return 1
+			}
+			defer store.Close()
+
+			ctx := context.Background()
+			b, err := store.GetBrief(ctx, *briefFlag)
+			if err != nil {
+				exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("brief %q not found: %w", *briefFlag, err), "Check brief ID with 'g8s brief show'", *jsonl)
+				return 1
+			}
+			target.DoDItems = verifier.ParseBriefDoDItems(b.DodMD)
+		}
+	} else {
+		dbPath := dbPathOverride
+		if dbPath == "" {
+			var err error
+			dbPath, err = databasePath()
+			if err != nil {
+				exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeIO, err, "", *jsonl)
+				return 1
+			}
+		}
+
+		store, err := controlplane.NewControlPlane(dbPath, nil)
+		if err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+			return 1
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		task, err := store.GetTask(ctx, taskID)
+		if err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+			return 1
+		}
+		if task == nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("task %q not found", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
+			return 1
+		}
+
+		target = verifier.TaskRef{
+			ID:             taskID,
+			OverrideReason: strings.TrimSpace(*overrideReasonFlag),
+		}
+
+		// Extract receipt_id and allowed_paths from task payload/request
+		var reqPayload struct {
+			ReceiptID    string   `json:"receipt_id"`
+			AllowedPaths []string `json:"allowed_paths"`
+			ScopeRoot    string   `json:"scope_root"`
+			AddDirs      []string `json:"add_dirs"`
+		}
+		if len(task.Request) > 0 {
+			_ = json.Unmarshal(task.Request, &reqPayload)
+		}
+
+		target.ReceiptID = reqPayload.ReceiptID
+		target.AllowedPaths = reqPayload.AllowedPaths
+
+		// If receipt_id is present and allowed_paths not embedded in request, resolve from
+		// the sibling receipts.db — the canonical receipt ledger (the receipt CLI and the
+		// controlplane both write receipts.db next to g8s.db; round-1 of issue #516 caught
+		// verify reading g8s.db, where the table does not exist, and landing unregistered).
+		if target.ReceiptID != "" && len(target.AllowedPaths) == 0 {
+			rcDbPath := filepath.Join(filepath.Dir(dbPath), "receipts.db")
+			db, err := sql.Open("sqlite", pathutil.SQLiteURI(rcDbPath, "mode=ro"))
+			if err == nil {
+				defer db.Close()
+				var pathsJSON string
+				if err := db.QueryRowContext(ctx, "SELECT allowed_paths_json FROM write_receipts WHERE receipt_id = ?", target.ReceiptID).Scan(&pathsJSON); err == nil {
+					var paths []string
+					if err := json.Unmarshal([]byte(pathsJSON), &paths); err == nil {
+						target.AllowedPaths = paths
+					}
+				}
+			}
+		}
+
+		targetRepoDir = strings.TrimSpace(reqPayload.ScopeRoot)
+		if targetRepoDir == "" && len(reqPayload.AddDirs) > 0 {
+			targetRepoDir = strings.TrimSpace(reqPayload.AddDirs[0])
+		}
+
+		// Fix L3: Inspect task.Result for deliverable pointer or dod_matrix
+		var taskRes struct {
+			Deliverable *struct {
+				Mode string `json:"mode"`
+				Dir  string `json:"dir"`
+			} `json:"deliverable"`
+			DoDMatrix []verifier.DoDItemStatus `json:"dod_matrix"`
+		}
+		if len(task.Result) > 0 {
+			_ = json.Unmarshal(task.Result, &taskRes)
+		}
+		if len(taskRes.DoDMatrix) > 0 {
+			target.ReportedDoD = taskRes.DoDMatrix
+		}
+		if taskRes.Deliverable != nil && taskRes.Deliverable.Mode == "worktree" && strings.TrimSpace(taskRes.Deliverable.Dir) != "" {
+			wtDir := strings.TrimSpace(taskRes.Deliverable.Dir)
+			if fi, err := os.Stat(wtDir); err == nil && fi.IsDir() {
+				target.WorktreeDir = wtDir
+				targetRepoDir = wtDir
+			}
+		}
+
+		if *briefFlag != "" {
+			b, err := store.GetBrief(ctx, *briefFlag)
+			if err != nil {
+				exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("brief %q not found: %w", *briefFlag, err), "Check brief ID with 'g8s brief show'", *jsonl)
+				return 1
+			}
+			target.DoDItems = verifier.ParseBriefDoDItems(b.DodMD)
+		}
 	}
 
 	caller := verifier.TaskRef{}
@@ -98,74 +216,114 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		return 1
 	}
 
-	// Extract receipt_id and allowed_paths from task payload/request
-	var reqPayload struct {
-		ReceiptID    string   `json:"receipt_id"`
-		AllowedPaths []string `json:"allowed_paths"`
-		ScopeRoot    string   `json:"scope_root"`
-		AddDirs      []string `json:"add_dirs"`
-	}
-	if len(task.Request) > 0 {
-		_ = json.Unmarshal(task.Request, &reqPayload)
+	if strings.TrimSpace(*repoFlag) != "" && targetRepoDir == "" {
+		targetRepoDir = strings.TrimSpace(*repoFlag)
+		if target.WorktreeDir == "" {
+			target.WorktreeDir = targetRepoDir
+		}
 	}
 
-	target.ReceiptID = reqPayload.ReceiptID
-	target.AllowedPaths = reqPayload.AllowedPaths
+	if featureFlagVal := strings.TrimSpace(*featureFlag); featureFlagVal != "" {
+		fmRoot := targetRepoDir
+		if fmRoot == "" {
+			fmRoot = "."
+		}
+		fmPath := filepath.Join(fmRoot, featuremap.DefaultFeatureMapPath)
+		fm, err := featuremap.Load(fmPath)
+		if err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, err, "Ensure .g8s/feature-map.yml exists", *jsonl)
+			return 1
+		}
 
-	// If receipt_id is present and allowed_paths not embedded in request, resolve from
-	// the sibling receipts.db — the canonical receipt ledger (the receipt CLI and the
-	// controlplane both write receipts.db next to g8s.db; round-1 of issue #516 caught
-	// verify reading g8s.db, where the table does not exist, and landing unregistered).
-	if target.ReceiptID != "" && len(target.AllowedPaths) == 0 {
-		rcDbPath := filepath.Join(filepath.Dir(dbPath), "receipts.db")
-		db, err := sql.Open("sqlite", pathutil.SQLiteURI(rcDbPath, "mode=ro"))
-		if err == nil {
-			defer db.Close()
-			var pathsJSON string
-			if err := db.QueryRowContext(ctx, "SELECT allowed_paths_json FROM write_receipts WHERE receipt_id = ?", target.ReceiptID).Scan(&pathsJSON); err == nil {
-				var paths []string
-				if err := json.Unmarshal([]byte(pathsJSON), &paths); err == nil {
-					target.AllowedPaths = paths
+		nodes, err := fm.ResolveTransitiveFeatures(featureFlagVal)
+		if err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, err, "Check feature ID with 'g8s feature list'", *jsonl)
+			return 1
+		}
+
+		target.FeatureID = featureFlagVal
+		target.SpecContract = fmt.Sprintf("%s (%s) SRS:%s Delta:%s", nodes[0].Title, nodes[0].PersonaStory, strings.Join(nodes[0].SRSReqs, ","), nodes[0].OpenSpecDelta)
+
+		if len(target.AllowedPaths) == 0 {
+			if derivedPaths, err := fm.DeriveAllowedPaths(target.FeatureID); err == nil {
+				target.AllowedPaths = derivedPaths
+			}
+		}
+
+		var invariants []string
+		seenInvariants := make(map[string]bool)
+		var visibleTests []string
+		seenVisibleTests := make(map[string]bool)
+
+		for _, node := range nodes {
+			for _, inv := range node.Invariants {
+				inv = strings.TrimSpace(inv)
+				if inv != "" && !seenInvariants[inv] {
+					seenInvariants[inv] = true
+					invariants = append(invariants, inv)
 				}
+			}
+			for _, vt := range node.VisibleTests {
+				vt = strings.TrimSpace(vt)
+				if vt != "" && !seenVisibleTests[vt] {
+					seenVisibleTests[vt] = true
+					visibleTests = append(visibleTests, vt)
+				}
+			}
+		}
+		target.Invariants = invariants
+
+		var extraChecks []verifier.Check
+		for _, vt := range visibleTests {
+			if strings.HasPrefix(vt, "go test") {
+				fields := strings.Fields(vt)
+				var pkgs []string
+				if len(fields) > 2 {
+					for _, f := range fields[2:] {
+						if strings.HasPrefix(f, "-") {
+							continue
+						}
+						pkgs = append(pkgs, f)
+					}
+				}
+				if len(pkgs) > 0 {
+					extraChecks = append(extraChecks, verifier.Check{
+						Type:     verifier.CheckTypeGoTest,
+						Packages: pkgs,
+					})
+				}
+			} else if strings.HasSuffix(vt, "_test.go") {
+				dir := filepath.ToSlash(filepath.Dir(vt))
+				pkgDir := "./" + dir
+				if dir == "." {
+					pkgDir = "."
+				} else if strings.HasPrefix(dir, "./") {
+					pkgDir = dir
+				}
+				extraChecks = append(extraChecks, verifier.Check{
+					Type:     verifier.CheckTypeGoTest,
+					Packages: []string{pkgDir},
+				})
+			} else {
+				extraChecks = append(extraChecks, verifier.Check{
+					Type: verifier.CheckTypeScript,
+					Run:  vt,
+				})
+			}
+		}
+		target.ExtraChecks = extraChecks
+
+		if strings.TrimSpace(*holdoutDirFlag) == "" && os.Getenv("G8S_STATE_DIR") != "" {
+			cand := filepath.Join(os.Getenv("G8S_STATE_DIR"), "holdout", target.FeatureID)
+			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+				*holdoutDirFlag = cand
 			}
 		}
 	}
 
-	targetRepoDir := strings.TrimSpace(reqPayload.ScopeRoot)
-	if targetRepoDir == "" && len(reqPayload.AddDirs) > 0 {
-		targetRepoDir = strings.TrimSpace(reqPayload.AddDirs[0])
-	}
-
-	// Fix L3: Inspect task.Result for deliverable pointer or dod_matrix
-	var taskRes struct {
-		Deliverable *struct {
-			Mode string `json:"mode"`
-			Dir  string `json:"dir"`
-		} `json:"deliverable"`
-		DoDMatrix []verifier.DoDItemStatus `json:"dod_matrix"`
-	}
-	if len(task.Result) > 0 {
-		_ = json.Unmarshal(task.Result, &taskRes)
-	}
-	if len(taskRes.DoDMatrix) > 0 {
-		target.ReportedDoD = taskRes.DoDMatrix
-	}
-	if taskRes.Deliverable != nil && taskRes.Deliverable.Mode == "worktree" && strings.TrimSpace(taskRes.Deliverable.Dir) != "" {
-		wtDir := strings.TrimSpace(taskRes.Deliverable.Dir)
-		if fi, err := os.Stat(wtDir); err == nil && fi.IsDir() {
-			target.WorktreeDir = wtDir
-			targetRepoDir = wtDir
-		}
-	}
-
-	if *briefFlag != "" {
-		b, err := store.GetBrief(ctx, *briefFlag)
-		if err != nil {
-			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("brief %q not found: %w", *briefFlag, err), "Check brief ID with 'g8s brief show'", *jsonl)
-			return 1
-		}
-		target.DoDItems = verifier.ParseBriefDoDItems(b.DodMD)
-	}
+	target.HoldoutDir = strings.TrimSpace(*holdoutDirFlag)
+	target.GenerateBlindPacket = *blindPacketFlag
+	target.RunCanaryMutant = *canaryMutantFlag
 
 	// Run Verify
 	finalOpts := make([]verifier.Option, 0, len(verifierOpts)+2)
@@ -193,6 +351,9 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 
 	// Hard failure exits 1
 	if verdict.Status == verifier.StatusHard && verdict.Outcome == verifier.OutcomeFail {
+		return 1
+	}
+	if verdict.VetoReason != "" || (verdict.HoldoutChecksOK != nil && !*verdict.HoldoutChecksOK) {
 		return 1
 	}
 

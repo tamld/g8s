@@ -694,3 +694,140 @@ func TestVerifyCLI_BriefFlag(t *testing.T) {
 		t.Errorf("D2 should be UNMET, got %+v", v.DoDMatrix[1])
 	}
 }
+
+// TestVerifyCLI_StandaloneFeatureBlindPacket verifies that g8s verify runs standalone with --feature and --blind-packet.
+func TestVerifyCLI_StandaloneFeatureBlindPacket(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+
+	mockRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		return []byte("ok"), nil, 0, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{
+		"--feature", "FEAT-FEATUREMAP-01",
+		"--blind-packet",
+		"--repo", repoRoot,
+		"--json",
+	}, &stdout, &stderr, "", mockRunner)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v. stdout: %s", err, stdout.String())
+	}
+
+	if env.Kind != "verdict" || env.Command != "verify" {
+		t.Fatalf("unexpected envelope kind/command: kind=%q cmd=%q", env.Kind, env.Command)
+	}
+	if env.Subcommand != "feature-FEAT-FEATUREMAP-01" {
+		t.Fatalf("expected Subcommand (taskID) 'feature-FEAT-FEATUREMAP-01', got %q", env.Subcommand)
+	}
+
+	payloadBytes, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal env.Data: %v", err)
+	}
+
+	var v verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v.FeatureID != "FEAT-FEATUREMAP-01" {
+		t.Errorf("verdict.FeatureID = %q, want FEAT-FEATUREMAP-01", v.FeatureID)
+	}
+	if v.BlindReviewPacket == nil {
+		t.Fatalf("expected non-nil blind_review_packet in verdict")
+	}
+	if v.BlindReviewPacket.FeatureID != "FEAT-FEATUREMAP-01" {
+		t.Errorf("BlindReviewPacket.FeatureID = %q, want FEAT-FEATUREMAP-01", v.BlindReviewPacket.FeatureID)
+	}
+	if v.BlindReviewPacket.PacketID == "" {
+		t.Errorf("expected non-empty PacketID in BlindReviewPacket")
+	}
+	if !strings.Contains(v.BlindReviewPacket.SpecContract, "FEAT-FEATUREMAP-01") && !strings.Contains(v.BlindReviewPacket.SpecContract, "Declarative Feature Map") {
+		t.Errorf("unexpected SpecContract: %q", v.BlindReviewPacket.SpecContract)
+	}
+	if len(v.Checks) == 0 {
+		t.Errorf("expected transitive feature checks to be executed, got 0 checks")
+	}
+}
+
+// TestVerifyCLI_StandaloneFeatureHoldoutAndCanary verifies holdout script execution and canary mutant check.
+func TestVerifyCLI_StandaloneFeatureHoldoutAndCanary(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	tempHoldoutDir := t.TempDir()
+
+	scriptPath := filepath.Join(tempHoldoutDir, "holdout_verify.sh")
+	scriptContent := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write holdout script: %v", err)
+	}
+
+	holdoutCallCount := 0
+	mockRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		for _, arg := range args {
+			if strings.Contains(arg, "holdout_verify.sh") {
+				holdoutCallCount++
+				if holdoutCallCount > 1 {
+					// Simulated probe runner mutant catch
+					return nil, []byte("canary caught mutant"), 1, nil
+				}
+				return []byte("holdout passed"), nil, 0, nil
+			}
+		}
+		return []byte("ok"), nil, 0, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{
+		"--feature", "FEAT-FEATUREMAP-01",
+		"--holdout-dir", tempHoldoutDir,
+		"--canary-mutant",
+		"--repo", repoRoot,
+		"--json",
+	}, &stdout, &stderr, "", mockRunner)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+
+	if holdoutCallCount < 2 {
+		t.Errorf("expected holdout script to be called at least 2 times (holdout check + canary probe), got %d", holdoutCallCount)
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v. stdout: %s", err, stdout.String())
+	}
+
+	payloadBytes, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal env.Data: %v", err)
+	}
+
+	var v verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &v); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+
+	if v.HoldoutChecksOK == nil || !*v.HoldoutChecksOK {
+		t.Errorf("expected HoldoutChecksOK to be true, got %v", v.HoldoutChecksOK)
+	}
+	if v.CanaryResult == nil {
+		t.Fatalf("expected non-nil CanaryResult in verdict")
+	}
+	if !v.CanaryResult.Executed {
+		t.Errorf("expected CanaryResult.Executed to be true")
+	}
+	if !v.CanaryResult.CanaryCaught {
+		t.Errorf("expected CanaryResult.CanaryCaught to be true")
+	}
+	if v.VetoReason != "" {
+		t.Errorf("expected empty VetoReason, got %q", v.VetoReason)
+	}
+}
