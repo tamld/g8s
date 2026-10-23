@@ -7,8 +7,8 @@
   "go_version": "1.26.10",
   "latest_release": {
     "tag": "v0.19.0",
-    "commit": "0f07738",
-    "date": "2026-10-16"
+    "commit": "3bcca92",
+    "date": "2026-10-22"
   },
   "license": "MIT",
   "repository": "https://github.com/tamld/g8s",
@@ -29,6 +29,7 @@
   "declarative_registries": {
     "agent_models": ".g8s/agent-models.yml",
     "effort_classes": ".g8s/effort-classes.yml",
+    "feature_map": ".g8s/feature-map.yml",
     "lane_bundles": ".g8s/lane-bundles.yml",
     "trust_boundaries": ".g8s/trust-boundaries.yml",
     "verifier_classes": ".g8s/verifier-classes.yml"

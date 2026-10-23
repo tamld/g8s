@@ -94,6 +94,7 @@ func TestHook_NonCommandToolAllowed(t *testing.T) {
 func TestHook_MergeCommandGateCheck(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir, _, headSHA := setupTestGitRepo(t)
+	t.Cleanup(func() { gateCheckWg.Wait() })
 
 	// Case A: Gate check FAILS (no mandate, no evidence)
 	inputFail := PreToolInput{
@@ -188,6 +189,7 @@ func TestHook_MergeCommandGateCheck(t *testing.T) {
 func TestHook_MergeTimeoutFailSafe(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir, _, _ := setupTestGitRepo(t)
+	t.Cleanup(func() { gateCheckWg.Wait() })
 
 	// Simulate timeout by setting gateCheckTimeout to 1 nanosecond
 	oldTimeout := gateCheckTimeout

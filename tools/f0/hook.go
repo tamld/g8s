@@ -12,10 +12,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-var gateCheckTimeout = 25 * time.Second
+var (
+	gateCheckTimeout = 25 * time.Second
+	gateCheckWg      sync.WaitGroup
+)
 
 // HookDecision represents the decision returned by agent hooks.
 type HookDecision struct {
@@ -674,7 +678,9 @@ func runMergeGateCheck(repoDir string, pr int) HookDecision {
 	defer cancel()
 
 	ch := make(chan gateRes, 1)
+	gateCheckWg.Add(1)
 	go func() {
+		defer gateCheckWg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				ch <- gateRes{err: fmt.Errorf("panic in gate check: %v", r)}

@@ -47,7 +47,7 @@ jobs:
           SRC_VERSION="$(grep -oE 'Version[[:space:]]*=[[:space:]]*"[^"]*"' cmd/g8s/version.go | head -n1 | cut -d'"' -f2)"
           echo "tag version : ${TAG_VERSION}"
           echo "src  version: ${SRC_VERSION}"
-          if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]]; then
+          if [ "${TAG_VERSION}" != "${SRC_VERSION}" ]; then
             echo "::error::Tag ${TAG_NAME} does not match cmd/g8s/version.go Version '${SRC_VERSION}'."
             exit 1
           fi
