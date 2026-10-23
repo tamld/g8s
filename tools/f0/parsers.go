@@ -250,6 +250,8 @@ type verifyEnvelope struct {
 	} `json:"data"`
 }
 
+var g8sVerifyRegex = regexp.MustCompile(`(?m)^\s*\[(PASS|FAIL|SKIP|HARD|SOFT)\]`)
+
 // parseG8sVerify parses verification check results from g8s verify.
 func parseG8sVerify(stdout []byte) int {
 	start := bytes.IndexByte(stdout, '{')
@@ -262,8 +264,7 @@ func parseG8sVerify(stdout []byte) int {
 			}
 		}
 	}
-	re := regexp.MustCompile(`(?m)^\s*\[(PASS|FAIL|SKIP|HARD|SOFT)\]`)
-	matches := re.FindAll(stdout, -1)
+	matches := g8sVerifyRegex.FindAll(stdout, -1)
 	if len(matches) > 0 {
 		return len(matches)
 	}
