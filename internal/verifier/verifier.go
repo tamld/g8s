@@ -215,10 +215,20 @@ func (e *SelfGradeError) Is(target error) bool {
 	return target == ErrSelfGrade
 }
 
-// Citation regex patterns: exactly #<digits> or incident:<slug>
+// ⚡ Bolt Optimization: Hoist dynamic regexp.MustCompile calls to package level for zero-allocation processing.
 var (
+	// Citation regex patterns: exactly #<digits> or incident:<slug>
 	citationIssueTokenRegex    = regexp.MustCompile(`^#\d+$`)
 	citationIncidentTokenRegex = regexp.MustCompile(`^incident:[a-z0-9][a-z0-9_-]*$`)
+
+	// Go test failure extraction patterns
+	goTestPassRegex = regexp.MustCompile(`^(?:\s*)--- PASS:\s*(\S+)`)
+	goTestFailRegex = regexp.MustCompile(`^(?:\s*)--- FAIL:\s*(\S+)`)
+	goTestRunRegex  = regexp.MustCompile(`^=== RUN\s+(\S+)`)
+
+	// Brief DoD item extraction patterns
+	dodItemRegex     = regexp.MustCompile(`(?i)^\s*(?:[-*]\s+(?:\[[ xX]\]\s+)?)?\*{0,2}(D\d+|DoD-\d+)\*{0,2}(?:[:\-–—\s]+(.*))?$`)
+	dodFallbackRegex = regexp.MustCompile(`(?i)\b(D\d+|DoD-\d+)\b[:\-–—\s]*(.*)`)
 )
 
 // isValidCitationToken reports whether a single token is a valid citation.
@@ -1349,9 +1359,6 @@ func (v *Verifier) runGoTestCheck(ctx context.Context, runner CommandRunner, pkg
 
 // countGoTests parses stdout of go test to determine tests ran, failed, and whether execution was vacuous.
 func countGoTests(stdout []byte, exitCode int) (ran int, failed int, isVacuous bool) {
-	passRegex := regexp.MustCompile(`^(?:\s*)--- PASS:\s*(\S+)`)
-	failRegex := regexp.MustCompile(`^(?:\s*)--- FAIL:\s*(\S+)`)
-
 	var passCount, failCount, okCount int
 	var hasVacuousMarker bool
 
@@ -1377,9 +1384,9 @@ func countGoTests(stdout []byte, exitCode int) (ran int, failed int, isVacuous b
 			}
 		}
 
-		if passRegex.MatchString(trimmed) {
+		if goTestPassRegex.MatchString(trimmed) {
 			passCount++
-		} else if failRegex.MatchString(trimmed) {
+		} else if goTestFailRegex.MatchString(trimmed) {
 			failCount++
 		} else {
 			if strings.HasPrefix(trimmed, "ok\t") || strings.HasPrefix(trimmed, "ok ") || trimmed == "ok" {
@@ -1426,29 +1433,25 @@ func extractGoTestFailures(targetStr string, stdout, stderr []byte) []FailureDia
 	var currentRunLines []string
 	var activeFailTest string
 
-	failRegex := regexp.MustCompile(`^(?:\s*)--- FAIL:\s*(\S+)`)
-	passRegex := regexp.MustCompile(`^(?:\s*)--- PASS:\s*(\S+)`)
-	runRegex := regexp.MustCompile(`^=== RUN\s+(\S+)`)
-
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
-		if m := runRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+		if m := goTestRunRegex.FindStringSubmatch(trimmed); len(m) > 1 {
 			currentRunTest = m[1]
 			currentRunLines = nil
 			activeFailTest = ""
 			continue
 		}
 
-		if m := passRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+		if m := goTestPassRegex.FindStringSubmatch(trimmed); len(m) > 1 {
 			currentRunTest = ""
 			currentRunLines = nil
 			activeFailTest = ""
 			continue
 		}
 
-		if m := failRegex.FindStringSubmatch(trimmed); len(m) > 1 {
+		if m := goTestFailRegex.FindStringSubmatch(trimmed); len(m) > 1 {
 			testName := m[1]
 			activeFailTest = testName
 			var lines []string
@@ -1562,8 +1565,6 @@ func ParseBriefDoDItems(dodMD string) []BriefDoDItem {
 	seen := make(map[string]bool)
 
 	// Markdown patterns matching (D\d+|DoD-\d+)
-	itemRegex := regexp.MustCompile(`(?i)^\s*(?:[-*]\s+(?:\[[ xX]\]\s+)?)?\*{0,2}(D\d+|DoD-\d+)\*{0,2}(?:[:\-–—\s]+(.*))?$`)
-	fallbackRegex := regexp.MustCompile(`(?i)\b(D\d+|DoD-\d+)\b[:\-–—\s]*(.*)`)
 
 	scanner := bufio.NewScanner(strings.NewReader(dodMD))
 	for scanner.Scan() {
@@ -1572,12 +1573,12 @@ func ParseBriefDoDItems(dodMD string) []BriefDoDItem {
 			continue
 		}
 		var id, desc string
-		if m := itemRegex.FindStringSubmatch(line); len(m) > 1 {
+		if m := dodItemRegex.FindStringSubmatch(line); len(m) > 1 {
 			id = strings.TrimSpace(m[1])
 			if len(m) > 2 {
 				desc = strings.TrimSpace(m[2])
 			}
-		} else if m := fallbackRegex.FindStringSubmatch(line); len(m) > 1 {
+		} else if m := dodFallbackRegex.FindStringSubmatch(line); len(m) > 1 {
 			id = strings.TrimSpace(m[1])
 			if len(m) > 2 {
 				desc = strings.TrimSpace(m[2])
