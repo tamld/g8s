@@ -583,13 +583,14 @@ func checkIrreversible(cmd string) (bool, string) {
 }
 
 var (
-	ghPrMergeRegex   = regexp.MustCompile(`(?i)\bgh\s+pr\s+merge\b`)
-	ghApiMergeRegex  = regexp.MustCompile(`(?i)\bgh\s+api\b[^\n;&]*pulls/(\d+)/merge`)
-	gitPushMainRegex = regexp.MustCompile(`(?i)\bgit\s+push\b[^\n;&]*(?:\s+(?:[^\s;&]+[/])?(?:main|master)\b|:(?:main|master)\b)`)
-	prUrlRegex       = regexp.MustCompile(`pull/(\d+)`)
-	prFlagRegex      = regexp.MustCompile(`--pr(?:=|\s+)(\d+)`)
-	cdDirRegex       = regexp.MustCompile(`(?i)(?:^|[\s;&])cd\s+([^\s;&]+)`)
-	repoFlagRegex    = regexp.MustCompile(`(?:-R|--repo)(?:=|\s+)(\S+)`)
+	ghPrMergeRegex    = regexp.MustCompile(`(?i)\bgh\s+pr\s+merge\b`)
+	ghApiMergeRegex   = regexp.MustCompile(`(?i)\bgh\s+api\b[^\n;&]*pulls/(\d+)/merge`)
+	gitPushMainRegex  = regexp.MustCompile(`(?i)\bgit\s+push\b[^\n;&]*(?:\s+(?:[^\s;&]+[/])?(?:main|master)\b|:(?:main|master)\b)`)
+	prUrlRegex        = regexp.MustCompile(`pull/(\d+)`)
+	prFlagRegex       = regexp.MustCompile(`--pr(?:=|\s+)(\d+)`)
+	cdDirRegex        = regexp.MustCompile(`(?i)(?:^|[\s;&])cd\s+([^\s;&]+)`)
+	repoFlagRegex     = regexp.MustCompile(`(?:-R|--repo)(?:=|\s+)(\S+)`)
+	ghIssueCloseRegex = regexp.MustCompile(`(?i)\bgh\s+issue\s+close\b`)
 )
 
 func extractCdDir(cmd string) string {
@@ -660,7 +661,7 @@ func checkMerge(cmd string) (bool, int, string) {
 }
 
 func checkIssueClose(cmd string) bool {
-	return regexp.MustCompile(`(?i)\bgh\s+issue\s+close\b`).MatchString(cmd)
+	return ghIssueCloseRegex.MatchString(cmd)
 }
 
 func runMergeGateCheck(repoDir string, pr int) HookDecision {
