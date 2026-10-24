@@ -34,6 +34,12 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-23`](23-native-agent-io-spec.md)** | Native Cross-Platform Agent I/O (`search`, `read`, `edit`, `--select`) | `internal/fsops`, `internal/search` | M6 (Agent Ergonomics) | `APPLIED` |
 | **[`DELTA-24`](24-differential-governance-hitl-spec.md)** | Differential Governance, Spatial JIT Whisper, Net-Delta Diff Guard & Sovereign HITL Calibration | `internal/vault`, `internal/verifier`, `internal/telemetry` | M6 (Governance Hardening) | `APPLIED` |
 | **[`DELTA-25`](25-config-driven-llm-consumer-spec.md)** | Universal Config-Driven LLM Call Consumer & Multi-Model Gateway | `internal/provider`, `internal/config`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-26`](26-worker-isolation-fail-closed-spec.md)** | Fail-Closed Worktree Isolation for Workspace Write Tasks | `internal/worker` | M6 (Safety Hardening) | `APPLIED` |
+| **[`DELTA-27`](27-server-bind-auth-spec.md)** | Daemon Server Bind Address & API Token Authentication Enforcement | `internal/server` | M6 (Daemon Hardening) | `APPLIED` |
+| **[`DELTA-28`](28-dod-mechanical-binding-spec.md)** | Definition of Done Mechanical Evidence Binding | `internal/verifier`, `cmd/g8s` | M6 (Verifier Binding) | `APPLIED` |
+| **[`DELTA-29`](29-output-schema-validation-spec.md)** | Task Output Schema Validation (JSON Schema Draft 7) | `internal/worker` | M6 (Agent Ergonomics) | `APPLIED` |
+| **[`DELTA-30`](30-worker-claim-affinity-spec.md)** | Worker Claim Affinity Enforcement (Provider and Model) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | M6 (Claim Affinity) | `APPLIED` |
+| **[`DELTA-31`](31-receipt-export-status-spec.md)** | Receipt Export Status Persistence and Idempotent Operator Recovery | `internal/controlplane`, `internal/worker`, `cmd/g8s` | M6 (Evidence Lake) | `APPLIED` |
 
 ---
 

@@ -166,6 +166,8 @@ func main() {
 		runChildren(os.Args[2:])
 	case "receipt":
 		runReceipt(os.Args[2:])
+	case "receipt-export":
+		runReceiptExport(os.Args[2:])
 	case "doctor":
 		runDoctor(os.Args[2:])
 	case "init":
@@ -852,6 +854,8 @@ func runReceipt(args []string) {
 	defer receipts.Close()
 
 	switch subcmd {
+	case "export":
+		runReceiptExport(args[1:])
 	case "issue":
 		fs := flag.NewFlagSet("receipt issue", flag.ExitOnError)
 		actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
@@ -1697,8 +1701,8 @@ func runWorker(args []string) {
 	fs := flag.NewFlagSet("worker", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	once := fs.Bool("once", true, "claim and execute a single task, then exit")
-	model := fs.String("model", "", "restrict to tasks targeting this model")
-	provider := fs.String("provider", "", "restrict to tasks targeting this provider")
+	model := fs.String("model", "", "restrict claims to tasks targeting this model (serial and concurrent)")
+	provider := fs.String("provider", "", "restrict claims to tasks targeting this provider (serial and concurrent)")
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	if err := fs.Parse(args); err != nil {
@@ -1812,11 +1816,16 @@ func runWorker(args []string) {
 	if *concurrency > 1 {
 		// #394 PR-B: concurrent drain — hard-gated on worktree isolation,
 		// session-registered for provenance and cleanup.
-		runWorkerConcurrentDrain(ctx, sup, store, *actor, *lease, *concurrency, *jsonMode, *jsonl, *traceID)
+		runWorkerConcurrentDrain(ctx, sup, store, *actor, *provider, *model, *lease, *concurrency, *jsonMode, *jsonl, *traceID)
 		return
 	}
 	for {
-		task, err := sup.RunOnce(ctx, worker.RunOptions{WorkerID: *actor, LeaseSeconds: *lease, Provider: *provider})
+		task, err := sup.RunOnce(ctx, worker.RunOptions{
+			WorkerID:     *actor,
+			LeaseSeconds: *lease,
+			Provider:     *provider,
+			Model:        *model,
+		})
 		if err != nil {
 			exitRuntime("worker", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
@@ -1836,10 +1845,6 @@ func runWorker(args []string) {
 			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		} else {
 			fmt.Printf("%s %s\n", task.TaskID, task.State)
-		}
-		if *model != "" && task.State != "SUCCEEDED" && task.State != "FAILED" {
-			// model filter is advisory; states printed per cycle
-			_ = model
 		}
 		if *once {
 			// Check task result for failure (non-retryable)

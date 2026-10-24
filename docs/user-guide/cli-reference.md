@@ -48,6 +48,7 @@ g8s submit \
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
 | `--effort` | `string` | `"medium"` | Target worker reasoning effort level (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). See [effort.md](effort.md). |
+| `--output-schema` | `string` | `""` | JSON Schema (Draft 7) string or file path validating worker result structure (#655). Supervised results failing schema validation trigger non-retryable `contract_violation` failures. |
 | `--route` | `string` | `"manual"` | Routing mode (`manual` or `auto`). When `auto`, selects provider, model, and role using context-based rules and manifest configuration with optional Jev assistance. See [routing.md](routing.md). |
 
 > See [providers.md](providers.md) for multi-provider setup, [routing.md](routing.md) for task routing, and [effort.md](effort.md) for reasoning effort configuration and the quality ladder.
@@ -248,16 +249,24 @@ g8s worker --once=false --model "gemini-3.8-flash-high" --lease 120
 
 # Run worker with strict provider claim affinity
 g8s worker --provider agy
+
+# Run concurrent workers with provider and model claim affinity (#657)
+g8s worker --concurrency 4 --provider agy --model "gemini-3.8-flash-high"
 ```
 
-When `--provider` is specified, the worker claims only tasks whose payload `provider` matches the flag value (strict claim affinity; provider-filtered workers never claim legacy provider-less tasks, while unfiltered workers claim all queued tasks). See [providers.md](providers.md) for multi-provider setup.
+When `--provider` and/or `--model` are specified, the worker enforces strict claim affinity across serial (`--concurrency 1`, `--once`) and concurrent modes (`--concurrency > 1`, #657):
+- Atomic candidate selection filters tasks directly in SQLite (`json_extract(request_json, '$.provider')` and `json_extract(request_json, '$.model')`).
+- Out-of-affinity tasks remain untouched in `QUEUED` state with `attempts = 0` and no lease.
+- Unfiltered workers (`--provider ""` and `--model ""`) claim all queued tasks in standard priority/FIFO order.
+See [providers.md](providers.md) for multi-provider setup.
 
 #### Flags:
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--once` | `bool` | `true` | Claim and execute a single task, then exit. |
-| `--provider` | `string` | `""` | Restrict claiming to tasks targeting this provider (strict claim affinity). |
-| `--model` | `string` | `""` | Restrict claiming to tasks targeting this model. |
+| `--provider` | `string` | `""` | Restrict claiming to tasks targeting this provider (strict claim affinity in serial and concurrent modes). |
+| `--model` | `string` | `""` | Restrict claiming to tasks targeting this model (strict claim affinity in serial and concurrent modes). |
+| `--concurrency` | `int` | `1` | Number of concurrent worker goroutines running parallel claim loops. |
 | `--lease` | `int` | `60` | Lease duration in seconds. |
 
 ---
@@ -461,9 +470,14 @@ g8s wake --format json
 ### 24. `g8s serve`
 Runs long-lived daemon mode exposing RESTful HTTP API server for remote task submission, receipt validation, and Prometheus metrics.
 
+> **Security Requirement (#659)**: Unauthenticated binds (`--token ""` / empty `ApiToken`) are strictly permitted ONLY for literal IPv4 and IPv6 loopback addresses (`127.0.0.0/8`, `::1`). Non-loopback addresses (e.g. `192.168.1.100:8080`), hostnames, and wildcard addresses (`0.0.0.0:8080`, `[::]:8080`, or `:8080`) MUST be configured with a valid, non-whitespace API token (`--token` or `ApiToken` in config). `g8s serve` validates configuration pre-flight and rejects unauthenticated non-loopback binds immediately at startup without opening any network listener.
+
 ```sh
-# Start HTTP API server on default port
-g8s serve --address ":8080"
+# Start HTTP API server on loopback interface (token optional)
+g8s serve --address "127.0.0.1:8080"
+
+# Start HTTP API server on wildcard or non-loopback interface (token required)
+g8s serve --address "0.0.0.0:8080" --token "secret-token"
 
 # Run as background daemon blocking until SIGINT/SIGTERM
 g8s serve --address "127.0.0.1:8080" --daemon
@@ -472,13 +486,40 @@ g8s serve --address "127.0.0.1:8080" --daemon
 #### Flags:
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--address` | `string` | `":8080"` | Host and port to listen on. |
+| `--address` | `string` | `"127.0.0.1:8080"` | Host and port to listen on. Non-loopback and wildcard binds require `--token`. |
+| `--token` | `string` | `""` | Bearer API token for authentication (mandatory for non-loopback binds). |
 | `--daemon` | `bool` | `false` | Run as long-lived daemon (blocks until signal received). |
 | `--config` | `string` | `""` | Path to server configuration YAML file. |
 
 ---
 
-### 24a. `g8s reflex triage`
+### 24a. `g8s receipt-export`
+Performs operator-invokable retry and repair for evidence receipt exports (DELTA-31, #658). Operates directly on the stored task record without claiming tasks, acquiring leases, or re-invoking models.
+
+```sh
+# Retry receipt export for a completed task
+g8s receipt-export --task "task-123"
+
+# Retry export specifying explicit run and evidence directories
+g8s receipt-export --task "task-123" --run-dir ".g8s/runs/attempt-1" --evidence-dir "~/.local/state/g8s/evidence"
+
+# Output structured JSON result envelope
+g8s receipt-export --task "task-123" --json
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task`, `--task-id` | `string` | `""` | Task ID to export/retry receipt for (can also be provided as positional argument). |
+| `--run-dir`, `--attempt-dir` | `string` | `""` | Path to attempt run directory (optional). |
+| `--evidence-dir` | `string` | `""` | Path to evidence lake directory (defaults to `G8S_EVIDENCE_DIR`). |
+| `--require-local` | `bool` | `true` | Require attempt-local export to succeed for overall acceptance. |
+| `--require-central` | `bool` | `false` | Require centralized Evidence Lake export to succeed for overall acceptance. |
+| `--json` | `bool` | `false` | Output structured JSON result envelope. |
+
+---
+
+### 24b. `g8s reflex triage`
 Runs the System-1 reflex gate (Jev / TypeSafe AI sensor + deterministic supervisor policy, ADR-0020) on a *planned* mutation and prints the verdict: `grant_receipt`, `escalate_hitl`, or `instant_kill`. Use it as an enforce-code pre-mutation gate in scripts and CI.
 
 ```sh

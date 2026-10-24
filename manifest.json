@@ -274,6 +274,42 @@
       "title": "Universal Config-Driven LLM Call Consumer & 9Router Multi-Model Gateway",
       "path": "spec/openspec/25-config-driven-llm-consumer-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-26",
+      "title": "Fail-Closed Worktree Isolation for Workspace Write Tasks",
+      "path": "spec/openspec/26-worker-isolation-fail-closed-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-27",
+      "title": "Daemon Server Bind Address & API Token Authentication Enforcement",
+      "path": "spec/openspec/27-server-bind-auth-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-28",
+      "title": "Definition of Done Mechanical Evidence Binding",
+      "path": "spec/openspec/28-dod-mechanical-binding-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-29",
+      "title": "Task Output Schema Validation (JSON Schema Draft 7)",
+      "path": "spec/openspec/29-output-schema-validation-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-30",
+      "title": "Worker Claim Affinity Enforcement (Provider and Model)",
+      "path": "spec/openspec/30-worker-claim-affinity-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-31",
+      "title": "Receipt Export Status Persistence and Idempotent Operator Recovery",
+      "path": "spec/openspec/31-receipt-export-status-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

@@ -117,6 +117,12 @@ Incoming Task:
 | **DELTA-23** | [`23-native-agent-io-spec.md`](../spec/openspec/23-native-agent-io-spec.md) | `internal/fsops`, `internal/search` | APPLIED |
 | **DELTA-24** | [`24-differential-governance-hitl-spec.md`](../spec/openspec/24-differential-governance-hitl-spec.md) | `internal/vault`, `internal/verifier`, `internal/telemetry` | APPLIED |
 | **DELTA-25** | [`25-config-driven-llm-consumer-spec.md`](../spec/openspec/25-config-driven-llm-consumer-spec.md) | `internal/config`, `internal/provider`, `cmd/g8s` | IMPLEMENTED |
+| **DELTA-26** | [`26-worker-isolation-fail-closed-spec.md`](../spec/openspec/26-worker-isolation-fail-closed-spec.md) | `internal/worker` | APPLIED |
+| **DELTA-27** | [`27-server-bind-auth-spec.md`](../spec/openspec/27-server-bind-auth-spec.md) | `internal/server` | APPLIED |
+| **DELTA-28** | [`28-dod-mechanical-binding-spec.md`](../spec/openspec/28-dod-mechanical-binding-spec.md) | `internal/verifier`, `cmd/g8s` | APPLIED |
+| **DELTA-29** | [`29-output-schema-validation-spec.md`](../spec/openspec/29-output-schema-validation-spec.md) | `internal/worker` | APPLIED |
+| **DELTA-30** | [`30-worker-claim-affinity-spec.md`](../spec/openspec/30-worker-claim-affinity-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
+| **DELTA-31** | [`31-receipt-export-status-spec.md`](../spec/openspec/31-receipt-export-status-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
 
 ---
 

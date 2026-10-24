@@ -136,7 +136,7 @@ func (p *poolIsolation) Cleanup(ctx context.Context) {
 // errors surface through OnError and exit 1 — never a silent "drained" —
 // matching the serial path's contract. os.Exit paths finish sessions
 // explicitly because deferred calls do not run on exit.
-func runWorkerConcurrentDrain(ctx context.Context, sup *worker.Supervisor, store *controlplane.Store, actor string, lease, concurrency int, jsonMode, jsonl bool, traceID string) {
+func runWorkerConcurrentDrain(ctx context.Context, sup *worker.Supervisor, store *controlplane.Store, actor, provider, model string, lease, concurrency int, jsonMode, jsonl bool, traceID string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		exitRuntime("worker", "", traceID, cli.CodeIO, err, "", jsonl)
@@ -222,6 +222,8 @@ func runWorkerConcurrentDrain(ctx context.Context, sup *worker.Supervisor, store
 	code := sup.RunLoop(ctx, worker.LoopOptions{
 		WorkerID:     actor,
 		LeaseSeconds: lease,
+		Provider:     provider,
+		Model:        model,
 		Concurrency:  concurrency,
 		Isolation:    iso,
 		OnTask:       printTask,
