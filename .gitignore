@@ -88,11 +88,11 @@ internal/orchestrator/scratch/
 internal/orchestrator/.heartbeat/
 internal/orchestrator/.g8s/
 
-# Brief / receipt / handoff scratch
+# Brief / receipt / handoff scratch & local agent runtime directories
 /briefs/
 /receipts/
 /handoffs/
-.claude/scratch/
+.claude/
 
 # Local coverage + diagnostic
 cover.out

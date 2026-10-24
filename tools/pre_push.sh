@@ -118,7 +118,7 @@ if [ "$DETECTED_LANE" = "docs" ]; then
         fail "AI anti-patterns detected in source code."
     fi
     bash tools/brief_lint_test.sh >/dev/null
-    if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/; then
+    if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ skills/; then
         fail "Brief anti-patterns detected."
     fi
     pass "AI and brief anti-pattern checks clean"
@@ -228,7 +228,7 @@ pass "Quantitative claims verified"
 step "5/11" "Running Brief Anti-Pattern Gate (DEBT-51)..."
 bash tools/brief_lint_test.sh >/dev/null
 pass "Brief lint self-tests passed"
-if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ .claude/; then
+if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ skills/; then
     fail "Brief anti-patterns detected."
 fi
 pass "Brief anti-pattern checks clean"

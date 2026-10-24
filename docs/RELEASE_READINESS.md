@@ -1,39 +1,32 @@
-# Release Readiness Checklist
+# Release Readiness & Baseline Parity Record
 
-Status snapshot for the upcoming release-version stage. The repository is currently
-**PRIVATE**; the visibility switch to public and any CI matrix trimming are
-owner-gated decisions made at release time.
+> **Current Status**: Public MIT Repository (`v0.20.0+` live on GitHub Releases).  
+> **Historical Role**: Preserves the side-by-side Go-vs-Python parity matrix and Type-2 dispatch verification record executed at the initial `v0.1.0` cutover (referenced by `spec/openspec/10-two-class-providers-spec.md`).
 
-## Verification gates (all met at MVP close, 2026-08-24)
+## Verification gates (all met at MVP close, 2026-08-24, and enforced continuously in CI)
 
-- [x] Zero-CGO dual-pass verification green in Docker `golang:1.25`:
+- [x] Zero-CGO dual-pass verification green:
       `CGO_ENABLED=0 go vet ./... && go test ./...` and
       `CGO_ENABLED=1 go test -race ./...` across all packages.
-- [x] Test corpus ≥ 140 collected functions (187 at close).
-- [x] `goreleaser release --snapshot --clean` produces five cross-platform archives
-      (darwin/linux/windows on amd64/arm64, excluding windows/arm64).
+- [x] Test corpus ≥ 140 collected functions (1,000+ across 42 packages at `v0.20.0`).
+- [x] `goreleaser release --snapshot --clean` produces cross-platform archives
+      (darwin/linux/windows on amd64/arm64).
 - [x] Final audit receipt maps all board receipts to plan phases with
       `full_outcome_complete: true`.
-- [x] CI green on ubuntu/macos/windows (run 32716564641).
+- [x] CI green on ubuntu/macos/windows.
 
-## Outstanding items before tagging a version
+## Initial public release checklist (Completed at v0.1.0, 2026-08-25)
 
-- [ ] Owner decision on PR #1 (`pterm` TUI polish): blocking stderr-regression fix,
-      gofmt cleanup, dependency-proportionality call.
-- [ ] Add a `gofmt -l` gate to CI (drafted in `chore/release-prep`; PR-ready).
-- [ ] Decide the first tag (`v0.1.0` suggested) and run the six-gate pre-release
-      audit per `docs/RELEASE_SOP.md`.
-- [ ] Owner flips repo visibility to **public** (rule: only at release-version stage).
-- [ ] Trim/disable non-essential workflows or shrink the OS matrix if Actions quota
-      becomes a concern for public CI traffic.
-- [ ] Verify `LICENSE` (MIT), `README.md`, and archive contents one final time via a
-      fresh `goreleaser` snapshot after the last commit.
-- [ ] Confirm `.goreleaser.yaml` `ldflags` version stamping renders the chosen tag.
+- [x] Add `gofmt -l` and `gofumpt` gates to CI (`quality.yml` and `tools/pre_push.sh`).
+- [x] Run the pre-release audit per `docs/RELEASE_SOP.md`.
+- [x] Repository visibility flipped to **public** under MIT License.
+- [x] Verify `LICENSE` (MIT), `README.md`, and archive contents via `goreleaser`.
+- [x] Confirm `.goreleaser.yaml` `ldflags` version stamping renders the chosen tag.
 
 ## Post-release
 
-- [x] Publish GitHub Release with generated archives and checksums. (v0.1.0 live: https://github.com/tamld/g8s/releases/tag/v0.1.0, 6 assets, 2026-08-25)
-- [ ] Announce the MCP tool surface (`g8s_*`) in the README quick-start.
+- [x] Publish GitHub Releases with generated archives, Windows installers, SBOMs, and checksums (`v0.1.0` through `v0.20.0`).
+- [x] Announce the MCP tool surface (`g8s_*`) in the README quick-start and `docs/user-guide/mcp-tools.md`.
 
 ## Side-by-side verification assessment (REFACTORING_PLAN line 87)
 

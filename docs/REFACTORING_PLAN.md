@@ -2,7 +2,7 @@
 
 > **Baseline Reference**: `reference/python/` (Extracted from `plugins/agy-dispatch`)  
 > **Target Architecture**: Pure Go (Zero-CGO), Cross-Platform, Modular Engine  
-> **Status**: Active Execution  
+> **Status**: Completed (Baseline Ported in `v0.1.0`; Superseded by `DELTA-01..33` Pure-Go Engine)  
 
 ---
 

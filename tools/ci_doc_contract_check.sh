@@ -181,11 +181,13 @@ fi
 #     never be TRACKED at the repository root — the tree a fresh clone sees
 #     is the product surface. Local-only junk is a session cleanup matter;
 #     committed junk fails this gate.
-echo "--> [10/14] Verifying root hygiene (no tracked build artifacts)..."
+echo "--> [10/14] Verifying root & agent-runtime hygiene (no tracked build artifacts or local agent configs)..."
 HYGIENE_VIOLATIONS=$( { git ls-files '*.out' '*.test' '*.exe' 'g8s.exe' \
-    '*.patch' '*.orig' '*.bak' 'go.work.bak' '.g8s-drain-*' 'worktrees/*' 'dist/*'; } 2>/dev/null)
+    '*.patch' '*.orig' '*.bak' 'go.work.bak' '.g8s-drain-*' 'worktrees/*' 'dist/*' \
+    '.opencode/*' '.jules/*' '.claude/*' '.sisyphus/*' '.superpowers/*' \
+    'docs/superpowers/*' 'docs/goals/*' 'reference/python/scripts/scratch/*'; } 2>/dev/null)
 if [ -n "$HYGIENE_VIOLATIONS" ]; then
-    echo "::error::root hygiene: tracked build artifacts / scratch at repo root:"
+    echo "::error::root hygiene: tracked build artifacts / scratch / local agent configs:"
     echo "$HYGIENE_VIOLATIONS"
     FAILED=$((FAILED + 1))
 fi
