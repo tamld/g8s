@@ -659,8 +659,10 @@ func checkMerge(cmd string) (bool, int, string) {
 	return true, pr, repo
 }
 
+var ghIssueCloseRegex = regexp.MustCompile(`(?i)\bgh\s+issue\s+close\b`)
+
 func checkIssueClose(cmd string) bool {
-	return regexp.MustCompile(`(?i)\bgh\s+issue\s+close\b`).MatchString(cmd)
+	return ghIssueCloseRegex.MatchString(cmd)
 }
 
 func runMergeGateCheck(repoDir string, pr int) HookDecision {
