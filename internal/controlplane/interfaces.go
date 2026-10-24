@@ -18,6 +18,13 @@ type TaskQueueStore interface {
 	FailTask(ctx context.Context, taskID, reason string, exitCode int) error
 	CancelTask(ctx context.Context, taskID, reason string) error
 	ResubmitTask(ctx context.Context, origTaskID string, opts ResubmitOpts) (string, error)
+	RecordReceiptExport(ctx context.Context, taskID string, status ReceiptExportStatus) error
+}
+
+// ClaimFilter parameterizes task claim selection with affinity constraints (issue #657).
+type ClaimFilter struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // TaskLeaseStore defines atomic lease acquisition, heartbeat renewal, and
@@ -25,6 +32,7 @@ type TaskQueueStore interface {
 type TaskLeaseStore interface {
 	ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*Task, error)
 	ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error)
+	ClaimTaskFiltered(ctx context.Context, workerID string, leaseDurationSeconds int, filter ClaimFilter) (*Task, error)
 	ClaimTaskInSession(ctx context.Context, workerID, sessionID string, leaseDurationSeconds int) (*Task, error)
 	StartTask(taskID, workerID, leaseToken string) bool
 	RenewHeartbeat(ctx context.Context, taskID, workerID string, extensionSeconds int) error

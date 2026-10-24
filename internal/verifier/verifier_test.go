@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -843,28 +842,52 @@ classes:
 	}
 }
 
-// TestDoD2_EvaluateDoDMatrix tests 1-to-1 coverage and rejection of incomplete DoD mappings.
+// TestDoD2_EvaluateDoDMatrix tests 1-to-1 coverage, legacy fail-closed behavior, and trusted evidence binding.
 func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
 	items := []BriefDoDItem{
-		{ID: "D1", Description: "Implement firewall"},
-		{ID: "D2", Description: "Add tests"},
+		{ID: "D1", Description: "Implement firewall", VerifierHint: "gotest:./internal/firewall"},
+		{ID: "D2", Description: "Add tests", VerifierHint: "gotest:./internal/verifier"},
 	}
 
-	// 1. Complete reported items with all MET
+	trustedEv := TrustedEvidence{
+		TaskID:    "task-test-dod2",
+		RawLogSHA: "deadbeef12345678",
+		Checks: []CheckResult{
+			{Type: "gotest", Target: "./internal/firewall", OK: true, Detail: "ok"},
+			{Type: "gotest", Target: "./internal/verifier", OK: true, Detail: "ok"},
+		},
+	}
+
+	// 1. Legacy call without trusted check records fails closed for explicit DoD (#648)
 	reportedComplete := []DoDItemStatus{
 		{ID: "D1", Status: "MET", Evidence: "firewall.go:10 active (pass)"},
 		{ID: "D2", Status: "MET", Evidence: "tests green"},
 	}
-	matrix, ok := EvaluateDoDMatrix(items, reportedComplete, true, "sha1")
-	if !ok || len(matrix) != 2 {
-		t.Errorf("expected complete MET to pass, ok=%v, matrix=%+v", ok, matrix)
+	matrixLegacy, okLegacy := EvaluateDoDMatrix(items, reportedComplete, true, "sha1")
+	if okLegacy {
+		t.Fatalf("expected legacy EvaluateDoDMatrix call to fail closed for explicit DoD, got ok=true")
+	}
+	if len(matrixLegacy) != 2 || matrixLegacy[0].Status != "UNMET" || matrixLegacy[1].Status != "UNMET" {
+		t.Errorf("expected both items UNMET for legacy call, got %+v", matrixLegacy)
 	}
 
-	// 2. Incomplete: D2 missing from reported
+	// 1b. Complete reported items with trusted evidence binding -> MET
+	matrix, ok := EvaluateDoDMatrixWithEvidence(items, reportedComplete, true, trustedEv)
+	if !ok || len(matrix) != 2 {
+		t.Fatalf("expected complete MET to pass with trusted evidence, ok=%v, matrix=%+v", ok, matrix)
+	}
+	if matrix[0].Status != "MET" || matrix[1].Status != "MET" {
+		t.Errorf("expected all MET, got %+v", matrix)
+	}
+	if !strings.Contains(matrix[0].Evidence, "bound to check[gotest:./internal/firewall]") {
+		t.Errorf("expected matrix[0] bound evidence, got %q", matrix[0].Evidence)
+	}
+
+	// 2. Incomplete: D2 missing from reported -> UNMET
 	reportedIncomplete := []DoDItemStatus{
 		{ID: "D1", Status: "MET", Evidence: "firewall.go:10 active (pass)"},
 	}
-	matrix, ok = EvaluateDoDMatrix(items, reportedIncomplete, true, "sha1")
+	matrix, ok = EvaluateDoDMatrixWithEvidence(items, reportedIncomplete, true, trustedEv)
 	if ok {
 		t.Errorf("expected missing D2 to fail, got ok=true")
 	}
@@ -875,17 +898,17 @@ func TestDoD2_EvaluateDoDMatrix(t *testing.T) {
 		t.Errorf("unexpected matrix item for missing D2: %+v", matrix[1])
 	}
 
-	// 3. Empty reported with checksOK=true -> auto populated as MET
-	matrix, ok = EvaluateDoDMatrix(items, nil, true, "log-sha-abc")
+	// 3. Empty reported with checksOK=true -> binds to matching trusted checks
+	matrix, ok = EvaluateDoDMatrixWithEvidence(items, nil, true, trustedEv)
 	if !ok || len(matrix) != 2 {
-		t.Errorf("expected empty reported with checksOK to pass, ok=%v, matrix=%+v", ok, matrix)
+		t.Errorf("expected empty reported with trusted checks to pass, ok=%v, matrix=%+v", ok, matrix)
 	}
-	if matrix[0].Status != "MET" || !strings.Contains(matrix[0].Evidence, "log-sha-abc") {
-		t.Errorf("matrix[0] should be MET with log sha, got %+v", matrix[0])
+	if matrix[0].Status != "MET" || !strings.Contains(matrix[0].Evidence, "bound to check[gotest:./internal/firewall]") {
+		t.Errorf("matrix[0] should be MET with bound check, got %+v", matrix[0])
 	}
 
 	// 4. Empty reported with checksOK=false -> auto populated as UNMET
-	matrix, ok = EvaluateDoDMatrix(items, nil, false, "log-sha-abc")
+	matrix, ok = EvaluateDoDMatrixWithEvidence(items, nil, false, trustedEv)
 	if ok || len(matrix) != 2 {
 		t.Errorf("expected empty reported with checksOK=false to fail, ok=%v, matrix=%+v", ok, matrix)
 	}
@@ -933,8 +956,8 @@ func TestEvaluateDoDMatrix_RejectsWorkerSelfReportWhenChecksFail(t *testing.T) {
 
 func TestEvaluateDoDMatrix_RejectsUnverifiedProseEvidence(t *testing.T) {
 	items := []BriefDoDItem{
-		{ID: "D1", Description: "Feature one"},
-		{ID: "D2", Description: "Feature two"},
+		{ID: "D1", Description: "Feature one", VerifierHint: "gotest:./pkg/one"},
+		{ID: "D2", Description: "Feature two", VerifierHint: "gotest:./pkg/two"},
 	}
 
 	proseCases := []string{
@@ -945,12 +968,20 @@ func TestEvaluateDoDMatrix_RejectsUnverifiedProseEvidence(t *testing.T) {
 		"met requirement",
 	}
 
+	trustedEvOnlyOne := TrustedEvidence{
+		TaskID:    "t-prose",
+		RawLogSHA: "logsha123456",
+		Checks: []CheckResult{
+			{Type: "gotest", Target: "./pkg/two", OK: true, Detail: "ok"},
+		},
+	}
+
 	for _, prose := range proseCases {
 		reported := []DoDItemStatus{
 			{ID: "D1", Status: "MET", Evidence: prose},
-			{ID: "D2", Status: "MET", Evidence: "internal/verifier/verifier.go:42 (pass)"},
+			{ID: "D2", Status: "MET", Evidence: "gotest:./pkg/two"},
 		}
-		matrix, ok := EvaluateDoDMatrix(items, reported, true, "logsha123456")
+		matrix, ok := EvaluateDoDMatrixWithEvidence(items, reported, true, trustedEvOnlyOne)
 		if ok {
 			t.Errorf("expected rejection of prose evidence %q, but got ok=true", prose)
 		}
@@ -960,43 +991,38 @@ func TestEvaluateDoDMatrix_RejectsUnverifiedProseEvidence(t *testing.T) {
 		if matrix[0].Status != "UNMET" {
 			t.Errorf("expected D1 UNMET for prose %q, got status %q", prose, matrix[0].Status)
 		}
-		expectedPrefix := fmt.Sprintf("unverified self-report prose: %s", prose)
-		if matrix[0].Evidence != expectedPrefix {
-			t.Errorf("expected evidence %q, got %q", expectedPrefix, matrix[0].Evidence)
+		if !strings.Contains(matrix[0].Evidence, "unverified criterion") {
+			t.Errorf("expected evidence to mention unverified criterion, got %q", matrix[0].Evidence)
 		}
 		if matrix[1].Status != "MET" {
 			t.Errorf("expected D2 to remain MET with mechanical evidence, got %q", matrix[1].Status)
 		}
 	}
 
-	// Verify valid mechanical anchors pass
-	validAnchors := []string{
+	// Verify bare words and unverified anchors are REJECTED (#648)
+	bannedBareAnchors := []string{
 		"sha256:abcd",
 		"ev-1234",
 		"ok ",
 		"pass",
 		"exit code 0",
-		"main.go",
-		"script.sh",
-		"index.js",
-		"tool.py",
-		"config.yml",
-		"schema.yaml",
-		"data.json",
-		"README.md",
 		"unit test passed",
-		"logsha123456",
 		"ok",
+		"not passed",
 	}
 
-	for _, anchorEvidence := range validAnchors {
+	for _, bareAnchor := range bannedBareAnchors {
 		reported := []DoDItemStatus{
-			{ID: "D1", Status: "MET", Evidence: anchorEvidence},
-			{ID: "D2", Status: "MET", Evidence: anchorEvidence},
+			{ID: "D1", Status: "MET", Evidence: bareAnchor},
+			{ID: "D2", Status: "MET", Evidence: bareAnchor},
 		}
-		matrix, ok := EvaluateDoDMatrix(items, reported, true, "logsha123456")
-		if !ok {
-			t.Errorf("expected anchor %q to pass, got ok=false, matrix=%+v", anchorEvidence, matrix)
+		// No matching checks in trustedEv
+		matrix, ok := EvaluateDoDMatrixWithEvidence(items, reported, true, TrustedEvidence{RawLogSHA: "logsha123456"})
+		if ok {
+			t.Errorf("expected bare anchor %q to be rejected, got ok=true, matrix=%+v", bareAnchor, matrix)
+		}
+		if matrix[0].Status != "UNMET" || matrix[1].Status != "UNMET" {
+			t.Errorf("expected all UNMET for bare anchor %q, got %+v", bareAnchor, matrix)
 		}
 	}
 
@@ -1023,14 +1049,30 @@ func TestIsMechanicallyVerifiedEvidence(t *testing.T) {
 	if IsMechanicallyVerifiedEvidence("done", "sha25612345") {
 		t.Errorf("pure prose 'done' should return false")
 	}
-	if !IsMechanicallyVerifiedEvidence("ok", "") {
-		t.Errorf("'ok' should return true")
+	// Bare words 'ok', 'pass', 'not passed', 'exit code 0' MUST return false (#648)
+	if IsMechanicallyVerifiedEvidence("ok", "") {
+		t.Errorf("'ok' should return false")
 	}
-	if !IsMechanicallyVerifiedEvidence("pass", "") {
-		t.Errorf("'pass' should return true")
+	if IsMechanicallyVerifiedEvidence("pass", "") {
+		t.Errorf("'pass' should return false")
+	}
+	if IsMechanicallyVerifiedEvidence("not passed", "") {
+		t.Errorf("'not passed' should return false")
+	}
+	if IsMechanicallyVerifiedEvidence("exit code 0", "") {
+		t.Errorf("'exit code 0' should return false")
+	}
+	if IsMechanicallyVerifiedEvidence("unit test passed", "") {
+		t.Errorf("'unit test passed' should return false")
 	}
 	if !IsMechanicallyVerifiedEvidence("sha25612_match", "sha25612345") {
 		t.Errorf("matching 8-char prefix of rawLogSHA should return true")
+	}
+	if !IsMechanicallyVerifiedEvidence("bound to check[gotest:./pkg] ok=true", "") {
+		t.Errorf("bound check record should return true")
+	}
+	if !IsMechanicallyVerifiedEvidence("bound to artifact[spec.md] sha256=123 (verified on disk)", "") {
+		t.Errorf("verified artifact should return true")
 	}
 }
 

@@ -181,13 +181,23 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Start starts the HTTP server.
+// Start starts the HTTP server. It validates the configuration before
+// changing the running state or starting the network listener.
 func (s *Server) Start() error {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
 		return fmt.Errorf("server already running")
 	}
+	if err := s.config.Validate(); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("cannot start server with invalid configuration: %w", err)
+	}
+	if s.httpSrv == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("server http listener is not initialized")
+	}
+	s.httpSrv.Addr = s.config.Address
 	s.running = true
 	s.mu.Unlock()
 

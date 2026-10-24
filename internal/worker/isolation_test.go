@@ -7,6 +7,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -30,10 +31,17 @@ func (f *fakeWorktreeIsolator) AcquireWorktree(ctx context.Context, taskID strin
 	err := f.acquireErr
 	f.mu.Unlock()
 	if err != nil {
-		return "", nil, err
+		return "", func(keep bool) {
+			f.mu.Lock()
+			f.keepFlag = keep
+			f.released++
+			f.mu.Unlock()
+		}, err
 	}
-	if err := os.MkdirAll(f.dir, 0o700); err != nil {
-		return "", nil, err
+	if f.dir != "" {
+		if err := os.MkdirAll(f.dir, 0o700); err != nil {
+			return "", nil, err
+		}
 	}
 	return f.dir, func(keep bool) {
 		f.mu.Lock()
@@ -92,20 +100,52 @@ func TestReadOnlyAttemptSkipsIsolation(t *testing.T) {
 	}
 }
 
-// Isolator failure degrades gracefully: the attempt falls back to the
-// shared checkout instead of failing the task.
-func TestIsolatorFailureFallsBackToSharedCheckout(t *testing.T) {
+// #656: Isolator failure must fail closed: structured isolation_unavailable failure,
+// child command is never invoked, attempt terminally finished without lease leak.
+func TestIsolatorFailureFailsClosed(t *testing.T) {
 	iso := &fakeWorktreeIsolator{dir: filepath.Join(t.TempDir(), "wt-err"), acquireErr: errors.New("pool exhausted")}
 	env := newIsolationEnv(t, iso)
 	task := submitTask(t, env, "iso-err-1", 1, map[string]any{"permission": "workspace_write"})
-	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-err", LeaseSeconds: 60}); err != nil {
-		t.Fatalf("isolator failure must degrade, not fail: %v", err)
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-err", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce returned error: %v", err)
 	}
+	if final == nil {
+		t.Fatal("RunOnce returned nil final task")
+	}
+
 	env.runner.mu.Lock()
-	spawnDir := env.runner.spawned[0].Dir
+	spawnCount := len(env.runner.spawned)
 	env.runner.mu.Unlock()
-	if spawnDir == iso.dir {
-		t.Fatal("fallback must not use the failed worktree dir")
+	if spawnCount != 0 {
+		t.Fatalf("child runner must NEVER be spawned when isolation fails, got %d spawns", spawnCount)
 	}
-	_ = task
+
+	got, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != "WORKER_COMPLETED" {
+		t.Fatalf("expected task state WORKER_COMPLETED, got %q", got.State)
+	}
+	if got.LeaseToken != nil {
+		t.Fatalf("lease leak: expected nil LeaseToken, got %v", *got.LeaseToken)
+	}
+	if got.LeaseOwner != nil {
+		t.Fatalf("lease leak: expected nil LeaseOwner, got %v", *got.LeaseOwner)
+	}
+
+	var resultMap map[string]any
+	if err := json.Unmarshal(got.Result, &resultMap); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if resultMap["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", resultMap["ok"])
+	}
+	if resultMap["status"] != "isolation_unavailable" {
+		t.Fatalf("expected status=isolation_unavailable, got %v", resultMap["status"])
+	}
+	if iso.released != 1 || iso.keepFlag {
+		t.Fatalf("expected release(false) called exactly once on failure, got released=%d keep=%v", iso.released, iso.keepFlag)
+	}
 }

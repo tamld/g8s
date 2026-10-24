@@ -276,6 +276,11 @@ func applyBaseSchema(conn *sql.Conn) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_active
 			ON sessions(id) WHERE status = 'active'`,
+		`CREATE TABLE IF NOT EXISTS task_receipt_exports (
+			task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+			status_json TEXT NOT NULL,
+			updated_at REAL NOT NULL
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {
@@ -845,24 +850,76 @@ func scanTask(scanner interface{ Scan(...any) error }) (*Task, error) {
 }
 
 // GetTask returns nil (not an error) when no task carries taskID.
-func (s *Store) GetTask(_ context.Context, taskID string) (*Task, error) {
+func (s *Store) GetTask(ctx context.Context, taskID string) (*Task, error) {
 	row := s.db.QueryRow(
 		"SELECT "+taskColumns+" FROM tasks WHERE task_id = ?", taskID,
 	)
-	return scanTask(row)
+	t, err := scanTask(row)
+	if err != nil || t == nil {
+		return t, err
+	}
+	s.populateTaskReceiptExport(ctx, t)
+	return t, nil
 }
 
 // GetTaskInSession returns a task only if it belongs to the given session.
-func (s *Store) GetTaskInSession(_ context.Context, taskID, sessionID string) (*Task, error) {
+func (s *Store) GetTaskInSession(ctx context.Context, taskID, sessionID string) (*Task, error) {
 	row := s.db.QueryRow(
 		"SELECT "+taskColumns+" FROM tasks WHERE task_id = ? AND session_id = ?", taskID, sessionID,
 	)
-	return scanTask(row)
+	t, err := scanTask(row)
+	if err != nil || t == nil {
+		return t, err
+	}
+	s.populateTaskReceiptExport(ctx, t)
+	return t, nil
+}
+
+func (s *Store) populateTaskReceiptExport(ctx context.Context, t *Task) {
+	if t == nil {
+		return
+	}
+	var statusJSON string
+	err := s.db.QueryRowContext(ctx, "SELECT status_json FROM task_receipt_exports WHERE task_id = ?", t.TaskID).Scan(&statusJSON)
+	if err == nil && statusJSON != "" {
+		_ = json.Unmarshal([]byte(statusJSON), &t.ReceiptExport)
+	}
+}
+
+// RecordReceiptExport persists the structured receipt export status for a task
+// without modifying its execution state, result, result_hash, receipt_hash, or completed_at.
+func (s *Store) RecordReceiptExport(ctx context.Context, taskID string, status ReceiptExportStatus) error {
+	status.UpdatedAt = float64(s.clock().UnixNano()) / 1e9
+	data, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("marshal receipt export status: %w", err)
+	}
+
+	var exists int
+	err = s.db.QueryRowContext(ctx, "SELECT 1 FROM tasks WHERE task_id = ?", taskID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+	}
+	if err != nil {
+		return fmt.Errorf("verify task %s: %w", taskID, err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO task_receipt_exports (task_id, status_json, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(task_id) DO UPDATE SET
+			status_json = excluded.status_json,
+			updated_at = excluded.updated_at`,
+		taskID, string(data), status.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("record receipt export for task %s: %w", taskID, err)
+	}
+	return nil
 }
 
 // ListTasks returns up to filter.Limit newest tasks, optionally narrowed to
 // one state. limit must be between 1 and 200; unknown states are rejected.
-func (s *Store) ListTasks(_ context.Context, filter TaskFilter) ([]*Task, error) {
+func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) ([]*Task, error) {
 	limit := filter.Limit
 	if limit == 0 {
 		limit = 50
@@ -911,6 +968,9 @@ func (s *Store) ListTasks(_ context.Context, filter TaskFilter) ([]*Task, error)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate tasks: %w", err)
+	}
+	for _, t := range out {
+		s.populateTaskReceiptExport(ctx, t)
 	}
 	return out, nil
 }
@@ -1466,19 +1526,22 @@ func parentKeyOfReq(req SubmitTaskRequest) string {
 // ClaimTask leases the highest-priority QUEUED task to workerID under a
 // BEGIN IMMEDIATE transaction so concurrent claimers elect a single winner.
 func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*Task, error) {
-	return s.claimTaskInternal(ctx, workerID, leaseDurationSeconds, "")
+	return s.ClaimTaskFiltered(ctx, workerID, leaseDurationSeconds, ClaimFilter{})
 }
 
 // ClaimTaskProvider leases the highest-priority QUEUED task matching provider to workerID.
 // Empty provider = no filter (delegates to existing ClaimTask logic).
 func (s *Store) ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error) {
-	if provider == "" {
-		return s.ClaimTask(ctx, workerID, leaseDurationSeconds)
-	}
-	return s.claimTaskInternal(ctx, workerID, leaseDurationSeconds, provider)
+	return s.ClaimTaskFiltered(ctx, workerID, leaseDurationSeconds, ClaimFilter{Provider: provider})
 }
 
-func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error) {
+// ClaimTaskFiltered leases the highest-priority QUEUED task matching filter to workerID (issue #657).
+// Non-empty Provider and Model restrict claims with exact match; both set uses logical AND.
+func (s *Store) ClaimTaskFiltered(ctx context.Context, workerID string, leaseDurationSeconds int, filter ClaimFilter) (*Task, error) {
+	return s.claimTaskInternal(ctx, workerID, leaseDurationSeconds, filter)
+}
+
+func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDurationSeconds int, filter ClaimFilter) (*Task, error) {
 	if strings.TrimSpace(workerID) == "" {
 		return nil, errors.New("worker_id is required")
 	}
@@ -1522,23 +1585,26 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 		return nil, fmt.Errorf("read maintenance: %w", err)
 	}
 
-	var row *sql.Row
-	if provider != "" {
-		row = tx.QueryRowContext(ctx, `
-		SELECT `+taskColumns+` FROM tasks
-		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
-		  AND json_extract(request_json, '$.provider') = ?
-		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
-		ORDER BY priority DESC, created_at ASC
-		LIMIT 1`, provider, now)
-	} else {
-		row = tx.QueryRowContext(ctx, `
-		SELECT `+taskColumns+` FROM tasks
-		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
-		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
-		ORDER BY priority DESC, created_at ASC
-		LIMIT 1`, now)
+	var query strings.Builder
+	query.WriteString(`SELECT ` + taskColumns + ` FROM tasks
+		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts`)
+	var queryArgs []any
+
+	if filter.Provider != "" {
+		query.WriteString(` AND json_extract(request_json, '$.provider') = ?`)
+		queryArgs = append(queryArgs, filter.Provider)
 	}
+	if filter.Model != "" {
+		query.WriteString(` AND json_extract(request_json, '$.model') = ?`)
+		queryArgs = append(queryArgs, filter.Model)
+	}
+
+	query.WriteString(` AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
+		ORDER BY priority DESC, created_at ASC
+		LIMIT 1`)
+	queryArgs = append(queryArgs, now)
+
+	row := tx.QueryRowContext(ctx, query.String(), queryArgs...)
 	candidate, scanErr := scanTask(row)
 	if scanErr != nil {
 		return nil, fmt.Errorf("select claim candidate: %w", scanErr)

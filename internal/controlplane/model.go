@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -218,9 +219,101 @@ type Task struct {
 	// Checkpoint data for task recovery (issue #290)
 	CheckpointData *CheckpointData `json:"checkpoint_data,omitempty"`
 
+	// ReceiptExport stores the per-destination receipt export outcome (issue #658)
+	ReceiptExport *ReceiptExportStatus `json:"receipt_export,omitempty"`
+
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
 	Deduplicated bool `json:"deduplicated,omitempty"`
+}
+
+// Export status values for per-destination export outcome.
+const (
+	ExportStatusDisabled  = "disabled"
+	ExportStatusSucceeded = "succeeded"
+	ExportStatusFailed    = "failed"
+)
+
+// ExportDestinationStatus records the evidence export outcome for a single destination.
+type ExportDestinationStatus struct {
+	Status   string  `json:"status"`             // "disabled", "succeeded", "failed"
+	Time     float64 `json:"time,omitempty"`     // unix timestamp of export attempt
+	Digest   string  `json:"digest,omitempty"`   // SHA-256 hex digest on success
+	Category string  `json:"category,omitempty"` // sanitized category: "mkdir_failed", "write_failed", "disabled", etc.
+	Error    string  `json:"error,omitempty"`    // sanitized stable error message (no raw absolute private paths)
+	Path     string  `json:"path,omitempty"`     // relative or clean reference path
+}
+
+// ReceiptExportStatus captures the per-destination receipt export outcome.
+type ReceiptExportStatus struct {
+	Local          ExportDestinationStatus `json:"local"`                // attempt-local receipt destination
+	Central        ExportDestinationStatus `json:"central"`              // centralized Evidence Lake destination
+	UpdatedAt      float64                 `json:"updated_at,omitempty"` // last updated timestamp
+	Success        bool                    `json:"success"`              // true if all non-disabled/required destinations succeeded
+	FullyEvidenced bool                    `json:"fully_evidenced"`      // true if required evidence policy is met
+}
+
+// ExportPolicy configures which receipt export destinations are required.
+type ExportPolicy struct {
+	RequireLocal   bool `json:"require_local"`
+	RequireCentral bool `json:"require_central"`
+}
+
+// DefaultExportPolicy returns the default policy where local is required and central is required if enabled.
+func DefaultExportPolicy(centralEnabled bool) ExportPolicy {
+	return ExportPolicy{
+		RequireLocal:   true,
+		RequireCentral: centralEnabled,
+	}
+}
+
+// CheckExportAcceptance verifies whether the task's receipt export satisfies the policy.
+// It returns an error if any required destination failed, is disabled, or has not been exported.
+func (t *Task) CheckExportAcceptance(policy ExportPolicy) error {
+	if t.ReceiptExport == nil {
+		if policy.RequireLocal || policy.RequireCentral {
+			return errors.New("receipt export status is missing: task evidence not exported")
+		}
+		return nil
+	}
+	return t.ReceiptExport.CheckAcceptance(policy)
+}
+
+// CheckAcceptance verifies whether the export status satisfies the given policy.
+func (s *ReceiptExportStatus) CheckAcceptance(policy ExportPolicy) error {
+	if policy.RequireLocal {
+		if s.Local.Status != ExportStatusSucceeded {
+			errMsg := s.Local.Error
+			if errMsg == "" {
+				errMsg = "export not succeeded"
+			}
+			return fmt.Errorf("required local receipt export incomplete (status=%s): %s", s.Local.Status, errMsg)
+		}
+	}
+	if policy.RequireCentral {
+		if s.Central.Status != ExportStatusSucceeded {
+			errMsg := s.Central.Error
+			if errMsg == "" {
+				errMsg = "export not succeeded"
+			}
+			return fmt.Errorf("required central receipt export incomplete (status=%s): %s", s.Central.Status, errMsg)
+		}
+	}
+	return nil
+}
+
+// CanonicalReceiptSnapshot returns the deterministic JSON bytes for exporting a task's sealed receipt snapshot.
+// It excludes mutable receipt_export status and pins UpdatedAt to CompletedAt (if completed) to avoid updated_at churn.
+func CanonicalReceiptSnapshot(task *Task) ([]byte, error) {
+	if task == nil {
+		return nil, errors.New("cannot create receipt snapshot for nil task")
+	}
+	clone := *task
+	clone.ReceiptExport = nil
+	if clone.CompletedAt != nil {
+		clone.UpdatedAt = *clone.CompletedAt
+	}
+	return json.MarshalIndent(&clone, "", "  ")
 }
 
 // ErrorCallRecord represents one error call in the task's history.
@@ -362,6 +455,9 @@ type ControlPlane interface {
 	// Checkpoint/recovery for long-running tasks (issue #290)
 	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *CheckpointData) (*Task, error)
 	ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leaseToken string, newLeaseSeconds int) (*Task, error)
+
+	// Receipt export outcome persistence (issue #658)
+	RecordReceiptExport(ctx context.Context, taskID string, status ReceiptExportStatus) error
 }
 
 // canonicalJSON serializes value deterministically: map keys sorted

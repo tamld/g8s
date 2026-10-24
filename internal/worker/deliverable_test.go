@@ -68,8 +68,9 @@ func TestDeliverablePointerRecordedOnPreservedWorktreeWrite(t *testing.T) {
 	}
 }
 
-// TestDeliverablePointerOmittedWhenIsolatorNil verifies requirement 2:
-// workspace_write task + isolator nil (legacy shared checkout) → no deliverable key.
+// TestDeliverablePointerOmittedWhenIsolatorNil verifies DELTA-26 / #656:
+// workspace_write task + isolator nil fails closed with isolation_unavailable,
+// no deliverable key, and a cleared lease.
 func TestDeliverablePointerOmittedWhenIsolatorNil(t *testing.T) {
 	env := newWorkerEnv(t, nil) // isolator is nil
 	task := submitTask(t, env, "deliv-noiso", 1, map[string]any{"permission": "workspace_write"})
@@ -85,6 +86,15 @@ func TestDeliverablePointerOmittedWhenIsolatorNil(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("get task: %v", err)
 	}
+	if got.State != "WORKER_COMPLETED" {
+		t.Fatalf("expected task state WORKER_COMPLETED, got %q", got.State)
+	}
+	if got.LeaseToken != nil {
+		t.Fatalf("lease leak: expected nil LeaseToken, got %v", *got.LeaseToken)
+	}
+	if got.LeaseOwner != nil {
+		t.Fatalf("lease leak: expected nil LeaseOwner, got %v", *got.LeaseOwner)
+	}
 
 	var resultMap map[string]any
 	if err := json.Unmarshal(got.Result, &resultMap); err != nil {
@@ -93,8 +103,11 @@ func TestDeliverablePointerOmittedWhenIsolatorNil(t *testing.T) {
 	if _, exists := resultMap["deliverable"]; exists {
 		t.Fatalf("expected no deliverable key when isolator is nil, got: %v", resultMap["deliverable"])
 	}
-	if okVal, exists := resultMap["ok"]; !exists || okVal != true {
-		t.Fatalf("expected ok=true in result map, got %v", resultMap["ok"])
+	if okVal, exists := resultMap["ok"]; !exists || okVal != false {
+		t.Fatalf("expected ok=false in result map, got %v", resultMap["ok"])
+	}
+	if statusVal, exists := resultMap["status"]; !exists || statusVal != "isolation_unavailable" {
+		t.Fatalf("expected status=isolation_unavailable, got %v", resultMap["status"])
 	}
 }
 

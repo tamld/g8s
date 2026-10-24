@@ -109,7 +109,7 @@ type workerEnv struct {
 	runDir string
 }
 
-func newWorkerEnv(t *testing.T, clock func() time.Time) *workerEnv {
+func newWorkerEnv(t *testing.T, clock func() time.Time, opts ...Option) *workerEnv {
 	t.Helper()
 	root := t.TempDir()
 	store, err := controlplane.NewControlPlane(filepath.Join(root, "cp.db"), nil)
@@ -118,10 +118,12 @@ func newWorkerEnv(t *testing.T, clock func() time.Time) *workerEnv {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	runner := &fakeRunner{}
-	sup := NewSupervisor(store, filepath.Join(root, "runs"),
+	supOpts := []Option{
 		WithRunner(runner),
-		WithPollInterval(2*time.Millisecond),
-	)
+		WithPollInterval(2 * time.Millisecond),
+	}
+	supOpts = append(supOpts, opts...)
+	sup := NewSupervisor(store, filepath.Join(root, "runs"), supOpts...)
 	if clock != nil {
 		sup.clock = clock
 	}
@@ -1669,7 +1671,9 @@ func TestRunOnceWallClockDurationAndProviderDuration(t *testing.T) {
 }
 
 func TestWorkerChildEnvDelegation(t *testing.T) {
-	env := newWorkerEnv(t, nil)
+	isoDir := filepath.Join(t.TempDir(), "wt-delegation")
+	iso := &fakeWorktreeIsolator{dir: isoDir}
+	env := newWorkerEnv(t, nil, WithWorktreeIsolator(iso))
 
 	var capturedEnv []string
 	env.runner.factory = func(opts SpawnOptions) Child {

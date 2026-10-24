@@ -8,6 +8,8 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -162,6 +164,7 @@ func extractAGYUsage(stdoutText string) *agyUsage {
 type WorkerControlPlane interface {
 	ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*controlplane.Task, error)
 	ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*controlplane.Task, error)
+	ClaimTaskFiltered(ctx context.Context, workerID string, leaseDurationSeconds int, filter controlplane.ClaimFilter) (*controlplane.Task, error)
 	StartTask(taskID, workerID, leaseToken string) bool
 	RenewHeartbeat(ctx context.Context, taskID, workerID string, extensionSeconds int) error
 	FinishAttempt(taskID, workerID, leaseToken string, params controlplane.FinishAttemptParams) (*controlplane.Task, error)
@@ -178,6 +181,9 @@ type WorkerControlPlane interface {
 	// Checkpoint/recovery for long-running tasks (issue #290)
 	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *controlplane.CheckpointData) (*controlplane.Task, error)
 	ResumeFromCheckpoint(ctx context.Context, taskID, workerID, leaseToken string, newLeaseSeconds int) (*controlplane.Task, error)
+
+	// Receipt export outcome persistence (issue #658)
+	RecordReceiptExport(ctx context.Context, taskID string, status controlplane.ReceiptExportStatus) error
 }
 
 // taskRequest mirrors the worker-facing payload stored on every task.
@@ -289,8 +295,9 @@ func WithProviderCommandResolver(fn func(prompt, provider, model, timeout string
 // WorktreeIsolator hands workspace_write attempts a private worktree
 // directory so concurrent code-writing attempts in one worker process
 // cannot clobber each other's uncommitted deliverables (#427). Implemented
-// by the cmd layer over the orchestrator pool; nil isolator = legacy
-// shared-checkout behavior.
+// by the cmd layer over the orchestrator pool. Under #656, isolation
+// fails closed for workspace_write: nil isolator or acquisition failure
+// terminally fails the attempt.
 type WorktreeIsolator interface {
 	// AcquireWorktree returns the worktree directory for the task and a
 	// release function. release(true) keeps the worktree for inspection
@@ -465,6 +472,7 @@ type RunOptions struct {
 	WorkerID     string
 	LeaseSeconds int
 	Provider     string
+	Model        string
 	// Dir optionally overrides the child process working directory — the
 	// concurrent loop's per-worker worktree (#394). Empty keeps the
 	// request-driven default (first AddDir, else the run root).
@@ -647,8 +655,11 @@ var fencedJSONPattern = regexp.MustCompile("(?s)(?:```|`)(?:json)?\\s*(\\{.*?\\}
 func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplane.Task, error) {
 	var task *controlplane.Task
 	var err error
-	if opts.Provider != "" {
-		task, err = s.cp.ClaimTaskProvider(ctx, opts.WorkerID, opts.LeaseSeconds, opts.Provider)
+	if opts.Provider != "" || opts.Model != "" {
+		task, err = s.cp.ClaimTaskFiltered(ctx, opts.WorkerID, opts.LeaseSeconds, controlplane.ClaimFilter{
+			Provider: opts.Provider,
+			Model:    opts.Model,
+		})
 	} else {
 		task, err = s.cp.ClaimTask(ctx, opts.WorkerID, opts.LeaseSeconds)
 	}
@@ -763,10 +774,12 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	// #427: workspace_write attempts get per-attempt worktree isolation —
 	// concurrent code-writing attempts sharing one checkout destroy each
-	// other's uncommitted deliverables. Isolator failure degrades to the
-	// shared checkout (warn, never fail the task). read_only attempts are
-	// untouched. opts.Dir (concurrent-loop per-worker worktree) wins over
-	// the request default; the isolator wins over both for writes.
+	// other's uncommitted deliverables.
+	// #656: workspace_write fails closed if isolation is unavailable.
+	// Nil isolator, Acquire error, or empty dir with nil error produces a
+	// structured isolation_unavailable failure, never invokes the child
+	// command, and terminally releases/finishes the attempt without leaking
+	// leases. read_only attempts are untouched.
 	// #610: when req.AddDirs specifies an explicit target repository
 	// (cross-repo dispatch), it takes precedence over pool worktree opts.Dir.
 	explicitAddDir := strings.TrimSpace(firstOf(req.AddDirs))
@@ -778,7 +791,31 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	var releaseWorktree func(keep bool)
 	var isolatedWorktreeDir string
-	if req.Permission == "workspace_write" && s.isolator != nil {
+	if req.Permission == "workspace_write" {
+		if s.isolator == nil {
+			outWriter.Close()
+			errWriter.Close()
+			outFile.Close()
+			errFile.Close()
+			errMsg := "worktree isolation unavailable: isolator is nil"
+			fmt.Fprintf(os.Stderr, "[warn] worker: %s for %s\n", errMsg, task.TaskID)
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+			}
+			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result: mustJSON(map[string]any{
+					"ok":     false,
+					"status": "isolation_unavailable",
+					"error":  errMsg,
+					"reason": errMsg,
+				}),
+				Success:   false,
+				Retryable: false,
+				Err:       errMsg,
+			})
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+		}
+
 		var (
 			wt      string
 			release func(keep bool)
@@ -789,14 +826,42 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		} else {
 			wt, release, err = s.isolator.AcquireWorktree(ctx, task.TaskID)
 		}
-		if err == nil {
-			spawnDir = wt
-			releaseWorktree = release
-			isolatedWorktreeDir = wt
-			fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
-		} else {
-			fmt.Fprintf(os.Stderr, "[warn] worker: worktree isolation unavailable for %s: %v\n", task.TaskID, err)
+		if err != nil || strings.TrimSpace(wt) == "" {
+			if release != nil {
+				release(false)
+			}
+			outWriter.Close()
+			errWriter.Close()
+			outFile.Close()
+			errFile.Close()
+			var errMsg string
+			if err != nil {
+				errMsg = fmt.Sprintf("worktree isolation unavailable: %v", err)
+			} else {
+				errMsg = "worktree isolation unavailable: isolator returned empty worktree directory"
+			}
+			fmt.Fprintf(os.Stderr, "[warn] worker: %s for %s\n", errMsg, task.TaskID)
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+			}
+			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result: mustJSON(map[string]any{
+					"ok":     false,
+					"status": "isolation_unavailable",
+					"error":  errMsg,
+					"reason": errMsg,
+				}),
+				Success:   false,
+				Retryable: false,
+				Err:       errMsg,
+			})
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
+
+		spawnDir = wt
+		releaseWorktree = release
+		isolatedWorktreeDir = wt
+		fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
 	}
 	if releaseWorktree != nil {
 		defer func() { releaseWorktree(true) }()
@@ -2250,11 +2315,24 @@ func (s *Supervisor) validateContract(
 
 	// 2. Validate output schema if provided
 	if outputSchemaRaw, ok := requestMap["output_schema"]; ok {
-		schemaBytes, _ := json.Marshal(outputSchemaRaw)
-		if len(schemaBytes) > 0 && string(schemaBytes) != "null" {
-			// Use gojsonschema for validation
-			// For now, just mark as validated
-			validation.Details["schema_validated"] = "true"
+		outcome := validateOutputSchema(outputSchemaRaw, resultJSON)
+		if outcome.Evaluated {
+			if outcome.Valid {
+				validation.Details["schema_validated"] = "true"
+			} else {
+				validation.Valid = false
+				validation.SchemaErrors = append(validation.SchemaErrors, outcome.SchemaErrors...)
+				for _, msg := range outcome.SchemaErrors {
+					errorCalls = append(errorCalls, controlplane.ErrorCallRecord{
+						Timestamp:  float64(s.clock().UnixNano()) / 1e9,
+						WorkerID:   workerID,
+						Attempt:    attempt,
+						ErrorType:  "contract_violation",
+						ErrorMsg:   msg,
+						StackTrace: "",
+					})
+				}
+			}
 		}
 	}
 
@@ -2301,39 +2379,169 @@ func (s *Supervisor) snapshot(ctx context.Context, taskID, runDir string, leftov
 	return s.cp.GetTask(ctx, taskID)
 }
 
-// ExportReceipt writes the redacted task snapshot as sealed evidence into the
-// attempt directory and centralized Evidence Lake; failures are swallowed so
-// cleanup never masks outcomes.
-func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
-	snap, err := s.cp.GetTask(ctx, taskID)
-	if err != nil || snap == nil {
-		return
+// sanitizeExportError strips absolute paths and returns a discrete category and clean message.
+func sanitizeExportError(op, target string, err error) (string, string) {
+	if err == nil {
+		return "", ""
 	}
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		return
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		cat := "io_error"
+		switch pathErr.Op {
+		case "mkdir":
+			cat = "mkdir_failed"
+		case "open", "write":
+			cat = "write_failed"
+		case "stat":
+			cat = "stat_failed"
+		case "read":
+			cat = "read_failed"
+		}
+		return cat, fmt.Sprintf("%s %s: %v", pathErr.Op, target, pathErr.Err)
 	}
-	receiptPath := filepath.Join(runDir, "receipt.json")
-	if werr := os.WriteFile(receiptPath, data, 0o600); werr != nil {
-		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", receiptPath, werr)
+	raw := err.Error()
+	re := regexp.MustCompile(`(/[a-zA-Z0-9_\-\.]+)+`)
+	clean := re.ReplaceAllString(raw, "[path]")
+	return "io_error", fmt.Sprintf("%s %s: %s", op, target, clean)
+}
+
+// ExportReceiptDetailed writes the redacted task snapshot as sealed evidence into the
+// attempt directory and centralized Evidence Lake, and persists the structured export outcome.
+func (s *Supervisor) ExportReceiptDetailed(ctx context.Context, taskID, runDir string) controlplane.ReceiptExportStatus {
+	now := float64(s.clock().UnixNano()) / 1e9
+	exportStatus := controlplane.ReceiptExportStatus{
+		UpdatedAt: now,
 	}
 
-	// Centralized Evidence Lake export
-	if s.evidenceDir != "" {
-		taskEvidenceDir := filepath.Join(s.evidenceDir, taskID)
-		if err := os.MkdirAll(taskEvidenceDir, 0o700); err == nil {
-			evReceiptPath := filepath.Join(taskEvidenceDir, "receipt.json")
-			if werr := os.WriteFile(evReceiptPath, data, 0o600); werr != nil {
-				fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", evReceiptPath, werr)
+	snap, err := s.cp.GetTask(ctx, taskID)
+	if err != nil || snap == nil {
+		exportStatus.Local = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusFailed,
+			Time:     now,
+			Category: "task_not_found",
+			Error:    "task lookup failed",
+		}
+		exportStatus.Central = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusDisabled,
+			Time:     now,
+			Category: "disabled",
+		}
+		return exportStatus
+	}
+
+	snapData, err := controlplane.CanonicalReceiptSnapshot(snap)
+	if err != nil {
+		exportStatus.Local = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusFailed,
+			Time:     now,
+			Category: "marshal_failed",
+			Error:    "canonical snapshot generation failed",
+		}
+		exportStatus.Central = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusDisabled,
+			Time:     now,
+			Category: "disabled",
+		}
+		return exportStatus
+	}
+
+	hash := sha256.Sum256(snapData)
+	digest := hex.EncodeToString(hash[:])
+
+	// 1. Attempt local runDir export
+	if runDir == "" {
+		exportStatus.Local = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusDisabled,
+			Time:     now,
+			Category: "disabled",
+		}
+	} else {
+		receiptPath := filepath.Join(runDir, "receipt.json")
+		if werr := os.WriteFile(receiptPath, snapData, 0o600); werr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", receiptPath, werr)
+			cat, sErr := sanitizeExportError("write", "receipt.json", werr)
+			exportStatus.Local = controlplane.ExportDestinationStatus{
+				Status:   controlplane.ExportStatusFailed,
+				Time:     now,
+				Category: cat,
+				Error:    sErr,
+				Path:     "receipt.json",
 			}
-			if snap.Attempts > 0 {
-				attemptPath := filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts))
-				if werr := os.WriteFile(attemptPath, data, 0o600); werr != nil {
-					fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", attemptPath, werr)
+		} else {
+			exportStatus.Local = controlplane.ExportDestinationStatus{
+				Status: controlplane.ExportStatusSucceeded,
+				Time:   now,
+				Digest: digest,
+				Path:   "receipt.json",
+			}
+		}
+	}
+
+	// 2. Attempt centralized Evidence Lake export
+	if s.evidenceDir == "" {
+		exportStatus.Central = controlplane.ExportDestinationStatus{
+			Status:   controlplane.ExportStatusDisabled,
+			Time:     now,
+			Category: "disabled",
+		}
+	} else {
+		taskEvidenceDir := filepath.Join(s.evidenceDir, taskID)
+		if merr := os.MkdirAll(taskEvidenceDir, 0o700); merr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] worker: mkdir %s: %v\n", taskEvidenceDir, merr)
+			cat, sErr := sanitizeExportError("mkdir", "evidence_dir", merr)
+			exportStatus.Central = controlplane.ExportDestinationStatus{
+				Status:   controlplane.ExportStatusFailed,
+				Time:     now,
+				Category: cat,
+				Error:    sErr,
+				Path:     filepath.Join(taskID, "receipt.json"),
+			}
+		} else {
+			evReceiptPath := filepath.Join(taskEvidenceDir, "receipt.json")
+			if werr := os.WriteFile(evReceiptPath, snapData, 0o600); werr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", evReceiptPath, werr)
+				cat, sErr := sanitizeExportError("write", "receipt.json", werr)
+				exportStatus.Central = controlplane.ExportDestinationStatus{
+					Status:   controlplane.ExportStatusFailed,
+					Time:     now,
+					Category: cat,
+					Error:    sErr,
+					Path:     filepath.Join(taskID, "receipt.json"),
+				}
+			} else {
+				if snap.Attempts > 0 {
+					attemptPath := filepath.Join(taskEvidenceDir, fmt.Sprintf("attempt_%d.json", snap.Attempts))
+					if aerr := os.WriteFile(attemptPath, snapData, 0o600); aerr != nil {
+						fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", attemptPath, aerr)
+					}
+				}
+				exportStatus.Central = controlplane.ExportDestinationStatus{
+					Status: controlplane.ExportStatusSucceeded,
+					Time:   now,
+					Digest: digest,
+					Path:   filepath.Join(taskID, "receipt.json"),
 				}
 			}
 		}
 	}
+
+	// Success is true if local succeeded (or disabled) and central did not fail
+	localOk := exportStatus.Local.Status == controlplane.ExportStatusSucceeded
+	centralOk := exportStatus.Central.Status == controlplane.ExportStatusSucceeded || exportStatus.Central.Status == controlplane.ExportStatusDisabled
+	exportStatus.Success = localOk && centralOk
+	exportStatus.FullyEvidenced = localOk && (s.evidenceDir == "" || exportStatus.Central.Status == controlplane.ExportStatusSucceeded)
+
+	// Persist outcome into control plane
+	_ = s.cp.RecordReceiptExport(ctx, taskID, exportStatus)
+
+	return exportStatus
+}
+
+// ExportReceipt writes the redacted task snapshot as sealed evidence into the
+// attempt directory and centralized Evidence Lake; failures are recorded in the
+// task's structured receipt export status without masking execution outcomes.
+func (s *Supervisor) ExportReceipt(ctx context.Context, taskID, runDir string) {
+	_ = s.ExportReceiptDetailed(ctx, taskID, runDir)
 }
 
 // LoopIsolation hands each concurrent loop worker a private working directory
@@ -2349,6 +2557,8 @@ type LoopIsolation interface {
 type LoopOptions struct {
 	WorkerID     string
 	LeaseSeconds int
+	Provider     string
+	Model        string
 	Once         bool
 	// Concurrency bounds the drain pool: <=1 (and any Once request) keeps
 	// the serial drain byte-identical; N>1 claims and runs up to N attempts
@@ -2395,7 +2605,12 @@ func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
 		if ctx.Err() != nil {
 			return ExitCodeForSignal(15)
 		}
-		task, err := s.RunOnce(ctx, RunOptions{WorkerID: opts.WorkerID, LeaseSeconds: opts.LeaseSeconds})
+		task, err := s.RunOnce(ctx, RunOptions{
+			WorkerID:     opts.WorkerID,
+			LeaseSeconds: opts.LeaseSeconds,
+			Provider:     opts.Provider,
+			Model:        opts.Model,
+		})
 		if err != nil || task == nil {
 			if err != nil && opts.OnError != nil {
 				opts.OnError(err)
@@ -2476,7 +2691,13 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 				active++
 				mu.Unlock()
 
-				task, err := s.RunOnce(ctx, RunOptions{WorkerID: opts.WorkerID, LeaseSeconds: opts.LeaseSeconds, Dir: dir})
+				task, err := s.RunOnce(ctx, RunOptions{
+					WorkerID:     opts.WorkerID,
+					LeaseSeconds: opts.LeaseSeconds,
+					Provider:     opts.Provider,
+					Model:        opts.Model,
+					Dir:          dir,
+				})
 
 				mu.Lock()
 				active--
