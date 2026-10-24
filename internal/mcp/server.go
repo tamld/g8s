@@ -1,7 +1,7 @@
 // Package mcp implements the g8s Model Context Protocol (MCP) server over
 // stdio using newline-delimited JSON-RPC 2.0 (DELTA-04).
 //
-// The server exposes sixteen tools that let a Brain-tier client (Claude Desktop,
+// The server exposes nineteen tools that let a Brain-tier client (Claude Desktop,
 // Cursor, Codex, Windsurf) drive the g8s runtime:
 //
 //	g8s_run             synchronous task execution (Phase 4 supervisor dependency)
@@ -20,6 +20,9 @@
 //	g8s_edit            atomic file editor with CAS SHA-256 (DELTA-23)
 //	g8s_select          native pure-Go JSON dot-path selector (DELTA-23)
 //	g8s_llm_call        direct synchronous LLM invocation (DELTA-25)
+//	g8s_charter_issue   issue an epoch-fenced Stratum Charter (DELTA-33)
+//	g8s_charter_verify  verify a Stratum Charter epoch & fence token (DELTA-33)
+//	g8s_portfolio_status O-Plane read-only portfolio & charter projection (DELTA-33)
 //
 // Dependencies are injected as narrow local interfaces so this package stays
 // decoupled from concrete store types and remains trivially testable. Per the
@@ -160,6 +163,9 @@ func (s *Server) RegisterTools() error {
 		"g8s_edit":             s.editTool,
 		"g8s_select":           s.selectTool,
 		"g8s_llm_call":         s.llmCallTool,
+		"g8s_charter_issue":    s.charterIssueTool,
+		"g8s_charter_verify":   s.charterVerifyTool,
+		"g8s_portfolio_status": s.portfolioStatusTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
@@ -178,6 +184,9 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_edit", Description: "Native pure-Go atomic file editor with exact-match replacement, CAS SHA-256 precondition, CRLF/LF preservation, and mandatory write-receipt validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"if_sha256":{"type":"string"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path","old_string"]}`)},
 		{Name: "g8s_select", Description: "Native pure-Go JSON dot-path selector (replaces jq; DELTA-23).", InputSchema: json.RawMessage(`{"type":"object","properties":{"input":{"type":"string","description":"Raw JSON string to query"},"selector":{"type":"string","description":"Dot-path selector (e.g. .data.receipt_id or items.0.name)"}},"required":["input","selector"]}`)},
 		{Name: "g8s_llm_call", Description: "Invoke any configured api_call LLM provider/gateway (OpenAI, Anthropic, 9router) from providers.json (DELTA-25).", InputSchema: json.RawMessage(`{"type":"object","properties":{"provider":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"system":{"type":"string"},"effort":{"type":"string"},"max_tokens":{"type":"integer"},"temperature":{"type":"number"},"timeout":{"type":"string"},"scope_root":{"type":"string"},"context_files":{"type":"array","items":{"type":"string"}}},"required":["prompt"]}`)},
+		{Name: "g8s_charter_issue", Description: "Issue an epoch-fenced Stratum Charter (S0/S1 -> S2) with canonical SHA-256 digest and fence token (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"issuer_stratum":{"type":"string"},"holder_stratum":{"type":"string"},"holder_ring":{"type":"string"},"scope_repo":{"type":"string"},"objective":{"type":"string"},"allowed_paths":{"type":"array","items":{"type":"string"}},"forbidden_paths":{"type":"array","items":{"type":"string"}},"required_gate_lane":{"type":"string"},"budget_calls":{"type":"integer"},"duration_sec":{"type":"integer"}},"required":["scope_repo","objective","allowed_paths"]}`)},
+		{Name: "g8s_charter_verify", Description: "Verify a Stratum Charter epoch and fence token against the SQLite WAL charter ledger (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"charter_id":{"type":"string"},"epoch":{"type":"integer"},"fence_token":{"type":"string"}},"required":["charter_id","epoch","fence_token"]}`)},
+		{Name: "g8s_portfolio_status", Description: "O-Plane read-only projection of active/revoked/completed Stratum Charters and domain scope allocations (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 	}
 	return nil
 }
@@ -225,7 +234,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "g8s", "version": "0.1.0-alpha"},
+			"serverInfo":      map[string]any{"name": "g8s", "version": "0.20.0"},
 		})
 	case "tools/list":
 		return okResponse(req.ID, map[string]any{"tools": s.list})

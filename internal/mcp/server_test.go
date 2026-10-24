@@ -194,6 +194,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 		"g8s_run", "g8s_submit", "g8s_get", "g8s_receipt_issue", "g8s_self_awareness", "g8s_blast_radius",
 		"g8s_dispatch", "g8s_list_tasks", "g8s_cancel_task", "g8s_list_roles", "g8s_list_permissions",
 		"g8s_search", "g8s_read", "g8s_edit", "g8s_select", "g8s_llm_call",
+		"g8s_charter_issue", "g8s_charter_verify", "g8s_portfolio_status",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))
@@ -1204,4 +1205,66 @@ func TestMCPLLMCallTool(t *testing.T) {
 			t.Errorf("expected context_files [sample.txt], got %v", output["context_files"])
 		}
 	})
+}
+
+func TestMCPCharterAndPortfolioTools(t *testing.T) {
+	t.Setenv("G8S_STATE_DIR", t.TempDir())
+	s, _, _, _ := newTestServer(t)
+
+	resIssue, rpcErr := callTool(t, s, "g8s_charter_issue", map[string]any{
+		"issuer_stratum":     "S1",
+		"holder_stratum":     "S2",
+		"holder_ring":        "F0",
+		"scope_repo":         "tamld/g8s",
+		"objective":          "Test MCP charter lifecycle",
+		"allowed_paths":      []string{"internal/**"},
+		"required_gate_lane": "D",
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_charter_issue failed: %+v", rpcErr)
+	}
+	var issued struct {
+		CharterID string `json:"charter_id"`
+		Epoch     int    `json:"epoch"`
+		Fence     string `json:"fence"`
+	}
+	if err := json.Unmarshal(resIssue, &issued); err != nil {
+		t.Fatalf("decode issued charter: %v", err)
+	}
+	if issued.CharterID == "" || issued.Epoch == 0 || issued.Fence == "" {
+		t.Fatalf("unexpected issued charter: %+v", issued)
+	}
+
+	resVerify, rpcErr := callTool(t, s, "g8s_charter_verify", map[string]any{
+		"charter_id":  issued.CharterID,
+		"epoch":       issued.Epoch,
+		"fence_token": issued.Fence,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_charter_verify failed: %+v", rpcErr)
+	}
+	var verified struct {
+		Valid bool `json:"valid"`
+	}
+	if err := json.Unmarshal(resVerify, &verified); err != nil {
+		t.Fatalf("decode verify result: %v", err)
+	}
+	if !verified.Valid {
+		t.Fatalf("expected valid charter verification, got %s", resVerify)
+	}
+
+	resPort, rpcErr := callTool(t, s, "g8s_portfolio_status", map[string]any{})
+	if rpcErr != nil {
+		t.Fatalf("g8s_portfolio_status failed: %+v", rpcErr)
+	}
+	var snap struct {
+		TotalCharters  int `json:"total_charters"`
+		ActiveCharters int `json:"active_charters"`
+	}
+	if err := json.Unmarshal(resPort, &snap); err != nil {
+		t.Fatalf("decode portfolio status: %v", err)
+	}
+	if snap.TotalCharters != 1 || snap.ActiveCharters != 1 {
+		t.Fatalf("unexpected portfolio counts: %+v", snap)
+	}
 }

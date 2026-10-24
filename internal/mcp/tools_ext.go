@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
@@ -652,4 +653,101 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 		out["context_files"] = hydratedFiles
 	}
 	return out, nil
+}
+
+func (s *Server) charterIssueTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		IssuerStratum string   `json:"issuer_stratum"`
+		RepoID        string   `json:"repo_id"`
+		ScopeRepo     string   `json:"scope_repo"`
+		ScopeRoot     string   `json:"scope_root"`
+		Objective     string   `json:"objective"`
+		AllowedPaths  []string `json:"allowed_paths"`
+		BudgetTokens  int      `json:"budget_tokens"`
+		DurationSec   int      `json:"duration_sec"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_charter_issue invalid arguments"}
+	}
+	repoID := strings.TrimSpace(a.RepoID)
+	if repoID == "" {
+		repoID = strings.TrimSpace(a.ScopeRepo)
+	}
+	if repoID == "" || strings.TrimSpace(a.Objective) == "" || len(a.AllowedPaths) == 0 {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_charter_issue requires scope_repo (or repo_id), objective, and allowed_paths"}
+	}
+	store, err := charter.Open("")
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	defer store.Close()
+	c, err := store.Issue(charter.IssueRequest{
+		IssuerStratum:  charter.Stratum(a.IssuerStratum),
+		RepoID:         repoID,
+		ScopeRoot:      a.ScopeRoot,
+		AllowedPaths:   a.AllowedPaths,
+		OutcomeMandate: a.Objective,
+		BudgetTokens:   a.BudgetTokens,
+		TTL:            time.Duration(a.DurationSec) * time.Second,
+	})
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	return c, nil
+}
+
+func (s *Server) charterVerifyTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		CharterID  string `json:"charter_id"`
+		RepoID     string `json:"repo_id"`
+		Epoch      int    `json:"epoch"`
+		FenceToken string `json:"fence_token"`
+		Fence      string `json:"fence"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_charter_verify invalid arguments"}
+	}
+	fence := strings.TrimSpace(a.FenceToken)
+	if fence == "" {
+		fence = strings.TrimSpace(a.Fence)
+	}
+	if strings.TrimSpace(a.CharterID) == "" || a.Epoch <= 0 || fence == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_charter_verify requires charter_id, epoch, and fence_token"}
+	}
+	store, err := charter.Open("")
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	defer store.Close()
+	c, err := store.Verify(a.CharterID, a.RepoID, a.Epoch, fence)
+	if err != nil {
+		return map[string]any{
+			"valid":      false,
+			"charter_id": a.CharterID,
+			"reason":     err.Error(),
+		}, nil
+	}
+	return map[string]any{
+		"valid":   true,
+		"charter": c,
+	}, nil
+}
+
+func (s *Server) portfolioStatusTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		WorkspaceDir string `json:"workspace_dir"`
+	}
+	if len(args) > 0 {
+		_ = json.Unmarshal(args, &a)
+	}
+	store, err := charter.Open("")
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	defer store.Close()
+	snap, err := store.ProjectPortfolio(a.WorkspaceDir)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
+	}
+	return snap, nil
 }

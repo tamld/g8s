@@ -923,3 +923,33 @@ func TestVerifyWriteScope_ProtectedDirectories(t *testing.T) {
 		t.Fatalf("expected normal file to succeed, got %v", err)
 	}
 }
+
+func TestFSOPSEnforcesS1MutationFirewall(t *testing.T) {
+	tempDir := t.TempDir()
+	target := filepath.Join(tempDir, "pkg", "main.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, forbiddenStratum := range []string{"S1", "S3-A", "O-Plane"} {
+		t.Setenv("G8S_STRATUM", forbiddenStratum)
+		if _, err := VerifyWriteScope(target, tempDir, []string{"**"}); err == nil || !strings.Contains(err.Error(), "E_S1_DIRECT_MUTATION_FORBIDDEN") {
+			t.Fatalf("expected VerifyWriteScope to block stratum %s, got %v", forbiddenStratum, err)
+		}
+		if _, _, err := ResolveDelegationContext("", tempDir, true); err == nil || !strings.Contains(err.Error(), "E_S1_DIRECT_MUTATION_FORBIDDEN") {
+			t.Fatalf("expected ResolveDelegationContext(isMutation=true) to block stratum %s, got %v", forbiddenStratum, err)
+		}
+		// Read-only resolution remains allowed for S1 / S3-A / O-Plane
+		if _, _, err := ResolveDelegationContext("", tempDir, false); err != nil {
+			t.Fatalf("expected read-only ResolveDelegationContext to succeed for stratum %s, got %v", forbiddenStratum, err)
+		}
+	}
+
+	t.Setenv("G8S_STRATUM", "S2")
+	if _, err := VerifyWriteScope(target, tempDir, []string{"**"}); err != nil {
+		t.Fatalf("expected VerifyWriteScope to allow stratum S2, got %v", err)
+	}
+}

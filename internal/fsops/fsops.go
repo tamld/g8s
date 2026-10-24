@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/vault"
@@ -197,6 +198,11 @@ func ResolveDelegationContext(flagReceiptID, flagScopeRoot string, isMutation bo
 	if isMutation && (envPerm == "read_only" || envPerm == "automation_read") {
 		return "", "", fmt.Errorf("permission=%s environment forbids file mutation", envPerm)
 	}
+	if isMutation {
+		if err := charter.VerifyMutationAllowed(charter.CurrentStratum(), flagScopeRoot); err != nil {
+			return "", "", err
+		}
+	}
 
 	if envReceipt != "" && flagReceiptID != "" && flagReceiptID != envReceipt {
 		return "", "", fmt.Errorf("receipt mismatch: flag %q conflicts with delegated worker environment receipt %q", flagReceiptID, envReceipt)
@@ -334,6 +340,9 @@ func hasExplicitPrefixGrant(prefix string, allowedPaths []string) bool {
 // operating under a receipt/wildcard scope or delegated F1/F2 tier unless
 // allowedPaths contains an explicit .g8s/** pattern.
 func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string, error) {
+	if err := charter.VerifyMutationAllowed(charter.CurrentStratum(), filePath); err != nil {
+		return "", err
+	}
 	relSlash, err := VerifyScope(filePath, scopeRoot, allowedPaths)
 	if err != nil {
 		return "", err
