@@ -1,9 +1,9 @@
 ---
 name: g8s-scenario-matrix
 description: "12-dimension edge-case, concurrency, and failure-injection generator and holdout verifier defeating test suite overfitting and AI blindspots."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: testing
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s matrix [gen|verify|inspect] --spec <spec_path> [--holdout-dir <dir>] [--dimensions <d1,d2...>] [--seed <seed>] [--json]"

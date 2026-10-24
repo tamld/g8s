@@ -234,3 +234,40 @@ With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer f
 3. **Multi-Model High-Availability Fleet via 9Router**: Standardized combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) automatically route and fail over across underlying upstream providers (NVIDIA NIM, OpenRouter, MiniMax, Gemini) with zero downtime or vendor lock-in.
 4. **T3 Independent Second Verifier Parity**: F0 can utilize `9router` (`deep-coding` or `reasoning-high`) as a genuinely independent verification oracle (`!= agy`) on `T3` trust-boundary modifications (`#628`).
 5. **Two-Layer Separation Rule (Public Mechanism vs. Operator Policy)**: Tracked repo files declare only generic protocols, standard combos, and localhost defaults. Homelab LAN IPs, specific gateway hosts, and custom homelab combos belong strictly in untracked local configurations (`~/.config/g8s/providers.json` and `~/.agents/skills/`).
+
+## 20. Two-Wave Layer-Disjoint Commit Split (`DEBT-34` + `Issue #208`) & `CRITICAL ROOT CONTRACT` (2026-10-24 campaign)
+
+1. **Two-Wave Layer-Disjoint Commit Split**:
+   - `tools/ci_layer_check.sh` (`DEBT-34`) inspects `git diff --name-only origin/main...HEAD` and rejects any push where `S + W + C > 1` (`S = internal/store/*`, `W = internal/worker/*`, `C = cmd/g8s/*`).
+   - Simultaneously, `tools/ci_doc_contract_check.sh` (`Issue #208`) and `tools/ci_spec_code_sync.sh` (`ADR-0024 G1`) require every `spec/openspec/*.md` file to be registered in `manifest.json`, `spec/openspec/README.md`, and `docs/AGENTS_FULL.md`, and every pinned `Test*` scenario in `spec/openspec/*.md` to exist in `*_test.go` (including tests inside `cmd/g8s/*_test.go`).
+   - **Canonical Resolution**: When a campaign touches both `internal/worker/*` and `cmd/g8s/*` alongside new OpenSpec deltas (`spec/openspec/*`), split the integration into **two sequential layer-disjoint pushes**:
+     - **Wave 1 (`S=0, W=1, C=0`)**: Stage, commit, and push `internal/*` (`internal/worker`, `internal/controlplane`, `internal/server`, `internal/verifier`, `go.mod`, `go.sum`).
+     - **Wave 2 (`S=0, W=0, C=1`)**: After `origin/main` advances to Wave 1 (and after `git pull --rebase origin main` if `github-actions[bot]` pushes a coverage baseline update), stage, commit, and push `cmd/g8s/*`, `spec/openspec/*`, `manifest.json`, `spec/openspec/README.md`, and `docs/*`.
+2. **`CRITICAL ROOT CONTRACT` for Isolated Worktrees**:
+   - When `g8s worker` spawns an F1 worker inside an isolated worktree (`$G8S_STATE_DIR/worktrees/wt-<hash>`), always include a `CRITICAL ROOT CONTRACT` directive in the prompt instructing the worker to operate strictly via relative paths inside its current working directory (`pwd`) and never `cd` to or reference the absolute primary repository path (`/Users/.../g8s`). Referencing the main checkout path from inside a worktree triggers receipt scope rejections or cross-worktree double writes.
+
+## 21. System-1 Reflex (`Jev`) Capability-Class Routing & 3-Tier Deterministic Fallback (`Sensor ≠ Decider`)
+
+1. **Jev as System-1 Sensor (`Sensor ≠ Decider`)**:
+   - Load Jev credentials from `.env` (`JEV_URL` / `JEV_TOKEN`) before invoking `g8s reflex triage --summary "<slice>" --files "<csv>" --json`. Verify `source == "jev"` and `is_fallback == false` in the returned envelope.
+   - Use Jev's `risk_score`, `breach_prob`, and ALDC lane signal (`0/D/R/F/S`) to route:
+     - **Model Capability Class**: `0/D` (`risk < 1.5`) $\to$ `9router/docs-retriever` or `fast-agent`; `R` (`1.5 <= risk < 3.0`) $\to$ `9router/reasoning-free` or `deep-coding`; `F` (`3.0 <= risk < 4.5`) $\to$ `9router/deep-coding` or `agy`; `S` (`risk >= 4.5` or `T3` boundary) $\to$ `agy` / `deep-coding` + independent `T3` verifier (`model_b != model_a`).
+     - **Verification Skill Bundle**: Automatically bind the lane's required skills (`g8s-epistemic-audit`, `g8s-red-prove`, `g8s-blind-verifier`, `g8s-scenario-matrix`, `g8s-ux-visual-gate`, `g8s-sec-gate`).
+     - **Supervisor Decision Pacing**: Fast-track low-risk slices; escalate high `breach_prob` slices to two-phase (`read_only` scout $\to$ `workspace_write` patch).
+2. **3-Tier Deterministic Fallback Hierarchy (When Jev is Offline / Degraded)**:
+   - **Tier 1 (Online)**: Live `Jev` (`source: "jev", is_fallback: false`).
+   - **Tier 2 (Deterministic Rule Engine + F1 Scout)**: Local static registries (`.g8s/effort-classes.yml`, `.g8s/lane-bundles.yml`, `.g8s/trust-boundaries.yml`, `.g8s/feature-map.yml`, and `skill-router.py --strict`) provide zero-latency path/blast-radius classification (`source: "deterministic", is_fallback: true`). If scope is still ambiguous, dispatch a bounded `read_only` F1 scout (`fast-agent` / `reasoning-free`, 30s timeout) to return a compact JSON scope packet.
+   - **Tier 3 (F0 Direct Brain)**: F0 never falls back to reading 100k+ lines of raw logs or source files when Jev is offline; F0 uses Tier 2 + F1 scouts and reserves its own context window strictly for architectural synthesis, conflict resolution, and commitment-point verification (`f0 gate check`).
+
+## 22. Zero-Trust Execution & Cross-Repo Delivery Discipline (`DELTA-26..31`, `v0.19.1`)
+
+1. **Six Execution Invariants (`DELTA-26..31`)**:
+   - `DELTA-26` (`#656`): `workspace_write` fails closed on worktree isolation errors (`StateFailed` before `cmd.Start()`).
+   - `DELTA-27` (`#657`): `g8s worker --provider <p> --model <m>` enforces strict claim affinity across both serial (`RunOnce`) and concurrent (`RunConcurrent`) worker loops.
+   - `DELTA-28` (`#658`): `g8s worker` reports `receipt_export: {status, path, attempts, last_error}` and `g8s receipt-export --task <id>` recovers failed exports idempotently.
+   - `DELTA-29` (`#659`): `g8s submit --output-schema <file>` validates worker JSON outputs against recursive Draft-7 constraints (`required`, `type`, `enum`, `minLength`, `minItems`, nested `properties`/`items`, `additionalProperties`).
+   - `DELTA-30` (`#655`): `g8s serve` refuses non-loopback binds (`0.0.0.0`, `::`, LAN IPs) without `G8S_API_TOKEN`.
+   - `DELTA-31` (`#648`): `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any DoD criterion `MET`.
+2. **Cross-Repo Commit & Push Completeness**:
+   - Whenever `g8s` dogfooding or Offer Bundle upgrades modify sibling repositories (`aegis`, `tuneflow`, `homelab-proxmox`, `defense-in-depth`, `hash-checker`, `dotagents`, `tamld-llm-wiki`), **never leave verified changes uncommitted or unpushed on local branches/worktrees**.
+   - Every cross-repo campaign wave MUST conclude with: (a) worktree/branch pruning (`wt/*`), (b) `g8s offer check` verification, (c) clean commit + push to remote (`origin/main` or merged PR per repo governance), and (d) release tagging (`tools/release.sh`) when `g8s` capabilities advance.

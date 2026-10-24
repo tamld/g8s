@@ -1,9 +1,9 @@
 ---
 name: g8s-red-prove
 description: "Mechanical Red -> Green reproduction + property/mutation proof + Seeded Mutant Canary verification (--canary-mutant) to eliminate vacuous tests and phantom bugfixes."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: testing
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-red-prove [repro|prove|canary] --repro <test> [--patch <file>] [--canary-mutant <file>] [--json]"

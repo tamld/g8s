@@ -113,3 +113,17 @@ Following the implementation of the pre-`v0.19.0` verification hardening suite (
    - `g8s-sec-gate` (`node scripts/ci-sast-gate.js` + `node scripts/ci-dast-gate.js`): Zero-trust SSRF private-IP rejection, path traversal containment, and HTTP security headers.
    - Native macOS `WKWebView`/`AVFoundation` 512KB chunked-Range MP3 streaming (`206 Partial Content`), `TUNEFLOW_DESKTOP_LOCAL=1` loopback auto-admin, and `OperationalLogger` (`tuneflow.log` 5MB rotation).
 
+## v0.19.1 Zero-Trust Execution Hardening & Jev-Assisted Multi-Worker Campaign (2026-10-24, Issues #648, #655–#659)
+
+During `campaign-20261024`, F0 (`agy` / `codex` handoff) orchestrated live `Jev` (`source: "jev", is_fallback: false`) pre-mutation triage alongside bounded F1 worker dispatches (`agy` + `9router`) to close 6 zero-trust execution and verification gaps across `DELTA-26` through `DELTA-31`:
+
+| Issue | OpenSpec Delta | Capability / Hardening Contract | Verification Evidence | Verdict |
+| :--- | :--- | :--- | :--- | :---: |
+| `#656` | `DELTA-26` (`26-worker-write-isolation-fail-closed.md`) | Fail-closed `workspace_write` isolation: abort before `cmd.Start()` when worktree creation fails (`StateFailed`, `exit_code=-1`) | `TestRunOnceWriteIsolationFailClosed` (`PR #654` / `7e41030`) | **PASS** |
+| `#657` | `DELTA-27` (`27-worker-provider-model-claim-affinity.md`) | Enforced `--provider` / `--model` claim affinity across serial (`RunOnce`) and concurrent (`RunConcurrent`) worker loops | `TestClaimNextQueuedTaskRespectsProviderAndModelFilter`, `TestRunOnceRespectsProviderAndModelFilter` (`7e41030`) | **PASS** |
+| `#658` | `DELTA-28` (`28-receipt-export-visibility-and-retry.md`) | Structured `receipt_export: {status, path, attempts, last_error}` in worker envelope + idempotent `g8s receipt-export --task <id>` CLI recovery | `TestReceiptExportSuccessAndIdempotentRetry`, `TestReceiptExportDegradesClearlyOnReadOnlyDir` (`b39847f`) | **PASS** |
+| `#659` | `DELTA-29` (`29-worker-output-schema-validation.md`) | Recursive JSON Schema Draft-7 validation (`--output-schema`) failing closed (`StateFailed` + `SCHEMA_VALIDATION_ERROR`) on invalid worker JSON | `TestRunOnceEnforcesOutputSchemaValidation` (`7e41030`) | **PASS** |
+| `#655` | `DELTA-30` (`30-server-non-loopback-bind-auth.md`) | Refuses non-loopback HTTP binds (`0.0.0.0`, `::`, LAN IPs) unless `G8S_API_TOKEN` is set; strips trailing slashes | `TestResolveServerRuntimeConfigRequiresTokenOnNonLoopback` (`PR #647` / `7e41030`) | **PASS** |
+| `#648` | `DELTA-31` (`31-mechanical-dod-check-binding.md`) | `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any criterion `MET` | `TestEvaluateDoDMatrixRequiresMechanicalEvidence`, `TestVerifyDoDFailsOnProseReportedDoDWithoutChecks` (`b39847f`) | **PASS** |
+
+

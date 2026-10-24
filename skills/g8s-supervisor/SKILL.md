@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.3.0
-last_updated: "2026-10-21"
+version: 4.4.0
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -93,13 +93,19 @@ Under `ADR-0033` (Phase 06b + Wave B), F0 enforces a strict **Cognitive Firewall
    - All log-hunting, CI failure extraction, documentation sync, formatting, and file editing are delegated to F1 workers (`agy` or `9router` combos: `fast-agent`, `docs-retriever`, `reasoning-free`, `deep-coding`).
    - Raw logs are isolated to disk at `$G8S_STATE_DIR/logs/verify-<task>-<ts>.log`, while F0 consumes only the compact, structured verdict.
 
-## Universal Config-Driven LLM Call Consumer & 9Router Fleet (DELTA-25, v0.19.0)
+## Universal Config-Driven LLM Call Consumer, 9Router Fleet & Zero-Trust Execution Hardening (DELTA-25..31, v0.19.1)
 
-With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer for any remote HTTP LLM gateway declared in `providers.json` or `.g8s/agent-models.yml`:
+With `v0.19.0`–`v0.19.1` (`DELTA-25..31`), `g8s` acts as a universal, config-driven consumer for any remote HTTP LLM gateway declared in `providers.json` or `.g8s/agent-models.yml` with strict zero-trust execution boundaries:
 - **Direct CLI Invocation**: `g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
-- **Worker Queue Execution**: `g8s submit --provider 9router --model <combo>` + `g8s worker --once`, seamlessly bridged via `g8s llm-call --worker-envelope` with duration, usage, and response capture.
-- **Live Model Discovery**: `g8s providers discover [--provider 9router] [--json]` queries live `/v1/models` from upstream.
-- **Multi-Model SWE Fleet**: Standard combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix globs (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) provide high-availability upstream failover with zero vendor lock-in.
+- **Worker Queue Execution & Pin Affinity (`DELTA-27`, `#657`)**: `g8s submit --provider 9router --model <combo>` + `g8s worker --once [--provider <p>] [--model <m>]`, enforcing strict claim affinity across both serial (`RunOnce`) and concurrent (`RunConcurrent`) worker loops without silent cross-provider/model hijacking.
+- **Strict Output Schema Validation (`DELTA-29`, `#659`)**: `g8s submit --output-schema <file.json>` enforces recursive JSON Schema Draft-7 validation (`required`, `type`, `enum`, `minLength`, `minItems`, nested `properties`/`items`, `additionalProperties`) on worker JSON responses, failing closed (`StateFailed` + `SCHEMA_VALIDATION_ERROR`) on malformed or truncated output.
+- **Fail-Closed Write Isolation (`DELTA-26`, `#656`)**: `workspace_write` tasks unconditionally require isolated git worktree creation (`RepoWorktreeIsolator` / `DefaultWorktreeIsolator`). Any worktree acquisition failure transitions the task directly to `FAILED` without spawning the child process against the live checkout.
+- **Receipt Export Visibility & Retry (`DELTA-28`, `#658`)**: Every `g8s worker` envelope includes structured `receipt_export: {status, path, attempts, last_error}`, and `g8s receipt-export --task <id> [--json]` allows idempotent recovery from SQLite without re-running the worker.
+- **Mechanical DoD Check Binding (`DELTA-31`, `#648`) & Non-Loopback Auth (`DELTA-30`, `#655`)**: `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any criterion `MET`; `g8s serve` refuses non-loopback binds (`0.0.0.0`, `::`, LAN IPs) unless `G8S_API_TOKEN` is configured.
+- **System-1 Reflex (`Jev`) Routing & 3-Tier Fallback (`Sensor ≠ Decider`)**:
+  - **Tier 1 (Jev Online)**: `g8s reflex triage --summary "..." --files "..."` (`source: "jev", is_fallback: false`) scores `risk_score`, `breach_prob`, ALDC lane (`0/D/R/F/S`), and recommends capability class (`fast-agent`, `docs-retriever`, `reasoning-free`, `deep-coding`, `reasoning-high`, `agy`) + verification skill bundle. F0 retains final `Decider` authority.
+  - **Tier 2 (Deterministic Rule Engine + F1 Scout)**: When Jev is offline (`is_fallback: true`), `.g8s/effort-classes.yml`, `.g8s/lane-bundles.yml`, `.g8s/trust-boundaries.yml`, and `skill-router.py --strict` deterministically map path globs and blast radius; if ambiguity remains, F0 dispatches a cheap `read_only` F1 scout (`fast-agent` / `reasoning-free`) for 15–30s reconnaissance.
+  - **Tier 3 (F0 Direct Brain Override)**: Reserved strictly for architectural tradeoffs (`T3`/`T4`), cross-worker contradictions, and final `g8s deliver` / commit / merge judgment.
 - **Two-Layer Separation Rule**: Public repo mechanisms and standard models remain strictly separated from untracked local policies (`~/.config/g8s/providers.json` and `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
 
 ## The six laws

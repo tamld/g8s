@@ -16,7 +16,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 )
 
-const offerBundleVersion = "0.19.0"
+const offerBundleVersion = "0.19.1"
 
 const knowledgeEffortClassesSeed = `# Effort Classes Configuration — Knowledge Profile (issue #550 / C2)
 # Maps task write-scope paths to reasoning effort defaults.

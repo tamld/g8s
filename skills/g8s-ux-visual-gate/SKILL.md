@@ -1,9 +1,9 @@
 ---
 name: g8s-ux-visual-gate
 description: "Headless browser DOM bounding-box collision, computed typography/contrast, console runtime error, keyboard navigation, and media playback contract verifier."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: testing
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s verify-ux --url <target_url> [--viewport <WxH>] [--wcag-level <AA|AAA>] [--media-selector <sel>] [--json]"

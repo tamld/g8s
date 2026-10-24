@@ -1,9 +1,9 @@
 ---
 name: g8s-sec-gate
 description: "Zero-trust SAST and live DAST probe runner enforcing SSRF private-IP blocking, path traversal containment, CSP/XSS sanitization, auth bypass probing, and trust boundary integrity."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: security
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: high
 evidence_level: runtime_required
 args_syntax: "g8s sec probe [--targets <paths>] [--endpoint <url>] [--config .g8s/trust-boundaries.yml] [--json]"

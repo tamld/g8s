@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-24
+
+### Added
+
+- Worker Provider & Model Claim Affinity (`DELTA-27`, #657):
+  - Enforced `--provider` and `--model` filter matching in `controlplane.ClaimNextQueuedTask` and `worker.Supervisor.RunOnce` / `RunConcurrent` so pinned tasks are never silently claimed by mismatched workers and filtered workers only claim compatible tasks.
+- Receipt Export Visibility & Idempotent Recovery CLI (`DELTA-28`, #658):
+  - Added structured `receipt_export: {status, path, attempts, last_error}` status to `g8s worker` JSON output envelopes and introduced `g8s receipt-export --task <id> [--state-dir <dir>] [--json]` for idempotent recovery of failed disk receipt exports without re-running tasks.
+- OpenSpec Deltas `26`–`31` & Supervisor Charter `v4.4.0`:
+  - Registered `spec/openspec/26-worker-write-isolation-fail-closed.md` through `31-mechanical-dod-check-binding.md` across `manifest.json`, `spec/openspec/README.md`, and `docs/AGENTS_FULL.md`.
+  - Updated `skills/g8s-supervisor` (`v4.4.0`, Lessons #20–#22) with Two-Wave Layer-Disjoint Commit Split (`DEBT-34` + `Issue #208`), Jev (`Sensor ≠ Decider`) capability-class routing + 3-tier deterministic fallback, and aligned `skills/g8s-*` frontmatter domains with the 18 MECE domains of `skill-router.py`.
+
+### Fixed
+
+- Fail-Closed Worker Write Isolation (`DELTA-26`, #656):
+  - Fixed `internal/worker/worker.go` (`RunOnce` & `runSingleTask`) so any `workspace_write` task whose worktree isolation fails (`isolator == nil`, empty path, or error) aborts before `cmd.Start()` and transitions directly to `StateFailed` without mutating the primary checkout.
+- Worker Output Schema Draft-7 Validation (`DELTA-29`, #659):
+  - Implemented recursive JSON Schema Draft-7 validation (`validateOutputAgainstSchema`) in `internal/worker/worker.go` enforcing `required`, `type`, `enum`, `minLength`, `minItems`, nested `properties`/`items`, and `additionalProperties: false`; invalid or non-JSON worker outputs now transition tasks to `StateFailed` (`SCHEMA_VALIDATION_ERROR`).
+- Non-Loopback HTTP Bind Auth Guard (`DELTA-30`, #655):
+  - Hardened `internal/server/config.go` (`ResolveServerRuntimeConfig` / `ValidateBindAuthConfig`) to refuse starting `g8s serve` on non-loopback addresses (`0.0.0.0`, `::`, LAN IPs, hostnames) unless `G8S_API_TOKEN` is configured, and normalized trailing slashes on base URLs.
+- Mechanical DoD Check Binding (`DELTA-31`, #648):
+  - Hardened `EvaluateDoDMatrix` (`internal/verifier/verifier.go`) and `g8s verify` (`cmd/g8s/verify.go`) so DoD criteria require real executed `VerificationCheck` records (`exit_code=0`, non-vacuous command output, and matching check ID or explicit criterion binding) instead of trusting worker prose or bare status tokens.
+
 ## [0.19.0] - 2026-10-22
 
 ### Added

@@ -1,9 +1,9 @@
 ---
 name: g8s-blind-verifier
 description: "Double-blind counterexample & falsification review operating exclusively on BlindReviewPacket (SpecContract + Invariants + RawGitDiff + MechanicalTestOutput), stripping worker self-report and model identity to defeat reviewer sycophancy."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: testing
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-blind-verifier [review|falsify|audit] --packet <path-or-json> [--task <id>] [--json]"

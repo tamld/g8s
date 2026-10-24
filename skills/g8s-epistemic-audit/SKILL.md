@@ -1,9 +1,9 @@
 ---
 name: g8s-epistemic-audit
 description: "Claim decomposition and evidence-tier classifier (MECHANICAL_VERIFIED, OBSERVATIONAL_TELEMETRY, UNVERIFIED_PROSE), enforcing the 4 epistemic laws across supervisor handoffs and receipts."
-domain: verification
-version: 1.0.0
-last_updated: "2026-10-22"
+domain: testing
+version: 1.0.1
+last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-epistemic-audit [audit|decompose|classify] --input <file.md> [--threshold <ratio>] [--json]"
