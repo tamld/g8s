@@ -811,6 +811,25 @@ g8s reflex triage --summary "Update feature map validation" --files "internal/fe
 
 ---
 
+### 37. `g8s charter` — Orthogonal Stratum Federation & Epoch-Fenced Charter Engine (`DELTA-33`, `ADR-0035`)
+Manages epoch-fenced `S1 -> S2` domain charters stored in `$G8S_STATE_DIR/charters.db` and projects read-only `O-Plane` portfolio telemetry.
+
+```sh
+# Issue an S1 -> S2 Charter for a repository
+g8s charter issue --repo tamld/g8s --mandate "Ship DELTA-33" --path "internal/**" --ttl 2h --json
+
+# Verify an active Charter's epoch and fencing token
+g8s charter verify --id <charter-id> --epoch 1 --fence <fence-token> --json
+
+# Revoke and reclaim a Charter (increments epoch and rotates fencing token)
+g8s charter revoke --id <charter-id> --reason "Reclaimed by S1 coordinator" --json
+
+# Project read-only O-Plane portfolio status
+g8s charter portfolio --json
+```
+
+---
+
 ## Standalone 1-Liner Installation
 
 Install or upgrade `g8s` directly via curl:

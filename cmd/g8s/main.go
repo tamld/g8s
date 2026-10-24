@@ -241,6 +241,8 @@ func main() {
 		runLadder(os.Args[2:])
 	case "fleet":
 		runFleet(os.Args[2:])
+	case "charter":
+		runCharter(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -1691,6 +1693,8 @@ func printUsage() {
 	fmt.Println("  verify       Run verifier-class acceptance checks on a task (g8s verify --task <id>)")
 	fmt.Println("  feature      Declarative feature map validation and blast radius routing (g8s feature verify|inspect|list)")
 	fmt.Println("  ladder       Quality-ladder failure classification and escalation (g8s ladder status|advance|gauges)")
+	fmt.Println("  fleet        Cross-repository git & release hygiene scanner (g8s fleet status [--dir <workspace>])")
+	fmt.Println("  charter      Orthogonal Stratum Federation charter lifecycle & O-Plane portfolio (g8s charter issue|verify|revoke|complete|list|portfolio)")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")

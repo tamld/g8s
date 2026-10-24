@@ -119,11 +119,97 @@
       "disables_model_tools": true
     }
   ],
-  "schemas": {
-    "task": "schemas/task-v1.schema.json",
-    "receipt": "schemas/receipt-v1.schema.json",
-    "result": "schemas/result-v1.schema.json"
-  },
+    "schemas": {
+      "task": "schemas/task-v1.schema.json",
+      "receipt": "schemas/receipt-v1.schema.json",
+      "result": "schemas/result-v1.schema.json"
+    },
+    "architecture_taxonomy": {
+      "adr": "docs/decisions/0035-orthogonal-stratum-federation.md",
+      "openspec_delta": "DELTA-33",
+      "containment_rings": {
+        "F0": {
+          "name": "Host / Supervisor Ring",
+          "description": "Primary checkout & control-plane DB authority; issues receipts and commits verified changes.",
+          "env_var": "G8S_TIER=F0"
+        },
+        "F1": {
+          "name": "Isolated Worker Ring",
+          "description": "Git worktree + Setpgid OS process group bound to a single-use WriteReceipt.",
+          "env_var": "G8S_TIER=F1"
+        },
+        "F2": {
+          "name": "Nested Subagent Ring",
+          "description": "Subagent or subtask (depth <= 2) inheriting F1 worktree and receipt ceiling (F2 subset of F1 subset of F0).",
+          "env_var": "G8S_TIER=F2"
+        }
+      },
+      "control_strata": {
+        "S0": {
+          "id": "Principal",
+          "ring": "Human / Root",
+          "can_mutate_files": false,
+          "can_dispatch_strata": ["S1", "S2", "O-Plane"],
+          "description": "Human Operator / Board setting strategic outcomes, risk appetite, and capital/quota budgets."
+        },
+        "S1": {
+          "id": "FederationCoordinator",
+          "ring": "F0 (Read-Only Repo)",
+          "env_var": "G8S_STRATUM=S1",
+          "can_mutate_files": false,
+          "can_dispatch_strata": ["S2", "O-Plane"],
+          "forbidden_actions": ["fsops.Edit", "fsops.VerifyWriteScope", "g8s submit (S3 bypass)"],
+          "cli_surface": ["g8s charter issue", "g8s charter verify", "g8s charter revoke", "g8s charter complete", "g8s charter portfolio", "g8s fleet status"],
+          "description": "Multi-repository portfolio orchestrator issuing epoch-fenced Charters to S2 DomainGovernors."
+        },
+        "S2": {
+          "id": "DomainGovernor",
+          "ring": "F0 (Repo-Scoped)",
+          "env_var": "G8S_STRATUM=S2",
+          "can_mutate_files": true,
+          "can_dispatch_strata": ["S3-M", "S3-A", "O-Plane"],
+          "cli_surface": ["g8s brief-issue", "g8s receipt issue", "g8s submit", "g8s worker", "g8s verify", "g8s deliver"],
+          "description": "Single-repository sovereign supervisor executing an active S1 Charter."
+        },
+        "S3-M": {
+          "id": "BoundedMutator",
+          "ring": "F1 / F2",
+          "env_var": "G8S_STRATUM=S3-M",
+          "can_mutate_files": true,
+          "can_dispatch_strata": [],
+          "description": "Isolated worktree coder/tester constrained by single-use WriteReceipt AllowedPaths."
+        },
+        "S3-A": {
+          "id": "BlindAdjudicator",
+          "ring": "F1 (Read-Only)",
+          "env_var": "G8S_STRATUM=S3-A",
+          "can_mutate_files": false,
+          "can_dispatch_strata": [],
+          "description": "Disjoint-model-family blind verifier operating exclusively on sanitized BlindReviewPacket."
+        },
+        "O-Plane": {
+          "id": "TelemetryProjector",
+          "ring": "Deterministic Code",
+          "env_var": "G8S_STRATUM=O-Plane",
+          "can_mutate_files": false,
+          "can_dispatch_strata": [],
+          "cli_surface": ["g8s charter portfolio --json", "g8s fleet status --json", "g8s supervisor-metrics --json"],
+          "description": "Zero-LLM-rewrite read-only SQLite WAL state & portfolio projector."
+        }
+      },
+      "verified_9router_routing": {
+        "gateway_provider": "9router",
+        "primary_coding_combo": "deep-coding",
+        "deep_reasoning_combo": "reasoning-high",
+        "fast_retrieval_combo": "docs-retriever",
+        "disjoint_blind_adjudicators": [
+          "cl/anthropic/claude-sonnet-4.6",
+          "cl/anthropic/claude-haiku-4.5",
+          "cl/openai/gpt-4.1-mini",
+          "cl/google/gemini-2.5-flash"
+        ]
+      }
+    },
   "specifications": [
     {
       "id": "DELTA-01",
@@ -321,6 +407,12 @@
       "id": "DELTA-32",
       "title": "Bounded Agentic Loop, Adaptive Effort Timeout, F1->F2 Subtask Containment, Fleet Gate, and Monotonic Jev Routing",
       "path": "spec/openspec/32-bounded-agentic-loop-f1f2-fleet-jev-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-33",
+      "title": "Orthogonal Stratum Federation (S0..S3 + O-Plane) and Epoch-Fenced Charter Engine",
+      "path": "spec/openspec/33-stratum-federation-and-charter-spec.md",
       "status": "APPLIED"
     }
   ],

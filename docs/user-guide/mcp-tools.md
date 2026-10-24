@@ -1,6 +1,6 @@
 # MCP Tools
 
-`g8s mcp` serves a sixteen-tool stdio JSON-RPC server (protocol version
+`g8s mcp` serves a nineteen-tool stdio JSON-RPC server (protocol version
 negotiated per client, default `2025-06-18`).
 
 ## Tool surface
@@ -23,6 +23,9 @@ negotiated per client, default `2025-06-18`).
 | `g8s_edit` | Atomic CAS file editing | exact-match replacement with precondition SHA-256 and mandatory write-receipt validation (DELTA-23) |
 | `g8s_select` | Native JSON dot-path selector | pure-Go field extraction and array indexing replacing `jq` (DELTA-23) |
 | `g8s_llm_call` | Direct synchronous LLM invocation | calls any configured `api_call` HTTP provider gateway (`openai`, `anthropic`, `9router`) (DELTA-25) |
+| `g8s_charter_issue` | Issue epoch-fenced Stratum Charter | mints an `S0/S1 -> S2` domain charter with canonical SHA-256 digest and fencing token (DELTA-33) |
+| `g8s_charter_verify` | Verify Stratum Charter | validates active charter state, epoch, and fencing token (DELTA-33) |
+| `g8s_portfolio_status` | O-Plane portfolio projection | read-only projection of active, completed, and revoked charters across repositories (DELTA-33) |
 
 ## Tool details & extensions
 

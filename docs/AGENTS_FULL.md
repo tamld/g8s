@@ -124,6 +124,7 @@ Incoming Task:
 | **DELTA-30** | [`30-worker-claim-affinity-spec.md`](../spec/openspec/30-worker-claim-affinity-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
 | **DELTA-31** | [`31-receipt-export-status-spec.md`](../spec/openspec/31-receipt-export-status-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
 | **DELTA-32** | [`32-bounded-agentic-loop-f1f2-fleet-jev-spec.md`](../spec/openspec/32-bounded-agentic-loop-f1f2-fleet-jev-spec.md) | `cmd/g8s`, `internal/routing` | APPLIED |
+| **DELTA-33** | [`33-stratum-federation-and-charter-spec.md`](../spec/openspec/33-stratum-federation-and-charter-spec.md) | `internal/charter`, `internal/fsops`, `internal/mcp`, `cmd/g8s` | APPLIED |
 
 ---
 
@@ -156,6 +157,11 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
    - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
    - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
    - **Two-Layer Separation Rule**: Public repo mechanism (`openai`/`anthropic`/`9router`, standard combos/wildcards, `http://127.0.0.1:20128/v1`) vs. local untracked operator policy (`~/.config/g8s/providers.json` & `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
+7. **Orthogonal Stratum Federation (`S0..S3` + `O-Plane`) & Epoch-Fenced Charter Engine (`DELTA-33` / [`ADR-0035`](decisions/0035-orthogonal-stratum-federation.md))**:
+   - **Axis X (Physical Containment Rings)**: `F0` (Host/Brain), `F1` (Isolated git worktree + `Setpgid` worker), `F2` (Nested subagent/subtask `F2 ⊆ F1 ⊆ F0`).
+   - **Axis Y (Hierarchical Control Strata)**: `S0 Principal` (Human) $\to$ `S1 FederationCoordinator` (Multi-Repo Charter Issuer) $\to$ `S2 DomainGovernor` (Single-Repo Sovereign Supervisor) $\to$ `S3-M BoundedMutator` / `S3-A BlindAdjudicator`, plus `O-Plane TelemetryProjector` (`g8s charter portfolio --json`).
+   - **Strict Adjacency & Mutation Firewall**: `S1`, `S3-A`, and `O-Plane` are kernel-blocked from direct file mutation (`E_S1_DIRECT_MUTATION_FORBIDDEN`) and `S1` is blocked from calling `g8s submit` directly (`E_STRATUM_ADJACENCY_VIOLATION`).
+   - **Verified `9router` Routing Priority**: Prefer `deep-coding` (complex coding), `reasoning-high` (Socratic/architectural analysis), `docs-retriever` (fast scouting), and `cl/anthropic/claude-sonnet-4.6` / `cl/openai/gpt-4.1-mini` / `cl/google/gemini-2.5-flash` (disjoint-family `S3-A` blind adjudication).
 
 ---
 

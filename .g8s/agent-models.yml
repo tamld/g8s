@@ -188,7 +188,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever) and sticky round-robin prompt caching"
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/anthropic/claude-sonnet-4.6, cl/anthropic/claude-haiku-4.5, cl/openai/gpt-4.1-mini, cl/google/gemini-2.5-flash)"
     models:
       - id: reasoning-free
         supported_efforts: [low, medium, high]

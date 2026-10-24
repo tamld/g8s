@@ -29,7 +29,7 @@
 
 * **FR-5 (Stdio MCP Server)**:
   * Implement JSON-RPC 2.0 stdio protocol for MCP compatibility.
-  * Expose 16 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`.
+  * Expose 19 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`, `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`.
 
 * **FR-6 (Cross-Platform Daemon Service)**:
   * Support `g8s service install|start|stop|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`sc.exe`); unsupported platforms fail closed with a clear error.
@@ -50,6 +50,7 @@
   * Enforce reversibility tiers `T0` (Observation/F1 dispatch), `T1` (Branch push/PR/Issue close), `T2` (Standard merge), `T3` (Trust-boundary merge requiring dual independent verification), and `T4` (Irreversible/Sovereign actions requiring explicit synchronous PiC approval).
   * Enforce fail-closed T3 blind verification (`EvaluateT3Response` requiring explicit `VERDICT: PASS`) and resolved model-family lineage disjointness (`ExtractModelFamily(model_resolved)`, `#662`).
   * Enforce deterministic commitment checks: completeness of `dod_matrix` (`all D1..Dn == MET`), `tree_sha`/`head_sha` non-vacuous test evidence (`G1`/`G5`), forge CI completion (`G2`), worktree-to-commit blob provenance (`G3`), and issue-closure criterion completeness (`G7`).
+  * Enforce Orthogonal Stratum Federation (`S0 Principal` $\to$ `S1 FederationCoordinator` $\to$ `S2 DomainGovernor` $\to$ `S3-M BoundedMutator` / `S3-A BlindAdjudicator` + `O-Plane TelemetryProjector`, `DELTA-33` / `ADR-0035`) with epoch-fenced SQLite WAL charters (`g8s charter`), strict adjacency (`E_STRATUM_ADJACENCY_VIOLATION`), and cross-stratum mutation firewall (`E_S1_DIRECT_MUTATION_FORBIDDEN`).
 
 * **FR-10 (Universal Config-Driven LLM Consumer & Multi-Model 9Router Fleet, `DELTA-25..32`, ADR-0034)**:
   * Declarative provider config in `providers.json` supporting `api_call` with `openai`, `anthropic`, and `9router` protocols, runtime `base_url_env`, static `headers`, and wildcard/prefix model matching (`allow_unlisted_models`).

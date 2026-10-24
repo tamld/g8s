@@ -21,6 +21,10 @@ Bare tokens **F0/F1/F2 are RESERVED** for the exponential containment tiers ([`d
 - **F2 — Subagent Tier**: Spawned recursively BY **F1** workers themselves inside the worker's platform (`define_subagent` / `invoke_subagent`) by default, sharing F1's sandbox and receipt boundary (`F2 ⊆ F1 ⊆ F0`). Recursive `g8s` (`F1` calling `g8s submit`) is reserved and ADR-gated.
 - **Cardinality Law**: `1 issue = 1 worker = 1 receipt` (strict `1-1`); **`F1 ↔ F1 = 0`** (no horizontal edges; coordinate only via frozen briefs and disjoint receipts); **`F0 ↔ F2 = 0 direct`** (F2 is visible to F0 only through F1's sealed evidence — never skip layers); `n workers ↔ queue = n-1` (SQLite WAL single-winner).
 - **Naming Discipline**: Wave and slice ordinals MUST carry a prefix (`WF1..WFN`, never bare `F1..FN`). Bare `F3+` does not exist.
+- **Orthogonal Control Strata (`S0..S3 + O-Plane`, [`docs/decisions/0035-orthogonal-stratum-federation.md`](docs/decisions/0035-orthogonal-stratum-federation.md) / `DELTA-33`)**:
+  - **Axis X (Rings)**: `F0 / F1 / F2` (physical OS/worktree sandboxing).
+  - **Axis Y (Strata)**: `S0 Principal` (Human) $\to$ `S1 FederationCoordinator` (`F0` read-only multi-repo charter issuer via `./bin/g8s charter`) $\to$ `S2 DomainGovernor` (`F0` single-repo sovereign supervisor) $\to$ `S3-M BoundedMutator` (`F1/F2` worktree coder) / `S3-A BlindAdjudicator` (`F1` disjoint-family blind verifier), plus `O-Plane TelemetryProjector` (`./bin/g8s charter portfolio --json`).
+  - **Kernel Firewalls**: `S1`, `S3-A`, and `O-Plane` are blocked from direct file mutation (`E_S1_DIRECT_MUTATION_FORBIDDEN`), and `S1` is blocked from calling `g8s submit` directly (`E_STRATUM_ADJACENCY_VIOLATION`).
 
 ---
 

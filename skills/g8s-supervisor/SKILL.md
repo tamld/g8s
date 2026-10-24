@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.4.0
-last_updated: "2026-10-24"
+version: 4.5.0
+last_updated: "2026-10-25"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -107,6 +107,16 @@ With `v0.19.0`–`v0.19.1` (`DELTA-25..31`), `g8s` acts as a universal, config-d
   - **Tier 2 (Deterministic Rule Engine + F1 Scout)**: When Jev is offline (`is_fallback: true`), `.g8s/effort-classes.yml`, `.g8s/lane-bundles.yml`, `.g8s/trust-boundaries.yml`, and `skill-router.py --strict` deterministically map path globs and blast radius; if ambiguity remains, F0 dispatches a cheap `read_only` F1 scout (`fast-agent` / `reasoning-free`) for 15–30s reconnaissance.
   - **Tier 3 (F0 Direct Brain Override)**: Reserved strictly for architectural tradeoffs (`T3`/`T4`), cross-worker contradictions, and final `g8s deliver` / commit / merge judgment.
 - **Two-Layer Separation Rule**: Public repo mechanisms and standard models remain strictly separated from untracked local policies (`~/.config/g8s/providers.json` and `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
+- **Orthogonal Stratum Federation (`DELTA-33` / `ADR-0035`) & Verified `9router` Strategic Routing**:
+  - **Axis X (Containment Rings)**: `F0` (Host/Brain), `F1` (Isolated git worktree + `Setpgid` worker), `F2` (Nested subagent/subtask `F2 ⊆ F1 ⊆ F0`).
+  - **Axis Y (Control Strata)**: `S0 Principal` (Human) $\to$ `S1 FederationCoordinator` (Multi-repo charter allocator via `g8s charter issue|verify|revoke|complete|portfolio`) $\to$ `S2 DomainGovernor` (Single-repo sovereign supervisor) $\to$ `S3-M BoundedMutator` / `S3-A BlindAdjudicator` + `O-Plane TelemetryProjector`.
+  - **Live-Verified `9router` Quota-Saving Model Matrix**:
+    - `deep-coding`: Primary complex coding & multi-file F1 worker combo (`S3-M`).
+    - `reasoning-high`: Deep Socratic inversion, RCA, and architectural analysis combo.
+    - `docs-retriever`: Fast repository reconnaissance, scouting, and documentation sync combo.
+    - `cl/anthropic/claude-sonnet-4.6` & `cl/anthropic/claude-haiku-4.5`: Anthropic family routes for disjoint-family `S3-A` / `T3` blind adjudication.
+    - `cl/openai/gpt-4.1-mini` & `cl/google/gemini-2.5-flash`: Fast OpenAI / Google Gemini routes for cross-family verification.
+  - **OS-Level MCP Integration**: Use registered MCP servers `g8s` (`~/.local/bin/g8s mcp`, 19 tools including `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`) and `wiki-mcp` (`~/.local/bin/mcp-wiki.py`, 8 tools wrapping `wiki.py`) to keep capability delegation and durable knowledge retrieval native in every session.
 
 ## The six laws
 

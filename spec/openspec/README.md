@@ -41,6 +41,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-30`](30-worker-claim-affinity-spec.md)** | Worker Claim Affinity Enforcement (Provider and Model) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | M6 (Claim Affinity) | `APPLIED` |
 | **[`DELTA-31`](31-receipt-export-status-spec.md)** | Receipt Export Status Persistence and Idempotent Operator Recovery | `internal/controlplane`, `internal/worker`, `cmd/g8s` | M6 (Evidence Lake) | `APPLIED` |
 | **[`DELTA-32`](32-bounded-agentic-loop-f1f2-fleet-jev-spec.md)** | Bounded Agentic Loop, Adaptive Effort Timeout, `F1->F2` Subtask Containment, `g8s fleet status`, and Monotonic `Jev` Routing | `cmd/g8s`, `internal/routing` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-33`](33-stratum-federation-and-charter-spec.md)** | Orthogonal Stratum Federation (`S0..S3` + `O-Plane`) and Epoch-Fenced Charter Engine | `internal/charter`, `internal/fsops`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 
 ---
 

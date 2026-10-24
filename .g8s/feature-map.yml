@@ -1,6 +1,6 @@
 schema_version: "1.0"
 # g8s Declarative End-to-End Feature Map (.g8s/feature-map.yml)
-# Maps 14 single-responsibility functional feature nodes to SRS requirements,
+# Maps 15 single-responsibility functional feature nodes to SRS requirements,
 # OpenSpec deltas, code paths, invariants, visible tests, verifier classes,
 # and acyclic blast radius graphs.
 
@@ -27,6 +27,7 @@ features:
     blast_radius:
       depends_on: []
       direct_consumers:
+        - "FEAT-CHARTER-FEDERATION-01"
         - "FEAT-WORKER-01"
         - "FEAT-VERIFY-01"
         - "FEAT-F0-GATE-01"
@@ -55,8 +56,35 @@ features:
     blast_radius:
       depends_on: []
       direct_consumers:
+        - "FEAT-CHARTER-FEDERATION-01"
         - "FEAT-FSOPS-01"
         - "FEAT-WORKER-01"
+
+  - id: "FEAT-CHARTER-FEDERATION-01"
+    title: "Orthogonal Stratum Federation & Epoch-Fenced Charter Engine"
+    persona_story: "As a multi-repository FederationCoordinator (S1) or DomainGovernor (S2), I need orthogonal control strata (S0..S3 + O-Plane) and epoch-fenced SQLite WAL charters so that cross-repository delegation is mechanically bounded without conflating OS containment rings (F0/F1/F2)."
+    srs_reqs:
+      - "FR-9"
+    openspec_delta: "DELTA-33"
+    code_paths:
+      - "internal/charter/**"
+      - "cmd/g8s/charter.go"
+    invariants:
+      - "Strict Stratum Adjacency Law (S0 -> S1/S2, S1 -> S2/O-Plane, S2 -> S3-M/S3-A/O-Plane)"
+      - "Cross-Stratum Mutation Firewall blocks S1, S3-A, and O-Plane from direct file writes"
+      - "Epoch-fenced SQLite WAL charter revocation and canonical SHA-256 digest verification"
+    visible_tests:
+      - "internal/charter/charter_test.go"
+      - "cmd/g8s/charter_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-CONTROLPLANE-01"
+        - "FEAT-RECEIPT-01"
+      direct_consumers:
+        - "FEAT-FSOPS-01"
+        - "FEAT-MCP-DAEMON-01"
+        - "FEAT-PLATFORM-CLI-01"
 
   - id: "FEAT-FSOPS-01"
     title: "Pure-Go Native Cross-Platform Filesystem Agent I/O"
@@ -74,6 +102,7 @@ features:
       - "Pure Go with zero external shell dependencies"
       - "Receipt allowed_paths boundary enforcement"
       - "VerifyWriteScope blocks .git/** and .g8s/** tampering under wildcard receipts (#664)"
+      - "VerifyWriteScope and ResolveDelegationContext enforce S1/S3-A/O-Plane mutation firewall (DELTA-33)"
     visible_tests:
       - "internal/fsops/fsops_test.go"
       - "internal/search/search_test.go"
@@ -81,6 +110,7 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-RECEIPT-01"
+        - "FEAT-CHARTER-FEDERATION-01"
         - "FEAT-VAULT-MEMORY-01"
       direct_consumers:
         - "FEAT-MCP-DAEMON-01"
@@ -300,7 +330,7 @@ features:
       - "internal/service/**"
       - "cmd/g8s/serve.go"
     invariants:
-      - "Stdio JSON-RPC 2.0 MCP server conformance (16 tools)"
+      - "Stdio JSON-RPC 2.0 MCP server conformance (19 tools)"
       - "Cross-platform daemon service lifecycle"
       - "Non-loopback HTTP daemon bind requires bearer token authentication (#655)"
     visible_tests:
@@ -309,6 +339,7 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
+        - "FEAT-CHARTER-FEDERATION-01"
         - "FEAT-FSOPS-01"
       direct_consumers:
         - "FEAT-PLATFORM-CLI-01"
@@ -365,6 +396,7 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
+        - "FEAT-CHARTER-FEDERATION-01"
         - "FEAT-WORKER-01"
         - "FEAT-LLMCALL-01"
         - "FEAT-ROUTING-LANE-01"

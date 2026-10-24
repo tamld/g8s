@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -54,6 +55,15 @@ func runSubmit(args []string) {
 	classFlag := fs.String("class", "", "explicit effort class hint (e.g. docs, test, feature, discovery)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
+	}
+
+	// Enforce Stratum Adjacency (DELTA-33 / ADR-0035): S1 FederationCoordinator
+	// cannot bypass S2 DomainGovernor to submit S3 worker tasks directly.
+	callerStratum := charter.CurrentStratum()
+	if callerStratum == charter.StratumS1 || callerStratum == charter.StratumOPlane || callerStratum == charter.StratumS3Adjudicator {
+		if err := charter.ValidateAdjacency(callerStratum, charter.StratumS3Mutator); err != nil {
+			exitRuntime("submit", "stratum", *traceID, cli.CodeDenied, err, "S1 FederationCoordinator must issue an S2 Charter instead of submitting S3 worker tasks directly", *jsonl)
+		}
 	}
 
 	if *routeFlag != "auto" && *routeFlag != "manual" {
