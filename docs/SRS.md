@@ -29,13 +29,15 @@
 
 * **FR-5 (Stdio MCP Server)**:
   * Implement JSON-RPC 2.0 stdio protocol for MCP compatibility.
-  * Expose 11 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`.
+  * Expose 16 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`.
 
 * **FR-6 (Cross-Platform Daemon Service)**:
   * Support `g8s service install|start|stop|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`sc.exe`); unsupported platforms fail closed with a clear error.
+  * Non-loopback HTTP daemon binds (`g8s serve`) require bearer token authentication (`G8S_SERVE_TOKEN`, `DELTA-27`).
 
 * **FR-7 (Decoupled Pure-Go Knowledge Vault)**:
-  * Provide persistent storage and SQLite FTS5 + BM25 ranked full-text search indexing over Tri-Anchor distillation records (`internal/vault`).
+  * Provide persistent storage and SQLite FTS5 + BM25 ranked full-text search indexing over Tri-Anchor distillation records (`internal/vault`) with multi-project partitioning (`repo_id` / `scope_tier`: `repo | domain | global`, `#661`).
+  * Hydrate pre-execution toolchain grounding (`go.mod` / `package.json`) and repo-scoped Vault whispers prior to Turn 1 execution (`#661`).
   * Support CLI subcommands: `g8s vault store`, `g8s vault query`, `g8s vault get`, `g8s vault list`, `g8s vault delete`.
 
 * **FR-8 (Information Firewall & Schema-Enforced Multi-Round Contracts)**:
@@ -46,11 +48,12 @@
 
 * **FR-9 (Verified Delegation & Commitment-Point Gates `T0–T4`, ADR-0033)**:
   * Enforce reversibility tiers `T0` (Observation/F1 dispatch), `T1` (Branch push/PR/Issue close), `T2` (Standard merge), `T3` (Trust-boundary merge requiring dual independent verification), and `T4` (Irreversible/Sovereign actions requiring explicit synchronous PiC approval).
+  * Enforce fail-closed T3 blind verification (`EvaluateT3Response` requiring explicit `VERDICT: PASS`) and resolved model-family lineage disjointness (`ExtractModelFamily(model_resolved)`, `#662`).
   * Enforce deterministic commitment checks: completeness of `dod_matrix` (`all D1..Dn == MET`), `tree_sha`/`head_sha` non-vacuous test evidence (`G1`/`G5`), forge CI completion (`G2`), worktree-to-commit blob provenance (`G3`), and issue-closure criterion completeness (`G7`).
 
-* **FR-10 (Universal Config-Driven LLM Consumer & Multi-Model 9Router Fleet, `DELTA-25`, ADR-0034)**:
+* **FR-10 (Universal Config-Driven LLM Consumer & Multi-Model 9Router Fleet, `DELTA-25..32`, ADR-0034)**:
   * Declarative provider config in `providers.json` supporting `api_call` with `openai`, `anthropic`, and `9router` protocols, runtime `base_url_env`, static `headers`, and wildcard/prefix model matching (`allow_unlisted_models`).
-  * Direct synchronous execution via `g8s llm-call` supporting `--provider`, `--model`, `--prompt`, `--prompt-file`, `--system`, `--timeout`, `--effort`, `--max-tokens`, `--base-url`, `--protocol`, `--auth-env`, `--apply-files`, and `--worker-envelope`.
+  * Direct synchronous and bounded agentic loop execution via `g8s llm-call` supporting `--provider`, `--model`, `--prompt`, `--prompt-file`, `--system`, `--timeout`, `--effort`, `--max-tokens`, `--base-url`, `--protocol`, `--auth-env`, `--apply-files`, `--context-files`, `--max-turns <1..5>`, `--verify-cmd`, and `--worker-envelope`, with Non-Markovian oscillation breaking (`A->B->A`), atomic per-turn file snapshot rollback (`#663`), `--verify-cmd` secret environment scrubbing, and `.git/**`/`.g8s/**` write protection (`#664`).
   * Native queue execution bridge in `g8s worker` wiring `api_call` providers to `g8s llm-call --worker-envelope`, capturing duration, token usage (`input_tokens`, `output_tokens`, `total_tokens`), and response text into `agyResult` format.
   * Live model discovery via `g8s providers discover [--provider <name>] [--json]` querying `/v1/models`.
   * Catalog registration of standardized 9router SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) in `.g8s/agent-models.yml`.
@@ -68,5 +71,5 @@
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
-| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
+| **`v0.20.0`** (2026-10-22) | **Zero-Trust Execution Hardening, Bounded Agentic Loop & Epistemic Verification** (`DELTA-26..32`, `#661..#664`): Fail-closed worktree isolation (`#656`), Draft-7 `--output-schema` (`#659`), `g8s fleet status` (`DELTA-32`), multi-project Vault grounding (`#661`), fail-closed T3 model-family disjointness (`#662`), non-Markovian loop rollback (`#663`), and `--verify-cmd` DLP scrubbing (`#664`). | **Done** |
 | **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

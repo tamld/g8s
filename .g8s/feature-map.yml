@@ -31,6 +31,8 @@ features:
         - "FEAT-VERIFY-01"
         - "FEAT-F0-GATE-01"
         - "FEAT-VAULT-MEMORY-01"
+        - "FEAT-MCP-DAEMON-01"
+        - "FEAT-DOCTOR-DIAG-01"
         - "FEAT-PLATFORM-CLI-01"
 
   - id: "FEAT-RECEIPT-01"
@@ -42,9 +44,11 @@ features:
     code_paths:
       - "internal/receipt/**"
       - "internal/signing/**"
+      - "cmd/g8s/receipt_export.go"
     invariants:
-      - "Single-use consumption"
+      - "Single-use consumption (ValidateAndConsume)"
       - "Path scope enforcement"
+      - "Idempotent operator receipt-export recovery (#658)"
     visible_tests:
       - "internal/receipt/receipt_test.go"
     verifier_class: "test"
@@ -65,9 +69,11 @@ features:
       - "internal/fsops/**"
       - "internal/pathutil/**"
       - "internal/search/**"
+      - "cmd/g8s/search.go"
     invariants:
       - "Pure Go with zero external shell dependencies"
       - "Receipt allowed_paths boundary enforcement"
+      - "VerifyWriteScope blocks .git/** and .g8s/** tampering under wildcard receipts (#664)"
     visible_tests:
       - "internal/fsops/fsops_test.go"
       - "internal/search/search_test.go"
@@ -75,7 +81,10 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-RECEIPT-01"
-      direct_consumers: []
+        - "FEAT-VAULT-MEMORY-01"
+      direct_consumers:
+        - "FEAT-MCP-DAEMON-01"
+        - "FEAT-LLMCALL-01"
 
   - id: "FEAT-WORKER-01"
     title: "Worker Process Execution & Capability Harness"
@@ -83,7 +92,7 @@ features:
     srs_reqs:
       - "FR-1"
       - "FR-4"
-    openspec_delta: "DELTA-04"
+    openspec_delta: "DELTA-26"
     code_paths:
       - "internal/worker/**"
       - "internal/process/**"
@@ -95,6 +104,8 @@ features:
     invariants:
       - "Setpgid process group isolation"
       - "Sensitive token sanitization"
+      - "Fail-closed worktree isolation for workspace_write tasks (#656)"
+      - "Draft-7 output_schema validation & provider/model claim affinity (#657, #659)"
     visible_tests:
       - "internal/worker/worker_test.go"
       - "internal/process/lister_test.go"
@@ -103,6 +114,7 @@ features:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
         - "FEAT-RECEIPT-01"
+        - "FEAT-VAULT-MEMORY-01"
       direct_consumers:
         - "FEAT-LLMCALL-01"
         - "FEAT-VERIFY-01"
@@ -113,7 +125,7 @@ features:
     persona_story: "As a heterogeneous agent team, I need a provider-agnostic LLM call adapter supporting CLIProxyAPI, OpenRouter, OpenAI, Anthropic, and 9router so that tasks route cleanly without vendor lock-in."
     srs_reqs:
       - "FR-10"
-    openspec_delta: "DELTA-25"
+    openspec_delta: "DELTA-32"
     code_paths:
       - "internal/provider/**"
       - "internal/config/**"
@@ -125,6 +137,8 @@ features:
       - "OpenAI, Anthropic, CLIProxyAPI, and 9router protocol conformance"
       - "DefaultModel resolution chain (--model -> entry.DefaultModel -> entry.Models[0].ID)"
       - "Two-layer public mechanism vs local policy separation"
+      - "Non-Markovian loop oscillation breaker (A->B->A) and atomic per-turn file snapshot rollback (#663)"
+      - "Verify-cmd credential environment scrubbing and DLP output sanitization (#664)"
     visible_tests:
       - "internal/provider/provider_test.go"
       - "internal/config/config_test.go"
@@ -133,6 +147,8 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-WORKER-01"
+        - "FEAT-FSOPS-01"
+        - "FEAT-VAULT-MEMORY-01"
       direct_consumers:
         - "FEAT-ROUTING-LANE-01"
         - "FEAT-PLATFORM-CLI-01"
@@ -232,6 +248,7 @@ features:
     invariants:
       - "Reversibility tiers T0-T4 and commitment checks G0-G7"
       - "Provider-agnostic T3 failover chain with blind diff sanitization and EvalProbeRunner fallback"
+      - "Fail-closed EvaluateT3Response requiring explicit VERDICT: PASS and resolved model-family lineage disjointness (#662)"
     visible_tests:
       - "internal/supervisor/supervisor_test.go"
       - "tools/f0/verifier_t3_test.go"
@@ -248,7 +265,7 @@ features:
     persona_story: "As a learning cognitive system, I need pure-Go knowledge vault storage with FTS5 search and memory promotion so that operational lessons persist across sessions."
     srs_reqs:
       - "FR-7"
-    openspec_delta: "DELTA-10"
+    openspec_delta: "DELTA-21"
     code_paths:
       - "internal/vault/**"
       - "internal/memory/**"
@@ -257,6 +274,7 @@ features:
     invariants:
       - "SQLite FTS5 full-text search"
       - "Second-brain promotion"
+      - "Multi-project repo_id / scope_tier partitioning and Pre-Turn-1 toolchain + Vault grounding hydration (#661)"
     visible_tests:
       - "internal/vault/vault_test.go"
       - "internal/memory/adapter_test.go"
@@ -264,7 +282,10 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
-      direct_consumers: []
+      direct_consumers:
+        - "FEAT-FSOPS-01"
+        - "FEAT-WORKER-01"
+        - "FEAT-LLMCALL-01"
 
   - id: "FEAT-MCP-DAEMON-01"
     title: "MCP JSON-RPC Server & Cross-Platform Daemon Service"
@@ -272,15 +293,16 @@ features:
     srs_reqs:
       - "FR-5"
       - "FR-6"
-    openspec_delta: "DELTA-05"
+    openspec_delta: "DELTA-27"
     code_paths:
       - "internal/mcp/**"
       - "internal/server/**"
       - "internal/service/**"
       - "cmd/g8s/serve.go"
     invariants:
-      - "Stdio JSON-RPC 2.0 MCP server conformance"
+      - "Stdio JSON-RPC 2.0 MCP server conformance (16 tools)"
       - "Cross-platform daemon service lifecycle"
+      - "Non-loopback HTTP daemon bind requires bearer token authentication (#655)"
     visible_tests:
       - "internal/mcp/server_test.go"
     verifier_class: "test"
@@ -297,7 +319,7 @@ features:
     srs_reqs:
       - "NFR-1"
       - "NFR-2"
-    openspec_delta: "DELTA-05"
+    openspec_delta: "DELTA-32"
     code_paths:
       - "internal/doctor/**"
       - "internal/telemetry/**"
@@ -306,9 +328,11 @@ features:
       - "cmd/g8s/doctor.go"
       - "cmd/g8s/cleanup.go"
       - "cmd/g8s/cleanup_worktrees.go"
+      - "cmd/g8s/fleet.go"
     invariants:
       - "Non-destructive environment readiness probing"
       - "Safe worktree and state hygiene cleanup"
+      - "Cross-repository fleet status hygiene gate (g8s fleet status --require-clean, DELTA-32)"
     visible_tests:
       - "cmd/g8s/cleanup_test.go"
       - "cmd/g8s/cleanup_worktrees_test.go"

@@ -305,3 +305,49 @@ func TestFeature_Validate_WithRepoRoot(t *testing.T) {
 		t.Errorf("expected orphan internal/orphan_pkg, got %v", repOrphan.OrphanPaths)
 	}
 }
+
+func TestFeature_Validate_BidirectionalEdgeSymmetry(t *testing.T) {
+	asymYAML := `schema_version: "1.0"
+features:
+  - id: "FEAT-BASE"
+    title: "Base Feature"
+    persona_story: "As a user, I want Base"
+    srs_reqs: ["FR-1"]
+    code_paths: ["internal/base/**"]
+    invariants: ["Inv Base"]
+    visible_tests: ["internal/base/base_test.go"]
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers: []
+  - id: "FEAT-LEAF"
+    title: "Leaf Feature"
+    persona_story: "As a user, I want Leaf"
+    srs_reqs: ["FR-2"]
+    code_paths: ["internal/leaf/**"]
+    invariants: ["Inv Leaf"]
+    visible_tests: ["internal/leaf/leaf_test.go"]
+    verifier_class: "test"
+    blast_radius:
+      depends_on: ["FEAT-BASE"]
+      direct_consumers: []
+`
+	fm, err := Parse([]byte(asymYAML))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	rep := Validate(fm, "")
+	if rep.Valid {
+		t.Fatal("expected asymmetric blast_radius edge to fail validation")
+	}
+	foundAsym := false
+	for _, e := range rep.Errors {
+		if e == "asymmetric blast_radius edge: FEAT-LEAF depends_on FEAT-BASE, but FEAT-BASE.direct_consumers omits FEAT-LEAF" {
+			foundAsym = true
+			break
+		}
+	}
+	if !foundAsym {
+		t.Fatalf("expected asymmetric edge error, got: %v", rep.Errors)
+	}
+}

@@ -38,7 +38,7 @@ g8s submit \
 | `--idempotency-key` | `string` | *(Required)* | Unique idempotency key. Resubmissions deduplicate atomically. |
 | `--prompt` | `string` | *(Required)* | Task prompt handed to the worker LLM. |
 | `--role` | `string` | `"collector"` | Worker role contract (`collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`). |
-| `--permission` | `string` | `"read_only"` | Permission profile (`read_only`, `automation_read`, `workspace_write`). |
+| `--permission` | `string` | `"read_only"` | Permission profile (`read_only`, `automation_read`, `workspace_write`, `supplied_text`). |
 | `--add-dir` | `string` | `[cwd]` | Allowed filesystem directory (repeatable). Validated against forbidden paths. |
 | `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). |
 | `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
@@ -561,7 +561,7 @@ Serves the standard Stdio JSON-RPC 2.0 Model Context Protocol (MCP) server on `s
 g8s mcp
 ```
 
-**11 tools exposed**: `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`.
+**16 tools exposed**: `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`.
 
 ---
 
@@ -728,6 +728,89 @@ g8s ladder gauges docs
 
 ---
 
+### 32. `g8s search` / `g8s read` / `g8s edit` / `g8s select` — Native Cross-Platform Agent I/O (`DELTA-23`)
+Pure-Go, cross-platform replacements for `rg`/`grep`/`find`, `cat`/`head`/`tail`/`sed -n`, `sed -i`/`awk`, and `jq` that enforce `G8S_SCOPE_ROOT`, `WriteReceipt.AllowedPaths` (plus `.git/**` & `.g8s/**` protection), and automatic DLP credential redaction in-process.
+
+```sh
+# Search literals or regexes inside scope root
+g8s search "VerifyWriteScope" internal/ --json
+
+# Bounded line-range file read with SHA-256 precondition output
+g8s read internal/fsops/fsops.go --lines 320:360 --json
+
+# Atomic CAS file edit with optional SHA-256 optimistic concurrency check
+g8s edit internal/fsops/fsops.go --old "oldText" --new "newText" --receipt-id <rc-id> --json
+
+# Pure-Go JSON dot-path extraction (or pass --select <dot.path> to any g8s command)
+g8s doctor --json --select .data.overall_status
+```
+
+---
+
+### 33. `g8s llm-call` & `g8s providers discover` — Universal LLM Consumer & Bounded Agentic Loop (`DELTA-25..32`, `#661..#664`)
+Invokes any configured `api_call` provider (`9router`, `cliproxyapi`, `openai`, `anthropic`) synchronously or in a bounded multi-turn verify-and-repair loop with Pre-Turn-1 toolchain/Vault grounding, Non-Markovian cycle breaking (`A->B->A`), atomic per-turn file snapshot rollback, and `--verify-cmd` secret environment scrubbing.
+
+```sh
+# Live model discovery from configured gateways
+g8s providers discover --provider 9router --json
+
+# Bounded multi-turn verify-and-repair loop
+g8s llm-call \
+  --provider 9router \
+  --model fast-agent \
+  --prompt "Implement feature X" \
+  --context-files "internal/pkg/x.go" \
+  --apply-files \
+  --max-turns 3 \
+  --verify-cmd "go test ./internal/pkg/..." \
+  --json
+```
+
+---
+
+### 34. `g8s fleet` & `g8s receipt-export` — Cross-Repo Fleet Hygiene & Receipt Recovery (`DELTA-31..32`)
+Inspects dirty working trees, ahead/behind branch divergence, and orphaned worktrees across sibling repositories, or recovers unexported task receipts idempotently.
+
+```sh
+# Check fleet hygiene across workspace repositories (exits non-zero if dirty under --require-clean)
+g8s fleet status --dir /workspace/repos --require-clean --json
+
+# Recover or re-export a completed task's execution receipt
+g8s receipt-export --task <task-id> --json
+```
+
+---
+
+### 35. `g8s feature` — Declarative Feature Map & Blast Radius DAG (`DELTA-23`, `#649`, `#665`)
+Validates `.g8s/feature-map.yml` (schema 1.0, cycle detection, bidirectional `depends_on` $\leftrightarrow$ `direct_consumers` edge symmetry, zero-orphan `internal/` package coverage) and computes transitive blast radius and allowed write scopes.
+
+```sh
+# Validate feature map against repository structure
+g8s feature verify --file .g8s/feature-map.yml --repo . --json
+
+# List all feature nodes or inspect transitive blast radius & derived allowed_paths
+g8s feature list --json
+g8s feature inspect FEAT-FSOPS-01 --json
+```
+
+---
+
+### 36. `g8s verify` / `g8s watch` / `g8s reflex` — Information Firewall, Event Wakeup & System-1 Triage (`DELTA-19..24`)
+Executes worktree-targeted non-vacuous verification producing `RoundReceiptSchema` (`g8s verify`), blocks on task/PR milestones without polling loops (`g8s watch`), and runs System-1 `Jev` pre-mutation triage (`g8s reflex`).
+
+```sh
+# Verify an isolated task worktree and emit RoundReceiptSchema
+g8s verify --task <task-id> --json
+
+# Event-driven wakeup on task completion or PR checks
+g8s watch --task <task-id> --milestone worker-complete --json
+
+# System-1 pre-mutation triage
+g8s reflex triage --summary "Update feature map validation" --files "internal/featuremap/featuremap.go" --json
+```
+
+---
+
 ## Standalone 1-Liner Installation
 
 Install or upgrade `g8s` directly via curl:
@@ -749,6 +832,7 @@ G8S_INSTALL_DIR="/usr/local/bin" curl -fsSL https://raw.githubusercontent.com/ta
 | :--- | :--- | :--- |
 | `--json` | `bool` | Output structured JSON envelope (v1). |
 | `--jsonl` | `bool` | Output JSON Lines (one envelope per line). |
+| `--select` | `string` | Pure-Go dot-path selector projecting a specific field from JSON output (replaces `jq`). |
 | `--actor` | `string` | Actor identity for traceability. |
 | `--trace-id` | `string` | Distributed trace ID (auto-generated if omitted). |
 | `--help` | `bool` | Show command-specific usage. |

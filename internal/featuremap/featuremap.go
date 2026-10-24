@@ -251,16 +251,34 @@ func Validate(fm *FeatureMap, repoRoot string) ValidationReport {
 		}
 	}
 
-	// Validate references in blast radius
+	// Validate references and bidirectional edge symmetry in blast radius (#665)
+	hasString := func(slice []string, target string) bool {
+		for _, item := range slice {
+			if item == target {
+				return true
+			}
+		}
+		return false
+	}
 	for _, f := range fm.Features {
 		for _, dep := range f.BlastRadius.DependsOn {
-			if !seenIDs[dep] {
+			depNode, ok := featureMapByID[dep]
+			if !ok {
 				report.Errors = append(report.Errors, fmt.Sprintf("feature %s depends_on unknown feature: %s", f.ID, dep))
+				continue
+			}
+			if !hasString(depNode.BlastRadius.DirectConsumers, f.ID) {
+				report.Errors = append(report.Errors, fmt.Sprintf("asymmetric blast_radius edge: %s depends_on %s, but %s.direct_consumers omits %s", f.ID, dep, dep, f.ID))
 			}
 		}
 		for _, cons := range f.BlastRadius.DirectConsumers {
-			if !seenIDs[cons] {
+			consNode, ok := featureMapByID[cons]
+			if !ok {
 				report.Errors = append(report.Errors, fmt.Sprintf("feature %s direct_consumers unknown feature: %s", f.ID, cons))
+				continue
+			}
+			if !hasString(consNode.BlastRadius.DependsOn, f.ID) {
+				report.Errors = append(report.Errors, fmt.Sprintf("asymmetric blast_radius edge: %s lists %s in direct_consumers, but %s.depends_on omits %s", f.ID, cons, cons, f.ID))
 			}
 		}
 	}

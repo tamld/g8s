@@ -111,6 +111,12 @@
       "name": "workspace_write",
       "allows_mutation": true,
       "requires_receipt": true
+    },
+    {
+      "name": "supplied_text",
+      "allows_mutation": false,
+      "requires_receipt": false,
+      "disables_model_tools": true
     }
   ],
   "schemas": {
