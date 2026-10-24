@@ -1784,15 +1784,15 @@ func verifyArtifactSupportingEvidence(artifactPath string, workerEvidence string
 		return "", fmt.Errorf("empty artifact path")
 	}
 
-	// Reject absolute paths
-	if filepath.IsAbs(p) {
+	// Reject absolute paths (both OS-native and rooted slash/backslash paths across Unix/Windows)
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
 		return "", fmt.Errorf("artifact path %q rejected: absolute paths outside trusted root are forbidden", p)
 	}
 
-	// Reject directory traversal
-	slashP := filepath.ToSlash(p)
-	cleanSlash := filepath.Clean(slashP)
-	if cleanSlash == "." || cleanSlash == ".." || strings.HasPrefix(cleanSlash, "../") || strings.Contains(cleanSlash, "/../") || filepath.IsAbs(cleanSlash) {
+	// Reject directory traversal (normalize backslashes and clean into forward-slash form)
+	slashP := strings.ReplaceAll(filepath.ToSlash(p), `\`, "/")
+	cleanSlash := filepath.ToSlash(filepath.Clean(slashP))
+	if cleanSlash == "." || cleanSlash == ".." || strings.HasPrefix(cleanSlash, "../") || strings.Contains(cleanSlash, "/../") || filepath.IsAbs(cleanSlash) || strings.HasPrefix(cleanSlash, "/") {
 		return "", fmt.Errorf("artifact path %q rejected: directory traversal outside trusted root is forbidden", p)
 	}
 
