@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-24
+
+### Added
+
+- Bounded Verify-and-Repair Agentic Loop (`DELTA-32`):
+  - Added `--max-turns <1..5>` (env `G8S_MAX_TURNS`) and `--verify-cmd <cmd>` (env `G8S_VERIFY_CMD`) to `g8s llm-call` (`cmd/g8s/llm_call.go`) so `9router` and `api_call` workers can apply fenced `file:` blocks, run mechanical verification inside `scopeRoot`, and self-repair across up to `K` turns when verification fails.
+- Adaptive Effort Timeout Scaling (`DELTA-32`):
+  - Updated `g8s submit` (`cmd/g8s/submit.go`) to scale default worker timeout by resolved effort (`low`=`45s`, `medium`=`90s`, `high`/`xhigh`/`max`=`240s`) when `--timeout` is not explicitly specified.
+- Controlled `F1 -> F2` Subtask Containment (`DELTA-32`):
+  - Enforced `ADR-0032` containment depth (`depth <= 2`, rejecting `F2 -> F3+` subtask chains) and parent `add_dirs` scope jail validation on `g8s submit --parent-task-id <id>`.
+- Cross-Repository Fleet Hygiene Gate (`DELTA-32`):
+  - Added `g8s fleet status [--dir <workspace>] [--require-clean] [--json]` (`cmd/g8s/fleet.go`) to audit all git repositories in the workspace for uncommitted files, unpushed commits, orphan worktrees, extra branches, and release tags.
+- Monotonic `Jev` Gate-Lane & Effort Routing (`DELTA-32`):
+  - Extended `internal/routing/jev_assist.go` and `internal/routing/router.go` with `SuggestedLane` (`0/D/R/F/S`) and `SuggestedEffort` (`low..xhigh`) governed by `EnforceMonotonicLane` and `EnforceMonotonicEffort` (allowing semantic risk upgrades while blocking downgrades of deterministic P0 trust-boundary requirements).
+  - Fixed `providerCriteria` in `internal/routing/jev_assist.go` to declare each provider's served models so `9router` combos (`fast-agent`, `deep-coding`, `reasoning-high`, `reasoning-free`) pass `(provider, model)` pair validation under `G8S_ROUTER_MODE=jev_assisted`.
+
 ## [0.19.1] - 2026-10-24
 
 ### Added

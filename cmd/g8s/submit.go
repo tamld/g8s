@@ -69,6 +69,7 @@ func runSubmit(args []string) {
 	var blastRadiusPassed bool
 	var locEstimatePassed bool
 	var toolPolicyPassed bool
+	var timeoutPassed bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "provider" {
 			providerPassed = true
@@ -84,6 +85,9 @@ func runSubmit(args []string) {
 		}
 		if f.Name == "tool-policy" {
 			toolPolicyPassed = true
+		}
+		if f.Name == "timeout" {
+			timeoutPassed = true
 		}
 	})
 
@@ -315,6 +319,13 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, effortErr, "Failed to resolve effort", *jsonl)
 	}
 
+	if !timeoutPassed {
+		effTimeout := defaultTimeoutForEffort(effortRes.Applied)
+		if effTimeout != "" {
+			*timeout = effTimeout
+		}
+	}
+
 	// Baked-name model/effort alignment:
 	// When effective model matches baked-name pattern (-<level>) for a baked-name provider
 	// and differs from effort_applied, rewrite model to -{effort_applied}, record model_requested
@@ -432,6 +443,39 @@ func runSubmit(args []string) {
 
 	var parentIDPtr *string
 	if *parentTaskID != "" {
+		parentTask, pErr := store.GetTask(context.Background(), *parentTaskID)
+		if pErr == nil && parentTask != nil {
+			if parentTask.ParentTaskID != nil && strings.TrimSpace(*parentTask.ParentTaskID) != "" {
+				exitRuntime(
+					"submit",
+					"parent-task-id",
+					*traceID,
+					cli.CodeHarness,
+					fmt.Errorf("containment depth exceeded: parent task %s is already an F2 subtask (ADR-0032 forbids F3+)", *parentTaskID),
+					"Only F0 or F1 tasks may spawn subtasks (depth <= 2)",
+					*jsonl,
+				)
+			}
+			var parentReq struct {
+				AddDirs []string `json:"add_dirs"`
+			}
+			if len(parentTask.Request) > 0 {
+				_ = json.Unmarshal(parentTask.Request, &parentReq)
+			}
+			if len(parentReq.AddDirs) > 0 {
+				if jErr := harness.ValidateScopeJail(dirs, parentReq.AddDirs); jErr != nil {
+					exitRuntime(
+						"submit",
+						"add-dir",
+						*traceID,
+						cli.CodeHarness,
+						fmt.Errorf("subtask scope escape: child add-dir must stay within parent task %s scope: %w", *parentTaskID, jErr),
+						"Constrain subtask --add-dir within parent task's allowed directories",
+						*jsonl,
+					)
+				}
+			}
+		}
 		parentIDPtr = parentTaskID
 	}
 
@@ -455,6 +499,19 @@ func runSubmit(args []string) {
 	env.TraceID = *traceID
 	if err := cli.WriteResponse(os.Stdout, env, *jsonl); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "", *jsonl)
+	}
+}
+
+func defaultTimeoutForEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal", "low":
+		return "45s"
+	case "medium", "adaptive", "dynamic":
+		return "90s"
+	case "high", "xhigh", "max":
+		return "240s"
+	default:
+		return "30s"
 	}
 }
 

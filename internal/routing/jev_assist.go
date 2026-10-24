@@ -241,6 +241,27 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 				"instructions": "Suggest the worker role profile.",
 				"criteria":     roleCriteria,
 			},
+			"lane": map[string]any{
+				"type":         "choice",
+				"instructions": "Suggest the ALDC verification gate lane (0=trivial, D=docs, R=refactor/test, F=feature, S=security/trust-boundary).",
+				"criteria": map[string]string{
+					"0": "Trivial one-liner or comment change.",
+					"D": "Documentation, markdown, or prose-only task.",
+					"R": "Refactoring, cleanup, or unit test maintenance.",
+					"F": "Feature implementation or multi-file bugfix.",
+					"S": "Security-critical, auth, receipt, harness, or controlplane trust-boundary change.",
+				},
+			},
+			"effort": map[string]any{
+				"type":         "choice",
+				"instructions": "Suggest the reasoning effort level required for this task.",
+				"criteria": map[string]string{
+					"low":    "Simple mechanical, lookup, or documentation task.",
+					"medium": "Standard feature, bugfix, or multi-step implementation.",
+					"high":   "Complex architecture, concurrency, security, or debugging task.",
+					"xhigh":  "Deep formal verification, root-cause diagnosis, or P0 trust-boundary redesign.",
+				},
+			},
 		},
 	}
 
@@ -357,6 +378,11 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		sugReason = fmt.Sprintf("Jev suggested provider=%s model=%s role=%s", sugProvider, sugModel, sugRole)
 	}
 
+	rawLane := strings.TrimSpace(jevResp.Answers["lane"].Choice)
+	rawEffort := strings.TrimSpace(jevResp.Answers["effort"].Choice)
+	finalLane := EnforceMonotonicLane(layer1.SuggestedLane, rawLane)
+	finalEffort := EnforceMonotonicEffort(layer1.SuggestedEffort, rawEffort, layer1.SuggestedLane == "S")
+
 	return Decision{
 		Provider:        sugProvider,
 		Model:           sugModel,
@@ -367,5 +393,83 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		Confidence:      conf,
 		JevInputTokens:  usageIn,
 		JevOutputTokens: usageOut,
+		SuggestedLane:   finalLane,
+		SuggestedEffort: finalEffort,
 	}, nil
+}
+
+func laneRank(lane string) int {
+	switch strings.ToUpper(strings.TrimSpace(lane)) {
+	case "0":
+		return 1
+	case "D":
+		return 2
+	case "R":
+		return 3
+	case "F":
+		return 4
+	case "S":
+		return 5
+	default:
+		return 0
+	}
+}
+
+// EnforceMonotonicLane enforces Safety Monotonicity for ALDC gate lanes:
+// Jev may upgrade the gate lane when semantic risk exceeds path heuristics,
+// but can NEVER downgrade deterministic security/feature lane requirements.
+func EnforceMonotonicLane(detLane, jevLane string) string {
+	dRank := laneRank(detLane)
+	jRank := laneRank(jevLane)
+	if jRank > dRank {
+		return strings.ToUpper(strings.TrimSpace(jevLane))
+	}
+	if dRank > 0 {
+		return strings.ToUpper(strings.TrimSpace(detLane))
+	}
+	return "R"
+}
+
+func effortRank(effort string) int {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none":
+		return 0
+	case "minimal":
+		return 1
+	case "low":
+		return 2
+	case "medium", "adaptive", "dynamic":
+		return 3
+	case "high":
+		return 4
+	case "xhigh":
+		return 5
+	case "max":
+		return 6
+	default:
+		return -1
+	}
+}
+
+// EnforceMonotonicEffort enforces Safety Monotonicity for reasoning effort:
+// Jev can upgrade effort on any task, and cannot downgrade effort below the
+// deterministic baseline when isTrustBoundary is true (or below valid ladder levels).
+func EnforceMonotonicEffort(detEffort, jevEffort string, isTrustBoundary bool) string {
+	jClean := strings.ToLower(strings.TrimSpace(jevEffort))
+	dClean := strings.ToLower(strings.TrimSpace(detEffort))
+	if dClean == "" {
+		dClean = "medium"
+	}
+	jRank := effortRank(jClean)
+	dRank := effortRank(dClean)
+	if jRank < 2 { // must be at least "low"
+		return dClean
+	}
+	if isTrustBoundary && jRank < dRank {
+		return dClean
+	}
+	if jRank > dRank {
+		return jClean
+	}
+	return dClean
 }

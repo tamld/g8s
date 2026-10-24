@@ -239,6 +239,8 @@ func main() {
 		runFeedback(os.Args[2:])
 	case "ladder":
 		runLadder(os.Args[2:])
+	case "fleet":
+		runFleet(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:

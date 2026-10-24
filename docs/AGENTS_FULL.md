@@ -123,6 +123,7 @@ Incoming Task:
 | **DELTA-29** | [`29-output-schema-validation-spec.md`](../spec/openspec/29-output-schema-validation-spec.md) | `internal/worker` | APPLIED |
 | **DELTA-30** | [`30-worker-claim-affinity-spec.md`](../spec/openspec/30-worker-claim-affinity-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
 | **DELTA-31** | [`31-receipt-export-status-spec.md`](../spec/openspec/31-receipt-export-status-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
+| **DELTA-32** | [`32-bounded-agentic-loop-f1f2-fleet-jev-spec.md`](../spec/openspec/32-bounded-agentic-loop-f1f2-fleet-jev-spec.md) | `cmd/g8s`, `internal/routing` | APPLIED |
 
 ---
 
@@ -147,10 +148,11 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
    - **Offer Bundle (`offer/`) & `wiki.py`**: Sibling repositories adopt `g8s` via [`offer/ONBOARDING.md`](../offer/ONBOARDING.md) and return sanitized Mode 3 packets. Align session state with Second Brain governance via `~/.local/bin/wiki.py orient`.
 5. **F0 Cognitive Purity & Information Firewall (`ADR-0033` Phase 06b + Wave B)**:
    - F0 operates strictly as Brain (reasoning, brief authoring, consuming `RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`). F0 NEVER manually hunts raw CI logs, scans disk bloat, or runs procedural janitor tasks. All log-hunting, CI failure extraction, and file sync tasks are delegated to F1 workers.
-6. **Universal Config-Driven LLM Call Consumer, `9router` Integration & Zero-Trust Hardening (`DELTA-25..31`, `v0.19.1`)**:
-   - Direct synchronous CLI execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files]`.
-   - Durable worker queue execution & claim affinity (`DELTA-27`): `./bin/g8s submit --provider 9router --model <combo> [--output-schema <schema.json>]` + `./bin/g8s worker --once [--provider <p>] [--model <m>]`, seamlessly bridged via `g8s llm-call --worker-envelope`.
-   - Zero-trust worker execution invariants (`DELTA-26..31`): fail-closed worktree isolation (`#656`), recursive Draft-7 `--output-schema` enforcement (`#659`), structured `receipt_export` visibility + `./bin/g8s receipt-export --task <id>` recovery (`#658`), non-loopback `g8s serve` token auth (`#655`), and mechanical `EvaluateDoDMatrix` check binding (`#648`).
+6. **Universal Config-Driven LLM Call Consumer, `9router` Integration & Zero-Trust Hardening (`DELTA-25..32`, `v0.20.0`)**:
+   - Direct synchronous & bounded agentic loop execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files] [--max-turns <1..5>] [--verify-cmd "..."]`.
+   - Durable worker queue execution, adaptive effort timeout & claim affinity (`DELTA-27..32`): `./bin/g8s submit --provider 9router --model <combo> [--output-schema <schema.json>]` (auto-scales default timeout by effort: `45s`/`90s`/`240s`; enforces `depth <= 2` and parent `add_dirs` jail on `--parent-task-id`) + `./bin/g8s worker --once [--provider <p>] [--model <m>]`.
+   - Cross-repository fleet hygiene gate (`DELTA-32`): `./bin/g8s fleet status [--dir <workspace>] [--require-clean] [--json]`.
+   - Zero-trust worker execution invariants (`DELTA-26..32`): fail-closed worktree isolation (`#656`), recursive Draft-7 `--output-schema` enforcement (`#659`), structured `receipt_export` visibility + `./bin/g8s receipt-export --task <id>` recovery (`#658`), non-loopback `g8s serve` token auth (`#655`), mechanical `EvaluateDoDMatrix` check binding (`#648`), and monotonic `Jev` gate-lane (`0/D/R/F/S`) & effort (`low..xhigh`) routing.
    - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
    - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
    - **Two-Layer Separation Rule**: Public repo mechanism (`openai`/`anthropic`/`9router`, standard combos/wildcards, `http://127.0.0.1:20128/v1`) vs. local untracked operator policy (`~/.config/g8s/providers.json` & `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.

@@ -551,3 +551,75 @@ func TestIsTrustBoundaryPath(t *testing.T) {
 		}
 	}
 }
+
+func TestJevAssist_LaneAndEffortSafetyMonotonicity(t *testing.T) {
+	// Case 1: Jev attempts to downgrade a deterministic S/high trust-boundary task to D/low -> blocked!
+	tsDowngrade := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(JevResponse{
+			Answers: map[string]Answer{
+				"provider": {Choice: "agy", Confidence: 0.95},
+				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.95},
+				"role":     {Choice: "test-runner", Confidence: 0.95},
+				"lane":     {Choice: "D", Confidence: 0.90},
+				"effort":   {Choice: "low", Confidence: 0.90},
+			},
+		})
+	}))
+	defer tsDowngrade.Close()
+
+	ctx1 := WithJevAssist(context.Background(), tsDowngrade.URL, "mock-key")
+	layer1Trust := Decision{
+		Provider:        "agy",
+		Model:           "gemini-3.8-flash-high",
+		Role:            "test-runner",
+		Source:          "deterministic",
+		SuggestedLane:   "S",
+		SuggestedEffort: "high",
+	}
+	dec1, err := jevAssist(ctx1, RouteRequest{Paths: []string{"internal/receipt/verifier.go"}}, layer1Trust, testCandidates())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dec1.SuggestedLane != "S" {
+		t.Errorf("SuggestedLane = %q, want S (monotonic safety must block S -> D downgrade)", dec1.SuggestedLane)
+	}
+	if dec1.SuggestedEffort != "high" {
+		t.Errorf("SuggestedEffort = %q, want high (monotonic safety must block high -> low downgrade on trust boundary)", dec1.SuggestedEffort)
+	}
+
+	// Case 2: Jev upgrades a deterministic R/medium task to S/xhigh -> allowed!
+	tsUpgrade := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(JevResponse{
+			Answers: map[string]Answer{
+				"provider": {Choice: "agy", Confidence: 0.95},
+				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.95},
+				"role":     {Choice: "collector", Confidence: 0.95},
+				"lane":     {Choice: "S", Confidence: 0.92},
+				"effort":   {Choice: "xhigh", Confidence: 0.92},
+			},
+		})
+	}))
+	defer tsUpgrade.Close()
+
+	ctx2 := WithJevAssist(context.Background(), tsUpgrade.URL, "mock-key")
+	layer1Default := Decision{
+		Provider:        "agy",
+		Model:           "gemini-3.8-flash-high",
+		Role:            "collector",
+		Source:          "deterministic",
+		SuggestedLane:   "R",
+		SuggestedEffort: "medium",
+	}
+	dec2, err := jevAssist(ctx2, RouteRequest{Prompt: "Audit SSRF vulnerability in webhook handler"}, layer1Default, testCandidates())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dec2.SuggestedLane != "S" {
+		t.Errorf("SuggestedLane = %q, want S (upgrade R -> S allowed)", dec2.SuggestedLane)
+	}
+	if dec2.SuggestedEffort != "xhigh" {
+		t.Errorf("SuggestedEffort = %q, want xhigh (upgrade medium -> xhigh allowed)", dec2.SuggestedEffort)
+	}
+}

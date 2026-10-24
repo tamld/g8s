@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,6 +111,8 @@ func runLLMCall(args []string) {
 	contextFilesFlag := fs.String("context-files", "", "comma-separated file paths to hydrate as bounded context relative to scope root")
 	scopeRootFlag := fs.String("scope-root", "", "base directory for context files and write scope")
 	receiptIDFlag := fs.String("receipt-id", "", "write receipt ID for delegation boundary validation")
+	maxTurnsFlag := fs.Int("max-turns", 1, "maximum turns for bounded verify-and-repair loop (1..5)")
+	verifyCmdFlag := fs.String("verify-cmd", "", "optional shell command run inside scope root after applying files to verify changes")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: g8s llm-call [flags]")
@@ -334,51 +338,60 @@ func runLLMCall(args []string) {
 		TraceID:      *traceID,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
-	defer cancel()
-
-	handle, spawnErr := p.Spawn(ctx, spec)
-	if spawnErr != nil {
-		if isWorkerEnvelope {
-			emitWorkerError(startTime, 0, spawnErr.Error())
+	maxTurns := *maxTurnsFlag
+	if maxTurns <= 1 {
+		if envTurns := strings.TrimSpace(os.Getenv("G8S_MAX_TURNS")); envTurns != "" {
+			if parsed, pErr := strconv.Atoi(envTurns); pErr == nil && parsed > 1 {
+				maxTurns = parsed
+			}
 		}
-		exitRuntime("llm-call", "", *traceID, cli.CodeRuntime, fmt.Errorf("spawn failed: %w", spawnErr), "", *jsonl)
+	}
+	if maxTurns < 1 {
+		maxTurns = 1
+	}
+	if maxTurns > 5 {
+		maxTurns = 5
 	}
 
-	rc, waitErr := handle.Wait(ctx)
-	if waitErr != nil {
-		if isWorkerEnvelope {
-			emitWorkerError(startTime, rc.DurationMs, waitErr.Error())
-		}
-		exitRuntime("llm-call", "", *traceID, cli.CodeRuntime, fmt.Errorf("call failed: %w", waitErr), "", *jsonl)
+	verifyCmd := strings.TrimSpace(*verifyCmdFlag)
+	if verifyCmd == "" {
+		verifyCmd = strings.TrimSpace(os.Getenv("G8S_VERIFY_CMD"))
 	}
 
 	applyFilesEnabled := *applyFilesFlag || (os.Getenv("G8S_PERMISSION") == "workspace_write" && os.Getenv("G8S_RECEIPT_ID") != "")
 	appliedFiles := make([]string, 0)
-	if applyFilesEnabled {
-		scopeRoot := os.Getenv("G8S_SCOPE_ROOT")
-		if scopeRoot == "" {
-			if cwd, cErr := os.Getwd(); cErr == nil {
-				scopeRoot = cwd
-			} else {
-				scopeRoot = "."
-			}
-		}
+	appliedFileSet := make(map[string]bool)
 
-		receiptID := os.Getenv("G8S_RECEIPT_ID")
-		var allowedPaths []string
+	scopeRoot := strings.TrimSpace(*scopeRootFlag)
+	if scopeRoot == "" {
+		scopeRoot = os.Getenv("G8S_SCOPE_ROOT")
+	}
+	if scopeRoot == "" {
+		if cwd, cErr := os.Getwd(); cErr == nil {
+			scopeRoot = cwd
+		} else {
+			scopeRoot = "."
+		}
+	}
+
+	var allowedPaths []string
+	if applyFilesEnabled {
+		receiptID := strings.TrimSpace(*receiptIDFlag)
+		if receiptID == "" {
+			receiptID = os.Getenv("G8S_RECEIPT_ID")
+		}
 		if receiptID != "" {
 			rcDbPath, rErr := receiptDatabasePath()
 			if rErr != nil {
 				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("locate receipt database: %v", rErr))
+					emitWorkerError(startTime, 0, fmt.Sprintf("locate receipt database: %v", rErr))
 				}
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("locate receipt database: %w", rErr), "Ensure G8S_STATE_DIR is set", *jsonl)
 			}
 			rcMgr, mErr := receipt.NewReceiptManager(rcDbPath, nil)
 			if mErr != nil {
 				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("open receipt database: %v", mErr))
+					emitWorkerError(startTime, 0, fmt.Sprintf("open receipt database: %v", mErr))
 				}
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("open receipt database: %w", mErr), "Ensure receipt database is accessible", *jsonl)
 			}
@@ -387,41 +400,115 @@ func runLLMCall(args []string) {
 			rec, vErr := rcMgr.VerifyReceipt(receiptID)
 			if vErr != nil {
 				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("verify receipt %s: %v", receiptID, vErr))
+					emitWorkerError(startTime, 0, fmt.Sprintf("verify receipt %s: %v", receiptID, vErr))
 				}
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("verify receipt %s: %w", receiptID, vErr), "Provide a valid receipt ID", *jsonl)
 			}
 			if rec.Consumed {
 				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("receipt %s already consumed", receiptID))
+					emitWorkerError(startTime, 0, fmt.Sprintf("receipt %s already consumed", receiptID))
 				}
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("receipt %s already consumed", receiptID), "Provide a fresh write receipt", *jsonl)
 			}
 			allowedPaths = rec.AllowedPaths
 		}
+	}
 
-		blocks := extractFileBlocks(rc.Stdout)
-		for _, b := range blocks {
-			targetPath := filepath.Join(scopeRoot, filepath.FromSlash(b.path))
-			if _, vErr := fsops.VerifyScope(targetPath, scopeRoot, allowedPaths); vErr != nil {
-				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("file %s denied: %v", b.path, vErr))
-				}
-				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("file %q denied: %w", b.path, vErr), "Path must be within scopeRoot and allowedPaths", *jsonl)
+	var rc provider.Receipt
+	var totalDurationMs int64
+	var totalInputTokens, totalOutputTokens, totalTokens int
+	turnsUsed := 0
+	verifyPassed := false
+
+	for turn := 1; turn <= maxTurns; turn++ {
+		turnsUsed = turn
+		turnCtx, turnCancel := context.WithTimeout(context.Background(), timeoutDur)
+		handle, spawnErr := p.Spawn(turnCtx, spec)
+		if spawnErr != nil {
+			turnCancel()
+			if isWorkerEnvelope {
+				emitWorkerError(startTime, totalDurationMs, spawnErr.Error())
 			}
-			if dirErr := os.MkdirAll(filepath.Dir(targetPath), 0o700); dirErr != nil {
-				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("mkdir %s: %v", b.path, dirErr))
-				}
-				exitRuntime("llm-call", "", *traceID, cli.CodeIO, fmt.Errorf("mkdir for %q: %w", b.path, dirErr), "", *jsonl)
+			exitRuntime("llm-call", "", *traceID, cli.CodeRuntime, fmt.Errorf("spawn failed: %w", spawnErr), "", *jsonl)
+		}
+
+		turnRes, waitErr := handle.Wait(turnCtx)
+		turnCancel()
+		totalDurationMs += turnRes.DurationMs
+		totalInputTokens += turnRes.InputTokens
+		totalOutputTokens += turnRes.OutputTokens
+		totalTokens += turnRes.TotalTokens
+		rc = turnRes
+		rc.DurationMs = totalDurationMs
+		rc.InputTokens = totalInputTokens
+		rc.OutputTokens = totalOutputTokens
+		rc.TotalTokens = totalTokens
+
+		if waitErr != nil {
+			if isWorkerEnvelope {
+				emitWorkerError(startTime, totalDurationMs, waitErr.Error())
 			}
-			if wErr := os.WriteFile(targetPath, []byte(b.content), 0o600); wErr != nil {
-				if isWorkerEnvelope {
-					emitWorkerError(startTime, rc.DurationMs, fmt.Sprintf("write %s: %v", b.path, wErr))
+			exitRuntime("llm-call", "", *traceID, cli.CodeRuntime, fmt.Errorf("call failed: %w", waitErr), "", *jsonl)
+		}
+
+		if applyFilesEnabled {
+			blocks := extractFileBlocks(rc.Stdout)
+			for _, b := range blocks {
+				targetPath := filepath.Join(scopeRoot, filepath.FromSlash(b.path))
+				if _, vErr := fsops.VerifyScope(targetPath, scopeRoot, allowedPaths); vErr != nil {
+					if isWorkerEnvelope {
+						emitWorkerError(startTime, totalDurationMs, fmt.Sprintf("file %s denied: %v", b.path, vErr))
+					}
+					exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("file %q denied: %w", b.path, vErr), "Path must be within scopeRoot and allowedPaths", *jsonl)
 				}
-				exitRuntime("llm-call", "", *traceID, cli.CodeIO, fmt.Errorf("write %q: %w", b.path, wErr), "", *jsonl)
+				if dirErr := os.MkdirAll(filepath.Dir(targetPath), 0o700); dirErr != nil {
+					if isWorkerEnvelope {
+						emitWorkerError(startTime, totalDurationMs, fmt.Sprintf("mkdir %s: %v", b.path, dirErr))
+					}
+					exitRuntime("llm-call", "", *traceID, cli.CodeIO, fmt.Errorf("mkdir for %q: %w", b.path, dirErr), "", *jsonl)
+				}
+				if wErr := os.WriteFile(targetPath, []byte(b.content), 0o600); wErr != nil {
+					if isWorkerEnvelope {
+						emitWorkerError(startTime, totalDurationMs, fmt.Sprintf("write %s: %v", b.path, wErr))
+					}
+					exitRuntime("llm-call", "", *traceID, cli.CodeIO, fmt.Errorf("write %q: %w", b.path, wErr), "", *jsonl)
+				}
+				relSlash := filepath.ToSlash(b.path)
+				if !appliedFileSet[relSlash] {
+					appliedFileSet[relSlash] = true
+					appliedFiles = append(appliedFiles, relSlash)
+				}
 			}
-			appliedFiles = append(appliedFiles, filepath.ToSlash(b.path))
+		}
+
+		if verifyCmd == "" {
+			break
+		}
+
+		vTimeout := timeoutDur
+		if vTimeout > 60*time.Second {
+			vTimeout = 60 * time.Second
+		}
+		vCtx, vCancel := context.WithTimeout(context.Background(), vTimeout)
+		vCmd := exec.CommandContext(vCtx, "sh", "-c", verifyCmd)
+		vCmd.Dir = scopeRoot
+		vOut, vErr := vCmd.CombinedOutput()
+		vCancel()
+		if vErr == nil {
+			verifyPassed = true
+			break
+		}
+
+		verifyPassed = false
+		if turn < maxTurns {
+			vOutStr := strings.TrimSpace(string(vOut))
+			if len(vOutStr) > 4096 {
+				vOutStr = vOutStr[:4096] + "\n...[truncated]"
+			}
+			spec.Brief = fmt.Sprintf(
+				"%s\n\n--- PREVIOUS RESPONSE (turn %d/%d) ---\n%s\n\n--- VERIFICATION FAILED (turn %d/%d, cmd: %s) ---\n%s\nPlease fix the issue and emit complete updated ```file:path``` blocks.",
+				prompt, turn, maxTurns, rc.Stdout, turn, maxTurns, verifyCmd, vOutStr,
+			)
 		}
 	}
 
@@ -472,6 +559,10 @@ func runLLMCall(args []string) {
 			"output_tokens":   rc.OutputTokens,
 			"total_tokens":    rc.TotalTokens,
 			"applied_files":   appliedFiles,
+			"turns_used":      turnsUsed,
+		}
+		if verifyCmd != "" {
+			data["verify_passed"] = verifyPassed
 		}
 		if len(contextFileList) > 0 {
 			data["context_files"] = contextFileList

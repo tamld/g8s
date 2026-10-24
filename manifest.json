@@ -310,6 +310,12 @@
       "title": "Receipt Export Status Persistence and Idempotent Operator Recovery",
       "path": "spec/openspec/31-receipt-export-status-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-32",
+      "title": "Bounded Agentic Loop, Adaptive Effort Timeout, F1->F2 Subtask Containment, Fleet Gate, and Monotonic Jev Routing",
+      "path": "spec/openspec/32-bounded-agentic-loop-f1f2-fleet-jev-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

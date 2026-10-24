@@ -34,6 +34,10 @@ type Decision struct {
 	EffortApplied      string `json:"effort_applied,omitempty"`
 	EffortMismatch     bool   `json:"effort_mismatch,omitempty"`
 	EffortBudgetTokens int    `json:"effort_budget_tokens,omitempty"`
+
+	// Gate-Lane & Effort routing suggestions (DELTA-32: Safety Monotonicity)
+	SuggestedLane   string `json:"suggested_lane,omitempty"`
+	SuggestedEffort string `json:"suggested_effort,omitempty"`
 }
 
 // RouteRequest carries task context for provider/model/role assignment.
@@ -235,13 +239,15 @@ func RouteDeterministic(req RouteRequest) Decision {
 	if hasTrustPath {
 		best := largestContextModel(candidates)
 		return Decision{
-			Provider:   best.provider,
-			Model:      best.model,
-			Role:       "test-runner",
-			Source:     "deterministic",
-			IsFallback: false,
-			Reason:     "trust-boundary path requires largest-context model and test-runner role",
-			Confidence: 1.0,
+			Provider:        best.provider,
+			Model:           best.model,
+			Role:            "test-runner",
+			Source:          "deterministic",
+			IsFallback:      false,
+			Reason:          "trust-boundary path requires largest-context model and test-runner role",
+			Confidence:      1.0,
+			SuggestedLane:   "S",
+			SuggestedEffort: "high",
 		}
 	}
 
@@ -257,13 +263,15 @@ func RouteDeterministic(req RouteRequest) Decision {
 		if allDocs {
 			best := cheapestModel(candidates)
 			return Decision{
-				Provider:   best.provider,
-				Model:      best.model,
-				Role:       "summarizer",
-				Source:     "deterministic",
-				IsFallback: false,
-				Reason:     "documentation paths route to summarizer role with lightweight model",
-				Confidence: 1.0,
+				Provider:        best.provider,
+				Model:           best.model,
+				Role:            "summarizer",
+				Source:          "deterministic",
+				IsFallback:      false,
+				Reason:          "documentation paths route to summarizer role with lightweight model",
+				Confidence:      1.0,
+				SuggestedLane:   "D",
+				SuggestedEffort: "low",
 			}
 		}
 	}
@@ -285,13 +293,15 @@ func RouteDeterministic(req RouteRequest) Decision {
 	if hasHighBlastRadius {
 		best := largestContextModel(candidates)
 		return Decision{
-			Provider:   best.provider,
-			Model:      best.model,
-			Role:       "collector",
-			Source:     "deterministic",
-			IsFallback: false,
-			Reason:     "high blast radius code impact requires large-context model",
-			Confidence: 0.9,
+			Provider:        best.provider,
+			Model:           best.model,
+			Role:            "collector",
+			Source:          "deterministic",
+			IsFallback:      false,
+			Reason:          "high blast radius code impact requires large-context model",
+			Confidence:      0.9,
+			SuggestedLane:   "F",
+			SuggestedEffort: "high",
 		}
 	}
 
@@ -300,13 +310,15 @@ func RouteDeterministic(req RouteRequest) Decision {
 		if d, err := time.ParseDuration(req.TimeoutHint); err == nil && d >= 30*time.Minute {
 			best := defaultModel(candidates)
 			return Decision{
-				Provider:   best.provider,
-				Model:      best.model,
-				Role:       "collector",
-				Source:     "deterministic",
-				IsFallback: false,
-				Reason:     fmt.Sprintf("extended timeout hint %s requires high-capacity model", req.TimeoutHint),
-				Confidence: 0.9,
+				Provider:        best.provider,
+				Model:           best.model,
+				Role:            "collector",
+				Source:          "deterministic",
+				IsFallback:      false,
+				Reason:          fmt.Sprintf("extended timeout hint %s requires high-capacity model", req.TimeoutHint),
+				Confidence:      0.9,
+				SuggestedLane:   "F",
+				SuggestedEffort: "high",
 			}
 		}
 	}
@@ -314,13 +326,15 @@ func RouteDeterministic(req RouteRequest) Decision {
 	// Rule 5: Manifest default fallback
 	def := defaultModel(candidates)
 	return Decision{
-		Provider:   def.provider,
-		Model:      def.model,
-		Role:       "collector",
-		Source:     "deterministic",
-		IsFallback: false,
-		Reason:     "manifest default routing",
-		Confidence: 0.85,
+		Provider:        def.provider,
+		Model:           def.model,
+		Role:            "collector",
+		Source:          "deterministic",
+		IsFallback:      false,
+		Reason:          "manifest default routing",
+		Confidence:      0.85,
+		SuggestedLane:   "R",
+		SuggestedEffort: "medium",
 	}
 }
 

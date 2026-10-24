@@ -537,3 +537,93 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 		t.Errorf("expected requestedModel gemini-2.5-pro from default_model, got %q", requestedModel)
 	}
 }
+
+func TestLLMCallBoundedAgenticLoop(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	scopeDir := t.TempDir()
+
+	turnCount := 0
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-agent"}]}`))
+		case "/v1/chat/completions":
+			turnCount++
+			w.Header().Set("Content-Type", "application/json")
+			if turnCount == 1 {
+				_, _ = w.Write([]byte(`{
+					"id": "turn-1",
+					"model": "fast-agent",
+					"choices": [{
+						"message": {
+							"role": "assistant",
+							"content": "Here is draft 1:\n` + "```file:status.txt\\nBROKEN\\n```" + `"
+						}
+					}],
+					"usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}
+				}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{
+				"id": "turn-2",
+				"model": "fast-agent",
+				"choices": [{
+					"message": {
+						"role": "assistant",
+						"content": "Fixed after verification failure:\n` + "```file:status.txt\\nVERIFIED_GREEN\\n```" + `"
+					}
+				}],
+				"usage": {"prompt_tokens": 25, "completion_tokens": 15, "total_tokens": 40}
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	cmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Write VERIFIED_GREEN to status.txt",
+		"--base-url", mockServer.URL+"/v1",
+		"--scope-root", scopeDir,
+		"--apply-files",
+		"--max-turns", "3",
+		"--verify-cmd", "grep -q VERIFIED_GREEN status.txt",
+		"--json",
+	)
+	cmd.Env = isolatedEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bounded agentic loop failed: %v\nOutput: %s", err, string(out))
+	}
+
+	var env struct {
+		Data struct {
+			TurnsUsed    int      `json:"turns_used"`
+			VerifyPassed bool     `json:"verify_passed"`
+			TotalTokens  int      `json:"total_tokens"`
+			AppliedFiles []string `json:"applied_files"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		t.Fatalf("unmarshal json: %v\nRaw: %s", err, string(out))
+	}
+	if env.Data.TurnsUsed != 2 {
+		t.Errorf("turns_used = %d, want 2", env.Data.TurnsUsed)
+	}
+	if !env.Data.VerifyPassed {
+		t.Errorf("verify_passed = false, want true")
+	}
+	if env.Data.TotalTokens != 60 {
+		t.Errorf("total_tokens = %d, want 60 (20 + 40)", env.Data.TotalTokens)
+	}
+	content, rErr := os.ReadFile(filepath.Join(scopeDir, "status.txt"))
+	if rErr != nil {
+		t.Fatalf("read status.txt: %v", rErr)
+	}
+	if strings.TrimSpace(string(content)) != "VERIFIED_GREEN" {
+		t.Errorf("status.txt content = %q, want VERIFIED_GREEN", string(content))
+	}
+}
