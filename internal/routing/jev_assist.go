@@ -187,7 +187,13 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	}
 	providerCriteria := make(map[string]string, len(providerSet))
 	for p := range providerSet {
-		providerCriteria[p] = "Registered provider available for delegated task dispatch in the active manifest."
+		var pModels []string
+		for _, c := range candidates {
+			if c.provider == p && !containsStr(pModels, c.model) {
+				pModels = append(pModels, c.model)
+			}
+		}
+		providerCriteria[p] = fmt.Sprintf("Registered provider serving models: %s.", strings.Join(pModels, ", "))
 	}
 	modelCriteria := make(map[string]string, len(modelSet))
 	for m := range modelSet {
@@ -222,7 +228,7 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		"questions": map[string]any{
 			"provider": map[string]any{
 				"type":         "choice",
-				"instructions": "Suggest the best provider for this task.",
+				"instructions": "Suggest the best provider for this task. Must be the exact provider serving the chosen model.",
 				"criteria":     providerCriteria,
 			},
 			"model": map[string]any{
