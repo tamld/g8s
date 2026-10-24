@@ -554,3 +554,74 @@ func TestSanitizeT3DiffAndProvidersConfigLoad(t *testing.T) {
 		t.Fatalf("expected [cliproxyapi openrouter agy] from G8S_PROVIDERS, got %v", opts.AvailableProviders)
 	}
 }
+
+func TestExtractModelFamilyAndLineageDisjointness(t *testing.T) {
+	cases := []struct {
+		model  string
+		family string
+	}{
+		{"claude-3-7-sonnet", "anthropic"},
+		{"cc/claude-opus-4-6", "anthropic"},
+		{"gpt-5.4", "openai"},
+		{"o3-mini", "openai"},
+		{"gemini-3.1-pro", "google"},
+		{"agy", "google"},
+		{"qwen3-coder-plus", "qwen"},
+		{"deepseek-r1", "deepseek"},
+		{"glm-4.7", "zhipu"},
+		{"nvidia/nemotron-3-super", "nvidia"},
+		{"9router", ""},
+		{"reasoning-high", ""},
+	}
+	for _, tc := range cases {
+		if got := ExtractModelFamily(tc.model); got != tc.family {
+			t.Errorf("ExtractModelFamily(%q) = %q, want %q", tc.model, got, tc.family)
+		}
+	}
+
+	if AreModelFamiliesDisjoint("claude-3-7-sonnet", "cc/claude-haiku-4-5") {
+		t.Fatalf("expected same family (anthropic) to NOT be disjoint")
+	}
+	if !AreModelFamiliesDisjoint("claude-3-7-sonnet", "gpt-5.4") {
+		t.Fatalf("expected anthropic and openai to be disjoint")
+	}
+	if !AreModelFamiliesDisjoint("gemini-2.5-pro", "9router") {
+		t.Fatalf("expected unresolved proxy '9router' to allow invocation until model_resolved check")
+	}
+}
+
+func TestEvaluateT3Response_FailClosedAndLineageGuard(t *testing.T) {
+	// 1. Empty output -> fail-closed
+	if passed, _, reason := EvaluateT3Response("", "claude"); passed {
+		t.Fatalf("expected empty response to fail closed, got PASS (%s)", reason)
+	}
+
+	// 2. Ambiguous response without explicit VERDICT: PASS -> fail-closed!
+	ambiguousJSON := `{"kind":"llm_call","data":{"model_resolved":"gpt-5.4","response":"Looks mostly okay, no major issues noticed."}}`
+	if passed, _, reason := EvaluateT3Response(ambiguousJSON, "claude"); passed {
+		t.Fatalf("expected ambiguous response without VERDICT: PASS to fail closed, got PASS (%s)", reason)
+	}
+
+	// 3. Same model family resolved through 9router combo -> fail-closed!
+	sameFamilyJSON := `{"kind":"llm_call","data":{"model_requested":"reasoning-high","model_resolved":"cc/claude-sonnet-4-6","response":"All invariants satisfied.\nVERDICT: PASS"}}`
+	passedSame, resolvedSame, reasonSame := EvaluateT3Response(sameFamilyJSON, "claude-opus-4-6")
+	if passedSame {
+		t.Fatalf("expected model family collision (anthropic vs anthropic) to fail closed")
+	}
+	if resolvedSame != "cc/claude-sonnet-4-6" || !strings.Contains(reasonSame, "model family collision") {
+		t.Fatalf("unexpected collision detail: model=%q reason=%q", resolvedSame, reasonSame)
+	}
+
+	// 4. Disjoint model family + explicit VERDICT: PASS -> PASS!
+	disjointPassJSON := `{"kind":"llm_call","data":{"model_requested":"reasoning-high","model_resolved":"gpt-5.4","response":"Checked all invariants.\nVERDICT: PASS"}}`
+	passedOK, resolvedOK, _ := EvaluateT3Response(disjointPassJSON, "claude-opus-4-6")
+	if !passedOK || resolvedOK != "gpt-5.4" {
+		t.Fatalf("expected disjoint model with explicit VERDICT: PASS to pass, got passed=%v model=%q", passedOK, resolvedOK)
+	}
+
+	// 5. Explicit VERDICT: VETO -> FAIL!
+	vetoJSON := `{"kind":"llm_call","data":{"model_resolved":"gpt-5.4","response":"Counterexample found in symlink check.\nVERDICT: VETO"}}`
+	if passedVeto, _, _ := EvaluateT3Response(vetoJSON, "claude-opus-4-6"); passedVeto {
+		t.Fatalf("expected VERDICT: VETO to fail")
+	}
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,16 +22,123 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 type fileBlock struct {
 	path    string
 	content string
+}
+
+type fileSnapshot struct {
+	existed bool
+	data    []byte
+	mode    os.FileMode
+}
+
+func restoreSnapshots(snapshots map[string]fileSnapshot) {
+	for path, snap := range snapshots {
+		if snap.existed {
+			mode := snap.mode
+			if mode == 0 {
+				mode = 0o600
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] llm-call: restore mkdir %s: %v\n", path, err)
+			}
+			if err := os.WriteFile(path, snap.data, mode); err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] llm-call: restore file %s: %v\n", path, err)
+			}
+		} else {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "[warn] llm-call: remove failed-turn file %s: %v\n", path, err)
+			}
+		}
+	}
+}
+
+var reVolatileErrorTokens = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?|\b\d+(?:\.\d+)?(?:ns|us|µs|ms|s)\b|0x[0-9a-fA-F]{4,}|/var/folders/[^\s:]+|/tmp/[^\s:]+)`)
+
+// NormalizeVerificationError strips volatile runtime noise (timestamps, Go test
+// elapsed durations, hex memory addresses, temporary directory paths) so
+// identical failures across turns produce a stable signature (#663).
+func NormalizeVerificationError(raw string) string {
+	replaced := reVolatileErrorTokens.ReplaceAllString(strings.TrimSpace(raw), "<VOLATILE>")
+	return strings.Join(strings.Fields(replaced), " ")
+}
+
+// ErrorSignatureHash computes a 16-char SHA-256 fingerprint of the normalized
+// verification error output (#663).
+func ErrorSignatureHash(raw string) string {
+	norm := NormalizeVerificationError(raw)
+	sum := sha256.Sum256([]byte(norm))
+	return hex.EncodeToString(sum[:8])
+}
+
+// FileTreeHash computes a deterministic 16-char SHA-256 fingerprint of all
+// emitted file blocks sorted by relative path (#663).
+func FileTreeHash(blocks []fileBlock) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	sorted := make([]fileBlock, len(blocks))
+	copy(sorted, blocks)
+	sort.Slice(sorted, func(i, j int) bool {
+		return filepath.ToSlash(sorted[i].path) < filepath.ToSlash(sorted[j].path)
+	})
+	h := sha256.New()
+	for _, b := range sorted {
+		_, _ = h.Write([]byte(filepath.ToSlash(b.path)))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(b.content))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)[:8])
+}
+
+// scrubVerifyEnv removes sensitive credential environment variables before
+// executing untrusted --verify-cmd shell subprocesses (#664).
+func scrubVerifyEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key := kv
+		if idx := strings.IndexByte(kv, '='); idx >= 0 {
+			key = kv[:idx]
+		}
+		upper := strings.ToUpper(strings.TrimSpace(key))
+		if strings.HasSuffix(upper, "_API_KEY") ||
+			strings.HasSuffix(upper, "_TOKEN") ||
+			strings.HasSuffix(upper, "_SECRET") ||
+			strings.HasSuffix(upper, "_PASSWORD") ||
+			strings.HasSuffix(upper, "_CREDENTIAL") ||
+			strings.HasSuffix(upper, "_PRIVATE_KEY") ||
+			upper == "AWS_SECRET_ACCESS_KEY" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+func openOptionalVaultForGrounding() *vault.Vault {
+	vdb := strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
+	if vdb == "" {
+		vdb = filepath.Join(pathutil.DefaultStateDir(), "vault.db")
+	}
+	if _, err := os.Stat(vdb); err != nil {
+		return nil
+	}
+	v, err := vault.NewVault(vdb, nil)
+	if err != nil {
+		return nil
+	}
+	return v
 }
 
 func extractFileBlocks(text string) []fileBlock {
@@ -375,6 +486,8 @@ func runLLMCall(args []string) {
 	}
 
 	var allowedPaths []string
+	var activeReceiptID string
+	var activeReceiptMgr *receipt.Manager
 	if applyFilesEnabled {
 		receiptID := strings.TrimSpace(*receiptIDFlag)
 		if receiptID == "" {
@@ -411,6 +524,20 @@ func runLLMCall(args []string) {
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("receipt %s already consumed", receiptID), "Provide a fresh write receipt", *jsonl)
 			}
 			allowedPaths = rec.AllowedPaths
+			activeReceiptID = receiptID
+			activeReceiptMgr = rcMgr
+		}
+	}
+
+	// #661: Pre-Execution Grounding Hydration (toolchain versions + repo-scoped Vault whispers)
+	if applyFilesEnabled || verifyCmd != "" || strings.TrimSpace(os.Getenv("G8S_VAULT_DB")) != "" {
+		v := openOptionalVaultForGrounding()
+		if v != nil {
+			defer v.Close()
+		}
+		if grounding := vault.BuildPreExecutionGrounding(context.Background(), v, scopeRoot, 0); grounding != "" {
+			prompt = "--- PRE-EXECUTION GROUNDING ---\n" + grounding + "\n\n" + prompt
+			spec.Brief = prompt
 		}
 	}
 
@@ -419,6 +546,12 @@ func runLLMCall(args []string) {
 	var totalInputTokens, totalOutputTokens, totalTokens int
 	turnsUsed := 0
 	verifyPassed := false
+	stagnationDetected := false
+	stagnationReason := ""
+	baselineSnapshots := make(map[string]fileSnapshot)
+	seenErrorSigs := make(map[string]int)
+	seenTreeHashes := make(map[string]int)
+	var falsifiedLedger []string
 
 	for turn := 1; turn <= maxTurns; turn++ {
 		turnsUsed = turn
@@ -451,15 +584,29 @@ func runLLMCall(args []string) {
 			exitRuntime("llm-call", "", *traceID, cli.CodeRuntime, fmt.Errorf("call failed: %w", waitErr), "", *jsonl)
 		}
 
+		var turnBlocks []fileBlock
+		var turnApplied []string
 		if applyFilesEnabled {
-			blocks := extractFileBlocks(rc.Stdout)
-			for _, b := range blocks {
+			turnBlocks = extractFileBlocks(rc.Stdout)
+			for _, b := range turnBlocks {
 				targetPath := filepath.Join(scopeRoot, filepath.FromSlash(b.path))
-				if _, vErr := fsops.VerifyScope(targetPath, scopeRoot, allowedPaths); vErr != nil {
+				if _, vErr := fsops.VerifyWriteScope(targetPath, scopeRoot, allowedPaths); vErr != nil {
 					if isWorkerEnvelope {
 						emitWorkerError(startTime, totalDurationMs, fmt.Sprintf("file %s denied: %v", b.path, vErr))
 					}
 					exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("file %q denied: %w", b.path, vErr), "Path must be within scopeRoot and allowedPaths", *jsonl)
+				}
+				if _, captured := baselineSnapshots[targetPath]; !captured {
+					if info, statErr := os.Stat(targetPath); statErr == nil {
+						origBytes, _ := os.ReadFile(targetPath)
+						baselineSnapshots[targetPath] = fileSnapshot{
+							existed: true,
+							data:    origBytes,
+							mode:    info.Mode(),
+						}
+					} else {
+						baselineSnapshots[targetPath] = fileSnapshot{existed: false}
+					}
 				}
 				if dirErr := os.MkdirAll(filepath.Dir(targetPath), 0o700); dirErr != nil {
 					if isWorkerEnvelope {
@@ -474,6 +621,7 @@ func runLLMCall(args []string) {
 					exitRuntime("llm-call", "", *traceID, cli.CodeIO, fmt.Errorf("write %q: %w", b.path, wErr), "", *jsonl)
 				}
 				relSlash := filepath.ToSlash(b.path)
+				turnApplied = append(turnApplied, relSlash)
 				if !appliedFileSet[relSlash] {
 					appliedFileSet[relSlash] = true
 					appliedFiles = append(appliedFiles, relSlash)
@@ -492,6 +640,7 @@ func runLLMCall(args []string) {
 		vCtx, vCancel := context.WithTimeout(context.Background(), vTimeout)
 		vCmd := exec.CommandContext(vCtx, "sh", "-c", verifyCmd)
 		vCmd.Dir = scopeRoot
+		vCmd.Env = scrubVerifyEnv(os.Environ())
 		vOut, vErr := vCmd.CombinedOutput()
 		vCancel()
 		if vErr == nil {
@@ -500,16 +649,55 @@ func runLLMCall(args []string) {
 		}
 
 		verifyPassed = false
-		if turn < maxTurns {
-			vOutStr := strings.TrimSpace(string(vOut))
-			if len(vOutStr) > 4096 {
-				vOutStr = vOutStr[:4096] + "\n...[truncated]"
+		// Sanitize verification stdout/stderr via DLP before hashing or re-injecting into LLM prompt (#664)
+		vOutStr := dispatch.SanitizeOutput(strings.TrimSpace(string(vOut)))
+		if len(vOutStr) > 4096 {
+			vOutStr = vOutStr[:4096] + "\n...[truncated]"
+		}
+
+		// #663: Atomic rollback of failed turn's file writes so broken artifacts never poison subsequent turns or workspace
+		if applyFilesEnabled && len(baselineSnapshots) > 0 {
+			restoreSnapshots(baselineSnapshots)
+			appliedFiles = nil
+			appliedFileSet = make(map[string]bool)
+		}
+
+		errSig := ErrorSignatureHash(vOutStr)
+		treeHash := FileTreeHash(turnBlocks)
+
+		if treeHash != "" {
+			if prevTurn, seen := seenTreeHashes[treeHash]; seen {
+				stagnationDetected = true
+				stagnationReason = fmt.Sprintf("oscillating file state %s (matches turn %d)", treeHash, prevTurn)
+				break
 			}
+			seenTreeHashes[treeHash] = turn
+		}
+		if vOutStr != "" || treeHash == "" {
+			if prevTurn, seen := seenErrorSigs[errSig]; seen {
+				stagnationDetected = true
+				stagnationReason = fmt.Sprintf("repeated error signature %s (matches turn %d)", errSig, prevTurn)
+				break
+			}
+			seenErrorSigs[errSig] = turn
+		}
+
+		if turn < maxTurns {
+			entrySummary := fmt.Sprintf(
+				"Turn %d/%d [files=%v tree=%s err_sig=%s]:\n%s",
+				turn, maxTurns, turnApplied, treeHash, errSig, vOutStr,
+			)
+			falsifiedLedger = append(falsifiedLedger, entrySummary)
 			spec.Brief = fmt.Sprintf(
-				"%s\n\n--- PREVIOUS RESPONSE (turn %d/%d) ---\n%s\n\n--- VERIFICATION FAILED (turn %d/%d, cmd: %s) ---\n%s\nPlease fix the issue and emit complete updated ```file:path``` blocks.",
-				prompt, turn, maxTurns, rc.Stdout, turn, maxTurns, verifyCmd, vOutStr,
+				"%s\n\n--- FALSIFIED ATTEMPTS LEDGER (DO NOT REPEAT THESE STATES OR ERRORS) ---\n%s\n\n--- LATEST FAILED RESPONSE (turn %d/%d) ---\n%s\nPlease diagnose the root cause, avoid all previously falsified states, and emit complete updated ```file:path``` blocks.",
+				prompt, strings.Join(falsifiedLedger, "\n\n"), turn, maxTurns, rc.Stdout,
 			)
 		}
+	}
+
+	// #664: Consume standalone write receipt after applying files when not managed by a worker task lifecycle
+	if activeReceiptMgr != nil && activeReceiptID != "" && len(appliedFiles) > 0 && strings.TrimSpace(os.Getenv("G8S_TASK_ID")) == "" {
+		_, _ = activeReceiptMgr.ValidateAndConsume(activeReceiptID, "standalone-llm-call")
 	}
 
 	modelResolved := rc.ModelResolved
@@ -563,6 +751,10 @@ func runLLMCall(args []string) {
 		}
 		if verifyCmd != "" {
 			data["verify_passed"] = verifyPassed
+			data["stagnation_detected"] = stagnationDetected
+			if stagnationReason != "" {
+				data["stagnation_reason"] = stagnationReason
+			}
 		}
 		if len(contextFileList) > 0 {
 			data["context_files"] = contextFileList

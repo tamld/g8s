@@ -312,6 +312,48 @@ func VerifyScope(filePath, scopeRoot string, allowedPaths []string) (string, err
 	return canonRelSlash, nil
 }
 
+// hasExplicitPrefixGrant reports whether allowedPaths contains an explicit
+// pattern targeting prefix (e.g. ".git/" or ".g8s/") rather than a generic
+// wildcard ("*", "**", "./**").
+func hasExplicitPrefixGrant(prefix string, allowedPaths []string) bool {
+	prefix = strings.TrimSuffix(prefix, "/")
+	for _, raw := range allowedPaths {
+		p := filepath.ToSlash(filepath.Clean(strings.TrimSpace(raw)))
+		p = strings.TrimPrefix(p, "./")
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// VerifyWriteScope enforces all VerifyScope checks and additionally protects
+// repository metadata and governance directories (.git/** and .g8s/**) from
+// unauthorized mutation (#664). Writes to .git/** are always denied unless
+// explicitly granted in allowedPaths; writes to .g8s/** are denied when
+// operating under a receipt/wildcard scope or delegated F1/F2 tier unless
+// allowedPaths contains an explicit .g8s/** pattern.
+func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string, error) {
+	relSlash, err := VerifyScope(filePath, scopeRoot, allowedPaths)
+	if err != nil {
+		return "", err
+	}
+	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relSlash)), "./")
+	if clean == ".git" || strings.HasPrefix(clean, ".git/") || strings.Contains(clean, "/.git/") || strings.HasSuffix(clean, "/.git") {
+		if !hasExplicitPrefixGrant(".git", allowedPaths) {
+			return "", fmt.Errorf("path %q targets protected git metadata (.git/**); write denied", filePath)
+		}
+	}
+	if clean == ".g8s" || strings.HasPrefix(clean, ".g8s/") || strings.Contains(clean, "/.g8s/") || strings.HasSuffix(clean, "/.g8s") {
+		envTier := strings.TrimSpace(os.Getenv("G8S_TIER"))
+		isDelegated := strings.EqualFold(envTier, "F1") || strings.EqualFold(envTier, "F2")
+		if (len(allowedPaths) > 0 || isDelegated) && !hasExplicitPrefixGrant(".g8s", allowedPaths) {
+			return "", fmt.Errorf("path %q targets protected governance directory (.g8s/**) without explicit receipt grant", filePath)
+		}
+	}
+	return relSlash, nil
+}
+
 // Read safely reads and bounds text file content, validating scope, checking for binary
 // content, computing SHA-256, slicing requested line ranges, and applying DLP sanitization.
 func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
@@ -452,7 +494,7 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	editMu.Lock()
 	defer editMu.Unlock()
 
-	relSlash, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
+	relSlash, err := VerifyWriteScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +506,7 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+	if _, err := VerifyWriteScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
 		return nil, err
 	}
 	scopeRoot := opts.ScopeRoot

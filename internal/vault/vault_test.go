@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -528,5 +529,107 @@ func TestMatchSpatialAndCarryingCapacity(t *testing.T) {
 	whispers := FormatJITWhisper(matchedOne)
 	if len(whispers) != 1 || !strings.Contains(whispers[0], "[jit:EXACT-FILE]") || !strings.Contains(whispers[0], "avoid: panic(") {
 		t.Fatalf("unexpected whisper format: %+v", whispers)
+	}
+}
+
+func TestVaultMultiProjectPartitioningAndIncludeShared(t *testing.T) {
+	v := newTestVault(t, nil)
+	ctx := context.Background()
+
+	// 1. Store a repo-scoped rule for tamld/tuneflow
+	rTune := sampleRecord("TUNE-1", "TuneFlow Windows NSIS Health")
+	rTune.RepoID = "tamld/tuneflow"
+	rTune.ScopeTier = "repo"
+	rTune.SpatialCoordinates.File = "scripts/verify.ps1"
+	if _, err := v.Store(ctx, rTune); err != nil {
+		t.Fatalf("store TUNE-1: %v", err)
+	}
+
+	// 2. Store a repo-scoped rule for tamld/g8s
+	rG8s := sampleRecord("G8S-1", "G8s Worktree Fail-Closed")
+	rG8s.RepoID = "tamld/g8s"
+	rG8s.ScopeTier = "repo"
+	rG8s.SpatialCoordinates.File = "scripts/verify.ps1"
+	if _, err := v.Store(ctx, rG8s); err != nil {
+		t.Fatalf("store G8S-1: %v", err)
+	}
+
+	// 3. Store a global rule shared across all repos
+	rGlobal := sampleRecord("GLOBAL-1", "Zero Secret Exfiltration")
+	rGlobal.RepoID = ""
+	rGlobal.ScopeTier = "global"
+	rGlobal.SpatialCoordinates.File = "scripts/verify.ps1"
+	if _, err := v.Store(ctx, rGlobal); err != nil {
+		t.Fatalf("store GLOBAL-1: %v", err)
+	}
+
+	// Strict repo filter (IncludeShared = false) for tamld/tuneflow -> only TUNE-1
+	repoTune := "tamld/tuneflow"
+	strictList, err := v.List(ctx, VaultFilter{RepoID: &repoTune, IncludeShared: false})
+	if err != nil {
+		t.Fatalf("strict List: %v", err)
+	}
+	if len(strictList) != 1 || strictList[0].ID != "TUNE-1" {
+		t.Fatalf("expected [TUNE-1], got %+v", strictList)
+	}
+
+	// Shared repo filter (IncludeShared = true) for tamld/tuneflow -> TUNE-1 + GLOBAL-1 (excludes G8S-1!)
+	sharedList, err := v.List(ctx, VaultFilter{RepoID: &repoTune, IncludeShared: true})
+	if err != nil {
+		t.Fatalf("shared List: %v", err)
+	}
+	if len(sharedList) != 2 {
+		t.Fatalf("expected 2 records (TUNE-1 + GLOBAL-1), got %d: %+v", len(sharedList), sharedList)
+	}
+	for _, r := range sharedList {
+		if r.ID == "G8S-1" {
+			t.Fatalf("repo-isolated record G8S-1 leaked into tamld/tuneflow query")
+		}
+	}
+
+	// MatchSpatial with G8S_REPO_ID=tamld/tuneflow must also exclude G8S-1
+	t.Setenv("G8S_REPO_ID", "tamld/tuneflow")
+	spatial, err := v.MatchSpatial(ctx, "scripts/verify.ps1", 10)
+	if err != nil {
+		t.Fatalf("MatchSpatial: %v", err)
+	}
+	if len(spatial) != 2 {
+		t.Fatalf("expected 2 spatial matches for tamld/tuneflow, got %d", len(spatial))
+	}
+	for _, r := range spatial {
+		if r.ID == "G8S-1" {
+			t.Fatalf("G8S-1 leaked into MatchSpatial for tamld/tuneflow")
+		}
+	}
+}
+
+func TestInferRepoIDAndExtractToolchainGrounding(t *testing.T) {
+	v := newTestVault(t, nil)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	goMod := "module github.com/tamld/g8s\n\ngo 1.25.0\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	if got := InferRepoID(dir); got != "tamld/g8s" {
+		t.Fatalf("InferRepoID = %q, want tamld/g8s", got)
+	}
+	grounding := ExtractToolchainGrounding(dir)
+	if !strings.Contains(grounding, "[grounding] repo=tamld/g8s") || !strings.Contains(grounding, "go=1.25.0") {
+		t.Fatalf("unexpected grounding: %q", grounding)
+	}
+
+	rec := sampleRecord("G8S-RULE-1", "Avoid Raw Stderr Hash")
+	rec.RepoID = "tamld/g8s"
+	rec.ScopeTier = "repo"
+	if _, err := v.Store(ctx, rec); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	block := BuildPreExecutionGrounding(ctx, v, dir, 3)
+	if !strings.Contains(block, "[grounding] repo=tamld/g8s") || !strings.Contains(block, "[jit:G8S-RULE-1]") {
+		t.Fatalf("expected grounding + jit whisper in BuildPreExecutionGrounding, got:\n%s", block)
 	}
 }

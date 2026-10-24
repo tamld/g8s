@@ -627,3 +627,235 @@ func TestLLMCallBoundedAgenticLoop(t *testing.T) {
 		t.Errorf("status.txt content = %q, want VERIFIED_GREEN", string(content))
 	}
 }
+
+func TestNormalizeVerificationErrorSignature(t *testing.T) {
+	errRun1 := "2026-10-24T21:00:01Z FAIL\tgithub.com/tamld/g8s/pkg\t0.015s panic at 0xc00012a400 in /tmp/go-build111/b001"
+	errRun2 := "2026-10-24T21:05:59Z FAIL\tgithub.com/tamld/g8s/pkg\t1.842s panic at 0xc00099f880 in /tmp/go-build999/b001"
+	sig1 := ErrorSignatureHash(errRun1)
+	sig2 := ErrorSignatureHash(errRun2)
+	if sig1 != sig2 {
+		t.Fatalf("expected identical normalized error signature across runs, got %s vs %s", sig1, sig2)
+	}
+}
+
+func TestLLMCallOscillationBreakerAndAtomicRollback(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	scopeDir := t.TempDir()
+
+	// Pre-existing file that should be restored to its original content on failed loop
+	existingFile := filepath.Join(scopeDir, "state.txt")
+	if err := os.WriteFile(existingFile, []byte("ORIGINAL_CLEAN\n"), 0o600); err != nil {
+		t.Fatalf("write initial state.txt: %v", err)
+	}
+
+	turnCount := 0
+	var turn3Prompt string
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-agent"}]}`))
+		case "/v1/chat/completions":
+			turnCount++
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			if turnCount == 3 {
+				for _, m := range reqBody.Messages {
+					if m.Role == "user" {
+						turn3Prompt = m.Content
+					}
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			var content string
+			switch turnCount {
+			case 1:
+				// State A + extra poison file
+				content = "Turn 1:\n```file:state.txt\nSTATE_A\n```\n```file:poison.txt\nBROKEN_RESIDUE\n```"
+			case 2:
+				// State B (different state, different error)
+				content = "Turn 2:\n```file:state.txt\nSTATE_B\n```"
+			default:
+				// Turn 3 oscillates back to State A + poison.txt (A -> B -> A cycle!)
+				content = "Turn 3:\n```file:state.txt\nSTATE_A\n```\n```file:poison.txt\nBROKEN_RESIDUE\n```"
+			}
+			payload := map[string]any{
+				"id":    fmt.Sprintf("turn-%d", turnCount),
+				"model": "fast-agent",
+				"choices": []map[string]any{
+					{"message": map[string]string{"role": "assistant", "content": content}},
+				},
+				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+			}
+			b, _ := json.Marshal(payload)
+			_, _ = w.Write(b)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	// verify-cmd prints state.txt content and exits 1 unless it equals VERIFIED_GREEN
+	cmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Update state.txt",
+		"--base-url", mockServer.URL+"/v1",
+		"--scope-root", scopeDir,
+		"--apply-files",
+		"--max-turns", "5",
+		"--verify-cmd", "cat state.txt && grep -q VERIFIED_GREEN state.txt",
+		"--json",
+	)
+	cmd.Env = isolatedEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("llm-call failed: %v\nOutput: %s", err, string(out))
+	}
+
+	var env struct {
+		Data struct {
+			TurnsUsed          int    `json:"turns_used"`
+			VerifyPassed       bool   `json:"verify_passed"`
+			StagnationDetected bool   `json:"stagnation_detected"`
+			StagnationReason   string `json:"stagnation_reason"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		t.Fatalf("unmarshal json: %v\nRaw: %s", err, string(out))
+	}
+
+	// Must abort on Turn 3 (A -> B -> A oscillation) instead of running Turns 4 and 5
+	if env.Data.TurnsUsed != 3 {
+		t.Errorf("turns_used = %d, want 3 (early abort on A->B->A cycle)", env.Data.TurnsUsed)
+	}
+	if !env.Data.StagnationDetected {
+		t.Errorf("expected stagnation_detected = true, got false (reason: %q)", env.Data.StagnationReason)
+	}
+	// Turn 3 prompt must include the cumulative Falsified Attempts Ledger containing BOTH Turn 1 and Turn 2
+	if !strings.Contains(turn3Prompt, "FALSIFIED ATTEMPTS LEDGER") ||
+		!strings.Contains(turn3Prompt, "Turn 1/5") ||
+		!strings.Contains(turn3Prompt, "Turn 2/5") {
+		t.Errorf("expected Turn 3 prompt to contain cumulative ledger for Turns 1 & 2, got:\n%s", turn3Prompt)
+	}
+
+	// Verify atomic rollback: state.txt restored to ORIGINAL_CLEAN and poison.txt removed!
+	restored, err := os.ReadFile(existingFile)
+	if err != nil {
+		t.Fatalf("read restored state.txt: %v", err)
+	}
+	if string(restored) != "ORIGINAL_CLEAN\n" {
+		t.Errorf("state.txt after failed loop = %q, want ORIGINAL_CLEAN", string(restored))
+	}
+	if _, statErr := os.Stat(filepath.Join(scopeDir, "poison.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("expected poison.txt from failed turn to be rolled back and removed, got statErr=%v", statErr)
+	}
+}
+
+func TestLLMCallVerifyCmdSecretScrubbingAndProtectedPaths(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	scopeDir := t.TempDir()
+
+	turnCount := 0
+	var turn2Prompt string
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-agent"}]}`))
+		case "/v1/chat/completions":
+			turnCount++
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			if turnCount == 2 {
+				for _, m := range reqBody.Messages {
+					if m.Role == "user" {
+						turn2Prompt = m.Content
+					}
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			content := fmt.Sprintf("Turn %d:\n```file:app.txt\ntry-%d\n```", turnCount, turnCount)
+			payload := map[string]any{
+				"id":    fmt.Sprintf("sec-turn-%d", turnCount),
+				"model": "fast-agent",
+				"choices": []map[string]any{
+					{"message": map[string]string{"role": "assistant", "content": content}},
+				},
+				"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+			}
+			b, _ := json.Marshal(payload)
+			_, _ = w.Write(b)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockServer.Close()
+
+	secretKey := "sk-live-super-secret-exfil-999999"
+	secretTok := "g8s-serve-token-secret-888888"
+
+	cmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Write app.txt",
+		"--base-url", mockServer.URL+"/v1",
+		"--scope-root", scopeDir,
+		"--apply-files",
+		"--max-turns", "2",
+		"--verify-cmd", "echo EXFIL_KEY=$OPENAI_API_KEY EXFIL_TOK=$G8S_SERVE_TOKEN && exit 1",
+		"--json",
+	)
+	cmd.Env = isolatedEnv(
+		"OPENAI_API_KEY="+secretKey,
+		"G8S_SERVE_TOKEN="+secretTok,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("llm-call failed: %v\nOutput: %s", err, string(out))
+	}
+
+	if strings.Contains(turn2Prompt, secretKey) || strings.Contains(turn2Prompt, secretTok) {
+		t.Fatalf("SECURITY FAILURE: verify-cmd leaked environment secrets into Turn 2 LLM prompt:\n%s", turn2Prompt)
+	}
+
+	// Verify that attempting to write to .git/hooks/pre-commit is denied
+	gitHookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-agent"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"git-hook","model":"fast-agent","choices":[{"message":{"role":"assistant","content":"` + "```file:.git/hooks/pre-commit\\n#!/bin/sh\\npwned\\n```" + `"}}],"usage":{"prompt_tokens":5,"completion_tokens":5,"total_tokens":10}}`))
+	}))
+	defer gitHookServer.Close()
+
+	hookCmd := exec.Command(binPath, "llm-call",
+		"--provider", "9router",
+		"--model", "fast-agent",
+		"--prompt", "Write hook",
+		"--base-url", gitHookServer.URL+"/v1",
+		"--scope-root", scopeDir,
+		"--apply-files",
+		"--json",
+	)
+	hookCmd.Env = isolatedEnv()
+	hookOut, hookErr := hookCmd.CombinedOutput()
+	if hookErr == nil {
+		t.Fatalf("expected .git/hooks/pre-commit write to fail, but succeeded: %s", string(hookOut))
+	}
+	if !strings.Contains(string(hookOut), "protected git metadata") {
+		t.Errorf("expected protected git metadata error, got: %s", string(hookOut))
+	}
+}

@@ -34,7 +34,9 @@ type DistillationRecord struct {
 	ID                   string            `json:"id"`
 	Title                string            `json:"title"`
 	Milestone            string            `json:"milestone"`
-	Status               string            `json:"status"` // PROPOSED, ACCEPTED, APPLIED, DEPRECATED
+	Status               string            `json:"status"`               // PROPOSED, ACCEPTED, APPLIED, DEPRECATED
+	RepoID               string            `json:"repo_id,omitempty"`    // e.g. "g8s", "tuneflow", "aegis" (#661)
+	ScopeTier            string            `json:"scope_tier,omitempty"` // "repo" | "domain" | "global" (#661)
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
 	Causality            CausalityAnchor   `json:"causality"`
@@ -72,11 +74,14 @@ type SearchResult struct {
 
 // VaultFilter defines parameters for listing records.
 type VaultFilter struct {
-	Milestone *string `json:"milestone,omitempty"`
-	Status    *string `json:"status,omitempty"`
-	Package   *string `json:"package,omitempty"`
-	Limit     int     `json:"limit,omitempty"`
-	Offset    int     `json:"offset,omitempty"`
+	Milestone     *string `json:"milestone,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	Package       *string `json:"package,omitempty"`
+	RepoID        *string `json:"repo_id,omitempty"`
+	ScopeTier     *string `json:"scope_tier,omitempty"`
+	IncludeShared bool    `json:"include_shared,omitempty"`
+	Limit         int     `json:"limit,omitempty"`
+	Offset        int     `json:"offset,omitempty"`
 }
 
 var schemaInitMu sync.Mutex
@@ -150,6 +155,8 @@ func (v *Vault) initSchema() error {
 		title TEXT NOT NULL,
 		milestone TEXT NOT NULL,
 		status TEXT NOT NULL,
+		repo_id TEXT NOT NULL DEFAULT '',
+		scope_tier TEXT NOT NULL DEFAULT 'global',
 		package_name TEXT NOT NULL,
 		file_path TEXT NOT NULL,
 		symbol TEXT,
@@ -166,7 +173,16 @@ func (v *Vault) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_vault_milestone ON vault_records(milestone);
 	CREATE INDEX IF NOT EXISTS idx_vault_status ON vault_records(status);
 	CREATE INDEX IF NOT EXISTS idx_vault_package ON vault_records(package_name);
+	`
+	if _, err := v.db.Exec(schema); err != nil {
+		return err
+	}
+	// Additive migration for pre-v0.20.1 databases (#661)
+	_, _ = v.db.Exec(`ALTER TABLE vault_records ADD COLUMN repo_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = v.db.Exec(`ALTER TABLE vault_records ADD COLUMN scope_tier TEXT NOT NULL DEFAULT 'global'`)
+	_, _ = v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_vault_repo_scope ON vault_records(repo_id, scope_tier)`)
 
+	ftsSchema := `
 	CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(
 		id UNINDEXED,
 		title,
@@ -199,7 +215,7 @@ func (v *Vault) initSchema() error {
 		VALUES (new.rowid, new.id, new.title, new.problem, new.trade_off, new.root_cause, new.package_name, new.file_path, new.symbol, new.test_case);
 	END;
 	`
-	_, err := v.db.Exec(schema)
+	_, err := v.db.Exec(ftsSchema)
 	return err
 }
 
@@ -224,6 +240,15 @@ func (v *Vault) Store(ctx context.Context, rec DistillationRecord) (*Distillatio
 	if rec.Milestone == "" {
 		rec.Milestone = "v0.3.0"
 	}
+	rec.RepoID = strings.TrimSpace(rec.RepoID)
+	rec.ScopeTier = strings.ToLower(strings.TrimSpace(rec.ScopeTier))
+	if rec.ScopeTier == "" {
+		if rec.RepoID != "" {
+			rec.ScopeTier = "repo"
+		} else {
+			rec.ScopeTier = "global"
+		}
+	}
 
 	now := v.getClock().UTC()
 	if rec.CreatedAt.IsZero() {
@@ -238,13 +263,15 @@ func (v *Vault) Store(ctx context.Context, rec DistillationRecord) (*Distillatio
 
 	query := `
 	INSERT INTO vault_records (
-		id, title, milestone, status, package_name, file_path, symbol,
+		id, title, milestone, status, repo_id, scope_tier, package_name, file_path, symbol,
 		problem, trade_off, root_cause, test_file, test_case, raw_json, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		title=excluded.title,
 		milestone=excluded.milestone,
 		status=excluded.status,
+		repo_id=excluded.repo_id,
+		scope_tier=excluded.scope_tier,
 		package_name=excluded.package_name,
 		file_path=excluded.file_path,
 		symbol=excluded.symbol,
@@ -262,6 +289,8 @@ func (v *Vault) Store(ctx context.Context, rec DistillationRecord) (*Distillatio
 		rec.Title,
 		rec.Milestone,
 		rec.Status,
+		rec.RepoID,
+		rec.ScopeTier,
 		rec.SpatialCoordinates.Package,
 		rec.SpatialCoordinates.File,
 		rec.SpatialCoordinates.Symbol,
@@ -372,6 +401,20 @@ func (v *Vault) List(ctx context.Context, filter VaultFilter) ([]DistillationRec
 	if filter.Package != nil {
 		conditions = append(conditions, "package_name = ?")
 		args = append(args, *filter.Package)
+	}
+	if filter.RepoID != nil && strings.TrimSpace(*filter.RepoID) != "" {
+		repoID := strings.TrimSpace(*filter.RepoID)
+		if filter.IncludeShared {
+			conditions = append(conditions, "(repo_id = ? OR repo_id = '' OR scope_tier IN ('domain', 'global'))")
+			args = append(args, repoID)
+		} else {
+			conditions = append(conditions, "repo_id = ?")
+			args = append(args, repoID)
+		}
+	}
+	if filter.ScopeTier != nil && strings.TrimSpace(*filter.ScopeTier) != "" {
+		conditions = append(conditions, "scope_tier = ?")
+		args = append(args, strings.ToLower(strings.TrimSpace(*filter.ScopeTier)))
 	}
 
 	whereClause := ""
@@ -575,6 +618,12 @@ func (v *Vault) matchSpatialInternal(ctx context.Context, filePath string, activ
 
 	var exactFileMatches []DistillationRecord
 	var pkgMatches []DistillationRecord
+	activeRepoID := strings.TrimSpace(os.Getenv("G8S_REPO_ID"))
+	if activeRepoID == "" {
+		if sr := strings.TrimSpace(os.Getenv("G8S_SCOPE_ROOT")); sr != "" {
+			activeRepoID = InferRepoID(sr)
+		}
+	}
 
 	for rows.Next() {
 		var raw string
@@ -583,6 +632,11 @@ func (v *Vault) matchSpatialInternal(ctx context.Context, filePath string, activ
 		}
 		var rec DistillationRecord
 		if err := json.Unmarshal([]byte(raw), &rec); err != nil {
+			continue
+		}
+		recRepo := strings.TrimSpace(rec.RepoID)
+		recTier := strings.ToLower(strings.TrimSpace(rec.ScopeTier))
+		if activeRepoID != "" && recRepo != "" && recRepo != activeRepoID && recTier != "domain" && recTier != "global" {
 			continue
 		}
 		recFile := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(rec.SpatialCoordinates.File)), "./")
@@ -604,6 +658,152 @@ func (v *Vault) matchSpatialInternal(ctx context.Context, filePath string, activ
 	out = append(out, exactFileMatches...)
 	out = append(out, pkgMatches...)
 	return out, nil
+}
+
+// InferRepoID derives a deterministic repository identifier for scopeRoot.
+// Priority:
+//  1. G8S_REPO_ID environment variable (if set and scopeRoot is empty).
+//  2. go.mod module path in scopeRoot (e.g. "github.com/tamld/g8s" -> "tamld/g8s").
+//  3. package.json "name" field in scopeRoot.
+//  4. Base directory name of scopeRoot.
+func InferRepoID(scopeRoot string) string {
+	scopeRoot = strings.TrimSpace(scopeRoot)
+	if scopeRoot == "" {
+		if envID := strings.TrimSpace(os.Getenv("G8S_REPO_ID")); envID != "" {
+			return envID
+		}
+		return ""
+	}
+	goModPath := filepath.Join(scopeRoot, "go.mod")
+	if b, err := os.ReadFile(goModPath); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "module ") {
+				mod := strings.TrimSpace(strings.TrimPrefix(line, "module "))
+				mod = strings.Trim(mod, `"`)
+				parts := strings.Split(mod, "/")
+				if len(parts) >= 2 && strings.Contains(parts[0], ".") {
+					return strings.Join(parts[1:], "/")
+				}
+				if mod != "" {
+					return mod
+				}
+			}
+		}
+	}
+	pkgJSONPath := filepath.Join(scopeRoot, "package.json")
+	if b, err := os.ReadFile(pkgJSONPath); err == nil {
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(b, &pkg) == nil && strings.TrimSpace(pkg.Name) != "" {
+			return strings.TrimSpace(pkg.Name)
+		}
+	}
+	if abs, err := filepath.Abs(scopeRoot); err == nil {
+		base := filepath.Base(abs)
+		if base != "." && base != "/" {
+			return base
+		}
+	}
+	return ""
+}
+
+// ExtractToolchainGrounding inspects scopeRoot for live toolchain manifests
+// (go.mod, package.json) and returns a compact single-line grounding header to
+// prevent LLM training cut-off hallucinations (#661). Returns "" if no manifest
+// exists in scopeRoot.
+func ExtractToolchainGrounding(scopeRoot string) string {
+	scopeRoot = strings.TrimSpace(scopeRoot)
+	if scopeRoot == "" {
+		return ""
+	}
+	var facts []string
+	repoID := InferRepoID(scopeRoot)
+
+	goModPath := filepath.Join(scopeRoot, "go.mod")
+	if b, err := os.ReadFile(goModPath); err == nil {
+		var modName, goVer string
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "module ") && modName == "" {
+				modName = strings.TrimSpace(strings.TrimPrefix(line, "module "))
+			} else if strings.HasPrefix(line, "go ") && goVer == "" {
+				goVer = strings.TrimSpace(strings.TrimPrefix(line, "go "))
+			}
+		}
+		if goVer != "" {
+			facts = append(facts, "go="+goVer)
+		}
+		if modName != "" {
+			facts = append(facts, "module="+modName)
+		}
+	}
+
+	pkgJSONPath := filepath.Join(scopeRoot, "package.json")
+	if b, err := os.ReadFile(pkgJSONPath); err == nil {
+		var pkg struct {
+			Name            string            `json:"name"`
+			Version         string            `json:"version"`
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
+		}
+		if json.Unmarshal(b, &pkg) == nil {
+			if pkg.Name != "" {
+				nv := pkg.Name
+				if pkg.Version != "" {
+					nv += "@" + pkg.Version
+				}
+				facts = append(facts, "pkg="+nv)
+			}
+			for _, key := range []string{"electron", "react", "next", "typescript", "vite"} {
+				if v, ok := pkg.Dependencies[key]; ok && v != "" {
+					facts = append(facts, key+"="+v)
+				} else if v, ok := pkg.DevDependencies[key]; ok && v != "" {
+					facts = append(facts, key+"="+v)
+				}
+			}
+		}
+	}
+
+	if len(facts) == 0 {
+		return ""
+	}
+	if repoID != "" {
+		return fmt.Sprintf("[grounding] repo=%s %s", repoID, strings.Join(facts, " "))
+	}
+	return fmt.Sprintf("[grounding] %s", strings.Join(facts, " "))
+}
+
+// BuildPreExecutionGrounding assembles a pre-Turn-1 grounding block combining
+// live toolchain facts from scopeRoot and up to maxNotes active Vault whispers
+// scoped to the repository (plus shared domain/global rules, #661).
+func BuildPreExecutionGrounding(ctx context.Context, v *Vault, scopeRoot string, maxNotes int) string {
+	var lines []string
+	if tc := ExtractToolchainGrounding(scopeRoot); tc != "" {
+		lines = append(lines, tc)
+	}
+	if v != nil {
+		if maxNotes <= 0 {
+			maxNotes = ResolveMaxActiveRules()
+		}
+		if maxNotes > 0 {
+			repoID := InferRepoID(scopeRoot)
+			applied := "APPLIED"
+			filter := VaultFilter{
+				Status:        &applied,
+				Limit:         maxNotes,
+				IncludeShared: true,
+			}
+			if repoID != "" {
+				filter.RepoID = &repoID
+			}
+			if recs, err := v.List(ctx, filter); err == nil && len(recs) > 0 {
+				lines = append(lines, FormatJITWhisper(recs)...)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // FormatJITWhisper renders each matched DistillationRecord into a single

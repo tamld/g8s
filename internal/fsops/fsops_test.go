@@ -895,3 +895,31 @@ func TestSelectJSON(t *testing.T) {
 		}
 	})
 }
+
+func TestVerifyWriteScope_ProtectedDirectories(t *testing.T) {
+	tempDir := t.TempDir()
+	gitHook := filepath.Join(tempDir, ".git", "hooks", "pre-commit")
+	g8sCfg := filepath.Join(tempDir, ".g8s", "trust-boundaries.yml")
+	normalFile := filepath.Join(tempDir, "pkg", "main.go")
+
+	// 1. .git/** is always rejected under nil or wildcard "**" allowedPaths
+	if _, err := VerifyWriteScope(gitHook, tempDir, nil); err == nil || !strings.Contains(err.Error(), "protected git metadata") {
+		t.Fatalf("expected .git/hooks/pre-commit to be rejected under nil allowedPaths, got %v", err)
+	}
+	if _, err := VerifyWriteScope(gitHook, tempDir, []string{"**"}); err == nil || !strings.Contains(err.Error(), "protected git metadata") {
+		t.Fatalf("expected .git/hooks/pre-commit to be rejected under wildcard '**', got %v", err)
+	}
+
+	// 2. .g8s/** is rejected under wildcard "**" receipt, but allowed when ".g8s/**" is explicitly granted
+	if _, err := VerifyWriteScope(g8sCfg, tempDir, []string{"**"}); err == nil || !strings.Contains(err.Error(), "protected governance directory") {
+		t.Fatalf("expected .g8s/trust-boundaries.yml to be rejected under wildcard '**', got %v", err)
+	}
+	if _, err := VerifyWriteScope(g8sCfg, tempDir, []string{".g8s/**"}); err != nil {
+		t.Fatalf("expected explicit .g8s/** receipt grant to succeed, got %v", err)
+	}
+
+	// 3. Normal file inside scope succeeds under "**"
+	if _, err := VerifyWriteScope(normalFile, tempDir, []string{"**"}); err != nil {
+		t.Fatalf("expected normal file to succeed, got %v", err)
+	}
+}

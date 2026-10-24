@@ -22,6 +22,7 @@ type T3VerifyOptions struct {
 	HeadSHA            string
 	BaseRef            string
 	F0Provider         string
+	AuthorModel        string
 	AvailableProviders []string
 	ProviderRunner     func(provider, repoDir, diff string) (passed bool, detail string, err error)
 	EvalProbeRunner    func(repoDir string) (passed bool, detail string, err error)
@@ -267,17 +268,144 @@ func RunT3Verification(opts T3VerifyOptions) (T3Verdict, error) {
 	return verdict, nil
 }
 
+// ExtractModelFamily maps a concrete model identifier or provider token to its
+// canonical foundation model family (#662). Generic proxy/combo names ("9router",
+// "cliproxyapi", "reasoning-high", etc.) return "" because their lineage is
+// only known after inspecting model_resolved.
+func ExtractModelFamily(modelOrProvider string) string {
+	s := strings.ToLower(strings.TrimSpace(modelOrProvider))
+	if s == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(s, "claude"), strings.Contains(s, "anthropic"), strings.Contains(s, "sonnet"), strings.Contains(s, "opus"), strings.Contains(s, "haiku"):
+		return "anthropic"
+	case strings.Contains(s, "gpt-"), strings.Contains(s, "gpt4"), strings.Contains(s, "gpt5"), strings.Contains(s, "openai"), strings.Contains(s, "codex"), strings.HasPrefix(s, "o1"), strings.HasPrefix(s, "o3"), strings.HasPrefix(s, "o4"):
+		return "openai"
+	case strings.Contains(s, "gemini"), strings.Contains(s, "google"), strings.Contains(s, "gemma"), s == "agy":
+		return "google"
+	case strings.Contains(s, "qwen"), strings.Contains(s, "alibaba"):
+		return "qwen"
+	case strings.Contains(s, "deepseek"):
+		return "deepseek"
+	case strings.Contains(s, "glm"), strings.Contains(s, "zhipu"):
+		return "zhipu"
+	case strings.Contains(s, "nemotron"), strings.Contains(s, "nvidia"):
+		return "nvidia"
+	case strings.Contains(s, "llama"), strings.Contains(s, "meta"):
+		return "meta"
+	case strings.Contains(s, "kimi"), strings.Contains(s, "moonshot"):
+		return "moonshot"
+	case strings.Contains(s, "minimax"):
+		return "minimax"
+	default:
+		return ""
+	}
+}
+
+// AreModelFamiliesDisjoint reports whether authorModel and verifierModel belong
+// to different foundation model families (#662). If either model has an unknown
+// family (e.g., an unresolved proxy name), it returns true so proxy candidates
+// can be queried and checked on their resolved model.
+func AreModelFamiliesDisjoint(authorModel, verifierModel string) bool {
+	famA := ExtractModelFamily(authorModel)
+	famV := ExtractModelFamily(verifierModel)
+	if famA == "" || famV == "" {
+		return true
+	}
+	return famA != famV
+}
+
+// buildT3BlindReviewPrompt constructs a BlindReviewPacket-grade prompt (#662)
+// combining repository invariants (spec/constitution.md or .g8s/trust-boundaries.yml)
+// with the identity-sanitized git diff.
+func buildT3BlindReviewPrompt(repoDir, diff string) string {
+	truncatedDiff := sanitizeT3Diff(diff)
+	if len(truncatedDiff) > 12000 {
+		truncatedDiff = truncatedDiff[:12000]
+	}
+
+	var invariants string
+	for _, rel := range []string{".g8s/trust-boundaries.yml", "spec/constitution.md"} {
+		p := filepath.Join(repoDir, rel)
+		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+			s := strings.TrimSpace(string(b))
+			if len(s) > 2000 {
+				s = s[:2000]
+			}
+			invariants = fmt.Sprintf("Repository Invariants (%s):\n%s\n\n", rel, s)
+			break
+		}
+	}
+
+	return fmt.Sprintf(
+		"You are an independent Double-Blind T3 Verifier. Author identity and self-reports have been stripped.\n"+
+			"Falsify this change against the repository invariants and inspect for security, regression, or correctness bugs.\n"+
+			"You MUST conclude with an explicit line: 'VERDICT: PASS' (if safe) or 'VERDICT: VETO' (with concrete counterexample).\n\n"+
+			"%sSanitized Git Diff:\n%s",
+		invariants, truncatedDiff,
+	)
+}
+
+// EvaluateT3Response parses the raw output from `g8s llm-call --json` (or plain
+// text), verifies model-family lineage disjointness against authorModel (#662),
+// and enforces fail-closed verdict parsing (requiring explicit 'VERDICT: PASS').
+func EvaluateT3Response(rawOutput string, authorModel string) (passed bool, resolvedModel string, detail string) {
+	trimmed := strings.TrimSpace(rawOutput)
+	if trimmed == "" {
+		return false, "", "veto: empty verifier response (fail-closed)"
+	}
+
+	responseText := trimmed
+	if strings.HasPrefix(trimmed, "{") {
+		var env struct {
+			Data struct {
+				ModelResolved  string `json:"model_resolved"`
+				ModelRequested string `json:"model_requested"`
+				Response       string `json:"response"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &env); err == nil {
+			resolvedModel = strings.TrimSpace(env.Data.ModelResolved)
+			if resolvedModel == "" {
+				resolvedModel = strings.TrimSpace(env.Data.ModelRequested)
+			}
+			responseText = strings.TrimSpace(env.Data.Response)
+		}
+	}
+
+	if authorModel != "" && resolvedModel != "" && !AreModelFamiliesDisjoint(authorModel, resolvedModel) {
+		return false, resolvedModel, fmt.Sprintf(
+			"veto: model family collision between author (%s -> %s) and verifier (%s -> %s)",
+			authorModel, ExtractModelFamily(authorModel), resolvedModel, ExtractModelFamily(resolvedModel),
+		)
+	}
+
+	if responseText == "" {
+		return false, resolvedModel, "veto: empty response body in verifier envelope (fail-closed)"
+	}
+
+	upper := strings.ToUpper(responseText)
+	if strings.Contains(upper, "VERDICT: VETO") || strings.Contains(upper, "VERDICT: FAIL") || strings.Contains(upper, "VERDICT: REJECT") {
+		return false, resolvedModel, responseText
+	}
+	if (strings.Contains(upper, "VETO") || strings.Contains(upper, "FAIL")) && !strings.Contains(upper, "VERDICT: PASS") {
+		return false, resolvedModel, responseText
+	}
+	if !strings.Contains(upper, "VERDICT: PASS") {
+		return false, resolvedModel, fmt.Sprintf("veto: missing explicit 'VERDICT: PASS' in verifier output (fail-closed): %s", responseText)
+	}
+
+	return true, resolvedModel, responseText
+}
+
 func defaultT3ProviderRunner(provider, repoDir, diff string) (bool, string, error) {
 	g8sBin := filepath.Join(repoDir, "bin", "g8s")
 	if _, err := os.Stat(g8sBin); err != nil {
 		g8sBin = "g8s"
 	}
 
-	truncatedDiff := sanitizeT3Diff(diff)
-	if len(truncatedDiff) > 12000 {
-		truncatedDiff = truncatedDiff[:12000]
-	}
-	prompt := fmt.Sprintf("Review this sanitized git diff as an independent blind second verifier. Inspect for critical safety, regression, or correctness issues. If acceptable, output 'VERDICT: PASS'. If vetoing, output 'VETO' or 'FAIL' with reasons.\n\nDiff:\n%s", truncatedDiff)
+	prompt := buildT3BlindReviewPrompt(repoDir, diff)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -302,11 +430,17 @@ func defaultT3ProviderRunner(provider, repoDir, diff string) (bool, string, erro
 		return false, detail, err
 	}
 
-	upper := strings.ToUpper(outStr)
-	if (strings.Contains(upper, "VETO") || strings.Contains(upper, "FAIL")) && !strings.Contains(upper, "VERDICT: PASS") {
-		return false, outStr, nil
+	authorModel := strings.TrimSpace(os.Getenv("G8S_AUTHOR_MODEL"))
+	if authorModel == "" {
+		authorModel = strings.TrimSpace(os.Getenv("F0_PROVIDER"))
 	}
-
+	passed, resolvedModel, detail := EvaluateT3Response(outStr, authorModel)
+	if !passed {
+		return false, detail, nil
+	}
+	if resolvedModel != "" {
+		return true, fmt.Sprintf("independent provider %s (model=%s) verified diff", provider, resolvedModel), nil
+	}
 	return true, fmt.Sprintf("independent provider %s verified diff", provider), nil
 }
 
