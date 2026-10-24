@@ -352,8 +352,8 @@ func TestRunT3Verification_FallbackToEvalProbeRunner(t *testing.T) {
 
 func TestVerifyT3Command_CLI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PATH", "/usr/bin:/bin")
 	repoDir, _, headSHA := setupTestGitRepo(t)
+	t.Setenv("PATH", t.TempDir())
 
 	// Run with no providers -> should exit 1 (VETO_ESCALATE)
 	oldStdout := os.Stdout
