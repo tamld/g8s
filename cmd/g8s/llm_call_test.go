@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -467,6 +468,7 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
+	var mu sync.Mutex
 	var requestedModel string
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -478,7 +480,9 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 				Model string `json:"model"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			mu.Lock()
 			requestedModel = reqBody.Model
+			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"chatcmpl-cliproxy","model":"gemini-2.5-pro","choices":[{"message":{"role":"assistant","content":"CLIPROXY_OK"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
 		default:
@@ -522,7 +526,9 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 		t.Fatalf("write providers.json: %v", err)
 	}
 
+	mu.Lock()
 	requestedModel = ""
+	mu.Unlock()
 	cmdDef := exec.Command(binPath, "llm-call",
 		"--provider", "cliproxyapi",
 		"--prompt", "Ping via default_model",
@@ -533,8 +539,11 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default_model resolution failed: %v\nOutput: %s", err, string(outDef))
 	}
-	if requestedModel != "gemini-2.5-pro" {
-		t.Errorf("expected requestedModel gemini-2.5-pro from default_model, got %q", requestedModel)
+	mu.Lock()
+	gotModel := requestedModel
+	mu.Unlock()
+	if gotModel != "gemini-2.5-pro" {
+		t.Errorf("expected requestedModel gemini-2.5-pro from default_model, got %q", gotModel)
 	}
 }
 

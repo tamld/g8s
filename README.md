@@ -51,76 +51,11 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 
 ## 2. Architecture & Execution Lifecycle
 
-`g8s` structures multi-agent collaboration into three strictly contained tiers (`F0 / F1 / F2` per [ADR-0032](docs/decisions/0032-containment-levels.md)):
+`g8s` structures multi-agent collaboration across a 2-Axis Orthogonal Architecture (**Axis X**: `F0 / F1 / F2` Containment Rings per [ADR-0032](docs/decisions/0032-containment-levels.md) $\times$ **Axis Y**: `S0..S3 + O-Plane` Control Strata per [ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md)):
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                      F0 — BRAIN / SUPERVISOR TIER                      │
-│  • Architecture reasoning, task decomposition, and milestone planning  │
-│  • Exclusive authority: Git commits, vault promotion, receipt issuance │
-│  • Information Firewall: Consumes compact structured RoundReceiptSchema│
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ JSON-RPC MCP / CLI Dispatch
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                       g8s HARNESS (Zero-CGO Pure Go)                   │
-│  ┌──────────────────────┐  ┌────────────────────┐  ┌────────────────┐  │
-│  │ Role & Perm Gate     │  │ Write Receipt DB   │  │ WAL Task Queue │  │
-│  └──────────────────────┘  └────────────────────┘  └────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Providers: agy │ claude │ gemini │ ollama │ 9router (DELTA-25)   │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Context Broker │ Reflex Sensor (L1/L3) │ Lossless Verify Firewall│  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Isolated Worktree & Setpgid
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                        F1 — WORKER TIER (Muscle)                       │
-│  • Bounded execution: file exploration, diff distillation, test runner │
-│  • Single-use WriteReceipt with path-scoped enforcement (AllowedPaths) │
-│  • May recursively spawn F2 subagents within its receipt boundary      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ In-Process Delegation
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      F2 — RECURSIVE SUBAGENT TIER                      │
-│  • Transient micro-tasks (AST parsing, syntax check, doc extraction)   │
-│  • Inherits F1's sandbox, receipt boundary, and scope root             │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-```mermaid
-flowchart TD
-    subgraph RingF0["Ring F0 — Brain / Supervisor Tier (S0 Principal, S1 Coordinator, S2 Domain Governor)"]
-        Op["Human Operator (S0)"] --> S1["S1 FederationCoordinator (g8s charter issue)"]
-        S1 --> S2["S2 DomainGovernor (g8s brief-issue / submit / verify / deliver)"]
-    end
-
-    subgraph Kernel["g8s Pure-Go Zero-Trust Harness"]
-        Gate["Pre-Execution Gate (Lane 0/D/R/F/S + DoR Floor)"]
-        CP["ContextPack (4-Tier AST + PageRank + Knapsack)"]
-        RC["WriteReceipt Ledger (Single-Use Path Scope)"]
-        WQ["SQLite WAL Task Queue + Model Scorecard Router"]
-        DL["DeviceLeasePool (1 Emulator = 1 Worker)"]
-    end
-
-    subgraph RingF1["Ring F1 — Isolated Worker Tier (Git Worktree + Setpgid)"]
-        S3M["S3-M BoundedMutator (implementer / test-runner)"]
-        S3A["S3-A BlindAdjudicator (verifier / sec-auditor / researcher)"]
-    end
-
-    subgraph RingF2["Ring F2 — Recursive Subagent Tier (F2 ⊆ F1)"]
-        Sub["F2 Ephemeral Subagent (shares F1 worktree & WriteReceipt)"]
-    end
-
-    S2 --> Gate --> CP --> RC --> WQ
-    WQ --> S3M
-    WQ --> S3A
-    DL -.-> S3M
-    S3M --> Sub
-```
+<p align="center">
+  <img src="assets/architecture.svg" alt="g8s Orthogonal Zero-Trust Architecture (F0/F1/F2 x S0..S3)" width="100%"/>
+</p>
 
 ### 5-Step Execution Lifecycle & Visual Workflow
 
@@ -130,29 +65,9 @@ flowchart TD
 4. **Verify (6-Stage QA & Blind Audit)**: Verification gate (`g8s verify` & `g8s qa-report`) executes tests inside the worktree, runs out-of-worktree holdout suites + seeded mutant canary checks, and emits a compact `RoundReceiptSchema` across the Information Firewall.
 5. **Seal & CAS Deliver**: Outcome is sealed in a durable receipt; Brain inspects the physical diff and promotes changes via optimistic concurrency check (`g8s deliver --expected-head-oid <sha>`).
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Op as Human Operator
-    participant F0 as F0 Brain (S2 Governor)
-    participant G8S as g8s Harness (SQLite WAL + Receipts)
-    participant F1M as F1 Worker (S3-M Implementer)
-    participant F1A as F1 Verifier (S3-A Blind Adjudicator)
-
-    Op->>F0: Define feature / bugfix objective
-    F0->>G8S: g8s brief-issue --lane F (Research + Socratic Debate Gate)
-    F0->>G8S: g8s receipt issue --path "internal/pkg/**"
-    G8S-->>F0: Single-use receipt_id
-    F0->>G8S: g8s submit --role implementer --permission workspace_write --receipt-id <id>
-    G8S->>F1M: Spawn isolated Git worktree + Setpgid + hydrate skill://g8s/ + ContextPack
-    F1M->>F1M: Mutate allowed_paths & run --verify-cmd loop
-    F1M-->>G8S: Consume WriteReceipt & seal worktree commit
-    F0->>G8S: g8s verify --task <id> --holdout-dir <dir> --canary-mutant
-    G8S->>F1A: Build sanitized BlindReviewPacket (strip worker identity/prose)
-    F1A-->>G8S: Mechanical DoD + Holdout + Canary PASS (RoundReceiptSchema)
-    F0->>G8S: g8s deliver --worktree <wt> --expected-head-oid <sha>
-    G8S-->>Op: Clean atomic promotion to target branch
-```
+<p align="center">
+  <img src="assets/workflow.svg" alt="g8s 5-Step Execution Lifecycle & Command Routing" width="100%"/>
+</p>
 
 ---
 
@@ -198,21 +113,6 @@ make local
 ---
 
 ## 5. Usage Paradigms (Quickstart)
-
-### Command Selection Flowchart (For Human Users & AI Supervisors)
-
-```mermaid
-flowchart LR
-    Start["What do you want to do?"] --> Q1{"Need file mutation?"}
-    Q1 -- "No (Read / Audit)" --> Q2{"Synchronous or Queued?"}
-    Q2 -- "Instant CLI / Gateway" --> C1["g8s llm-call --provider 9router --model reasoning-high --context-budget 8000"]
-    Q2 -- "Durable Background Worker" --> C2["g8s submit --role scout --permission read_only && g8s worker --once"]
-    Q1 -- "Yes (Code / Test Fix)" --> S1["1. g8s receipt issue --path 'pkg/**'"]
-    S1 --> S2["2. g8s submit --role implementer --permission workspace_write --receipt-id <id>"]
-    S2 --> S3["3. g8s worker --once"]
-    S3 --> S4["4. g8s verify --task <id> && g8s qa-report --spec spec.md"]
-    S4 --> S5["5. g8s deliver --worktree <wt> --expected-head-oid <sha>"]
-```
 
 ### Paradigm 1: Read-Only Reconnaissance
 Safely explore a codebase without granting write permissions:
@@ -351,7 +251,8 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | [Product Requirements (PRD)](docs/PRD.md) | Problem statement, target personas, and core value propositions. |
 | [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..10) and non-functional requirements (NFR-1..4). |
 | [Definition of Done & Ready](docs/DOD_DOR.md) | Engineering criteria, multi-round verification, and gate rules. |
-| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0034 architectural choices and rationales. |
+| [OWASP Agentic, SLSA & SBOM Security](docs/security/owasp-agentic-slsa-sbom.md) | OWASP Top 10 for LLM/Agentic Apps (2025), SLSA v1.0, and SPDX SBOM matrix. |
+| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0035 architectural choices and rationales. |
 
 ### AppSec & Quality Gates
 
@@ -377,7 +278,7 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
 | **`v0.20.0`** (2026-10-25, Current) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, 22-tool MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
-| **`v0.30.0`** (Planned) | **Full F0/F1/F2 MCP Proxy & Autonomous Skill Federation**: in-worktree F1/F2 MCP capability scoping, automated multi-repo charter orchestration, and cross-provider skill telemetry. | **Planned** |
+| **`v0.30.0`** (Planned) | **Universal CLI Agent Adapter Suite (`opencode`, `commandcode`, `codex`), Free-Model Tiered Routing & F0/F1/F2 MCP Proxy** (`DELTA-39`, [#672](https://github.com/tamld/g8s/issues/672)): pluggable external CLI coding agents under `g8s` worktree/receipt containment, zero-cost free-model routing for `read_only` (`scout`/`researcher`) tasks, and in-worktree F1/F2 MCP capability scoping. | **Planned** |
 | **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
 | **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across all 4 Offer Bundle domain profiles (`knowledge`, `security`, `infra`, `utility`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
 

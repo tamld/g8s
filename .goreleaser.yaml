@@ -60,6 +60,12 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+sboms:
+  - id: spdx
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.spdx.json"
+
 release:
   github:
     owner: tamld

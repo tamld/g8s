@@ -53,76 +53,11 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 
 ## 2. Kiến trúc & Vòng đời thực thi
 
-`g8s` tổ chức cộng tác đa agent theo 3 tầng cô lập nghiêm ngặt (`F0 / F1 / F2` theo [ADR-0032](docs/decisions/0032-containment-levels.md)):
+`g8s` tổ chức cộng tác đa agent theo kiến trúc trực giao 2 trục (**Trục X**: Vòng cô lập `F0 / F1 / F2` theo [ADR-0032](docs/decisions/0032-containment-levels.md) $\times$ **Trục Y**: Phân tầng điều khiển `S0..S3 + O-Plane` theo [ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md)):
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                      TẦNG F0 — NÃO / GIÁM SÁT (BRAIN)                  │
-│  • Tư duy kiến trúc, phân rã công việc và lập kế hoạch mốc             │
-│  • Nắm quyền độc quyền: Git commit, duyệt Knowledge Vault, cấp receipt │
-│  • Tường lửa thông tin: Tiêu thụ RoundReceiptSchema súc tích, đủ tín hiệu│
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ JSON-RPC MCP / CLI Dispatch
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                       HARNESS g8s (Thuần Go, Zero CGO)                 │
-│  ┌──────────────────────┐  ┌────────────────────┐  ┌────────────────┐  │
-│  │ Cổng Role & Quyền    │  │ DB Biên nhận ghi   │  │ Hàng đợi WAL   │  │
-│  └──────────────────────┘  └────────────────────┘  └────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Provider: agy │ claude │ gemini │ ollama │ 9router (DELTA-25)    │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Context Broker │ Cảm biến Reflex (L1/L3)│ Tường lửa Verify       │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Worktree độc lập & Setpgid
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      TẦNG F1 — THỢ THỰC THI (MUSCLE)                   │
-│  • Thực thi cơ học: duyệt mã nguồn, trích xuất diff, chạy kiểm thử     │
-│  • Biên nhận WriteReceipt dùng một lần kèm khóa vùng ghi (AllowedPaths)│
-│  • Có thể sinh đệ quy subagent F2 trong ranh giới của mình             │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Ủy thác nội bộ
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                     TẦNG F2 — SUBAGENT ĐỆ QUY (EPHEMERAL)              │
-│  • Tác vụ nhỏ tạm thời (phân tích AST, cú pháp, trích xuất doc)        │
-│  • Thừa kế sandbox, biên nhận và thư mục gốc của worker F1             │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-```mermaid
-flowchart TD
-    subgraph RingF0["Tầng F0 — Brain / Supervisor (S0 Principal, S1 Coordinator, S2 Domain Governor)"]
-        Op["Người vận hành (S0)"] --> S1["S1 FederationCoordinator (g8s charter issue)"]
-        S1 --> S2["S2 DomainGovernor (g8s brief-issue / submit / verify / deliver)"]
-    end
-
-    subgraph Kernel["Harness g8s Thuần Go Zero-Trust"]
-        Gate["Cổng Tiền thực thi (Lane 0/D/R/F/S + DoR Floor)"]
-        CP["ContextPack (Nén AST 4 tầng + PageRank + Knapsack)"]
-        RC["Sổ cái WriteReceipt (Dùng 1 lần, khóa đường dẫn)"]
-        WQ["Hàng đợi SQLite WAL + Bộ định tuyến Thẻ điểm Model"]
-        DL["DeviceLeasePool (1 Emulator = 1 Worker)"]
-    end
-
-    subgraph RingF1["Tầng F1 — Worker Cô lập (Git Worktree + Setpgid)"]
-        S3M["S3-M BoundedMutator (implementer / test-runner)"]
-        S3A["S3-A BlindAdjudicator (verifier / sec-auditor / researcher)"]
-    end
-
-    subgraph RingF2["Tầng F2 — Subagent Đệ quy (F2 ⊆ F1)"]
-        Sub["F2 Subagent Tạm thời (chia sẻ worktree & WriteReceipt của F1)"]
-    end
-
-    S2 --> Gate --> CP --> RC --> WQ
-    WQ --> S3M
-    WQ --> S3A
-    DL -.-> S3M
-    S3M --> Sub
-```
+<p align="center">
+  <img src="assets/architecture.svg" alt="Kiến trúc Zero-Trust Trực giao của g8s (F0/F1/F2 x S0..S3)" width="100%"/>
+</p>
 
 ### 5 bước vòng đời thực thi & Biểu đồ luồng trực quan
 
@@ -132,29 +67,9 @@ flowchart TD
 4. **Kiểm chứng 6 tầng (Verify & QA Audit)**: Cổng kiểm chứng (`g8s verify` & `g8s qa-report`) chạy bộ test thực tế, holdout độc lập và canary đột biến, xuất `RoundReceiptSchema` qua Tường lửa thông tin.
 5. **Niêm phong & Giao nhận CAS (Seal & Deliver)**: Kết quả niêm phong vào receipt; Brain kiểm tra diff và hợp nhất an toàn qua `g8s deliver --expected-head-oid <sha>`.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Op as Người vận hành (Operator)
-    participant F0 as F0 Brain (S2 Governor)
-    participant G8S as Harness g8s (SQLite WAL + Receipts)
-    participant F1M as F1 Worker (S3-M Implementer)
-    participant F1A as F1 Verifier (S3-A Blind Adjudicator)
-
-    Op->>F0: Giao mục tiêu tính năng / sửa lỗi
-    F0->>G8S: g8s brief-issue --lane F (Cổng Nghiên cứu + Phản biện Socratic)
-    F0->>G8S: g8s receipt issue --path "internal/pkg/**"
-    G8S-->>F0: Mã biên nhận receipt_id dùng 1 lần
-    F0->>G8S: g8s submit --role implementer --permission workspace_write --receipt-id <id>
-    G8S->>F1M: Tạo Git worktree cô lập + Setpgid + nạp skill://g8s/ + ContextPack
-    F1M->>F1M: Sửa file trong allowed_paths & chạy vòng lặp --verify-cmd
-    F1M-->>G8S: Tiêu thụ WriteReceipt & chốt commit worktree
-    F0->>G8S: g8s verify --task <id> --holdout-dir <dir> --canary-mutant
-    G8S->>F1A: Đóng gói BlindReviewPacket (ẩn danh tính & lời tự thuật của worker)
-    F1A-->>G8S: Xác nhận DoD + Holdout + Canary PASS (RoundReceiptSchema)
-    F0->>G8S: g8s deliver --worktree <wt> --expected-head-oid <sha>
-    G8S-->>Op: Hợp nhất nguyên tử sạch lên nhánh đích
-```
+<p align="center">
+  <img src="assets/workflow.svg" alt="Vòng đời thực thi 5 bước & Bảng chọn lệnh nhanh của g8s" width="100%"/>
+</p>
 
 ---
 
@@ -200,21 +115,6 @@ make local
 ---
 
 ## 5. Mô phạm sử dụng (Quickstart)
-
-### Sơ đồ chọn lệnh nhanh (Dành cho Người dùng & AI Supervisor)
-
-```mermaid
-flowchart LR
-    Start["Bạn muốn thực hiện tác vụ gì?"] --> Q1{"Có sửa đổi file không?"}
-    Q1 -- "Không (Đọc / Kiểm toán)" --> Q2{"Chạy tức thì hay Hàng đợi?"}
-    Q2 -- "Gọi trực tiếp tức thì" --> C1["g8s llm-call --provider 9router --model reasoning-high --context-budget 8000"]
-    Q2 -- "Hàng đợi Worker bền vững" --> C2["g8s submit --role scout --permission read_only && g8s worker --once"]
-    Q1 -- "Có (Viết code / Sửa lỗi)" --> S1["1. g8s receipt issue --path 'pkg/**'"]
-    S1 --> S2["2. g8s submit --role implementer --permission workspace_write --receipt-id <id>"]
-    S2 --> S3["3. g8s worker --once"]
-    S3 --> S4["4. g8s verify --task <id> && g8s qa-report --spec spec.md"]
-    S4 --> S5["5. g8s deliver --worktree <wt> --expected-head-oid <sha>"]
-```
 
 ### Paradigm 1: Trinh sát chỉ đọc (Read-Only Reconnaissance)
 Duyệt và thu thập thông tin codebase an toàn tuyệt đối mà không cấp quyền ghi:
@@ -353,7 +253,8 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | [Đặc tả Sản phẩm (PRD)](docs/PRD.md) | Vấn đề giải quyết, đối tượng hướng tới và giá trị cốt lõi. |
 | [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..10) và phi chức năng (NFR-1..4). |
 | [Định nghĩa Xong & Sẵn sàng (DOD_DOR)](docs/DOD_DOR.md) | Tiêu chuẩn chất lượng, quy trình xác thực đa vòng và cổng kiểm soát. |
-| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0034. |
+| [Chuẩn Bảo mật OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Ánh xạ OWASP Top 10 cho LLM/Agent (2025), SLSA v1.0 và SPDX SBOM. |
+| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0035. |
 
 ### 4 trụ cột cổng chất lượng & AppSec
 
@@ -379,7 +280,7 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): sổ cái bằng chứng hash-chain, mandate T0–T4, gates G0–G7, tường lửa verify không suy hao. | **Xong** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
 | **`v0.20.0`** (2026-10-25, Hiện tại) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model, Hydrate Skill Gắn Mã Băm, Nén Ngữ cảnh AST/Knapsack, Pipeline QA AI 6 Tầng & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): động cơ charter `S0..S3` + `O-Plane`, 22 công cụ MCP (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, cổng tiền thực thi `Lane F/R/S`, `g8s context-pack`, `g8s qa-report` và `DeviceLeasePool`. | **Xong** |
-| **`v0.30.0`** (Kế hoạch) | **Liên bang MCP & Skill Tự hành F0/F1/F2 Toàn diện**: phân quyền MCP theo biên nhận trong worktree F1/F2 và điều phối charter liên repo tự động. | **Kế hoạch** |
+| **`v0.30.0`** (Kế hoạch) | **Bộ Adapter CLI Agent Đa năng (`opencode`, `commandcode`, `codex`), Định tuyến Free-Model Phân tầng & Liên bang MCP F0/F1/F2** (`DELTA-39`, [#672](https://github.com/tamld/g8s/issues/672)): tích hợp các CLI coding agent ngoài dưới sandbox worktree/receipt của `g8s`, định tuyến free-model cho tác vụ chỉ đọc (`scout`/`researcher`), và phân quyền MCP theo biên nhận trong worktree F1/F2. | **Kế hoạch** |
 | **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
 | **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
 
