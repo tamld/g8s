@@ -464,6 +464,12 @@
       "title": "Exclusive Device-Lease Concurrency Governor & g8s-mobile-gate Emulator Contract",
       "path": "spec/openspec/38-device-lease-and-mobile-gate-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-39",
+      "title": "Universal CLI Agent Adapter Suite (opencode, commandcode, codex) & Free-Model Tiered Routing",
+      "path": "spec/openspec/39-universal-cli-agent-adapter-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

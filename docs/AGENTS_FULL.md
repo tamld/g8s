@@ -130,6 +130,7 @@ Incoming Task:
 | **DELTA-36** | [`36-contextpack-ast-knapsack-spec.md`](../spec/openspec/36-contextpack-ast-knapsack-spec.md) | `internal/contextpack`, `internal/mcp`, `cmd/g8s` | APPLIED |
 | **DELTA-37** | [`37-six-stage-ai-qa-pipeline-spec.md`](../spec/openspec/37-six-stage-ai-qa-pipeline-spec.md) | `internal/verifier`, `cmd/g8s` | APPLIED |
 | **DELTA-38** | [`38-device-lease-and-mobile-gate-spec.md`](../spec/openspec/38-device-lease-and-mobile-gate-spec.md) | `internal/provider`, `skills/g8s-mobile-gate` | APPLIED |
+| **DELTA-39** | [`39-universal-cli-agent-adapter-spec.md`](../spec/openspec/39-universal-cli-agent-adapter-spec.md) | `internal/provider`, `internal/worker`, `internal/routing` | APPLIED |
 
 ---
 

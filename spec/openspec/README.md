@@ -47,6 +47,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-36`](36-contextpack-ast-knapsack-spec.md)** | Pure-Go AST Elision, Personalized PageRank, and Multiple-Choice Knapsack Context Compressor | `internal/contextpack`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-37`](37-six-stage-ai-qa-pipeline-spec.md)** | End-to-End 6-Stage AI QA Pipeline (BA-to-Spec Matrix, Holdout Partition, and Epistemic QA Report) | `internal/verifier`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-38`](38-device-lease-and-mobile-gate-spec.md)** | Exclusive Device-Lease Concurrency Governor & `g8s-mobile-gate` Emulator Contract | `internal/provider`, `skills/g8s-mobile-gate` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-39`](39-universal-cli-agent-adapter-spec.md)** | Universal CLI Agent Adapter Suite (`opencode`, `commandcode`, `codex`) & Free-Model Tiered Routing | `internal/provider`, `internal/worker`, `internal/routing` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 
 ---
 
