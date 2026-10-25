@@ -327,9 +327,18 @@ func runPermissions(args []string) {
 // runProviders lists detected AI agent CLI providers and their availability status,
 // or discovers live models when invoked as 'g8s providers discover'.
 func runProviders(args []string) {
-	if len(args) > 0 && args[0] == "discover" {
-		runProvidersDiscover(args[1:])
-		return
+	if len(args) > 0 {
+		switch args[0] {
+		case "discover":
+			runProvidersDiscover(args[1:])
+			return
+		case "scorecard":
+			runProvidersScorecard(args[1:])
+			return
+		case "evaluate":
+			runProvidersEvaluate(args[1:])
+			return
+		}
 	}
 
 	fs := flag.NewFlagSet("providers", flag.ExitOnError)

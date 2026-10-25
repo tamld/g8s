@@ -28,6 +28,7 @@ import (
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/vault"
 )
 
@@ -559,6 +560,13 @@ func runLLMCall(args []string) {
 		handle, spawnErr := p.Spawn(turnCtx, spec)
 		if spawnErr != nil {
 			turnCancel()
+			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
+				Provider:       entry.Name,
+				ModelRequested: modelID,
+				Success:        false,
+				DurationMs:     totalDurationMs,
+				ErrorReason:    dispatch.SanitizeOutput(spawnErr.Error()),
+			})
 			if isWorkerEnvelope {
 				emitWorkerError(startTime, totalDurationMs, spawnErr.Error())
 			}
@@ -578,6 +586,15 @@ func runLLMCall(args []string) {
 		rc.TotalTokens = totalTokens
 
 		if waitErr != nil {
+			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
+				Provider:       entry.Name,
+				ModelRequested: modelID,
+				ModelResolved:  turnRes.ModelResolved,
+				Success:        false,
+				DurationMs:     totalDurationMs,
+				TotalTokens:    totalTokens,
+				ErrorReason:    dispatch.SanitizeOutput(waitErr.Error()),
+			})
 			if isWorkerEnvelope {
 				emitWorkerError(startTime, totalDurationMs, waitErr.Error())
 			}
@@ -704,6 +721,18 @@ func runLLMCall(args []string) {
 	if modelResolved == "" {
 		modelResolved = modelID
 	}
+
+	_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
+		Provider:       entry.Name,
+		ModelRequested: modelID,
+		ModelResolved:  modelResolved,
+		Success:        true,
+		VerifyChecked:  verifyCmd != "",
+		VerifyPassed:   verifyCmd == "" || verifyPassed,
+		Stagnated:      stagnationDetected,
+		DurationMs:     rc.DurationMs,
+		TotalTokens:    rc.TotalTokens,
+	})
 
 	if envTaskID := strings.TrimSpace(os.Getenv("G8S_TASK_ID")); envTaskID != "" && !*workerEnvelopeFlag {
 		recordF2CallTelemetry(envTaskID, *traceID, entry.Name, modelID, modelResolved, rc.DurationMs, rc.InputTokens, rc.OutputTokens, rc.TotalTokens, len(contextFileList), len(appliedFiles))

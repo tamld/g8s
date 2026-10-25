@@ -108,7 +108,7 @@ func extractCandidates(manifest *config.File) []candidateModel {
 			contextWindow: 1000000,
 		})
 	}
-	return candidates
+	return filterQuarantinedCandidates(candidates)
 }
 
 func modelCostRank(modelID string) int {
