@@ -23,8 +23,6 @@ func bytesDigest(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-var pathRedactionRegex = regexp.MustCompile(`(/[a-zA-Z0-9_\-\.]+)+`)
-
 // sanitizeCLISanitizedError strips absolute filesystem paths from errors.
 func sanitizeCLIExportError(op, target string, err error) (string, string) {
 	if err == nil {
@@ -46,7 +44,8 @@ func sanitizeCLIExportError(op, target string, err error) (string, string) {
 		return cat, fmt.Sprintf("%s %s: %v", pathErr.Op, target, pathErr.Err)
 	}
 	raw := err.Error()
-	clean := pathRedactionRegex.ReplaceAllString(raw, "[path]")
+	re := regexp.MustCompile(`(/[a-zA-Z0-9_\-\.]+)+`)
+	clean := re.ReplaceAllString(raw, "[path]")
 	return "io_error", fmt.Sprintf("%s %s: %s", op, target, clean)
 }
 
