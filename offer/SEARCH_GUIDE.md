@@ -15,7 +15,7 @@ In multi-platform, polyglot agentic engineering (`Go`, `TypeScript/Node.js`, `Py
    - **`ripgrep` (`rg`)** compiles a single deterministic Rust `regex` engine (with optional `-P` PCRE2 support) that behaves identically on **macOS, Linux, and Windows**, normalizing `/` path globs (`-g`) across all three OS families.
 2. **Unbounded Directory Traversal & Context Pollution**:
    - `grep -rn` and `find . -exec grep` blindly scan `.git/`, `node_modules/`, `vendor/`, `.venv/`, `dist/`, build caches, and nested `$G8S_STATE_DIR/worktrees/` unless the caller remembers a long chain of `! -path` or `--exclude-dir` flags.
-   - On sibling repositories like `aegis` or `tuneflow`, an unguarded `grep -rn` over `node_modules/` burns tens of thousands of tokens in worker stdout and stalls F1 workers toward the `360s` wall-clock timeout.
+   - On sibling repositories like `aegis` or `adopter-utility-01`, an unguarded `grep -rn` over `node_modules/` burns tens of thousands of tokens in worker stdout and stalls F1 workers toward the `360s` wall-clock timeout.
    - **`rg`** automatically respects `.gitignore`, `.ignore`, and `.rgignore`, skips hidden directories (`.git/`) and binary files by default, and provides explicit opt-in flags (`--hidden` / `-u` / `-uu` / `-uuu`) when raw inspection is required.
 3. **Throughput & Structured Telemetry**:
    - `rg` combines SIMD-accelerated literal scanning (Teddy / Aho-Corasick), memory-mapped I/O, and work-stealing parallel directory traversal, achieving **`5x–20x` lower latency** than `grep -rn` or `ag`.

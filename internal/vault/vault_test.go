@@ -536,13 +536,13 @@ func TestVaultMultiProjectPartitioningAndIncludeShared(t *testing.T) {
 	v := newTestVault(t, nil)
 	ctx := context.Background()
 
-	// 1. Store a repo-scoped rule for tamld/tuneflow
-	rTune := sampleRecord("TUNE-1", "TuneFlow Windows NSIS Health")
-	rTune.RepoID = "tamld/tuneflow"
+	// 1. Store a repo-scoped rule for example/utility-app
+	rTune := sampleRecord("UTIL-1", "Utility App Windows Installer Health")
+	rTune.RepoID = "example/utility-app"
 	rTune.ScopeTier = "repo"
 	rTune.SpatialCoordinates.File = "scripts/verify.ps1"
 	if _, err := v.Store(ctx, rTune); err != nil {
-		t.Fatalf("store TUNE-1: %v", err)
+		t.Fatalf("store UTIL-1: %v", err)
 	}
 
 	// 2. Store a repo-scoped rule for tamld/g8s
@@ -563,42 +563,42 @@ func TestVaultMultiProjectPartitioningAndIncludeShared(t *testing.T) {
 		t.Fatalf("store GLOBAL-1: %v", err)
 	}
 
-	// Strict repo filter (IncludeShared = false) for tamld/tuneflow -> only TUNE-1
-	repoTune := "tamld/tuneflow"
+	// Strict repo filter (IncludeShared = false) for example/utility-app -> only UTIL-1
+	repoTune := "example/utility-app"
 	strictList, err := v.List(ctx, VaultFilter{RepoID: &repoTune, IncludeShared: false})
 	if err != nil {
 		t.Fatalf("strict List: %v", err)
 	}
-	if len(strictList) != 1 || strictList[0].ID != "TUNE-1" {
-		t.Fatalf("expected [TUNE-1], got %+v", strictList)
+	if len(strictList) != 1 || strictList[0].ID != "UTIL-1" {
+		t.Fatalf("expected [UTIL-1], got %+v", strictList)
 	}
 
-	// Shared repo filter (IncludeShared = true) for tamld/tuneflow -> TUNE-1 + GLOBAL-1 (excludes G8S-1!)
+	// Shared repo filter (IncludeShared = true) for example/utility-app -> UTIL-1 + GLOBAL-1 (excludes G8S-1!)
 	sharedList, err := v.List(ctx, VaultFilter{RepoID: &repoTune, IncludeShared: true})
 	if err != nil {
 		t.Fatalf("shared List: %v", err)
 	}
 	if len(sharedList) != 2 {
-		t.Fatalf("expected 2 records (TUNE-1 + GLOBAL-1), got %d: %+v", len(sharedList), sharedList)
+		t.Fatalf("expected 2 records (UTIL-1 + GLOBAL-1), got %d: %+v", len(sharedList), sharedList)
 	}
 	for _, r := range sharedList {
 		if r.ID == "G8S-1" {
-			t.Fatalf("repo-isolated record G8S-1 leaked into tamld/tuneflow query")
+			t.Fatalf("repo-isolated record G8S-1 leaked into example/utility-app query")
 		}
 	}
 
-	// MatchSpatial with G8S_REPO_ID=tamld/tuneflow must also exclude G8S-1
-	t.Setenv("G8S_REPO_ID", "tamld/tuneflow")
+	// MatchSpatial with G8S_REPO_ID=example/utility-app must also exclude G8S-1
+	t.Setenv("G8S_REPO_ID", "example/utility-app")
 	spatial, err := v.MatchSpatial(ctx, "scripts/verify.ps1", 10)
 	if err != nil {
 		t.Fatalf("MatchSpatial: %v", err)
 	}
 	if len(spatial) != 2 {
-		t.Fatalf("expected 2 spatial matches for tamld/tuneflow, got %d", len(spatial))
+		t.Fatalf("expected 2 spatial matches for example/utility-app, got %d", len(spatial))
 	}
 	for _, r := range spatial {
 		if r.ID == "G8S-1" {
-			t.Fatalf("G8S-1 leaked into MatchSpatial for tamld/tuneflow")
+			t.Fatalf("G8S-1 leaked into MatchSpatial for example/utility-app")
 		}
 	}
 }

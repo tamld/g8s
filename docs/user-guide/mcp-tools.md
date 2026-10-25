@@ -1,6 +1,6 @@
 # MCP Tools
 
-`g8s mcp` serves a twenty-one-tool stdio JSON-RPC server (protocol version
+`g8s mcp` serves a twenty-two-tool stdio JSON-RPC server (protocol version
 negotiated per client, default `2025-06-18`).
 
 ## Tool surface
@@ -28,6 +28,7 @@ negotiated per client, default `2025-06-18`).
 | `g8s_portfolio_status` | O-Plane portfolio projection | read-only projection of active, completed, and revoked charters across repositories (DELTA-33) |
 | `g8s_skills_list` | Digest-pinned skill listing | lists `skill://g8s/<tier>/<name>` manifests filtered by F0/F1/F2 containment tier and optional role (DELTA-34) |
 | `g8s_skills_read` | Digest-verified skill hydration | reads `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check and F0/F1/F2 tier guard (DELTA-34) |
+| `g8s_context_pack` | Pure-Go AST & Knapsack context compressor | 4-tier AST/lexical elision (`FULL`/`SKEL`/`SIGS`/`TREE`) + Personalized PageRank + BM25F + Knapsack budget optimizer (DELTA-36) |
 
 ## Tool details & extensions
 

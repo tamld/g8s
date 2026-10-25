@@ -127,6 +127,9 @@ Incoming Task:
 | **DELTA-33** | [`33-stratum-federation-and-charter-spec.md`](../spec/openspec/33-stratum-federation-and-charter-spec.md) | `internal/charter`, `internal/fsops`, `internal/mcp`, `cmd/g8s` | APPLIED |
 | **DELTA-34** | [`34-mcp-skill-hydration-and-diagnosis-spec.md`](../spec/openspec/34-mcp-skill-hydration-and-diagnosis-spec.md) | `internal/brief`, `internal/mcp`, `internal/routing`, `cmd/g8s` | APPLIED |
 | **DELTA-35** | [`35-pre-execution-research-debate-gate-spec.md`](../spec/openspec/35-pre-execution-research-debate-gate-spec.md) | `internal/brief`, `internal/harness`, `cmd/g8s` | APPLIED |
+| **DELTA-36** | [`36-contextpack-ast-knapsack-spec.md`](../spec/openspec/36-contextpack-ast-knapsack-spec.md) | `internal/contextpack`, `internal/mcp`, `cmd/g8s` | APPLIED |
+| **DELTA-37** | [`37-six-stage-ai-qa-pipeline-spec.md`](../spec/openspec/37-six-stage-ai-qa-pipeline-spec.md) | `internal/verifier`, `cmd/g8s` | APPLIED |
+| **DELTA-38** | [`38-device-lease-and-mobile-gate-spec.md`](../spec/openspec/38-device-lease-and-mobile-gate-spec.md) | `internal/provider`, `skills/g8s-mobile-gate` | APPLIED |
 
 ---
 

@@ -93,13 +93,68 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 5 bước vòng đời thực thi
+```mermaid
+flowchart TD
+    subgraph RingF0["Tầng F0 — Brain / Supervisor (S0 Principal, S1 Coordinator, S2 Domain Governor)"]
+        Op["Người vận hành (S0)"] --> S1["S1 FederationCoordinator (g8s charter issue)"]
+        S1 --> S2["S2 DomainGovernor (g8s brief-issue / submit / verify / deliver)"]
+    end
 
-1. **Nạp (Submit)**: Brain khởi tạo task nguyên tử qua `g8s submit` với role, hạn ngạch và brief rõ ràng.
-2. **Khóa (Lease)**: Worker nhận task qua khóa Compare-And-Swap (CAS) nguyên tử trong SQLite WAL.
-3. **Cách ly (Contain)**: Harness tạo Git worktree riêng và nhóm tiến trình OS (`Setpgid`) có thể hủy an toàn.
-4. **Kiểm chứng (Verify)**: Cổng kiểm chứng (`g8s verify`) chạy trong worktree, lưu log chẩn đoán đầy đủ ra đĩa.
-5. **Niêm phong (Seal)**: Kết quả được niêm phong vào receipt; kiểm tra diff trên đĩa trước khi Brain hòa trộn.
+    subgraph Kernel["Harness g8s Thuần Go Zero-Trust"]
+        Gate["Cổng Tiền thực thi (Lane 0/D/R/F/S + DoR Floor)"]
+        CP["ContextPack (Nén AST 4 tầng + PageRank + Knapsack)"]
+        RC["Sổ cái WriteReceipt (Dùng 1 lần, khóa đường dẫn)"]
+        WQ["Hàng đợi SQLite WAL + Bộ định tuyến Thẻ điểm Model"]
+        DL["DeviceLeasePool (1 Emulator = 1 Worker)"]
+    end
+
+    subgraph RingF1["Tầng F1 — Worker Cô lập (Git Worktree + Setpgid)"]
+        S3M["S3-M BoundedMutator (implementer / test-runner)"]
+        S3A["S3-A BlindAdjudicator (verifier / sec-auditor / researcher)"]
+    end
+
+    subgraph RingF2["Tầng F2 — Subagent Đệ quy (F2 ⊆ F1)"]
+        Sub["F2 Subagent Tạm thời (chia sẻ worktree & WriteReceipt của F1)"]
+    end
+
+    S2 --> Gate --> CP --> RC --> WQ
+    WQ --> S3M
+    WQ --> S3A
+    DL -.-> S3M
+    S3M --> Sub
+```
+
+### 5 bước vòng đời thực thi & Biểu đồ luồng trực quan
+
+1. **Nạp & Kiểm cổng (Submit & Gate)**: Người vận hành / Brain (`F0`) kiểm tra brief (`g8s brief-issue --lane <0|D|R|F|S>`), nén ngữ cảnh (`g8s context-pack`), cấp biên nhận `WriteReceipt` (`g8s receipt issue`) và nạp task (`g8s submit`).
+2. **Khóa (Lease)**: Worker (`F1`) nhận task qua khóa Compare-And-Swap (CAS) nguyên tử trong SQLite WAL (`g8s worker --once`).
+3. **Cách ly & Hydrate (Contain & Hydrate)**: Harness tạo Git worktree riêng, nhóm tiến trình OS (`Setpgid`), và nạp skill gắn mã băm (`skill://g8s/<tier>/<name>`).
+4. **Kiểm chứng 6 tầng (Verify & QA Audit)**: Cổng kiểm chứng (`g8s verify` & `g8s qa-report`) chạy bộ test thực tế, holdout độc lập và canary đột biến, xuất `RoundReceiptSchema` qua Tường lửa thông tin.
+5. **Niêm phong & Giao nhận CAS (Seal & Deliver)**: Kết quả niêm phong vào receipt; Brain kiểm tra diff và hợp nhất an toàn qua `g8s deliver --expected-head-oid <sha>`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Op as Người vận hành (Operator)
+    participant F0 as F0 Brain (S2 Governor)
+    participant G8S as Harness g8s (SQLite WAL + Receipts)
+    participant F1M as F1 Worker (S3-M Implementer)
+    participant F1A as F1 Verifier (S3-A Blind Adjudicator)
+
+    Op->>F0: Giao mục tiêu tính năng / sửa lỗi
+    F0->>G8S: g8s brief-issue --lane F (Cổng Nghiên cứu + Phản biện Socratic)
+    F0->>G8S: g8s receipt issue --path "internal/pkg/**"
+    G8S-->>F0: Mã biên nhận receipt_id dùng 1 lần
+    F0->>G8S: g8s submit --role implementer --permission workspace_write --receipt-id <id>
+    G8S->>F1M: Tạo Git worktree cô lập + Setpgid + nạp skill://g8s/ + ContextPack
+    F1M->>F1M: Sửa file trong allowed_paths & chạy vòng lặp --verify-cmd
+    F1M-->>G8S: Tiêu thụ WriteReceipt & chốt commit worktree
+    F0->>G8S: g8s verify --task <id> --holdout-dir <dir> --canary-mutant
+    G8S->>F1A: Đóng gói BlindReviewPacket (ẩn danh tính & lời tự thuật của worker)
+    F1A-->>G8S: Xác nhận DoD + Holdout + Canary PASS (RoundReceiptSchema)
+    F0->>G8S: g8s deliver --worktree <wt> --expected-head-oid <sha>
+    G8S-->>Op: Hợp nhất nguyên tử sạch lên nhánh đích
+```
 
 ---
 
@@ -109,8 +164,9 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 | :--- | :--- | :--- |
 | **Cách ly Zero-Trust** | Biên nhận `WriteReceipt` dùng 1 lần, process group POSIX, và Git worktree riêng biệt. | `g8s receipt issue`, `g8s worker` |
 | **Hàng đợi bền vững** | Lưu trữ SQLite WAL, khóa CAS nguyên tử, chống trùng lặp idempotency, và tự động thử lại. | `g8s submit`, `g8s watch`, `g8s status` |
-| **I/O Agent thuần Go** | Tìm kiếm đa nền tảng (`search`), đọc file giới hạn (`read`), sửa CAS nguyên tử (`edit`), và trích xuất JSON dot-path (`--select` / `g8s select`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select` |
-| **Tiêu thụ Gateway LLM** | Thực thi CLI đồng bộ (`llm-call`) và hàng đợi worker cho OpenAI/Anthropic/9Router kèm khám phá model trực tiếp. | `g8s llm-call`, `g8s providers discover` |
+| **I/O Agent & ContextPack** | Tìm kiếm đa nền tảng (`search`), đọc giới hạn (`read`), sửa CAS (`edit`), trích xuất JSON (`select`), và nén ngữ cảnh AST 4 tầng + PageRank + Knapsack (`context-pack`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select`, `g8s context-pack` |
+| **Tiêu thụ Gateway LLM** | Thực thi CLI đồng bộ (`llm-call`) và hàng đợi worker cho OpenAI/Anthropic/9Router kèm bảng điểm chất lượng model & tự động cách ly. | `g8s llm-call`, `g8s providers discover`, `g8s providers scorecard` |
+| **QA AI 6 Tầng & Blind Verify** | Chuẩn hóa BA-to-Spec, cô lập Holdout, kiểm thử đột biến Canary và kiểm toán nhận thức luận (`MECHANICAL_VERIFIED` vs `UNVERIFIED_PROSE`). | `g8s verify`, `g8s qa-report` |
 | **Kho tri thức tách rời** | Đánh chỉ mục FTS5 + xếp hạng BM25 sub-millisecond trong SQLite cho quyết định kiến trúc và spatial whisper JIT. | `g8s vault store`, `g8s vault query` |
 
 ---
@@ -144,6 +200,21 @@ make local
 ---
 
 ## 5. Mô phạm sử dụng (Quickstart)
+
+### Sơ đồ chọn lệnh nhanh (Dành cho Người dùng & AI Supervisor)
+
+```mermaid
+flowchart LR
+    Start["Bạn muốn thực hiện tác vụ gì?"] --> Q1{"Có sửa đổi file không?"}
+    Q1 -- "Không (Đọc / Kiểm toán)" --> Q2{"Chạy tức thì hay Hàng đợi?"}
+    Q2 -- "Gọi trực tiếp tức thì" --> C1["g8s llm-call --provider 9router --model reasoning-high --context-budget 8000"]
+    Q2 -- "Hàng đợi Worker bền vững" --> C2["g8s submit --role scout --permission read_only && g8s worker --once"]
+    Q1 -- "Có (Viết code / Sửa lỗi)" --> S1["1. g8s receipt issue --path 'pkg/**'"]
+    S1 --> S2["2. g8s submit --role implementer --permission workspace_write --receipt-id <id>"]
+    S2 --> S3["3. g8s worker --once"]
+    S3 --> S4["4. g8s verify --task <id> && g8s qa-report --spec spec.md"]
+    S4 --> S5["5. g8s deliver --worktree <wt> --expected-head-oid <sha>"]
+```
 
 ### Paradigm 1: Trinh sát chỉ đọc (Read-Only Reconnaissance)
 Duyệt và thu thập thông tin codebase an toàn tuyệt đối mà không cấp quyền ghi:
@@ -216,7 +287,7 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Danh mục 21 công cụ MCP
+#### Danh mục 22 công cụ MCP
 
 | Tên công cụ | Mục đích & Thao tác |
 | :--- | :--- |
@@ -241,6 +312,7 @@ g8s mcp
 | `g8s_portfolio_status` | Chiếu trạng thái O-Plane chỉ đọc của các Stratum Charter liên repo (`DELTA-33`). |
 | `g8s_skills_list` | Liệt kê danh mục skill gắn mã băm (`skill://g8s/<tier>/<name>`) theo tầng F0/F1/F2 (`DELTA-34`). |
 | `g8s_skills_read` | Đọc `SKILL.md` có kiểm tra chống giả mạo TOCTOU qua `expected_digest` SHA-256 (`DELTA-34`). |
+| `g8s_context_pack` | Nén ngữ cảnh AST 4 tầng thuần Go, PageRank + BM25F và Knapsack (`DELTA-36`). |
 
 ### Agent Skills & Hiến chương Giám sát
 
@@ -306,10 +378,10 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): sổ cái bằng chứng hash-chain, mandate T0–T4, gates G0–G7, tường lửa verify không suy hao. | **Xong** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
-| **`v0.20.0`** (2026-10-25, Hiện tại) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model Liên tục, Hydrate Skill Gắn Mã Băm & Cổng Nghiên cứu/Phản biện Trước Thực thi** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..35`): động cơ charter `S0..S3` + `O-Plane`, 21 công cụ MCP (`g8s_skills_list`, `g8s_skills_read`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, và cổng tiền thực thi theo làn `Lane F/R/S`. | **Xong** |
+| **`v0.20.0`** (2026-10-25, Hiện tại) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model, Hydrate Skill Gắn Mã Băm, Nén Ngữ cảnh AST/Knapsack, Pipeline QA AI 6 Tầng & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): động cơ charter `S0..S3` + `O-Plane`, 22 công cụ MCP (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, cổng tiền thực thi `Lane F/R/S`, `g8s context-pack`, `g8s qa-report` và `DeviceLeasePool`. | **Xong** |
 | **`v0.30.0`** (Kế hoạch) | **Liên bang MCP & Skill Tự hành F0/F1/F2 Toàn diện**: phân quyền MCP theo biên nhận trong worktree F1/F2 và điều phối charter liên repo tự động. | **Kế hoạch** |
 | **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
-| **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên 3 kho cốt lõi (`g8s`, `TuneFlow`, `tamld-llm-wiki`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
+| **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
 
 ### Cấu trúc dự án
 

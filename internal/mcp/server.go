@@ -170,6 +170,7 @@ func (s *Server) RegisterTools() error {
 		"g8s_portfolio_status": s.portfolioStatusTool,
 		"g8s_skills_list":      s.skillsListTool,
 		"g8s_skills_read":      s.skillsReadTool,
+		"g8s_context_pack":     s.contextPackTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
@@ -193,6 +194,7 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_portfolio_status", Description: "O-Plane read-only projection of active/revoked/completed Stratum Charters and domain scope allocations (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
 		{Name: "g8s_skills_read", Description: "Read a verified skill (SKILL.md) by name or skill://g8s/ URI with optional expected_digest TOCTOU check (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"expected_digest":{"type":"string"},"bank_dir":{"type":"string"}},"required":["name"]}`)},
+		{Name: "g8s_context_pack", Description: "Pure-Go 4-tier AST elision (FULL/SKEL/SIGS/TREE), Personalized PageRank + BM25F, and Multiple-Choice Knapsack context compressor (DELTA-36).", InputSchema: json.RawMessage(`{"type":"object","properties":{"root_dir":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"allowed_paths":{"type":"array","items":{"type":"string"}},"focus_query":{"type":"string"},"budget_tokens":{"type":"integer"}}}`)},
 	}
 	return nil
 }

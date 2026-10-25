@@ -243,6 +243,10 @@ func main() {
 		runFleet(os.Args[2:])
 	case "charter":
 		runCharter(os.Args[2:])
+	case "context-pack":
+		runContextPack(os.Args[2:])
+	case "qa-report":
+		runQAReport(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:

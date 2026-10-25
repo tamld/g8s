@@ -152,7 +152,7 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
 ## 13. Cross-repo `workspace_write` isolation & preserved-worktree delivery (2026-10-14 mercenary campaign)
 
 - When F0 dispatches a `workspace_write` task from `g8s` into a sibling
-  repository (`aegis`, `tuneflow`, `homelab-proxmox`), pass BOTH
+  repository (`aegis`, `adopter-utility-01`, `homelab-proxmox`), pass BOTH
   `--scope-root <sibling-repo>` and `--add-dir <sibling-repo>` along with
   `--receipt-id <id>` (where receipt `--path` globs are relative to the
   sibling repository root) and `AGY_MCP_ALLOW_WORKSPACE_WRITE=1`.
@@ -171,7 +171,7 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
 
 ## 14. Atomic F1 slice quota (`<= 8 files / worker`) & JS/TS worktree `node_modules` trap
 
-- Empirical benchmark from parallel `aegis` + `tuneflow` waves:
+- Empirical benchmark from parallel `aegis` + `adopter-utility-01` waves:
   - Bundling `18+ files` (3 issues) into a single `workspace_write` worker
     causes `130–151+` tool steps and hits the `360s` timeout ceiling.
   - Right-sizing each F1 worker to **`<= 8–9 files`** (`1 issue-slice = 1
@@ -179,7 +179,7 @@ DIAGNOSTIC— worker liveness tiers are run ON DEMAND when a signal or
     **`19.5s–149s`** (`26K–187K` tokens) with `100% succeeded` status across
     3 parallel cross-repo rounds.
 - Git worktrees (`wt-<hash>`) do NOT contain gitignored `node_modules`.
-  In Node.js/TypeScript sibling repos (`aegis`, `tuneflow`), instruct F1
+  In Node.js/TypeScript sibling repos (`aegis`, `adopter-utility-01`), instruct F1
   workers either to perform file edits only (leaving test runner execution
   to F0 post-delivery) or to invoke `<sibling-repo>/node_modules/.bin/vitest`
   directly — never let F1 workers waste 30+ steps debugging missing
@@ -269,5 +269,5 @@ With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer f
    - `DELTA-30` (`#655`): `g8s serve` refuses non-loopback binds (`0.0.0.0`, `::`, LAN IPs) without `G8S_API_TOKEN`.
    - `DELTA-31` (`#648`): `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any DoD criterion `MET`.
 2. **Cross-Repo Commit & Push Completeness**:
-   - Whenever `g8s` dogfooding or Offer Bundle upgrades modify sibling repositories (`aegis`, `tuneflow`, `homelab-proxmox`, `defense-in-depth`, `hash-checker`, `dotagents`, `tamld-llm-wiki`), **never leave verified changes uncommitted or unpushed on local branches/worktrees**.
+   - Whenever `g8s` dogfooding or Offer Bundle upgrades modify sibling adopter repositories across any domain profile (`knowledge`, `security`, `infra`, `utility`), **never leave verified changes uncommitted or unpushed on local branches/worktrees**.
    - Every cross-repo campaign wave MUST conclude with: (a) worktree/branch pruning (`wt/*`), (b) `g8s offer check` verification, (c) clean commit + push to remote (`origin/main` or merged PR per repo governance), and (d) release tagging (`tools/release.sh`) when `g8s` capabilities advance.

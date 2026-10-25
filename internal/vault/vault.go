@@ -35,7 +35,7 @@ type DistillationRecord struct {
 	Title                string            `json:"title"`
 	Milestone            string            `json:"milestone"`
 	Status               string            `json:"status"`               // PROPOSED, ACCEPTED, APPLIED, DEPRECATED
-	RepoID               string            `json:"repo_id,omitempty"`    // e.g. "g8s", "tuneflow", "aegis" (#661)
+	RepoID               string            `json:"repo_id,omitempty"`    // e.g. "g8s", "adopter-utility-01", "aegis" (#661)
 	ScopeTier            string            `json:"scope_tier,omitempty"` // "repo" | "domain" | "global" (#661)
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`

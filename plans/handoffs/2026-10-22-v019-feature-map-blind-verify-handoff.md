@@ -11,12 +11,12 @@
 
 > **RELEASE GATE DIRECTIVE**: Do **NOT** tag or cut `v0.19.0` until GitHub Issues **`#648`, `#649`, `#650`, `#651`, and `#652`** are implemented via `F0 -> F1 -> F2`, mechanically verified, and merged into `main`.
 
-During the `TuneFlow` Deep Vertical dogfooding campaign and our subsequent multi-agent architectural audit (`F1-Arch-Auditor`, `F1-Skill-Verifier-Researcher`, and `GPT-6.1 Sol Ultra` via `9router`), we uncovered:
+During the `adopter-utility-01` Deep Vertical dogfooding campaign and our subsequent multi-agent architectural audit (`F1-Arch-Auditor`, `F1-Skill-Verifier-Researcher`, and `GPT-6.1 Sol Ultra` via `9router`), we uncovered:
 1. Two concrete verification defects in `g8s` (`EvaluateDoDMatrix` trusting worker-authored `ReportedDoD` strings without requiring `checksOK == true`, and `f0 verify-t3` leaving `ProviderRunner`/`EvalProbeRunner` unwired `nil` in CLI invocations).
 2. Fragmentation of feature traceability across 6 disjoint artifacts (`manifest.json`, `docs/PRD.md`, `docs/SRS.md`, `spec/openspec/*.md`, `.g8s/verifier-classes.yml`, and telemetry), causing context rot and cross-feature regressions when workers modify shared packages.
 3. Susceptibility to **AI Evaluation Awareness**, **Test Overfitting**, and **Reviewer Sycophancy** when F1/F2 workers can read the full test suite and when verifiers read persuasive worker self-summaries (`worker.Summary`, `worker.ReportedDoD`).
 
-To close these gaps permanently before tagging `v0.19.0`, we have opened 5 tracking issues defining the **Declarative End-to-End Feature Map (`.g8s/feature-map.yml`)**, the **3-Layer Anonymous / Blind Verification Loop**, the **6-Module `g8s` Verification Skills Suite**, and **TuneFlow Deep Vertical Phase 2 Dogfooding**.
+To close these gaps permanently before tagging `v0.19.0`, we have opened 5 tracking issues defining the **Declarative End-to-End Feature Map (`.g8s/feature-map.yml`)**, the **3-Layer Anonymous / Blind Verification Loop**, the **6-Module `g8s` Verification Skills Suite**, and **adopter-utility-01 Deep Vertical Phase 2 Dogfooding**.
 
 ---
 
@@ -30,7 +30,7 @@ Execute these issues in the following dependency order:
 | **2** | **#649** | `feat(feature-map): declarative end-to-end Feature Map (.g8s/feature-map.yml) & blast-radius routing for F0-F1-F2` | `.g8s/feature-map.yml`, `internal/featuremap/`, `cmd/g8s/feature.go`, `tools/ci_feature_map_sync.sh` | https://github.com/tamld/g8s/issues/649 |
 | **3** | **#650** | `feat(verify-blind): 3-layer Anonymous / Blind Verification Loop (Out-of-Worktree Holdout, Sanitized Double-Blind Packet & Seeded Mutant Canary)` | `internal/verifier/blind_packet.go`, `internal/verifier/canary.go`, `internal/verifier/verifier.go`, `cmd/g8s/verify.go` | https://github.com/tamld/g8s/issues/650 |
 | **4** | **#651** | `feat(skills): package g8s Verification Skills Suite & offer bundle integration` | `skills/`, `skills/manifest.json`, `.g8s/verifier-classes.yml`, `offer/` | https://github.com/tamld/g8s/issues/651 |
-| **5** | **#652** | `feat(dogfood): apply g8s v0.19.0 Feature Map, Blind Verification Loop & Verification Skills to TuneFlow Deep Vertical Phase 2` | `TuneFlow` worktree (`.g8s/feature-map.yml`, holdout suites, blind review), `offer/SCORECARD.md` | https://github.com/tamld/g8s/issues/652 |
+| **5** | **#652** | `feat(dogfood): apply g8s v0.19.0 Feature Map, Blind Verification Loop & Verification Skills to adopter-utility-01 Deep Vertical Phase 2` | `adopter-utility-01` worktree (`.g8s/feature-map.yml`, holdout suites, blind review), `offer/SCORECARD.md` | https://github.com/tamld/g8s/issues/652 |
 
 > **Parallelism Note**: Issues **#648**, **#649**, and **#651** touch disjoint file scopes and can be dispatched in parallel to isolated F1 workers in Wave 1. Issue **#650** builds on `#648`/`#649` in Wave 2, and Issue **#652** validates the full stack in Wave 3.
 
@@ -86,21 +86,21 @@ All `v0.19.0` verification components must enforce these four epistemic laws:
 
 ---
 
-## 4. Current State of `TuneFlow` Deep Vertical Dogfooding
+## 4. Current State of `adopter-utility-01` Deep Vertical Dogfooding
 
 - **Active Worktree Path**: `$HOME/.local/state/g8s-sess-tf-ux-qa/worktrees/wt-56415a1a`
 - **Current HEAD Commit**: `1f9355e` (`feat(macos,stream,logs): 512KB chunked range streaming, local desktop auto-admin, and operational logger`)
 - **Completed Dogfooding Rounds (Rounds 1–4)**:
-  1. **Round 1 — Core Resilience & Security**: Elderly Queue Recovery (`public/app.js`), SSRF private-IP blocking & bounded LRU cache (`src/services/`), and `tuneflow doctor` CLI health diagnostics.
+  1. **Round 1 — Core Resilience & Security**: Elderly Queue Recovery (`public/app.js`), SSRF private-IP blocking & bounded LRU cache (`src/services/`), and `adopter-utility-01 doctor` CLI health diagnostics.
   2. **Round 2 — Full-Stack API/DOM & Security CI Gates**: Added `scripts/ci-sast-gate.js` and `scripts/ci-dast-gate.js` verifying zero-trust input handling, traversal rejection, and live HTTP security headers.
   3. **Round 3 — Single Focus Frame UX & Headless Chrome UX-QA Gate**: Redesigned UI into a Single Focus Frame for elderly usability and enforced DOM geometry/contrast invariants via Headless Chrome (`scripts/ci-ux-qa-gate.js`).
   4. **Round 4 — macOS Native `WKWebView`/`AVFoundation` Streaming & Operational Logger (`1f9355e`)**:
      - Fixed `WKWebView`/`AVFoundation` byte-range starvation by streaming `ffmpeg` MP3 transcodes in 512KB `206 Partial Content` chunks.
-     - Enabled `TUNEFLOW_DESKTOP_LOCAL=1` loopback auto-admin for the native macOS desktop app wrapper.
+     - Enabled `ADOPTER_UTILITY_01_DESKTOP_LOCAL=1` loopback auto-admin for the native macOS desktop app wrapper.
      - Added structured operational logging (`src/utils/logger.js`) with rotation and diagnostic tracing.
 - **Live Installed macOS App & Logs**:
-  - App Bundle: `$HOME/Applications/TuneFlow.app`
-  - Operational Log File: `$HOME/Library/Application Support/TuneFlow/logs/tuneflow.log`
+  - App Bundle: `$HOME/Applications/adopter-utility-01.app`
+  - Operational Log File: `$HOME/Library/Application Support/adopter-utility-01/logs/adopter-utility-01.log`
 
 ---
 
@@ -129,5 +129,5 @@ mkdir -p "$G8S_STATE_DIR"
   --files "internal/verifier/verifier.go,cmd/g8s/verify.go,tools/f0/verifier_t3.go,.g8s/feature-map.yml,internal/featuremap/featuremap.go,skills/manifest.json"
 
 # 5. Dispatch Wave 1 via F0 -> F1 (1 issue = 1 worker = 1 disjoint WriteReceipt)
-# After Wave 1 merges, dispatch Wave 2 (#650 3-Layer Blind Verification Loop) and Wave 3 (#652 TuneFlow Phase 2).
+# After Wave 1 merges, dispatch Wave 2 (#650 3-Layer Blind Verification Loop) and Wave 3 (#652 adopter-utility-01 Phase 2).
 ```

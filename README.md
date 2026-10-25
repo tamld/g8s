@@ -91,13 +91,68 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 5-Step Execution Lifecycle
+```mermaid
+flowchart TD
+    subgraph RingF0["Ring F0 — Brain / Supervisor Tier (S0 Principal, S1 Coordinator, S2 Domain Governor)"]
+        Op["Human Operator (S0)"] --> S1["S1 FederationCoordinator (g8s charter issue)"]
+        S1 --> S2["S2 DomainGovernor (g8s brief-issue / submit / verify / deliver)"]
+    end
 
-1. **Submit**: Brain creates an atomic task via `g8s submit` with role, budget, and narrow prompt.
-2. **Lease**: Worker acquires task with atomic Compare-And-Swap (CAS) lease in SQLite WAL.
-3. **Contain**: Harness spawns worker in private Git worktree and killable OS process group (`Setpgid`).
-4. **Verify**: Verification gate (`g8s verify`) runs checks inside worktree, capturing unredacted diagnostics to disk while summarizing structured results.
-5. **Seal**: Outcome sealed in durable receipt; physical diff inspected before Brain squash-merges.
+    subgraph Kernel["g8s Pure-Go Zero-Trust Harness"]
+        Gate["Pre-Execution Gate (Lane 0/D/R/F/S + DoR Floor)"]
+        CP["ContextPack (4-Tier AST + PageRank + Knapsack)"]
+        RC["WriteReceipt Ledger (Single-Use Path Scope)"]
+        WQ["SQLite WAL Task Queue + Model Scorecard Router"]
+        DL["DeviceLeasePool (1 Emulator = 1 Worker)"]
+    end
+
+    subgraph RingF1["Ring F1 — Isolated Worker Tier (Git Worktree + Setpgid)"]
+        S3M["S3-M BoundedMutator (implementer / test-runner)"]
+        S3A["S3-A BlindAdjudicator (verifier / sec-auditor / researcher)"]
+    end
+
+    subgraph RingF2["Ring F2 — Recursive Subagent Tier (F2 ⊆ F1)"]
+        Sub["F2 Ephemeral Subagent (shares F1 worktree & WriteReceipt)"]
+    end
+
+    S2 --> Gate --> CP --> RC --> WQ
+    WQ --> S3M
+    WQ --> S3A
+    DL -.-> S3M
+    S3M --> Sub
+```
+
+### 5-Step Execution Lifecycle & Visual Workflow
+
+1. **Submit & Gate**: Operator / Brain (`F0`) validates the task brief (`g8s brief-issue --lane <0|D|R|F|S>`), optionally compresses codebase context (`g8s context-pack`), issues a single-use path-scoped `WriteReceipt` (`g8s receipt issue`), and queues the task (`g8s submit`).
+2. **Lease**: Worker (`F1`) acquires the queued task via an atomic Compare-And-Swap (CAS) lease in SQLite WAL (`g8s worker --once`).
+3. **Contain & Hydrate**: Harness spawns the worker inside an isolated Git worktree and killable OS process group (`Setpgid`), hydrating digest-pinned skills (`skill://g8s/<tier>/<name>`) and bounded context.
+4. **Verify (6-Stage QA & Blind Audit)**: Verification gate (`g8s verify` & `g8s qa-report`) executes tests inside the worktree, runs out-of-worktree holdout suites + seeded mutant canary checks, and emits a compact `RoundReceiptSchema` across the Information Firewall.
+5. **Seal & CAS Deliver**: Outcome is sealed in a durable receipt; Brain inspects the physical diff and promotes changes via optimistic concurrency check (`g8s deliver --expected-head-oid <sha>`).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Op as Human Operator
+    participant F0 as F0 Brain (S2 Governor)
+    participant G8S as g8s Harness (SQLite WAL + Receipts)
+    participant F1M as F1 Worker (S3-M Implementer)
+    participant F1A as F1 Verifier (S3-A Blind Adjudicator)
+
+    Op->>F0: Define feature / bugfix objective
+    F0->>G8S: g8s brief-issue --lane F (Research + Socratic Debate Gate)
+    F0->>G8S: g8s receipt issue --path "internal/pkg/**"
+    G8S-->>F0: Single-use receipt_id
+    F0->>G8S: g8s submit --role implementer --permission workspace_write --receipt-id <id>
+    G8S->>F1M: Spawn isolated Git worktree + Setpgid + hydrate skill://g8s/ + ContextPack
+    F1M->>F1M: Mutate allowed_paths & run --verify-cmd loop
+    F1M-->>G8S: Consume WriteReceipt & seal worktree commit
+    F0->>G8S: g8s verify --task <id> --holdout-dir <dir> --canary-mutant
+    G8S->>F1A: Build sanitized BlindReviewPacket (strip worker identity/prose)
+    F1A-->>G8S: Mechanical DoD + Holdout + Canary PASS (RoundReceiptSchema)
+    F0->>G8S: g8s deliver --worktree <wt> --expected-head-oid <sha>
+    G8S-->>Op: Clean atomic promotion to target branch
+```
 
 ---
 
@@ -107,8 +162,9 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 | :--- | :--- | :--- |
 | **Zero-Trust Containment** | Single-use path-scoped `WriteReceipt`s, POSIX process groups, and isolated Git worktrees. | `g8s receipt issue`, `g8s worker` |
 | **Durable Task Queue** | SQLite WAL storage, atomic CAS leases, idempotency deduplication, and retry policies. | `g8s submit`, `g8s watch`, `g8s status` |
-| **Native Agent I/O** | Pure-Go cross-platform file discovery (`search`), bounded reader (`read`), atomic editor (`edit`), and dot-path JSON extractor (`--select` / `g8s select`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select` |
-| **Universal LLM Consumer** | Config-driven direct synchronous CLI (`llm-call`) and worker queue execution for OpenAI/Anthropic/9Router with live model discovery. | `g8s llm-call`, `g8s providers discover` |
+| **Native Agent I/O & ContextPack** | Pure-Go file discovery (`search`), bounded reader (`read`), atomic editor (`edit`), JSON selector (`select`), and 4-tier AST + PageRank + Knapsack context compressor (`context-pack`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select`, `g8s context-pack` |
+| **Universal LLM Consumer** | Config-driven direct synchronous CLI (`llm-call`) and worker queue execution for OpenAI/Anthropic/9Router with continuous model scorecard & dynamic quarantine. | `g8s llm-call`, `g8s providers discover`, `g8s providers scorecard` |
+| **6-Stage AI QA & Blind Verify** | BA-to-Spec contract validation, holdout partition isolation, seeded mutant canary, and epistemic audit (`MECHANICAL_VERIFIED` vs `UNVERIFIED_PROSE`). | `g8s verify`, `g8s qa-report` |
 | **Decoupled Knowledge Vault** | Sub-millisecond SQLite FTS5 + BM25 ranked indexing of architectural records and JIT spatial whispers. | `g8s vault store`, `g8s vault query` |
 
 ---
@@ -142,6 +198,21 @@ make local
 ---
 
 ## 5. Usage Paradigms (Quickstart)
+
+### Command Selection Flowchart (For Human Users & AI Supervisors)
+
+```mermaid
+flowchart LR
+    Start["What do you want to do?"] --> Q1{"Need file mutation?"}
+    Q1 -- "No (Read / Audit)" --> Q2{"Synchronous or Queued?"}
+    Q2 -- "Instant CLI / Gateway" --> C1["g8s llm-call --provider 9router --model reasoning-high --context-budget 8000"]
+    Q2 -- "Durable Background Worker" --> C2["g8s submit --role scout --permission read_only && g8s worker --once"]
+    Q1 -- "Yes (Code / Test Fix)" --> S1["1. g8s receipt issue --path 'pkg/**'"]
+    S1 --> S2["2. g8s submit --role implementer --permission workspace_write --receipt-id <id>"]
+    S2 --> S3["3. g8s worker --once"]
+    S3 --> S4["4. g8s verify --task <id> && g8s qa-report --spec spec.md"]
+    S4 --> S5["5. g8s deliver --worktree <wt> --expected-head-oid <sha>"]
+```
 
 ### Paradigm 1: Read-Only Reconnaissance
 Safely explore a codebase without granting write permissions:
@@ -214,7 +285,7 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Complete MCP Tool Inventory (21 Tools)
+#### Complete MCP Tool Inventory (22 Tools)
 
 | Tool Name | Operation & Purpose |
 | :--- | :--- |
@@ -239,6 +310,7 @@ g8s mcp
 | `g8s_portfolio_status` | O-Plane read-only projection of active/revoked/completed Stratum Charters (`DELTA-33`). |
 | `g8s_skills_list` | List digest-pinned skills (`skill://g8s/<tier>/<name>`) filtered by F0/F1/F2 tier (`DELTA-34`). |
 | `g8s_skills_read` | Read a verified `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check (`DELTA-34`). |
+| `g8s_context_pack` | Pure-Go 4-tier AST elision, PageRank + BM25F, and Knapsack context compressor (`DELTA-36`). |
 
 ### Agent Skills & Supervisor Charter
 
@@ -304,10 +376,10 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
-| **`v0.20.0`** (2026-10-25, Current) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration & Pre-Execution Research/Debate Gate** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..35`): `S0..S3` + `O-Plane` charter engine, 21-tool MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, and risk-tiered `Lane F/R/S` pre-execution gate. | **Done** |
+| **`v0.20.0`** (2026-10-25, Current) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, 22-tool MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
 | **`v0.30.0`** (Planned) | **Full F0/F1/F2 MCP Proxy & Autonomous Skill Federation**: in-worktree F1/F2 MCP capability scoping, automated multi-repo charter orchestration, and cross-provider skill telemetry. | **Planned** |
 | **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
-| **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across the 3 core repositories (`g8s`, `TuneFlow`, `tamld-llm-wiki`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
+| **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across all 4 Offer Bundle domain profiles (`knowledge`, `security`, `infra`, `utility`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
 
 ### Project Structure
 
@@ -326,6 +398,7 @@ g8s/
 │   ├── completion/ — generates shell auto-completion scripts for bash, zsh, and fish
 │   ├── config/ — loads the operator-declared provider registry that feeds the two-class resource pool (DELTA-10): api_call proxy pools defined by hand and platform_dispatch entries resolved from local CLI binaries
 │   ├── context/ — is the Context Broker (ADR-0021 §8.2, #396): it assembles a bounded situational ContextPacket per deployment point from the knowledge vault (post promotion gate, #395), the telemetry ledger (recent outcomes, failure signatures), and the SOM state (current phase, DoR status)
+│   ├── contextpack/ — implements pure-Go AST and lexical 4-tier context compression (FULL, SKEL, SIGS, TREE), Personalized PageRank + BM25F scoring, and a Multiple-Choice Knapsack token budget optimizer (DELTA-36)
 │   ├── controlplane/ — implements the DELTA-03 SQLite-backed task queue with compare-and-swap leases and an append-only event log, ported from the Python baseline (reference/python/scripts/agy_control_plane.py) under the g8s Zero-CGO constitution: modernc.org/sqlite only, injectable deterministic clock, and per-operation connection pragmas
 │   ├── conv/ — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications
 │   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A): a deterministic debate engine where a thesis is refined through bounded critique rounds

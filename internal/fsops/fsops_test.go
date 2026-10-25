@@ -99,7 +99,7 @@ func TestResolveDelegationContext(t *testing.T) {
 	t.Run("multi-root G8S_SCOPE_ROOT and G8S_ADD_DIRS delegation (#643)", func(t *testing.T) {
 		base := t.TempDir()
 		worktreeDir := filepath.Join(base, "worktree")
-		siblingDir := filepath.Join(base, "sibling-tuneflow")
+		siblingDir := filepath.Join(base, "sibling-adopter-utility-01")
 		outsideDir := filepath.Join(base, "outside")
 		for _, d := range []string{worktreeDir, siblingDir, outsideDir} {
 			if err := os.MkdirAll(d, 0o755); err != nil {

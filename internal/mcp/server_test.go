@@ -195,7 +195,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 		"g8s_dispatch", "g8s_list_tasks", "g8s_cancel_task", "g8s_list_roles", "g8s_list_permissions",
 		"g8s_search", "g8s_read", "g8s_edit", "g8s_select", "g8s_llm_call",
 		"g8s_charter_issue", "g8s_charter_verify", "g8s_portfolio_status",
-		"g8s_skills_list", "g8s_skills_read",
+		"g8s_skills_list", "g8s_skills_read", "g8s_context_pack",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))
@@ -1327,5 +1327,25 @@ func TestMCPSkillsListAndReadTools(t *testing.T) {
 	})
 	if rpcErrMismatch == nil || !strings.Contains(rpcErrMismatch.Message, "E_SKILL_DIGEST_MISMATCH") {
 		t.Fatalf("expected E_SKILL_DIGEST_MISMATCH, got %+v", rpcErrMismatch)
+	}
+}
+
+func TestMCPContextPackTool(t *testing.T) {
+	tmp := t.TempDir()
+	src := "package sample\n\nfunc Compute(x int) int {\n\treturn x * 2\n}\n"
+	if err := os.WriteFile(filepath.Join(tmp, "sample.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _, _, _ := newTestServer(t)
+	res, rpcErr := callTool(t, s, "g8s_context_pack", map[string]any{
+		"root_dir":      tmp,
+		"focus_query":   "Compute",
+		"budget_tokens": 1000,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_context_pack failed: %+v", rpcErr)
+	}
+	if !strings.Contains(string(res), "sample.go") {
+		t.Fatalf("expected sample.go in packed output, got: %s", res)
 	}
 }
