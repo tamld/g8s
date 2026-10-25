@@ -39,7 +39,7 @@ WORKSPACE_WRITE_BLOCK_REASON = (
 
 
 def _workspace_write_enabled() -> bool:
-    """Opt-in per project via env (ADR-001, tamld-llm-wiki
+    """Opt-in per project via env (ADR-001, adopter-knowledge-01
     docs/goals/tiered-admission-gate-design-20260726/adr-001-workspace-write-scribe.md).
     Default stays blocked for every consumer that does not set the flag."""
     return os.environ.get("AGY_MCP_ALLOW_WORKSPACE_WRITE") == "1"

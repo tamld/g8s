@@ -17,7 +17,7 @@ created: 2026-10-21
 
 ### 1.1. Phản tư (Critique of Round 1 & Round 2)
 1. **Self-Shackling on Multi-Root Scope (`G8S_SCOPE_ROOT` vs `G8S_ADD_DIRS`)**:
-   - In Round 1, F1 workers isolated inside `g8s` worktrees needed to inspect sibling repositories (`aegis`, `defense-in-depth`, `homelab-proxmox`, `tuneflow`, `hash-checker`) while writing sealed reports back into `g8s` (`plans/handoffs/r1-ingest-*.md`).
+   - In Round 1, F1 workers isolated inside `g8s` worktrees needed to inspect sibling repositories (`aegis`, `defense-in-depth`, `homelab-proxmox`, `adopter-utility-01`, `hash-checker`) while writing sealed reports back into `g8s` (`plans/handoffs/r1-ingest-*.md`).
    - Because `fsops.ResolveDelegationContext` treated `G8S_SCOPE_ROOT` as a single path string and ignored `G8S_ADD_DIRS`, F1 workers had to run `env -u G8S_SCOPE_ROOT ./bin/g8s llm-call --scope-root <sibling_repo>` as a workaround.
 2. **Dark `F1 -> F2` Depth-2 Telemetry (`ADR-0032` §4 Gap)**:
    - When F1 workers spawned 20 F2 subagents via `./bin/g8s llm-call`, F0 could only verify F2 invocations by manually scanning F1 markdown prose.
@@ -27,7 +27,7 @@ created: 2026-10-21
 
 ### 1.2. Phản đề (Two Campaign Modes Enabled by `#643`–`#645`)
 - **Mode A — Broad Horizontal Campaign (`Đánh diện rộng`)**: `1 F0 -> m F1 (Repo/Module Leads) -> n F2 (Collectors/Auditors)` across multiple repositories or subsystems with zero F0 context dilution.
-- **Mode B — Deep Vertical Campaign (`Đánh diện chuyên sâu` — Next Experiment on `TuneFlow`)**: `1 F0 -> k F1 (Domain Leads: UX, Security, Deployment) -> n F2 (REA Researcher, Red-Team Skeptic, Implementer, Verifier)` iterating deeply on a single repository (`tuneflow`) with high-trust `WriteReceipt` isolation, perimeter anti-theater verification, and compact `f2_summary` proof.
+- **Mode B — Deep Vertical Campaign (`Đánh diện chuyên sâu` — Next Experiment on `adopter-utility-01`)**: `1 F0 -> k F1 (Domain Leads: UX, Security, Deployment) -> n F2 (REA Researcher, Red-Team Skeptic, Implementer, Verifier)` iterating deeply on a single repository (`adopter-utility-01`) with high-trust `WriteReceipt` isolation, perimeter anti-theater verification, and compact `f2_summary` proof.
 
 ---
 

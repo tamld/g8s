@@ -96,6 +96,16 @@
       "evidence_level": "runtime_required",
       "description": "Claim decomposition and evidence-tier classifier (MECHANICAL_VERIFIED, OBSERVATIONAL_TELEMETRY, UNVERIFIED_PROSE), enforcing the 4 epistemic laws across supervisor handoffs and receipts.",
       "args_syntax": "g8s-epistemic-audit [audit|decompose|classify] --input <file.md> [--threshold <ratio>] [--json]"
+    },
+    {
+      "name": "g8s-mobile-gate",
+      "version": "1.0.0",
+      "entry": "skills/g8s-mobile-gate/SKILL.md",
+      "domain": "testing",
+      "risk_level": "medium",
+      "evidence_level": "runtime_required",
+      "description": "Android/iOS mobile emulator perception & action verification gate (Artemis-compatible ADB/xcrun UI hierarchy dump, screenshot capture, exclusive DeviceLeasePool locking, and ANR/crash logcat trapping).",
+      "args_syntax": "g8s-mobile-gate [verify|snapshot|interact] --device <emulator-id> --app <pkg> [--lease-ttl 5m] [--json]"
     }
   ]
 }

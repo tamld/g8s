@@ -11,7 +11,7 @@
 
 ## 1. Problem Statement
 
-1. **Shallow Execution Without World-State / CVE Grounding**: Coding agents frequently jump into implementation relying on stale training-cutoff memory, missing real-world CVEs/CWEs, platform binary packaging requirements, or DOM side-effects (as observed during `TuneFlow` dogfooding).
+1. **Shallow Execution Without World-State / CVE Grounding**: Coding agents frequently jump into implementation relying on stale training-cutoff memory, missing real-world CVEs/CWEs, platform binary packaging requirements, or DOM side-effects (as observed during cross-repository Offer Bundle dogfooding).
 2. **Absence of Pre-Execution Socratic Falsification**: Without a mechanical pre-execution check requiring competing hypotheses and explicit counterexamples/falsification in `Lane F`, `Lane R`, and `Lane S` briefs, single-hypothesis plans pass into `workspace_write` execution unchallenged.
 3. **Coarse 6-Role Taxonomy**: Overloading `test-runner` for both feature implementation and test execution conflated `S3-M` code mutation with verification, and lacked dedicated `researcher`, `implementer`, `sec-auditor`, and `analyst` profiles.
 

@@ -23,6 +23,7 @@ import (
 	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/contextpack"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/harness"
@@ -227,6 +228,7 @@ func runLLMCall(args []string) {
 	maxTurnsFlag := fs.Int("max-turns", 1, "maximum turns for bounded verify-and-repair loop (1..5)")
 	verifyCmdFlag := fs.String("verify-cmd", "", "optional shell command run inside scope root after applying files to verify changes")
 	skillsFlag := fs.String("skills", "", "comma-separated skill names or skill://g8s/ URIs to hydrate with SHA-256 digest verification (DELTA-34)")
+	contextBudgetFlag := fs.Int("context-budget", 0, "optional token budget for 4-tier AST + PageRank + Knapsack context compression (DELTA-36)")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: g8s llm-call [flags]")
@@ -563,6 +565,21 @@ func runLLMCall(args []string) {
 			prompt = skillBlock + prompt
 			spec.Brief = prompt
 			hydratedSkills = manifests
+		}
+	}
+
+	// DELTA-36: Pure-Go AST Elision + PageRank + Knapsack Context Compression (--context-budget)
+	if *contextBudgetFlag > 0 {
+		packRes, pErr := contextpack.Pack(contextpack.PackRequest{
+			RootDir:      scopeRoot,
+			Paths:        contextFileList,
+			AllowedPaths: allowedPaths,
+			FocusQuery:   prompt,
+			BudgetTokens: *contextBudgetFlag,
+		})
+		if pErr == nil && packRes != nil && packRes.RenderedMarkdown != "" {
+			prompt = packRes.RenderedMarkdown + "\n" + prompt
+			spec.Brief = prompt
 		}
 	}
 

@@ -185,7 +185,7 @@ All shipped, tagged, and verified on GitHub Releases:
 | [x] #588 | Fix `FindGhostProcesses` subshell ancestor PID skip and prune dead `.heartbeat/agy/*.json` files on `g8s cleanup --target ghost-process --force` | P0 | ✅ Complete |
 | [x] #575 | Fix AGY `result.duration` and `result.duration_seconds` reporting wall-clock elapsed time + `provider_duration_seconds` and populate `usage` on timeout/error/cancel | P0 | ✅ Complete |
 | [x] #569 | `g8s deliver` copy-apply v2: propagate worker-deleted files (`git rm` inside worktree), cross-repo delivery, `--worktree`, and `--prune-worktree` | P0 | ✅ Complete |
-| [x] #442 | Complete Offer Bundle Wave 1–4 rollout (`tamld-llm-wiki`, `defense-in-depth`, `aegis`, `homelab-proxmox`, `tuneflow`) and merge 13 Mode-3 return packets | P1 | ✅ Complete |
+| [x] #442 | Complete Offer Bundle Wave 1–4 rollout across 5 adopter repositories (`knowledge`, `security`, `infra`, `utility`) and merge 13 Mode-3 return packets | P1 | ✅ Complete |
 | [x] #570 (R4-1, R4-2) | Validate `g8s ladder advance --out` path against scope/denied fragments (R4-1); emit typed JSON error envelope on unreadable `submit --prompt-file` (R4-2) | P1 | ✅ Complete |
 | [x] #567 & #570 (R1-1) | Effort-class registry glob matching (`docs/**` nested + root files, slash-normalized `path.Match` for Windows R1-1), `--class` flag, and receipt `allowed_paths` fallback | P1 | ✅ Complete |
 | [x] #566 | Provider-less manual submit baked-name resolution against stale manifests and `doctor` stale provider model ID diagnostic warning | P1 | ✅ Complete |

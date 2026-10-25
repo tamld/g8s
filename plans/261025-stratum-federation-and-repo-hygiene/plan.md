@@ -32,7 +32,7 @@ flowchart TB
 
     subgraph DOMAIN_RING["S2: DomainGovernor Stratum (Ring: F0 — Single-Repository Scope)"]
         S2_G8S["<b>S2: DomainGovernor [repo_id: tamld/g8s]</b><br/>Bound to Charter(id, digest, epoch, fence, scope_root)<br/>Authors OpenSpec/Plan · Mints WriteReceipts · Runs f0 gate check"]
-        S2_TF["<b>S2: DomainGovernor [repo_id: tamld/tuneflow]</b><br/>Bound to Charter(id, digest, epoch, fence, scope_root)<br/>Authors OpenSpec/Plan · Mints WriteReceipts · Runs CI Gates"]
+        S2_TF["<b>S2: DomainGovernor [repo_id: tamld/adopter-utility-01]</b><br/>Bound to Charter(id, digest, epoch, fence, scope_root)<br/>Authors OpenSpec/Plan · Mints WriteReceipts · Runs CI Gates"]
     end
 
     subgraph EXEC_RING["S3: Task Execution & Blind Adjudication Stratum (Ring: F1 ⊃ F2)"]

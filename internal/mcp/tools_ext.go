@@ -11,6 +11,7 @@ import (
 	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/contextpack"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/fsops"
@@ -814,6 +815,21 @@ func (s *Server) skillsReadTool(_ context.Context, args json.RawMessage) (any, *
 	res, err := brief.ReadVerifiedSkill(a.Name, a.ExpectedDigest, dirs...)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	return res, nil
+}
+
+// contextPackTool executes pure-Go 4-tier AST elision, PageRank + BM25F, and Knapsack compression (DELTA-36).
+func (s *Server) contextPackTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a contextpack.PackRequest
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_context_pack params must be an object"}
+		}
+	}
+	res, err := contextpack.Pack(a)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}
 	return res, nil
 }

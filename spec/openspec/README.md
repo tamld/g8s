@@ -44,6 +44,9 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-33`](33-stratum-federation-and-charter-spec.md)** | Orthogonal Stratum Federation (`S0..S3` + `O-Plane`) and Epoch-Fenced Charter Engine | `internal/charter`, `internal/fsops`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-34`](34-mcp-skill-hydration-and-diagnosis-spec.md)** | F0/F1/F2 Digest-Pinned Skill Hydration, Typed FailureDiagnosis & CAS Head Delivery | `internal/brief`, `internal/mcp`, `internal/routing`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-35`](35-pre-execution-research-debate-gate-spec.md)** | Mandatory Pre-Execution Research, CVE & Socratic Debate Gate and 10-Role Taxonomy | `internal/brief`, `internal/harness`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-36`](36-contextpack-ast-knapsack-spec.md)** | Pure-Go AST Elision, Personalized PageRank, and Multiple-Choice Knapsack Context Compressor | `internal/contextpack`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-37`](37-six-stage-ai-qa-pipeline-spec.md)** | End-to-End 6-Stage AI QA Pipeline (BA-to-Spec Matrix, Holdout Partition, and Epistemic QA Report) | `internal/verifier`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-38`](38-device-lease-and-mobile-gate-spec.md)** | Exclusive Device-Lease Concurrency Governor & `g8s-mobile-gate` Emulator Contract | `internal/provider`, `skills/g8s-mobile-gate` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 
 ---
 

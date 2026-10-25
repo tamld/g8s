@@ -446,6 +446,24 @@
       "title": "Mandatory Pre-Execution Research, CVE & Socratic Debate Gate and 10-Role Taxonomy",
       "path": "spec/openspec/35-pre-execution-research-debate-gate-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-36",
+      "title": "Pure-Go AST Elision, Personalized PageRank, and Multiple-Choice Knapsack Context Compressor",
+      "path": "spec/openspec/36-contextpack-ast-knapsack-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-37",
+      "title": "End-to-End 6-Stage AI QA Pipeline (BA-to-Spec Matrix, Holdout Partition, and Epistemic QA Report)",
+      "path": "spec/openspec/37-six-stage-ai-qa-pipeline-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-38",
+      "title": "Exclusive Device-Lease Concurrency Governor & g8s-mobile-gate Emulator Contract",
+      "path": "spec/openspec/38-device-lease-and-mobile-gate-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

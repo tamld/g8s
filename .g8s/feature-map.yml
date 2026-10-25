@@ -161,7 +161,9 @@ features:
       - "internal/config/**"
       - "internal/conv/**"
       - "internal/reflex/**"
+      - "internal/contextpack/**"
       - "cmd/g8s/llm_call.go"
+      - "cmd/g8s/context_pack.go"
       - "offer/templates/providers.example.json"
     invariants:
       - "OpenAI, Anthropic, CLIProxyAPI, and 9router protocol conformance"
@@ -219,6 +221,7 @@ features:
       - "internal/brief/**"
       - "internal/diffintel/**"
       - "internal/codeintel/**"
+      - "cmd/g8s/qa_report.go"
     invariants:
       - "Worktree-targeted non-vacuous test execution"
       - "EvaluateDoDMatrix rejects unverified worker self-report claims"
