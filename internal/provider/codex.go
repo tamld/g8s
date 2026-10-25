@@ -1,15 +1,17 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
-// CodexProvider is a stub provider for OpenAI Codex CLI workers.
+// CodexProvider manages OpenAI Codex CLI worker execution.
 type CodexProvider struct {
 	mu       sync.RWMutex
 	binary   string
@@ -86,10 +88,38 @@ func (c *CodexProvider) Version(ctx context.Context) (string, error) {
 	return c.version, nil
 }
 
-// Spawn is a stub for future Codex implementation.
+// Spawn launches a codex exec subprocess with the requested spec (DELTA-39).
 func (c *CodexProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err := c.Available(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
-	return nil, fmt.Errorf("codex provider spawn not implemented")
+
+	c.mu.RLock()
+	bin := c.binary
+	c.mu.RUnlock()
+
+	args := []string{"exec"}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.Brief != "" {
+		args = append(args, spec.Brief)
+	}
+
+	cmd := exec.Command(bin, args...)
+	if spec.WorktreeDir != "" {
+		cmd.Dir = spec.WorktreeDir
+	}
+	configureSysProcAttr(cmd)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start codex process: %w", err)
+	}
+
+	return newProcessHandle("codex", cmd, start, &stdoutBuf, &stderrBuf), nil
 }

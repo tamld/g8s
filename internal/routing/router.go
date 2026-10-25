@@ -48,6 +48,8 @@ type RouteRequest struct {
 	TimeoutHint string       `json:"timeout_hint"`
 	Manifest    *config.File `json:"manifest,omitempty"` // providers.json, may be nil → catalog defaults
 	Effort      string       `json:"effort,omitempty"`
+	Role        string       `json:"role,omitempty"`
+	Permission  string       `json:"permission,omitempty"`
 }
 
 type candidateModel struct {
@@ -111,10 +113,41 @@ func extractCandidates(manifest *config.File) []candidateModel {
 	return filterQuarantinedCandidates(candidates)
 }
 
+// IsFreeTierModel reports whether modelID belongs to the zero-cost / free-tier
+// routing pool (DELTA-39: 9router reasoning-free/docs-retriever, opencode/free, commandcode/free).
+func IsFreeTierModel(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	return strings.Contains(id, "free") || id == "docs-retriever"
+}
+
+func isReadOnlyReconRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "scout", "collector", "researcher", "analyst", "sec-auditor", "summarizer":
+		return true
+	default:
+		return false
+	}
+}
+
+func selectFreeTierCandidate(candidates []candidateModel) (candidateModel, bool) {
+	var free []candidateModel
+	for _, c := range candidates {
+		if IsFreeTierModel(c.model) {
+			free = append(free, c)
+		}
+	}
+	if len(free) == 0 {
+		return candidateModel{}, false
+	}
+	return cheapestModel(free), true
+}
+
 func modelCostRank(modelID string) int {
 	id := strings.ToLower(modelID)
 	noGemini := strings.ReplaceAll(id, "gemini", "")
 	switch {
+	case IsFreeTierModel(id):
+		return 5
 	case strings.Contains(id, "flash-lite") || strings.Contains(id, "flash_lite"):
 		return 10
 	case strings.Contains(id, "haiku") || strings.Contains(noGemini, "mini") || strings.Contains(id, "nano"):
@@ -319,6 +352,27 @@ func RouteDeterministic(req RouteRequest) Decision {
 				Confidence:      0.9,
 				SuggestedLane:   "F",
 				SuggestedEffort: "high",
+			}
+		}
+	}
+
+	// Rule 4b (DELTA-39): Free-tier routing for read_only recon roles when a healthy free-tier candidate exists
+	if strings.EqualFold(req.Permission, "read_only") || isReadOnlyReconRole(req.Role) {
+		if freeCand, ok := selectFreeTierCandidate(candidates); ok {
+			role := req.Role
+			if role == "" {
+				role = "scout"
+			}
+			return Decision{
+				Provider:        freeCand.provider,
+				Model:           freeCand.model,
+				Role:            role,
+				Source:          "deterministic",
+				IsFallback:      false,
+				Reason:          "read_only reconnaissance task routed to healthy free-tier model (DELTA-39)",
+				Confidence:      0.95,
+				SuggestedLane:   "R",
+				SuggestedEffort: "medium",
 			}
 		}
 	}

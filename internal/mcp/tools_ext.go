@@ -758,6 +758,7 @@ func (s *Server) portfolioStatusTool(_ context.Context, args json.RawMessage) (a
 func (s *Server) skillsListTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
 	var a struct {
 		Role    string `json:"role"`
+		Tier    string `json:"tier"`
 		BankDir string `json:"bank_dir"`
 	}
 	if len(args) > 0 {
@@ -770,6 +771,16 @@ func (s *Server) skillsListTool(_ context.Context, args json.RawMessage) (any, *
 		dirs = []string{a.BankDir}
 	}
 	skills := brief.ListVerifiedSkills(dirs...)
+	if strings.TrimSpace(a.Tier) != "" {
+		targetTier := strings.ToUpper(strings.TrimSpace(a.Tier))
+		var tierFiltered []brief.SkillManifest
+		for _, sk := range skills {
+			if strings.EqualFold(sk.Tier, targetTier) {
+				tierFiltered = append(tierFiltered, sk)
+			}
+		}
+		skills = tierFiltered
+	}
 	if strings.TrimSpace(a.Role) != "" {
 		role, err := harness.GetRole(strings.TrimSpace(a.Role))
 		if err != nil {
@@ -821,13 +832,28 @@ func (s *Server) skillsReadTool(_ context.Context, args json.RawMessage) (any, *
 
 // contextPackTool executes pure-Go 4-tier AST elision, PageRank + BM25F, and Knapsack compression (DELTA-36).
 func (s *Server) contextPackTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
-	var a contextpack.PackRequest
+	var a struct {
+		contextpack.PackRequest
+		Root   string `json:"root"`
+		Focus  string `json:"focus"`
+		Budget int    `json:"budget"`
+	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
 			return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_context_pack params must be an object"}
 		}
 	}
-	res, err := contextpack.Pack(a)
+	req := a.PackRequest
+	if strings.TrimSpace(req.RootDir) == "" && strings.TrimSpace(a.Root) != "" {
+		req.RootDir = a.Root
+	}
+	if strings.TrimSpace(req.FocusQuery) == "" && strings.TrimSpace(a.Focus) != "" {
+		req.FocusQuery = a.Focus
+	}
+	if req.BudgetTokens <= 0 && a.Budget > 0 {
+		req.BudgetTokens = a.Budget
+	}
+	res, err := contextpack.Pack(req)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}

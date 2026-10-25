@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
@@ -308,9 +309,10 @@ func hasProtectedPath(wtPath string, protected []string) bool {
 	return false
 }
 
-// resolveReceiptPaths reads allowed paths for a receipt ID from the canonical receipt ledger (receipts.db).
-func resolveReceiptPaths(receiptID string) []string {
-	if receiptID == "" {
+// resolveReceiptPaths reads allowed paths for a receipt ID or consumer task ID
+// from the canonical receipt ledger (receipts.db), tolerating already-consumed receipts.
+func resolveReceiptPaths(receiptOrTaskID string) []string {
+	if receiptOrTaskID == "" {
 		return nil
 	}
 	dbPath := filepath.Join(pathutil.DefaultStateDir(), "receipts.db")
@@ -322,11 +324,20 @@ func resolveReceiptPaths(receiptID string) []string {
 		return nil
 	}
 	defer mgr.Close()
-	rc, err := mgr.VerifyReceipt(receiptID)
-	if err != nil {
-		return nil
+	if rc, err := mgr.VerifyReceipt(receiptOrTaskID); err == nil && rc != nil {
+		return rc.AllowedPaths
 	}
-	return rc.AllowedPaths
+	if list, err := mgr.ListReceipts(receiptOrTaskID, time.Time{}, ""); err == nil && len(list) > 0 {
+		return list[len(list)-1].AllowedPaths
+	}
+	if list, err := mgr.ListReceipts("", time.Time{}, "consumed"); err == nil {
+		for i := len(list) - 1; i >= 0; i-- {
+			if list[i].ReceiptID == receiptOrTaskID {
+				return list[i].AllowedPaths
+			}
+		}
+	}
+	return nil
 }
 
 // resolveTaskProtectedPaths returns the declared protected paths for a task,

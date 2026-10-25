@@ -44,6 +44,22 @@ func Catalog() []CatalogEntry {
 			InstallHint: "Install from https://github.com/openai/codex",
 		},
 		{
+			Name:        "opencode",
+			Class:       "platform_dispatch",
+			Description: "OpenCode CLI Agent (supports free & multi-provider models)",
+			Binary:      "opencode",
+			InstallHint: "Install from https://opencode.ai",
+			Models:      []string{"opencode/free"},
+		},
+		{
+			Name:        "commandcode",
+			Class:       "platform_dispatch",
+			Description: "CommandCode CLI Agent",
+			Binary:      "commandcode",
+			InstallHint: "Install from https://commandcode.ai",
+			Models:      []string{"commandcode/free"},
+		},
+		{
 			Name:        "ollama",
 			Class:       "platform_dispatch",
 			Description: "Local Ollama daemon (HTTP, no binary required)",

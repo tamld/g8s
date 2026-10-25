@@ -93,6 +93,8 @@ func NewRegistry(providers ...Provider) *Registry {
 			NewAgyProvider(),
 			NewCodexProvider(),
 			NewClaudeProvider(),
+			NewOpenCodeProvider(),
+			NewCommandCodeProvider(),
 			NewOllamaProvider(),
 		}
 	}

@@ -540,3 +540,42 @@ func TestPoolReleaseFallbackRemovesWorktreeAndDeletesBranch(t *testing.T) {
 		t.Fatalf("expected branch %s to be deleted, but still exists", wt.Branch)
 	}
 }
+
+func TestPoolReleasePreservesWorktreeForConsumedReceipt(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("G8S_STATE_DIR", stateDir)
+
+	mgr, err := receipt.NewReceiptManager(filepath.Join(stateDir, "receipts.db"), nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc, err := mgr.IssueReceipt("f0-test", []string{"README.md"}, 600*time.Second,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+			SchemaURI:      "g8s://envelope/write-receipt/v1",
+			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+		}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+			RulesetVersion: "v1",
+			PipelineDigest: "test-digest",
+		}),
+	)
+	if err != nil {
+		mgr.Close()
+		t.Fatalf("IssueReceipt: %v", err)
+	}
+	if _, err := mgr.ValidateAndConsume(rc.ReceiptID, "task-consumed-1"); err != nil {
+		mgr.Close()
+		t.Fatalf("ValidateAndConsume: %v", err)
+	}
+	mgr.Close()
+
+	paths := resolveReceiptPaths("task-consumed-1")
+	if len(paths) != 1 || paths[0] != "README.md" {
+		t.Fatalf("expected resolveReceiptPaths by consumer task ID to return [README.md], got %v", paths)
+	}
+	pathsByID := resolveReceiptPaths(rc.ReceiptID)
+	if len(pathsByID) != 1 || pathsByID[0] != "README.md" {
+		t.Fatalf("expected resolveReceiptPaths by consumed receipt ID to return [README.md], got %v", pathsByID)
+	}
+}

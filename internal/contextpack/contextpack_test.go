@@ -222,3 +222,36 @@ type UserRecord struct {
 		t.Fatalf("expected FULL tier under generous budget, got %s", res.Files[0].SelectedTier)
 	}
 }
+
+func TestPackSkipsBuildArtifactsAndCacheDirTag(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "target", "debug"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "custom_cache"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "src", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "target", "debug", "generated.go"), []byte("package debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "custom_cache", "CACHEDIR.TAG"), []byte("Signature: 8a477f597d28d172789f06886806bc55\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "custom_cache", "cached.go"), []byte("package cache\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Pack(PackRequest{RootDir: tmp, BudgetTokens: 4000})
+	if err != nil {
+		t.Fatalf("Pack failed: %v", err)
+	}
+	if len(res.Files) != 1 || res.Files[0].Path != "src/main.go" {
+		t.Fatalf("expected only src/main.go, got %+v", res.Files)
+	}
+}

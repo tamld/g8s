@@ -317,10 +317,13 @@ func runEdit(args []string) {
 func runSelect(args []string) {
 	fs := flag.NewFlagSet("select", flag.ExitOnError)
 	fileFlag := fs.String("file", "", "path to raw JSON file (defaults to reading stdin)")
+	selectorFlag := fs.String("selector", "", "dot-path selector expression (alias for positional <expr>)")
 
 	valueFlags := map[string]bool{
-		"-file":  true,
-		"--file": true,
+		"-file":      true,
+		"--file":     true,
+		"-selector":  true,
+		"--selector": true,
 	}
 
 	var flagArgs []string
@@ -354,10 +357,13 @@ func runSelect(args []string) {
 		exitUsage("select", "", "", err.Error(), "Check g8s select flags", false)
 	}
 
-	if fs.NArg() == 0 {
-		exitUsage("select", "", "", "usage: g8s select [--file <path>] <expr>", "Provide a selector path expression", false)
+	expr := strings.TrimSpace(*selectorFlag)
+	if expr == "" && fs.NArg() > 0 {
+		expr = fs.Arg(0)
 	}
-	expr := fs.Arg(0)
+	if expr == "" {
+		exitUsage("select", "", "", "usage: g8s select [--file <path>] [--selector <expr>] <expr>", "Provide a selector path expression", false)
+	}
 
 	var raw []byte
 	if *fileFlag != "" {

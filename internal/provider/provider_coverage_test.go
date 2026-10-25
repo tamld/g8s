@@ -183,9 +183,20 @@ func TestCodexProvider_Extended(t *testing.T) {
 		t.Errorf("Version unexpected: %s, %v", ver, err)
 	}
 
-	_, err = p.Spawn(context.Background(), Spec{Brief: "test"})
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("expected not implemented error from codex spawn, got %v", err)
+	handle, err := p.Spawn(context.Background(), Spec{
+		Model:       "gpt-5-codex",
+		Brief:       "test",
+		WorktreeDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("expected Codex Spawn to succeed, got %v", err)
+	}
+	receipt, err := handle.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+	if receipt.Status != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %s", receipt.Status)
 	}
 }
 

@@ -834,7 +834,10 @@ func collectCandidateFiles(absRoot string, explicitPaths []string, maxFiles int)
 			}
 			if d.IsDir() {
 				name := d.Name()
-				if name == ".git" || name == "node_modules" || name == "vendor" || name == "dist" || name == "bin" || name == ".g8s" {
+				if name == ".git" || name == "node_modules" || name == "vendor" || name == "dist" || name == "bin" || name == ".g8s" || name == "target" || name == "build" || name == "__pycache__" || name == ".venv" || name == ".next" || name == ".cache" {
+					return filepath.SkipDir
+				}
+				if _, tagErr := os.Stat(filepath.Join(p, "CACHEDIR.TAG")); tagErr == nil {
 					return filepath.SkipDir
 				}
 				return nil

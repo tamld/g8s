@@ -119,6 +119,7 @@ Safely explore a codebase without granting write permissions:
 ```bash
 # Submit a read-only reconnaissance task
 g8s submit \
+  --idempotency-key "scout-providers-01" \
   --role scout \
   --permission read_only \
   --prompt "Scan internal/provider and map all exported interfaces"
@@ -134,7 +135,9 @@ Issue a single-use, path-scoped receipt before mutating files:
 RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select --selector .data.receipt_id)
 
 # 2. Dispatch worker bounded by the receipt
+export AGY_MCP_ALLOW_WORKSPACE_WRITE=1
 g8s submit \
+  --idempotency-key "test-config-01" \
   --role test-runner \
   --permission workspace_write \
   --receipt-id "$RECEIPT_ID" \

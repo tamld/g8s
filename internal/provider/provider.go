@@ -341,10 +341,14 @@ func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 				ContextWindow: m.ContextWindow,
 			})
 		}
+		slots := entry.Slots
+		if slots <= 0 {
+			slots = 1
+		}
 		cfg := Config{
 			Name:           entry.Name,
 			Class:          entry.Class,
-			MaxConcurrency: entry.Slots,
+			MaxConcurrency: slots,
 			Models:         models,
 		}
 		switch entry.Class {

@@ -549,3 +549,64 @@ func TestRouteDeterministic_DirectRules(t *testing.T) {
 		}
 	})
 }
+
+func TestFreeTierReconRouting(t *testing.T) {
+	manifest := &config.File{
+		Providers: []config.ProviderEntry{
+			{
+				Name:  "agy",
+				Class: "platform_dispatch",
+				Models: []config.ModelEntry{
+					{ID: "gemini-3.8-flash-high", ContextWindow: 1000000},
+				},
+			},
+			{
+				Name:  "9router",
+				Class: "api_call",
+				Models: []config.ModelEntry{
+					{ID: "reasoning-free", ContextWindow: 128000},
+					{ID: "deep-coding", ContextWindow: 200000},
+				},
+			},
+			{
+				Name:  "opencode",
+				Class: "platform_dispatch",
+				Models: []config.ModelEntry{
+					{ID: "opencode/free", ContextWindow: 64000},
+				},
+			},
+		},
+	}
+
+	if !routing.IsFreeTierModel("reasoning-free") || !routing.IsFreeTierModel("docs-retriever") || !routing.IsFreeTierModel("opencode/free") {
+		t.Fatal("expected IsFreeTierModel to return true for free-tier models")
+	}
+	if routing.IsFreeTierModel("deep-coding") {
+		t.Fatal("expected IsFreeTierModel to return false for deep-coding")
+	}
+
+	dec := routing.RouteDeterministic(routing.RouteRequest{
+		Prompt:     "Scan repository for unused exports",
+		Permission: "read_only",
+		Role:       "scout",
+		Manifest:   manifest,
+	})
+	if !routing.IsFreeTierModel(dec.Model) {
+		t.Fatalf("expected free-tier model for read_only scout, got provider=%s model=%s", dec.Provider, dec.Model)
+	}
+	if dec.Role != "scout" {
+		t.Fatalf("Role = %q, want scout", dec.Role)
+	}
+
+	// Trust-boundary paths still escalate to largest-context model even when Permission=read_only
+	trustDec := routing.RouteDeterministic(routing.RouteRequest{
+		Prompt:     "Audit receipt verification",
+		Paths:      []string{"internal/receipt/verifier.go"},
+		Permission: "read_only",
+		Role:       "scout",
+		Manifest:   manifest,
+	})
+	if trustDec.Model != "gemini-3.8-flash-high" || trustDec.Role != "test-runner" {
+		t.Fatalf("expected trust-boundary override, got provider=%s model=%s role=%s", trustDec.Provider, trustDec.Model, trustDec.Role)
+	}
+}

@@ -372,7 +372,6 @@ func runProviders(args []string) {
 			}
 		}
 	}
-
 	statuses := reg.List(context.Background())
 
 	if *jsonMode || *jsonl {
@@ -557,6 +556,17 @@ func runMCPServer(args []string) {
 	defer receipts.Close()
 
 	registry := provider.NewPoolRegistry(provider.DefaultConfigs(), nil, nil)
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			_ = registry.LoadProvidersJSON(providersPath)
+		}
+	}
 	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry)
 	if err := server.ServeStdio(context.Background()); err != nil {
 		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
@@ -1802,6 +1812,18 @@ func runWorker(args []string) {
 					}
 				}
 			}
+		}
+	}
+	for _, builtinName := range []string{"agy", "claude", "codex", "opencode", "commandcode"} {
+		found := false
+		for _, existing := range platformDispatchNames {
+			if existing == builtinName {
+				found = true
+				break
+			}
+		}
+		if !found && !apiCallNames[builtinName] {
+			platformDispatchNames = append(platformDispatchNames, builtinName)
 		}
 	}
 

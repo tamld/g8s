@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,6 +46,9 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	canaryMutantFlag := fs.Bool("canary-mutant", false, "run Seeded Mutant Canary sensitivity check")
 
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		exitUsageWithWriter(stderr, "verify", "", *traceID, err.Error(), "", *jsonl)
 		return 2
 	}

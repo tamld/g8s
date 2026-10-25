@@ -192,9 +192,9 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_charter_issue", Description: "Issue an epoch-fenced Stratum Charter (S0/S1 -> S2) with canonical SHA-256 digest and fence token (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"issuer_stratum":{"type":"string"},"holder_stratum":{"type":"string"},"holder_ring":{"type":"string"},"scope_repo":{"type":"string"},"objective":{"type":"string"},"allowed_paths":{"type":"array","items":{"type":"string"}},"forbidden_paths":{"type":"array","items":{"type":"string"}},"required_gate_lane":{"type":"string"},"budget_calls":{"type":"integer"},"duration_sec":{"type":"integer"}},"required":["scope_repo","objective","allowed_paths"]}`)},
 		{Name: "g8s_charter_verify", Description: "Verify a Stratum Charter epoch and fence token against the SQLite WAL charter ledger (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"charter_id":{"type":"string"},"epoch":{"type":"integer"},"fence_token":{"type":"string"}},"required":["charter_id","epoch","fence_token"]}`)},
 		{Name: "g8s_portfolio_status", Description: "O-Plane read-only projection of active/revoked/completed Stratum Charters and domain scope allocations (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
+		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"tier":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
 		{Name: "g8s_skills_read", Description: "Read a verified skill (SKILL.md) by name or skill://g8s/ URI with optional expected_digest TOCTOU check (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"expected_digest":{"type":"string"},"bank_dir":{"type":"string"}},"required":["name"]}`)},
-		{Name: "g8s_context_pack", Description: "Pure-Go 4-tier AST elision (FULL/SKEL/SIGS/TREE), Personalized PageRank + BM25F, and Multiple-Choice Knapsack context compressor (DELTA-36).", InputSchema: json.RawMessage(`{"type":"object","properties":{"root_dir":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"allowed_paths":{"type":"array","items":{"type":"string"}},"focus_query":{"type":"string"},"budget_tokens":{"type":"integer"}}}`)},
+		{Name: "g8s_context_pack", Description: "Pure-Go 4-tier AST elision (FULL/SKEL/SIGS/TREE), Personalized PageRank + BM25F, and Multiple-Choice Knapsack context compressor (DELTA-36).", InputSchema: json.RawMessage(`{"type":"object","properties":{"root_dir":{"type":"string"},"root":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"allowed_paths":{"type":"array","items":{"type":"string"}},"focus_query":{"type":"string"},"focus":{"type":"string"},"budget_tokens":{"type":"integer"},"budget":{"type":"integer"}}}`)},
 	}
 	return nil
 }
@@ -410,7 +410,7 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 			RulesetVersion: "v1",
 			PipelineDigest: "mcp-server-default",
 		}),
-		receipt.WithProvenanceContext("g8s/v0.9.0", "", ""),
+		receipt.WithProvenanceContext("g8s/0.20.0", "", ""),
 	)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
