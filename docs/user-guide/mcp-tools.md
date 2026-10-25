@@ -1,6 +1,6 @@
 # MCP Tools
 
-`g8s mcp` serves a nineteen-tool stdio JSON-RPC server (protocol version
+`g8s mcp` serves a twenty-one-tool stdio JSON-RPC server (protocol version
 negotiated per client, default `2025-06-18`).
 
 ## Tool surface
@@ -16,7 +16,7 @@ negotiated per client, default `2025-06-18`).
 | `g8s_dispatch` | Synchronous guarded dispatch | guard chain: policy → harness → sandbox → add_dirs → binary probe → contract violation |
 | `g8s_list_tasks` | Filtered task listing | sanitized views |
 | `g8s_cancel_task` | Request cancellation | requires task id + reason |
-| `g8s_list_roles` | Role profiles | read-only |
+| `g8s_list_roles` | Role profiles | read-only (10 canonical roles) |
 | `g8s_list_permissions` | Permission profiles incl MCP availability | `workspace_write` reported disabled |
 | `g8s_search` | Native repository search | pure-Go regex/literal/files-only search respecting gitignore and receipt boundaries (DELTA-22/23) |
 | `g8s_read` | Bounded file reading | line-range slicing, SHA-256 fingerprint, binary guard, and receipt-scope validation (DELTA-23) |
@@ -26,6 +26,8 @@ negotiated per client, default `2025-06-18`).
 | `g8s_charter_issue` | Issue epoch-fenced Stratum Charter | mints an `S0/S1 -> S2` domain charter with canonical SHA-256 digest and fencing token (DELTA-33) |
 | `g8s_charter_verify` | Verify Stratum Charter | validates active charter state, epoch, and fencing token (DELTA-33) |
 | `g8s_portfolio_status` | O-Plane portfolio projection | read-only projection of active, completed, and revoked charters across repositories (DELTA-33) |
+| `g8s_skills_list` | Digest-pinned skill listing | lists `skill://g8s/<tier>/<name>` manifests filtered by F0/F1/F2 containment tier and optional role (DELTA-34) |
+| `g8s_skills_read` | Digest-verified skill hydration | reads `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check and F0/F1/F2 tier guard (DELTA-34) |
 
 ## Tool details & extensions
 

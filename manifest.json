@@ -93,6 +93,26 @@
       "name": "test-runner",
       "default_permission": "workspace_write",
       "sow": "Unit test synthesis and targeted test suite execution"
+    },
+    {
+      "name": "researcher",
+      "default_permission": "read_only",
+      "sow": "Deep world-state, CVE/NVD, upstream documentation, and architectural evidence synthesis"
+    },
+    {
+      "name": "implementer",
+      "default_permission": "workspace_write",
+      "sow": "Bounded code mutations, feature implementations, and bugfixes within WriteReceipt allowed_paths"
+    },
+    {
+      "name": "sec-auditor",
+      "default_permission": "read_only",
+      "sow": "STRIDE/OWASP/CWE security audits, SSRF/path-traversal/symlink scans, and supply-chain verification"
+    },
+    {
+      "name": "analyst",
+      "default_permission": "read_only",
+      "sow": "Stakeholder intent decomposition into formal PRD/SRS/AC/FSM contracts and 12D scenario matrices"
     }
   ],
   "permissions": [
@@ -413,6 +433,18 @@
       "id": "DELTA-33",
       "title": "Orthogonal Stratum Federation (S0..S3 + O-Plane) and Epoch-Fenced Charter Engine",
       "path": "spec/openspec/33-stratum-federation-and-charter-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-34",
+      "title": "F0/F1/F2 Digest-Pinned Skill Hydration, Typed FailureDiagnosis & CAS Head Delivery",
+      "path": "spec/openspec/34-mcp-skill-hydration-and-diagnosis-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-35",
+      "title": "Mandatory Pre-Execution Research, CVE & Socratic Debate Gate and 10-Role Taxonomy",
+      "path": "spec/openspec/35-pre-execution-research-debate-gate-spec.md",
       "status": "APPLIED"
     }
   ],

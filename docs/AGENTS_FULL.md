@@ -125,6 +125,8 @@ Incoming Task:
 | **DELTA-31** | [`31-receipt-export-status-spec.md`](../spec/openspec/31-receipt-export-status-spec.md) | `internal/controlplane`, `internal/worker`, `cmd/g8s` | APPLIED |
 | **DELTA-32** | [`32-bounded-agentic-loop-f1f2-fleet-jev-spec.md`](../spec/openspec/32-bounded-agentic-loop-f1f2-fleet-jev-spec.md) | `cmd/g8s`, `internal/routing` | APPLIED |
 | **DELTA-33** | [`33-stratum-federation-and-charter-spec.md`](../spec/openspec/33-stratum-federation-and-charter-spec.md) | `internal/charter`, `internal/fsops`, `internal/mcp`, `cmd/g8s` | APPLIED |
+| **DELTA-34** | [`34-mcp-skill-hydration-and-diagnosis-spec.md`](../spec/openspec/34-mcp-skill-hydration-and-diagnosis-spec.md) | `internal/brief`, `internal/mcp`, `internal/routing`, `cmd/g8s` | APPLIED |
+| **DELTA-35** | [`35-pre-execution-research-debate-gate-spec.md`](../spec/openspec/35-pre-execution-research-debate-gate-spec.md) | `internal/brief`, `internal/harness`, `cmd/g8s` | APPLIED |
 
 ---
 

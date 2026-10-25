@@ -16,7 +16,7 @@ $$\mathbf{v\text{MAJOR}.\text{MINOR}.\text{PATCH}[-\text{PRERELEASE}]}$$
 ## 2. Release Cadence & Phases
 
 ```
-v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-07) ──► v0.17.0 (2026-10-16) ──► v0.18.0 (2026-10-21) ──► v0.19.0 (2026-10-21, Current) ──► v0.20.0 (Planned) ──► v0.21.0+ (Pre-1.0 Burn-In)
+v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-07) ──► v0.17.0 (2026-10-16) ──► v0.18.0 (2026-10-21) ──► v0.19.0 (2026-10-21) ──► v0.20.0 (2026-10-25, Current) ──► v0.30.0 ──► v0.40.0 ──► v1.0.0 (Receipt-Gated GA)
 ```
 
 | Version Milestone | Target Scope | Stability Level |
@@ -29,9 +29,12 @@ v0.14.0 (2026-10-03) ──► v0.15.0 (2026-10-05) ──► v0.16.0 (2026-10-0
 | **`v0.16.0`** | Self-measuring effort telemetry release (2026-10-07): effort manifest + adapter + `submit --effort`, class registry + signal demotion, token telemetry, quality ladder + gauges, baked-name realignment (#568), ladder hardening (#570). | Delivered |
 | **`v0.17.0`** | Native Cross-Platform Agent I/O & Cross-Repo Offer Rollout release (2026-10-16): `DELTA-23` pure-Go `search`/`read`/`edit`/`--select` (#591, #593), F0/F1/F2 recursive containment (#587), Offer Bundle Wave 1–4 rollout & cross-repo delivery (#442, #569), DLP & SQLite DSN hardening (#574, #586, #590), OpenSpec `DELTA-01..23` & 50/50 bound claims. | Delivered |
 | **`v0.18.0`** | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630, 2026-10-21): append-only hash-chained evidence ledger (`f0 run`, `f0 status`), signed operator mandates (`T0`–`T4`), merge/commit gates `G0`–`G7` (`f0 gate check`), agent hooks (`f0 hook pre-tool|stop`), portable ground-truth bundles, gate-appeasement detection (G4), issue-closure gate (G7), error-budget circuit breaker, and lossless verify firewall. | Delivered |
-| **`v0.19.0`** | Universal Config-Driven LLM Call Consumer & Multi-Model Gateway ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`, 2026-10-21): direct synchronous `g8s llm-call`, queue bridge via `g8s llm-call --worker-envelope`, live model discovery `g8s providers discover`, standardized SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`), prefix wildcard matching (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`), and F0 Cognitive Purity. | Delivered (Current) |
-| **`v0.20.0`** | Test Suite Execution Optimization & Empirical PRI Lane Routing (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation (Issue #639). | Planned |
-| **`v0.21.0+`** | 90-day Multi-Repo Offer Retention (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | Planned (Pre-1.0 Burn-In) |
+| **`v0.19.0`** | Universal Config-Driven LLM Call Consumer & Multi-Model Gateway ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`, 2026-10-21): direct synchronous `g8s llm-call`, queue bridge via `g8s llm-call --worker-envelope`, live model discovery `g8s providers discover`, standardized SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`), prefix wildcard matching (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`), and F0 Cognitive Purity. | Delivered |
+| **`v0.20.0`** | Orthogonal Stratum Federation (`S0..S3` + `O-Plane`), Continuous Model Scorecard & Quarantine, Digest-Pinned Skill Hydration (`skill://g8s/`), 10-Role Harness Taxonomy, CAS `deliver --expected-head-oid`, and Risk-Tiered Pre-Execution Research/CVE/Debate Gate ([ADR-0035](decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..35`, 2026-10-25). | Delivered (Current) |
+| **`v0.20.x`** | Patch releases (`0.20.1`, `0.20.2`, ...) for bug fixes, model scorecard tuning, and documentation/CI synchronization with zero schema or CLI breaking changes. | Active Maintenance |
+| **`v0.30.0`** | Full F0/F1/F2 MCP Proxy & Autonomous Skill Federation: in-worktree F1/F2 MCP capability scoping, automated multi-repo charter orchestration, and cross-provider skill telemetry. | Planned |
+| **`v0.40.0`** | Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | Planned |
+| **`v1.0.0`** | Production GA Lock: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across the 3 core repositories (`g8s`, `TuneFlow`, `tamld-llm-wiki`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | Planned (Receipt-Gated GA) |
 
 ---
 

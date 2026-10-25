@@ -9,8 +9,17 @@ import (
 
 func TestRolesAndPermissions(t *testing.T) {
 	roles := RoleNames()
-	if len(roles) != 6 {
-		t.Fatalf("expected 6 roles, got %d", len(roles))
+	if len(roles) != 10 {
+		t.Fatalf("expected 10 roles, got %d", len(roles))
+	}
+	for _, want := range []string{"collector", "scout", "mcp-mapper", "summarizer", "verifier", "test-runner", "researcher", "implementer", "sec-auditor", "analyst"} {
+		r, err := GetRole(want)
+		if err != nil {
+			t.Fatalf("expected role %q to be registered: %v", want, err)
+		}
+		if r.DefaultPermission == "" || r.Stratum == "" || len(r.RecommendedSkills) == 0 {
+			t.Fatalf("role %q missing metadata fields: %+v", want, r)
+		}
 	}
 
 	perms := PermissionNames()

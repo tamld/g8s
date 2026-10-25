@@ -34,6 +34,7 @@ type deliverData struct {
 	Deleted        []string `json:"deleted,omitempty"`
 	Skipped        []string `json:"skipped"`
 	ReceiptID      string   `json:"receipt_id"`
+	HeadOID        string   `json:"head_oid,omitempty"`
 	PrunedWorktree bool     `json:"pruned_worktree,omitempty"`
 }
 
@@ -46,6 +47,7 @@ func runDeliver(args []string) {
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
 	worktreeFlag := fs.String("worktree", "", "explicit preserved worktree directory (#427 deliverable survival)")
 	receiptIDFlag := fs.String("receipt-id", "", "explicit receipt ID override for delivering preserved worktrees")
+	expectedHeadOID := fs.String("expected-head-oid", "", "optional expected git HEAD SHA in target workspace (CAS STALE_HEAD guard; DELTA-34)")
 
 	// Allow flags to appear before or after positional task-id
 	var positional []string
@@ -54,7 +56,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -349,6 +351,30 @@ func runDeliver(args []string) {
 		}
 	}
 
+	// DELTA-34: CAS Head Check (--expected-head-oid / STALE_HEAD protection)
+	var currentHeadOID string
+	headCmd := exec.Command("git", "rev-parse", "HEAD")
+	headCmd.Dir = cwd
+	if headOut, headErr := headCmd.Output(); headErr == nil {
+		currentHeadOID = strings.TrimSpace(string(headOut))
+	}
+	wantHeadOID := strings.TrimSpace(*expectedHeadOID)
+	if wantHeadOID == "" {
+		wantHeadOID = strings.TrimSpace(os.Getenv("G8S_EXPECTED_HEAD_OID"))
+	}
+	if wantHeadOID != "" {
+		if currentHeadOID == "" {
+			exitRuntime("deliver", "stale-head", *traceID, cli.CodeConflict,
+				fmt.Errorf("STALE_HEAD: unable to resolve git HEAD in %s while verifying --expected-head-oid %s", cwd, wantHeadOID),
+				"Ensure the target workspace is a valid git repository with at least one commit", *jsonl)
+		}
+		if !strings.EqualFold(currentHeadOID, wantHeadOID) && !strings.HasPrefix(strings.ToLower(currentHeadOID), strings.ToLower(wantHeadOID)) {
+			exitRuntime("deliver", "stale-head", *traceID, cli.CodeConflict,
+				fmt.Errorf("STALE_HEAD: expected target HEAD %s, got %s", wantHeadOID, currentHeadOID),
+				"Re-verify or rebase against the current target HEAD before delivering", *jsonl)
+		}
+	}
+
 	var toApply []string
 	for _, rel := range candidates {
 		destPath := filepath.Join(cwd, filepath.FromSlash(rel))
@@ -522,6 +548,7 @@ func runDeliver(args []string) {
 		Deleted:        deleted,
 		Skipped:        skipped,
 		ReceiptID:      receiptID,
+		HeadOID:        currentHeadOID,
 		PrunedWorktree: pruned,
 	}
 

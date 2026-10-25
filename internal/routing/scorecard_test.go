@@ -133,3 +133,58 @@ func TestComputeScorecardAndDynamicQuarantine(t *testing.T) {
 		t.Errorf("ledger perm = %o, want 0600", info.Mode().Perm())
 	}
 }
+
+func TestClassifyFailureDiagnosisAndRateLimitBackoff(t *testing.T) {
+	cases := []struct {
+		reason   string
+		stagnate bool
+		vFailed  bool
+		want     FailureType
+	}{
+		{"HTTP 429 Too Many Requests", false, false, FailureRateLimit},
+		{"HTTP 401 Unauthorized: invalid api key", false, false, FailureAuth},
+		{"blocked_by_policy: out of scope", false, false, FailurePermission},
+		{"context deadline exceeded", false, false, FailureTimeout},
+		{"upstream 502 bad gateway", false, false, FailureTransientNetwork},
+		{"syntax error: unexpected newline", false, true, FailureCodeError},
+		{"--- FAIL: TestFoo", false, true, FailureTestFailure},
+		{"oscillating file state", true, true, FailureStagnation},
+	}
+	for _, tc := range cases {
+		if got := ClassifyFailureDiagnosis(tc.reason, tc.stagnate, tc.vFailed); got != tc.want {
+			t.Errorf("ClassifyFailureDiagnosis(%q, %v, %v) = %q, want %q", tc.reason, tc.stagnate, tc.vFailed, got, tc.want)
+		}
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("G8S_MODEL_SCORECARD_PATH", filepath.Join(tmpDir, "rate_limit_events.jsonl"))
+	for i := 0; i < 4; i++ {
+		_ = RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+			Provider:       "9router",
+			ModelRequested: "deep-coding",
+			Success:        true,
+			VerifyChecked:  true,
+			VerifyPassed:   true,
+			DurationMs:     1500,
+		})
+	}
+	for i := 0; i < 3; i++ {
+		_ = RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+			Provider:       "9router",
+			ModelRequested: "deep-coding",
+			Success:        false,
+			DurationMs:     200,
+			ErrorReason:    "HTTP 429 rate limit exceeded",
+		})
+	}
+	scores, err := ComputeScorecard(tmpDir, "9router", 20)
+	if err != nil || len(scores) != 1 {
+		t.Fatalf("ComputeScorecard: %v %+v", err, scores)
+	}
+	if scores[0].HealthStatus != ModelHealthDegraded || scores[0].Recommendation != "BACKOFF_RATE_LIMIT" {
+		t.Fatalf("expected DEGRADED + BACKOFF_RATE_LIMIT on pure 429 burst after successes, got %+v", scores[0])
+	}
+	if scores[0].LastFailureDiagnosis != FailureRateLimit || scores[0].FailureBreakdown[FailureRateLimit] != 3 {
+		t.Fatalf("expected FailureRateLimit breakdown=3, got %+v", scores[0])
+	}
+}

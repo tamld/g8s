@@ -27,40 +27,88 @@ const (
 // DefaultScorecardWindow is the default rolling sample window per (provider, model).
 const DefaultScorecardWindow = 20
 
+// FailureType classifies the root cause of a model execution or verification failure (DELTA-34).
+type FailureType string
+
+const (
+	FailureNone             FailureType = ""
+	FailureRateLimit        FailureType = "rate_limit"
+	FailureTransientNetwork FailureType = "transient_network"
+	FailureTimeout          FailureType = "timeout"
+	FailureAuth             FailureType = "auth"
+	FailurePermission       FailureType = "permission"
+	FailureStagnation       FailureType = "stagnation"
+	FailureTestFailure      FailureType = "test_failure"
+	FailureCodeError        FailureType = "code_error"
+	FailureUnknown          FailureType = "unknown"
+)
+
+// ClassifyFailureDiagnosis deterministically maps an error reason, stagnation flag,
+// and verification outcome to a typed FailureType (DELTA-34).
+func ClassifyFailureDiagnosis(errReason string, stagnated bool, verifyFailed bool) FailureType {
+	if stagnated {
+		return FailureStagnation
+	}
+	lower := strings.ToLower(strings.TrimSpace(errReason))
+	switch {
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "too many requests") || strings.Contains(lower, "quota exceeded"):
+		return FailureRateLimit
+	case strings.Contains(lower, "401") || strings.Contains(lower, "403") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "invalid api key") || strings.Contains(lower, "authentication"):
+		return FailureAuth
+	case strings.Contains(lower, "permission") || strings.Contains(lower, "denied") || strings.Contains(lower, "out of scope") || strings.Contains(lower, "blocked_by_"):
+		return FailurePermission
+	case strings.Contains(lower, "deadline exceeded") || strings.Contains(lower, "timed out") || strings.Contains(lower, "timeout"):
+		return FailureTimeout
+	case strings.Contains(lower, "502") || strings.Contains(lower, "503") || strings.Contains(lower, "504") || strings.Contains(lower, "bad gateway") || strings.Contains(lower, "connection reset") || strings.Contains(lower, "connection refused") || strings.Contains(lower, "dial tcp") || strings.Contains(lower, "eof"):
+		return FailureTransientNetwork
+	case strings.Contains(lower, "compile") || strings.Contains(lower, "syntax error") || strings.Contains(lower, "undefined:") || strings.Contains(lower, "build failed"):
+		return FailureCodeError
+	case verifyFailed || strings.Contains(lower, "verify") || strings.Contains(lower, "test failed") || strings.Contains(lower, "--- fail:"):
+		return FailureTestFailure
+	case lower != "":
+		return FailureUnknown
+	default:
+		return FailureNone
+	}
+}
+
 // ModelOutcomeRecord represents one observed execution outcome for a (provider, model) pair.
 type ModelOutcomeRecord struct {
-	Provider       string `json:"provider"`
-	ModelRequested string `json:"model_requested"`
-	ModelResolved  string `json:"model_resolved,omitempty"`
-	Success        bool   `json:"success"`
-	VerifyChecked  bool   `json:"verify_checked,omitempty"`
-	VerifyPassed   bool   `json:"verify_passed,omitempty"`
-	Stagnated      bool   `json:"stagnated,omitempty"`
-	DurationMs     int64  `json:"duration_ms"`
-	TotalTokens    int    `json:"total_tokens,omitempty"`
-	ErrorReason    string `json:"error_reason,omitempty"`
-	RecordedAt     string `json:"recorded_at"`
+	Provider         string      `json:"provider"`
+	ModelRequested   string      `json:"model_requested"`
+	ModelResolved    string      `json:"model_resolved,omitempty"`
+	Success          bool        `json:"success"`
+	VerifyChecked    bool        `json:"verify_checked,omitempty"`
+	VerifyPassed     bool        `json:"verify_passed,omitempty"`
+	Stagnated        bool        `json:"stagnated,omitempty"`
+	DurationMs       int64       `json:"duration_ms"`
+	TotalTokens      int         `json:"total_tokens,omitempty"`
+	ErrorReason      string      `json:"error_reason,omitempty"`
+	FailureDiagnosis FailureType `json:"failure_diagnosis,omitempty"`
+	RecordedAt       string      `json:"recorded_at"`
 }
 
 // ModelQualityScore summarizes the rolling quality metrics and routing recommendation for a model.
 type ModelQualityScore struct {
-	Provider            string            `json:"provider"`
-	Model               string            `json:"model"`
-	LastResolvedModel   string            `json:"last_resolved_model,omitempty"`
-	WindowSamples       int               `json:"window_samples"`
-	SuccessCount        int               `json:"success_count"`
-	SuccessRate         float64           `json:"success_rate"`
-	VerifyCheckedCount  int               `json:"verify_checked_count"`
-	VerifyPassRate      float64           `json:"verify_pass_rate"`
-	StagnationRate      float64           `json:"stagnation_rate"`
-	ConsecutiveFailures int               `json:"consecutive_failures"`
-	P50LatencyMs        int64             `json:"p50_latency_ms"`
-	P95LatencyMs        int64             `json:"p95_latency_ms"`
-	CompositeScore      float64           `json:"composite_score"`
-	HealthStatus        ModelHealthStatus `json:"health_status"`
-	Recommendation      string            `json:"recommendation"`
-	LastError           string            `json:"last_error,omitempty"`
-	LastUpdatedAt       string            `json:"last_updated_at"`
+	Provider             string              `json:"provider"`
+	Model                string              `json:"model"`
+	LastResolvedModel    string              `json:"last_resolved_model,omitempty"`
+	WindowSamples        int                 `json:"window_samples"`
+	SuccessCount         int                 `json:"success_count"`
+	SuccessRate          float64             `json:"success_rate"`
+	VerifyCheckedCount   int                 `json:"verify_checked_count"`
+	VerifyPassRate       float64             `json:"verify_pass_rate"`
+	StagnationRate       float64             `json:"stagnation_rate"`
+	ConsecutiveFailures  int                 `json:"consecutive_failures"`
+	P50LatencyMs         int64               `json:"p50_latency_ms"`
+	P95LatencyMs         int64               `json:"p95_latency_ms"`
+	CompositeScore       float64             `json:"composite_score"`
+	HealthStatus         ModelHealthStatus   `json:"health_status"`
+	Recommendation       string              `json:"recommendation"`
+	LastError            string              `json:"last_error,omitempty"`
+	LastFailureDiagnosis FailureType         `json:"last_failure_diagnosis,omitempty"`
+	FailureBreakdown     map[FailureType]int `json:"failure_breakdown,omitempty"`
+	LastUpdatedAt        string              `json:"last_updated_at"`
 }
 
 // ScorecardPath resolves the JSONL ledger path for model quality observations.
@@ -86,6 +134,9 @@ func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	}
 	if len(rec.ErrorReason) > 240 {
 		rec.ErrorReason = rec.ErrorReason[:240]
+	}
+	if rec.FailureDiagnosis == "" && (!rec.Success || (rec.VerifyChecked && !rec.VerifyPassed) || rec.Stagnated) {
+		rec.FailureDiagnosis = ClassifyFailureDiagnosis(rec.ErrorReason, rec.Stagnated, rec.VerifyChecked && !rec.VerifyPassed)
 	}
 
 	p := ScorecardPath(stateDir)
@@ -187,13 +238,26 @@ func evaluateModelWindow(providerName, modelName string, records []ModelOutcomeR
 	var latencies []int64
 	lastResolved := ""
 	lastErr := ""
+	var lastDiagnosis FailureType
+	breakdown := make(map[FailureType]int)
 	lastUpdated := ""
 
 	for _, r := range records {
+		failed := !r.Success || (r.VerifyChecked && !r.VerifyPassed) || r.Stagnated
 		if r.Success {
 			successCount++
 		} else if r.ErrorReason != "" {
 			lastErr = r.ErrorReason
+		}
+		if failed {
+			diag := r.FailureDiagnosis
+			if diag == "" {
+				diag = ClassifyFailureDiagnosis(r.ErrorReason, r.Stagnated, r.VerifyChecked && !r.VerifyPassed)
+			}
+			if diag != "" {
+				breakdown[diag]++
+				lastDiagnosis = diag
+			}
 		}
 		if r.VerifyChecked {
 			verifyCheckedCount++
@@ -216,11 +280,19 @@ func evaluateModelWindow(providerName, modelName string, records []ModelOutcomeR
 	}
 
 	consecutiveFailures := 0
+	allConsecutiveRateLimited := true
 	for i := len(records) - 1; i >= 0; i-- {
 		r := records[i]
 		failed := !r.Success || (r.VerifyChecked && !r.VerifyPassed)
 		if failed {
 			consecutiveFailures++
+			diag := r.FailureDiagnosis
+			if diag == "" {
+				diag = ClassifyFailureDiagnosis(r.ErrorReason, r.Stagnated, r.VerifyChecked && !r.VerifyPassed)
+			}
+			if diag != FailureRateLimit {
+				allConsecutiveRateLimited = false
+			}
 		} else {
 			break
 		}
@@ -254,7 +326,10 @@ func evaluateModelWindow(providerName, modelName string, records []ModelOutcomeR
 	status := ModelHealthHealthy
 	recommendation := "PREFER"
 
-	if consecutiveFailures >= 3 || (n >= 2 && composite < 45.0) || (n >= 2 && successRate < 0.40) {
+	if consecutiveFailures >= 3 && allConsecutiveRateLimited && successCount > 0 {
+		status = ModelHealthDegraded
+		recommendation = "BACKOFF_RATE_LIMIT"
+	} else if consecutiveFailures >= 3 || (n >= 2 && composite < 45.0) || (n >= 2 && successRate < 0.40) {
 		status = ModelHealthQuarantined
 		recommendation = "DEMOTE_OR_FALLBACK"
 	} else if composite < 75.0 || consecutiveFailures >= 1 || verifyPassRate < 0.75 {
@@ -262,24 +337,30 @@ func evaluateModelWindow(providerName, modelName string, records []ModelOutcomeR
 		recommendation = "ALLOW_WITH_VERIFY"
 	}
 
+	if len(breakdown) == 0 {
+		breakdown = nil
+	}
+
 	return ModelQualityScore{
-		Provider:            providerName,
-		Model:               modelName,
-		LastResolvedModel:   lastResolved,
-		WindowSamples:       n,
-		SuccessCount:        successCount,
-		SuccessRate:         math.Round(successRate*1000) / 1000,
-		VerifyCheckedCount:  verifyCheckedCount,
-		VerifyPassRate:      math.Round(verifyPassRate*1000) / 1000,
-		StagnationRate:      math.Round(stagnationRate*1000) / 1000,
-		ConsecutiveFailures: consecutiveFailures,
-		P50LatencyMs:        p50,
-		P95LatencyMs:        p95,
-		CompositeScore:      composite,
-		HealthStatus:        status,
-		Recommendation:      recommendation,
-		LastError:           lastErr,
-		LastUpdatedAt:       lastUpdated,
+		Provider:             providerName,
+		Model:                modelName,
+		LastResolvedModel:    lastResolved,
+		WindowSamples:        n,
+		SuccessCount:         successCount,
+		SuccessRate:          math.Round(successRate*1000) / 1000,
+		VerifyCheckedCount:   verifyCheckedCount,
+		VerifyPassRate:       math.Round(verifyPassRate*1000) / 1000,
+		StagnationRate:       math.Round(stagnationRate*1000) / 1000,
+		ConsecutiveFailures:  consecutiveFailures,
+		P50LatencyMs:         p50,
+		P95LatencyMs:         p95,
+		CompositeScore:       composite,
+		HealthStatus:         status,
+		Recommendation:       recommendation,
+		LastError:            lastErr,
+		LastFailureDiagnosis: lastDiagnosis,
+		FailureBreakdown:     breakdown,
+		LastUpdatedAt:        lastUpdated,
 	}
 }
 

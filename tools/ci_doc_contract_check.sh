@@ -18,6 +18,7 @@
 #   12. Zero-Stale Manifest Contract
 #   13. Declarative Feature Map contract (#649)
 #   14. Verification Skills Suite contract (#651)
+#   15. MCP Tool Inventory & Harness Roles SSoT Parity (DELTA-34/35)
 
 set -euo pipefail
 
@@ -282,6 +283,44 @@ for s in skills:
         elif not os.path.exists(entry):
             print(f'::error::Skill {s.get(\"name\", \"unknown\")} entry does not exist on disk: {entry}')
             err = True
+
+if err:
+    sys.exit(1)
+"; then
+    FAILED=$((FAILED + 1))
+fi
+
+# 15. MCP Tool Inventory & Harness Roles SSoT Parity (DELTA-34/35):
+echo "--> [15/15] Verifying MCP Tool Inventory & Harness Roles SSoT parity..."
+if ! python3 -c "
+import json, re, sys
+
+with open('internal/mcp/server.go', 'r', encoding='utf-8') as f:
+    server_src = f.read()
+mcp_tools = sorted(set(re.findall(r'\"(g8s_[a-z0-9_]+)\"\s*:\s*s\.\w+Tool', server_src)))
+if not mcp_tools:
+    print('::error::Failed to extract MCP tools from internal/mcp/server.go')
+    sys.exit(1)
+
+err = False
+for doc_path in ['README.md', 'README.vi.md', 'docs/user-guide/mcp-tools.md']:
+    with open(doc_path, 'r', encoding='utf-8') as df:
+        doc_text = df.read()
+    for tool in mcp_tools:
+        if f'\`{tool}\`' not in doc_text:
+            print(f'::error::{doc_path} is missing documented MCP tool: {tool}')
+            err = True
+
+with open('internal/harness/roles.go', 'r', encoding='utf-8') as rf:
+    roles_src = rf.read()
+code_roles = sorted(set(re.findall(r'\"([a-z0-9-]+)\"\s*:\s*\{', roles_src)))
+with open('manifest.json', 'r', encoding='utf-8') as mf:
+    manifest_data = json.load(mf)
+manifest_roles = sorted(r.get('name') for r in manifest_data.get('roles', []) if isinstance(r, dict))
+
+if code_roles != manifest_roles:
+    print(f'::error::Role mismatch between internal/harness/roles.go ({code_roles}) and manifest.json ({manifest_roles})')
+    err = True
 
 if err:
     sys.exit(1)

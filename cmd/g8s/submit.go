@@ -39,7 +39,7 @@ func runSubmit(args []string) {
 	maxAttempts := fs.Int("max-attempts", 1, "retry budget (1..10)")
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
 	promptFile := fs.String("prompt-file", "", "path to file containing task prompt")
-	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner)")
+	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner, researcher, implementer, sec-auditor, analyst)")
 	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text)")
 	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
 	timeout := fs.String("timeout", "30s", "execution window for the worker")

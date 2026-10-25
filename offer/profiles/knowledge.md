@@ -26,18 +26,29 @@ trust_boundaries:
 
 1. **docs-freshness** (heavy) — link integrity across the vault (hundreds of
    notes), orphan-note detection, stale-backlink report.
-2. **spec-sync** — if the vault has structural conventions (folder schema,
+2. **epistemic-audit** — run `g8s-epistemic-audit` to classify claims into
+   `MECHANICAL_VERIFIED`, `OBSERVATIONAL_TELEMETRY`, or `UNVERIFIED_PROSE`,
+   preventing unverified LLM prose from being promoted as proven knowledge.
+3. **spec-sync** — if the vault has structural conventions (folder schema,
    naming), pin them as a convention spec and enforce via the same gate
    pattern.
-3. **evidence** — session-type markers on any campaign ledgers the vault
+4. **evidence** — session-type markers on any campaign ledgers the vault
    hosts.
+
+## Role & Skill Routing Matrix
+
+| Task Phase | Recommended Role | Permission | Mandatory Skills |
+|---|---|---|---|
+| Primary Source & Citation Lookup | `researcher` | `read_only` | `g8s-epistemic-audit`, `wiki-researcher` |
+| PRD / SRS / DoD Decomposition | `analyst` | `read_only` | `wiki-business-analyst`, `g8s-scenario-matrix` |
+| Vault Inventory & Link Discovery | `collector` / `scout` | `read_only` | `g8s-epistemic-audit`, `wiki-knowledge-linker` |
+| Synthesis & Compression | `summarizer` | `read_only` | `g8s-epistemic-audit`, `stop-slop` |
+| Epistemic & Link Verification | `verifier` | `read_only` | `g8s-epistemic-audit`, `g8s-blind-verifier` |
 
 ## Worker recommendation
 
-- `read_only` verifiers only for audits (agent never bulk-writes content).
-- Model: flash-tier is sufficient for link/freshness scans; escalate to a
-  stronger model only for content-quality judgments (subjective — keep
-  human).
+- `read_only` (`researcher`, `analyst`, `collector`, `summarizer`, `verifier`) for audits and synthesis (agent never bulk-writes curated vault content without explicit receipt).
+- Model: `docs-retriever` is ideal for link/freshness scans; escalate to `deep-coding` or `reasoning-high` for epistemic classification and SRS/FSM modeling.
 
 ## Contribute back
 

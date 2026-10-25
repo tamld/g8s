@@ -95,3 +95,110 @@ func TestScanSkillBank(t *testing.T) {
 		t.Fatalf("missing bank must be nil, got %+v", bank)
 	}
 }
+
+func TestFloorPreExecutionResearchDebateGateByLane(t *testing.T) {
+	basePayload := "touch internal/worker/worker.go receipt_id=rcp-1"
+	baseDoD := "go test ./internal/worker/..."
+
+	// Lane 0 and Lane D bypass the heavy pre-execution research/debate gate
+	for _, exemptLane := range []string{"", "0", "D", "d"} {
+		res := CheckDoRFloorForLane("fix typo", basePayload, baseDoD, "workspace_write", exemptLane)
+		if !res.OK {
+			t.Fatalf("lane %q must bypass heavy pre-execution gate, got failures: %+v", exemptLane, res.Checks)
+		}
+	}
+
+	// Lane F, R, S fail closed when research, Socratic debate, or spec contract references are missing
+	for _, strictLane := range []string{"F", "R", "S"} {
+		res := CheckDoRFloorForLane("implement feature", basePayload, baseDoD, "workspace_write", strictLane)
+		if res.OK {
+			t.Fatalf("lane %q without pre-execution research/debate/spec must fail closed", strictLane)
+		}
+		errMsg := FloorFailureError(res).Error()
+		for _, wantCheck := range []string{"research_world_state_present", "socratic_debate_present", "spec_contract_present"} {
+			if !strings.Contains(errMsg, wantCheck) {
+				t.Fatalf("lane %q failure error missing %q: %s", strictLane, wantCheck, errMsg)
+			}
+		}
+	}
+
+	// Lane F passes when World-State research, Socratic debate (hypothesis + falsification), and Spec refs exist
+	validPayloadF := `touch internal/worker/worker.go receipt_id=rcp-1
+Research: Local: internal/worker/worker.go, Upstream: stdlib context cancellation.
+Socratic Debate: Hypothesis H1 uses channel close; Counterexample / Falsification: concurrent writers panic, so Alternative Rejected in favor of sync.Once.
+Spec Contract: DELTA-35, SRS REQ-FUNC-01, AC-01, FSM state transition READY -> RUNNING.`
+	if res := CheckDoRFloorForLane("implement worker gate", validPayloadF, baseDoD, "workspace_write", "F"); !res.OK {
+		t.Fatalf("valid Lane F brief must pass: %+v", res.Checks)
+	}
+
+	// Lane S additionally requires explicit CVE/CWE/STRIDE/OWASP/trust-boundary evidence
+	if res := CheckDoRFloorForLane("security fix", validPayloadF, baseDoD, "workspace_write", "S"); res.OK {
+		t.Fatalf("Lane S without CVE/CWE/STRIDE/OWASP/trust-boundary citation must fail")
+	}
+	validPayloadS := validPayloadF + "\nSecurity Advisory: CWE-22 path traversal & trust-boundary check (no-known-cve)."
+	if res := CheckDoRFloorForLane("security fix", validPayloadS, baseDoD, "workspace_write", "S"); !res.OK {
+		t.Fatalf("valid Lane S brief with CWE & trust-boundary evidence must pass: %+v", res.Checks)
+	}
+}
+
+func TestReadVerifiedSkillDigestPinningAndTierContainment(t *testing.T) {
+	dir := t.TempDir()
+	for _, s := range []struct {
+		name string
+		desc string
+		body string
+	}{
+		{"g8s-red-prove", "Red to green proof", "Always run red test before green fix."},
+		{"g8s-supervisor", "F0 exclusive charter", "Supervisor only instructions."},
+	} {
+		sDir := filepath.Join(dir, s.name)
+		if err := os.MkdirAll(sDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + s.name + "\ndescription: " + s.desc + "\n---\n" + s.body
+		if err := os.WriteFile(filepath.Join(sDir, "SKILL.md"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. F0 (default unset tier) sees both skills
+	t.Setenv("G8S_TIER", "")
+	listF0 := ListVerifiedSkills(dir)
+	if len(listF0) != 2 {
+		t.Fatalf("expected 2 skills for F0, got %d: %+v", len(listF0), listF0)
+	}
+
+	// 2. ReadVerifiedSkill succeeds with matching digest and fails closed on mismatch
+	res, err := ReadVerifiedSkill("g8s-red-prove", "", dir)
+	if err != nil {
+		t.Fatalf("ReadVerifiedSkill failed: %v", err)
+	}
+	if !strings.HasPrefix(res.Digest, "sha256:") || res.URI != "skill://g8s/shared/g8s-red-prove" {
+		t.Fatalf("unexpected digest or URI: %+v", res)
+	}
+	if _, err := ReadVerifiedSkill("skill://g8s/shared/g8s-red-prove", res.Digest, dir); err != nil {
+		t.Fatalf("ReadVerifiedSkill with matching expected_digest failed: %v", err)
+	}
+	if _, err := ReadVerifiedSkill("g8s-red-prove", "sha256:0000000000000000", dir); err == nil || !strings.Contains(err.Error(), "E_SKILL_DIGEST_MISMATCH") {
+		t.Fatalf("expected E_SKILL_DIGEST_MISMATCH on wrong digest, got %v", err)
+	}
+
+	// 3. F1 / F2 worker tier cannot list or read F0-only g8s-supervisor
+	t.Setenv("G8S_TIER", "F1")
+	listF1 := ListVerifiedSkills(dir)
+	if len(listF1) != 1 || listF1[0].Name != "g8s-red-prove" {
+		t.Fatalf("F1 tier must filter out F0 skills, got %+v", listF1)
+	}
+	if _, err := ReadVerifiedSkill("g8s-supervisor", "", dir); err == nil || !strings.Contains(err.Error(), "E_SKILL_TIER_FORBIDDEN") {
+		t.Fatalf("expected E_SKILL_TIER_FORBIDDEN when F1 reads g8s-supervisor, got %v", err)
+	}
+
+	// 4. HydrateSkillsBlock formats skill content and returns manifests
+	block, manifests, err := HydrateSkillsBlock([]string{"g8s-red-prove"}, 1024, dir)
+	if err != nil {
+		t.Fatalf("HydrateSkillsBlock failed: %v", err)
+	}
+	if len(manifests) != 1 || !strings.Contains(block, "HYDRATED SKILL CONTRACTS") || !strings.Contains(block, res.Digest) {
+		t.Fatalf("unexpected hydrated block: %s", block)
+	}
+}

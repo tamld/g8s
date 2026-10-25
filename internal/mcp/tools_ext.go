@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
@@ -750,4 +751,69 @@ func (s *Server) portfolioStatusTool(_ context.Context, args json.RawMessage) (a
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
 	}
 	return snap, nil
+}
+
+// skillsListTool lists digest-pinned skills across F0/F1/F2 containment tiers (DELTA-34).
+func (s *Server) skillsListTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		Role    string `json:"role"`
+		BankDir string `json:"bank_dir"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_skills_list params must be an object"}
+		}
+	}
+	var dirs []string
+	if strings.TrimSpace(a.BankDir) != "" {
+		dirs = []string{a.BankDir}
+	}
+	skills := brief.ListVerifiedSkills(dirs...)
+	if strings.TrimSpace(a.Role) != "" {
+		role, err := harness.GetRole(strings.TrimSpace(a.Role))
+		if err != nil {
+			return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
+		}
+		recSet := make(map[string]bool)
+		for _, r := range role.RecommendedSkills {
+			clean := r
+			if idx := strings.LastIndex(clean, ":"); idx >= 0 {
+				clean = clean[idx+1:]
+			}
+			recSet[clean] = true
+			recSet[r] = true
+		}
+		var filtered []brief.SkillManifest
+		for _, sk := range skills {
+			if recSet[sk.Name] {
+				filtered = append(filtered, sk)
+			}
+		}
+		skills = filtered
+	}
+	return map[string]any{
+		"skills": skills,
+		"count":  len(skills),
+	}, nil
+}
+
+// skillsReadTool reads a skill by name or skill://g8s/ URI with optional expected_digest verification (DELTA-34).
+func (s *Server) skillsReadTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	var a struct {
+		Name           string `json:"name"`
+		ExpectedDigest string `json:"expected_digest"`
+		BankDir        string `json:"bank_dir"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.Name) == "" {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_skills_read requires name"}
+	}
+	var dirs []string
+	if strings.TrimSpace(a.BankDir) != "" {
+		dirs = []string{a.BankDir}
+	}
+	res, err := brief.ReadVerifiedSkill(a.Name, a.ExpectedDigest, dirs...)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInvalidParams, Message: err.Error()}
+	}
+	return res, nil
 }

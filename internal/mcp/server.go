@@ -1,8 +1,8 @@
 // Package mcp implements the g8s Model Context Protocol (MCP) server over
 // stdio using newline-delimited JSON-RPC 2.0 (DELTA-04).
 //
-// The server exposes nineteen tools that let a Brain-tier client (Claude Desktop,
-// Cursor, Codex, Windsurf) drive the g8s runtime:
+// The server exposes twenty-one tools that let a Brain-tier or Worker-tier client
+// drive the g8s runtime:
 //
 //	g8s_run             synchronous task execution (Phase 4 supervisor dependency)
 //	g8s_submit          durable queue submission via internal/controlplane
@@ -23,6 +23,8 @@
 //	g8s_charter_issue   issue an epoch-fenced Stratum Charter (DELTA-33)
 //	g8s_charter_verify  verify a Stratum Charter epoch & fence token (DELTA-33)
 //	g8s_portfolio_status O-Plane read-only portfolio & charter projection (DELTA-33)
+//	g8s_skills_list     list digest-pinned skills across F0/F1/F2 tiers (DELTA-34)
+//	g8s_skills_read     read a skill with optional expected_digest TOCTOU check (DELTA-34)
 //
 // Dependencies are injected as narrow local interfaces so this package stays
 // decoupled from concrete store types and remains trivially testable. Per the
@@ -166,6 +168,8 @@ func (s *Server) RegisterTools() error {
 		"g8s_charter_issue":    s.charterIssueTool,
 		"g8s_charter_verify":   s.charterVerifyTool,
 		"g8s_portfolio_status": s.portfolioStatusTool,
+		"g8s_skills_list":      s.skillsListTool,
+		"g8s_skills_read":      s.skillsReadTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
@@ -187,6 +191,8 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_charter_issue", Description: "Issue an epoch-fenced Stratum Charter (S0/S1 -> S2) with canonical SHA-256 digest and fence token (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"issuer_stratum":{"type":"string"},"holder_stratum":{"type":"string"},"holder_ring":{"type":"string"},"scope_repo":{"type":"string"},"objective":{"type":"string"},"allowed_paths":{"type":"array","items":{"type":"string"}},"forbidden_paths":{"type":"array","items":{"type":"string"}},"required_gate_lane":{"type":"string"},"budget_calls":{"type":"integer"},"duration_sec":{"type":"integer"}},"required":["scope_repo","objective","allowed_paths"]}`)},
 		{Name: "g8s_charter_verify", Description: "Verify a Stratum Charter epoch and fence token against the SQLite WAL charter ledger (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"charter_id":{"type":"string"},"epoch":{"type":"integer"},"fence_token":{"type":"string"}},"required":["charter_id","epoch","fence_token"]}`)},
 		{Name: "g8s_portfolio_status", Description: "O-Plane read-only projection of active/revoked/completed Stratum Charters and domain scope allocations (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
+		{Name: "g8s_skills_read", Description: "Read a verified skill (SKILL.md) by name or skill://g8s/ URI with optional expected_digest TOCTOU check (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"expected_digest":{"type":"string"},"bank_dir":{"type":"string"}},"required":["name"]}`)},
 	}
 	return nil
 }

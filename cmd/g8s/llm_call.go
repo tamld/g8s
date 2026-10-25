@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/dispatch"
@@ -225,6 +226,7 @@ func runLLMCall(args []string) {
 	receiptIDFlag := fs.String("receipt-id", "", "write receipt ID for delegation boundary validation")
 	maxTurnsFlag := fs.Int("max-turns", 1, "maximum turns for bounded verify-and-repair loop (1..5)")
 	verifyCmdFlag := fs.String("verify-cmd", "", "optional shell command run inside scope root after applying files to verify changes")
+	skillsFlag := fs.String("skills", "", "comma-separated skill names or skill://g8s/ URIs to hydrate with SHA-256 digest verification (DELTA-34)")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: g8s llm-call [flags]")
@@ -542,6 +544,28 @@ func runLLMCall(args []string) {
 		}
 	}
 
+	// DELTA-34: F0/F1/F2 Digest-Pinned Skill Hydration (--skills or G8S_ACTIVE_SKILLS)
+	var hydratedSkills []brief.SkillManifest
+	rawSkills := strings.TrimSpace(*skillsFlag)
+	if rawSkills == "" {
+		rawSkills = strings.TrimSpace(os.Getenv("G8S_ACTIVE_SKILLS"))
+	}
+	if rawSkills != "" {
+		skillParts := strings.Split(rawSkills, ",")
+		skillBlock, manifests, sErr := brief.HydrateSkillsBlock(skillParts, 4096)
+		if sErr != nil {
+			if isWorkerEnvelope {
+				emitWorkerError(startTime, 0, sErr.Error())
+			}
+			exitRuntime("llm-call", "", *traceID, cli.CodeDenied, sErr, "Verify skill names and F0/F1/F2 tier access", *jsonl)
+		}
+		if skillBlock != "" {
+			prompt = skillBlock + prompt
+			spec.Brief = prompt
+			hydratedSkills = manifests
+		}
+	}
+
 	var rc provider.Receipt
 	var totalDurationMs int64
 	var totalInputTokens, totalOutputTokens, totalTokens int
@@ -722,6 +746,14 @@ func runLLMCall(args []string) {
 		modelResolved = modelID
 	}
 
+	outcomeErrReason := ""
+	if verifyCmd != "" && !verifyPassed {
+		if stagnationReason != "" {
+			outcomeErrReason = stagnationReason
+		} else {
+			outcomeErrReason = "verify command failed"
+		}
+	}
 	_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 		Provider:       entry.Name,
 		ModelRequested: modelID,
@@ -732,6 +764,7 @@ func runLLMCall(args []string) {
 		Stagnated:      stagnationDetected,
 		DurationMs:     rc.DurationMs,
 		TotalTokens:    rc.TotalTokens,
+		ErrorReason:    outcomeErrReason,
 	})
 
 	if envTaskID := strings.TrimSpace(os.Getenv("G8S_TASK_ID")); envTaskID != "" && !*workerEnvelopeFlag {
@@ -787,6 +820,9 @@ func runLLMCall(args []string) {
 		}
 		if len(contextFileList) > 0 {
 			data["context_files"] = contextFileList
+		}
+		if len(hydratedSkills) > 0 {
+			data["hydrated_skills"] = hydratedSkills
 		}
 		env := cli.NewEnvelope("llm_call", "llm-call", "", data)
 		env.TraceID = *traceID

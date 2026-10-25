@@ -57,7 +57,7 @@ _g8s() {
         submit)
             _arguments \
                 '--prompt=[Prompt text for worker]:prompt:' \
-                '--role=[Worker role profile]:role:(collector scout mcp-mapper summarizer verifier test-runner)' \
+                '--role=[Worker role profile]:role:(collector scout mcp-mapper summarizer verifier test-runner researcher implementer sec-auditor analyst)' \
                 '--permission=[Permission profile]:permission:(read_only automation_read workspace_write)' \
                 '--model=[Target model name]:model:(gemini-3.8-flash-high claude-3-7-sonnet-latest gpt-4o)' \
                 '--timeout=[Execution timeout duration]:timeout:' \
@@ -118,7 +118,7 @@ _g8s_completions() {
             local submit_opts="--prompt --role --permission --model --timeout --idempotency-key --add-dir --receipt-id --no-sandbox"
             case "${prev}" in
                 --role)
-                    COMPREPLY=( $(compgen -W "collector scout mcp-mapper summarizer verifier test-runner" -- "${cur}") )
+                    COMPREPLY=( $(compgen -W "collector scout mcp-mapper summarizer verifier test-runner researcher implementer sec-auditor analyst" -- "${cur}") )
                     return 0
                     ;;
                 --permission)
@@ -170,7 +170,7 @@ set -l commands submit get resume tasks lineage children receipt doctor init con
 complete -c g8s -f
 complete -c g8s -n "not __fish_seen_subcommand_from $commands" -a "$commands"
 
-complete -c g8s -n "__fish_seen_subcommand_from submit" -l role -a "collector scout mcp-mapper summarizer verifier test-runner"
+complete -c g8s -n "__fish_seen_subcommand_from submit" -l role -a "collector scout mcp-mapper summarizer verifier test-runner researcher implementer sec-auditor analyst"
 complete -c g8s -n "__fish_seen_subcommand_from submit" -l permission -a "read_only automation_read workspace_write"
 complete -c g8s -n "__fish_seen_subcommand_from submit" -l no-sandbox
 

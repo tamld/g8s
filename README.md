@@ -214,27 +214,31 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Complete MCP Tool Inventory (16 Tools)
+#### Complete MCP Tool Inventory (21 Tools)
 
 | Tool Name | Operation & Purpose |
 | :--- | :--- |
+| `g8s_run` | Synchronously execute an isolated worker task (requires Phase 4 supervisor). |
 | `g8s_submit` | Enqueue a durable task with role, permissions, and timeout budget. |
-| `g8s_worker` | Execute queued tasks in isolated process groups and Git worktrees. |
-| `g8s_status` | Query queue health, active attempts, and worker heartbeats. |
-| `g8s_list_tasks` | List tasks filtered by state (`QUEUED`, `LEASED`, `SUCCEEDED`, `FAILED`). |
-| `g8s_inspect_task` | Inspect full task details including payload, events, and receipts. |
+| `g8s_get` | Fetch sanitized task status by task ID. |
 | `g8s_receipt_issue` | Issue a single-use, path-scoped, time-limited Write Receipt. |
-| `g8s_receipt_verify` | Validate cryptographic integrity and scope bounds of a receipt. |
-| `g8s_vault_store` | Store architectural decisions and distilled patterns in Knowledge Vault. |
-| `g8s_vault_query` | Retrieve relevant knowledge records using SQLite FTS5 + BM25 ranking. |
+| `g8s_self_awareness` | Report discovered providers, model availability, and concurrency slots. |
+| `g8s_blast_radius` | LSP and AST call-hierarchy impact analysis for a file/symbol (`DELTA-07`). |
 | `g8s_dispatch` | Execute a bounded, read-only dispatch through the CLI wrapper. |
-| `g8s_list_roles` | Enumerate available worker roles and their default permissions. |
-| `g8s_list_permissions` | Enumerate permission profiles (`read_only`, `workspace_write`). |
-| `g8s_search` | Pure-Go regex and literal file search with gitignore awareness. |
-| `g8s_read` | Bounded file reading with line-range slicing and SHA-256 validation. |
-| `g8s_edit` | Atomic CAS file editing with CRLF/LF preservation and receipt checks. |
+| `g8s_list_tasks` | List tasks filtered by state (`QUEUED`, `LEASED`, `SUCCEEDED`, `FAILED`). |
+| `g8s_cancel_task` | Request cooperative cancellation of a durable task with an audit reason. |
+| `g8s_list_roles` | Enumerate all 10 registered worker role profiles and default permissions. |
+| `g8s_list_permissions` | Enumerate permission profiles (`read_only`, `automation_read`, `workspace_write`, `supplied_text`). |
+| `g8s_search` | Pure-Go regex and literal file search with gitignore awareness (`DELTA-22/23`). |
+| `g8s_read` | Bounded file reading with line-range slicing and SHA-256 validation (`DELTA-23`). |
+| `g8s_edit` | Atomic CAS file editing with CRLF/LF preservation and receipt checks (`DELTA-23`). |
 | `g8s_select` | Pure-Go JSON dot-path selector (replaces jq; `DELTA-23`). |
 | `g8s_llm_call` | Direct synchronous LLM invocation across configured providers (`DELTA-25`). |
+| `g8s_charter_issue` | Issue an epoch-fenced Stratum Charter (`S0/S1 -> S2`) (`DELTA-33`). |
+| `g8s_charter_verify` | Verify a Stratum Charter epoch and fence token (`DELTA-33`). |
+| `g8s_portfolio_status` | O-Plane read-only projection of active/revoked/completed Stratum Charters (`DELTA-33`). |
+| `g8s_skills_list` | List digest-pinned skills (`skill://g8s/<tier>/<name>`) filtered by F0/F1/F2 tier (`DELTA-34`). |
+| `g8s_skills_read` | Read a verified `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check (`DELTA-34`). |
 
 ### Agent Skills & Supervisor Charter
 
@@ -270,7 +274,7 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | :--- | :--- |
 | [Quickstart Guide](docs/quickstart.md) | Step-by-step introduction from first install to delegated execution. |
 | [CLI Reference](docs/user-guide/cli-reference.md) | Exhaustive manual of all subcommands, flags, and exit codes. |
-| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 16 MCP tools. |
+| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 21 MCP tools. |
 | [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Fast pure-Go searching, slicing, editing, and dot-path extraction. |
 | [Product Requirements (PRD)](docs/PRD.md) | Problem statement, target personas, and core value propositions. |
 | [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..10) and non-functional requirements (NFR-1..4). |
@@ -299,9 +303,11 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | Version Milestone | Scope & Grounded Milestones | Status |
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
-| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
-| **`v0.20.0`** (Planned — Issue #639) | **Test Suite Execution Optimization & Empirical PRI Lane Routing** (`>=90%` first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation. | **Planned** |
-| **`v0.21.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
+| **`v0.20.0`** (2026-10-25, Current) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration & Pre-Execution Research/Debate Gate** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..35`): `S0..S3` + `O-Plane` charter engine, 21-tool MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, and risk-tiered `Lane F/R/S` pre-execution gate. | **Done** |
+| **`v0.30.0`** (Planned) | **Full F0/F1/F2 MCP Proxy & Autonomous Skill Federation**: in-worktree F1/F2 MCP capability scoping, automated multi-repo charter orchestration, and cross-provider skill telemetry. | **Planned** |
+| **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
+| **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across the 3 core repositories (`g8s`, `TuneFlow`, `tamld-llm-wiki`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
 
 ### Project Structure
 

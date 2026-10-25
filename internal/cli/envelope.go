@@ -25,6 +25,7 @@ const (
 	CodeUsage    = "E_USAGE"
 	CodeRuntime  = "E_RUNTIME"
 	CodeHarness  = "E_HARNESS"
+	CodeConflict = "E_CONFLICT"
 )
 
 // Envelope wraps every g8s command's stdout JSON.

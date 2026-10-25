@@ -216,27 +216,31 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Danh mục 16 công cụ MCP
+#### Danh mục 21 công cụ MCP
 
 | Tên công cụ | Mục đích & Thao tác |
 | :--- | :--- |
+| `g8s_run` | Thực thi đồng bộ một worker task cô lập (yêu cầu Phase 4 supervisor). |
 | `g8s_submit` | Nạp một task bền vững với role, quyền và ngân sách thời gian. |
-| `g8s_worker` | Thực thi task từ hàng đợi trong worktree và nhóm tiến trình riêng biệt. |
-| `g8s_status` | Tra cứu sức khỏe hàng đợi, các attempt đang chạy và heartbeat. |
-| `g8s_list_tasks` | Liệt kê danh sách task theo trạng thái (`QUEUED`, `SUCCEEDED`, v.v.). |
-| `g8s_inspect_task` | Xem chi tiết nội dung task, lịch sử sự kiện và biên nhận. |
+| `g8s_get` | Tra cứu trạng thái task đã làm sạch theo `task_id`. |
 | `g8s_receipt_issue` | Cấp biên nhận ghi có phạm vi đường dẫn và thời hạn dùng một lần. |
-| `g8s_receipt_verify` | Kiểm tra tính toàn vẹn và phạm vi cho phép của một biên nhận. |
-| `g8s_vault_store` | Lưu trữ quyết định kiến trúc và tri thức chắt lọc vào Knowledge Vault. |
-| `g8s_vault_query` | Truy vấn tri thức liên quan bằng SQLite FTS5 + BM25 ranking. |
+| `g8s_self_awareness` | Báo cáo danh sách provider, model khả dụng và số slot đồng thời. |
+| `g8s_blast_radius` | Phân tích phạm vi ảnh hưởng LSP và AST cho file/symbol (`DELTA-07`). |
 | `g8s_dispatch` | Thực thi lệnh dispatch chỉ đọc qua lớp bọc an toàn. |
-| `g8s_list_roles` | Liệt kê các role worker khả dụng cùng quyền mặc định. |
-| `g8s_list_permissions` | Liệt kê các profile quyền hạn (`read_only`, `workspace_write`). |
-| `g8s_search` | Tìm kiếm regex và chuỗi ký tự thuần Go tôn trọng `.gitignore`. |
-| `g8s_read` | Đọc giới hạn dòng file và xác thực mã băm SHA-256 an toàn. |
-| `g8s_edit` | Chỉnh sửa file nguyên tử CAS bảo toàn định dạng xuống dòng CRLF/LF. |
+| `g8s_list_tasks` | Liệt kê danh sách task theo trạng thái (`QUEUED`, `SUCCEEDED`, v.v.). |
+| `g8s_cancel_task` | Yêu cầu hủy task hợp tác kèm lý do kiểm toán. |
+| `g8s_list_roles` | Liệt kê toàn bộ 10 role worker chuẩn cùng quyền mặc định. |
+| `g8s_list_permissions` | Liệt kê các profile quyền hạn (`read_only`, `automation_read`, `workspace_write`, `supplied_text`). |
+| `g8s_search` | Tìm kiếm regex và chuỗi ký tự thuần Go tôn trọng `.gitignore` (`DELTA-22/23`). |
+| `g8s_read` | Đọc giới hạn dòng file và xác thực mã băm SHA-256 an toàn (`DELTA-23`). |
+| `g8s_edit` | Chỉnh sửa file nguyên tử CAS bảo toàn định dạng xuống dòng CRLF/LF (`DELTA-23`). |
 | `g8s_select` | Trích xuất giá trị JSON qua đường dẫn dot-path (thay thế `jq`; `DELTA-23`). |
 | `g8s_llm_call` | Thực thi gọi LLM đồng bộ trực tiếp tới gateway được khai báo (`DELTA-25`). |
+| `g8s_charter_issue` | Cấp phát Stratum Charter gắn epoch & fence token (`S0/S1 -> S2`; `DELTA-33`). |
+| `g8s_charter_verify` | Xác thực epoch và fence token của Stratum Charter (`DELTA-33`). |
+| `g8s_portfolio_status` | Chiếu trạng thái O-Plane chỉ đọc của các Stratum Charter liên repo (`DELTA-33`). |
+| `g8s_skills_list` | Liệt kê danh mục skill gắn mã băm (`skill://g8s/<tier>/<name>`) theo tầng F0/F1/F2 (`DELTA-34`). |
+| `g8s_skills_read` | Đọc `SKILL.md` có kiểm tra chống giả mạo TOCTOU qua `expected_digest` SHA-256 (`DELTA-34`). |
 
 ### Agent Skills & Hiến chương Giám sát
 
@@ -272,7 +276,7 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | :--- | :--- |
 | [Hướng dẫn Quickstart](docs/quickstart.md) | Khởi đầu từ cài đặt đến lần ủy quyền thực thi đầu tiên. |
 | [Tra cứu lệnh CLI](docs/user-guide/cli-reference.md) | Sổ tay đầy đủ về mọi lệnh con, cờ tùy chọn và mã thoát. |
-| [Tài liệu MCP Tools](docs/user-guide/mcp-tools.md) | Schema JSON, tham số và kiểu dữ liệu trả về của 16 MCP tool. |
+| [Tài liệu MCP Tools](docs/user-guide/mcp-tools.md) | Schema JSON, tham số và kiểu dữ liệu trả về của 21 MCP tool. |
 | [Hướng dẫn I/O Agent](offer/SEARCH_GUIDE.md) | Tìm kiếm, cắt dòng, sửa nguyên tử và trích xuất JSON dot-path. |
 | [Đặc tả Sản phẩm (PRD)](docs/PRD.md) | Vấn đề giải quyết, đối tượng hướng tới và giá trị cốt lõi. |
 | [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..10) và phi chức năng (NFR-1..4). |
@@ -301,9 +305,11 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | Mốc phiên bản | Phạm vi & Năng lực nghiệm thu | Trạng thái |
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): sổ cái bằng chứng hash-chain, mandate T0–T4, gates G0–G7, tường lửa verify không suy hao. | **Xong** |
-| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16 công cụ MCP (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
-| **`v0.20.0`** (Kế hoạch — Issue #639) | **Tối ưu thực thi bộ test & Điều hướng phân làn PRI thực nghiệm** (`>=90%` đạt lần đầu), Đồng chuẩn bảo mật ngành (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Tăng cường đóng gói đa nền tảng & Hợp nhất gói nội bộ. | **Kế hoạch** |
-| **`v0.21.0+`** (Kế hoạch — Pre-1.0 Burn-In) | **Duy trì Offer liên repo 90 ngày** (`SCORECARD.md` M4 trên 5 kho lưu trữ không hồi quy cổng) và tiêu chí đóng băng API trước bản 1.0 (`v1.0.0` chỉ được cắt khi có đầy đủ bằng chứng kiểm nghiệm). | **Kế hoạch** |
+| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
+| **`v0.20.0`** (2026-10-25, Hiện tại) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model Liên tục, Hydrate Skill Gắn Mã Băm & Cổng Nghiên cứu/Phản biện Trước Thực thi** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..35`): động cơ charter `S0..S3` + `O-Plane`, 21 công cụ MCP (`g8s_skills_list`, `g8s_skills_read`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, và cổng tiền thực thi theo làn `Lane F/R/S`. | **Xong** |
+| **`v0.30.0`** (Kế hoạch) | **Liên bang MCP & Skill Tự hành F0/F1/F2 Toàn diện**: phân quyền MCP theo biên nhận trong worktree F1/F2 và điều phối charter liên repo tự động. | **Kế hoạch** |
+| **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
+| **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên 3 kho cốt lõi (`g8s`, `TuneFlow`, `tamld-llm-wiki`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
 
 ### Cấu trúc dự án
 

@@ -1239,3 +1239,48 @@ func TestDeliverConsumedReceiptAfterWallClockExpiry(t *testing.T) {
 		t.Fatalf("unexpected overnight.txt content: %q", string(got))
 	}
 }
+
+func TestDeliverExpectedHeadOIDConflictAndMatch(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	repoDir := initGitRepo(t)
+	wtDir := createWorktree(t, repoDir, "case-head-oid")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "cp.db")
+	rcDbPath := filepath.Join(tempDir, "receipts.db")
+
+	fPath := filepath.Join(wtDir, "cas_head.txt")
+	if err := os.WriteFile(fPath, []byte("cas verified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcID := issueTestReceipt(t, rcDbPath, []string{"cas_head.txt"})
+	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
+
+	headCmd := exec.Command("git", "rev-parse", "HEAD")
+	headCmd.Dir = repoDir
+	headBytes, err := headCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	actualHead := strings.TrimSpace(string(headBytes))
+
+	// 1. Mismatched --expected-head-oid fails closed with STALE_HEAD and does NOT apply file
+	badRes := runDeliverCmd(t, binPath, repoDir, dbPath, taskID, "--expected-head-oid", "0000000000000000000000000000000000000000")
+	if badRes.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code on STALE_HEAD mismatch")
+	}
+	if _, statErr := os.Stat(filepath.Join(repoDir, "cas_head.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("cas_head.txt must not be applied when --expected-head-oid mismatches")
+	}
+
+	// 2. Matching --expected-head-oid succeeds and applies file
+	okRes := runDeliverCmd(t, binPath, repoDir, dbPath, taskID, "--expected-head-oid", actualHead, "--json")
+	if okRes.exitCode != 0 {
+		t.Fatalf("expected exit code 0 on matching --expected-head-oid, got %d (%s / %s)", okRes.exitCode, okRes.stderr, okRes.stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(repoDir, "cas_head.txt"))
+	if err != nil || string(got) != "cas verified" {
+		t.Fatalf("unexpected cas_head.txt after matching head delivery: %v %q", err, string(got))
+	}
+}

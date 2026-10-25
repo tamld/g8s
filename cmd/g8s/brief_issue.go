@@ -27,6 +27,7 @@ func runBriefIssue(args []string) {
 	dodFile := fs.String("dod-file", "", "path to markdown DoD file")
 	dodStr := fs.String("dod", "", "inline markdown DoD")
 	permission := fs.String("permission", "read_only", "dispatch permission class (read_only|workspace_write) — workspace_write requires a receipt reference")
+	lane := fs.String("lane", "", "ALDC gate lane (0|D|R|F|S) — lanes F, R, S enforce Pre-Execution Research, CVE & Socratic Debate Gate (DELTA-35)")
 	issuedBy := fs.String("issued-by", "", "issuer identity (defaults to --actor)")
 	ttlStr := fs.String("ttl", "2h", "time-to-live duration (e.g. 2h, 30m, 3600s)")
 	if err := fs.Parse(args); err != nil {
@@ -61,10 +62,15 @@ func runBriefIssue(args []string) {
 		exitUsage("brief-issue", "", *traceID, "brief-issue requires --dod-file or --dod", "Provide either --dod-file or --dod", *jsonl)
 	}
 
-	// L2 deterministic DoR floor (#398): mechanical, blocking, no Jev, no
+	effectiveLane := *lane
+	if effectiveLane == "" {
+		effectiveLane = os.Getenv("G8S_GATE_LANE")
+	}
+
+	// L2 deterministic DoR floor (#398 + DELTA-35): mechanical, blocking, no Jev, no
 	// broker dependency. A floor failure is a usage error naming every
 	// failed check.
-	if floor := brief.CheckDoRFloor(*title, payload, dod, *permission); !floor.OK {
+	if floor := brief.CheckDoRFloorForLane(*title, payload, dod, *permission, effectiveLane); !floor.OK {
 		exitUsage("brief-issue", "dor-floor", *traceID, brief.FloorFailureError(floor).Error(), "Fix the listed DoR checks before issuing", *jsonl)
 	}
 

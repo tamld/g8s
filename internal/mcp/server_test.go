@@ -195,6 +195,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 		"g8s_dispatch", "g8s_list_tasks", "g8s_cancel_task", "g8s_list_roles", "g8s_list_permissions",
 		"g8s_search", "g8s_read", "g8s_edit", "g8s_select", "g8s_llm_call",
 		"g8s_charter_issue", "g8s_charter_verify", "g8s_portfolio_status",
+		"g8s_skills_list", "g8s_skills_read",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))
@@ -465,8 +466,8 @@ func TestListRolesReturnsAllRegisteredProfiles(t *testing.T) {
 	if err := json.Unmarshal(result, &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(out.Roles) != 6 {
-		t.Fatalf("got %d roles, want 6", len(out.Roles))
+	if len(out.Roles) != 10 {
+		t.Fatalf("got %d roles, want 10", len(out.Roles))
 	}
 	byName := map[string]struct {
 		Purpose   string
@@ -478,7 +479,7 @@ func TestListRolesReturnsAllRegisteredProfiles(t *testing.T) {
 			Forbidden []string
 		}{r.Purpose, r.Forbidden}
 	}
-	for _, want := range []string{"collector", "scout", "verifier"} {
+	for _, want := range []string{"collector", "scout", "verifier", "researcher", "implementer", "sec-auditor", "analyst"} {
 		r, ok := byName[want]
 		if !ok || r.Purpose == "" || len(r.Forbidden) == 0 {
 			t.Fatalf("role %q missing purpose/forbidden: %+v", want, r)
@@ -1266,5 +1267,65 @@ func TestMCPCharterAndPortfolioTools(t *testing.T) {
 	}
 	if snap.TotalCharters != 1 || snap.ActiveCharters != 1 {
 		t.Fatalf("unexpected portfolio counts: %+v", snap)
+	}
+}
+
+func TestMCPSkillsListAndReadTools(t *testing.T) {
+	bankDir := t.TempDir()
+	skillDir := filepath.Join(bankDir, "g8s-red-prove")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: g8s-red-prove\ndescription: Red to green verification\n---\n# Red Prove\nRun red test first."
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, _, _, _ := newTestServer(t)
+
+	// 1. g8s_skills_list filtered by role implementer
+	resList, rpcErr := callTool(t, s, "g8s_skills_list", map[string]any{
+		"bank_dir": bankDir,
+		"role":     "implementer",
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_skills_list failed: %+v", rpcErr)
+	}
+	var listed struct {
+		Count  int `json:"count"`
+		Skills []struct {
+			Name   string `json:"name"`
+			URI    string `json:"uri"`
+			Digest string `json:"digest"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal(resList, &listed); err != nil {
+		t.Fatalf("decode skills list: %v", err)
+	}
+	if listed.Count != 1 || listed.Skills[0].Name != "g8s-red-prove" || !strings.HasPrefix(listed.Skills[0].Digest, "sha256:") {
+		t.Fatalf("unexpected listed skills: %+v", listed)
+	}
+
+	// 2. g8s_skills_read with matching expected_digest succeeds
+	resRead, rpcErr := callTool(t, s, "g8s_skills_read", map[string]any{
+		"bank_dir":        bankDir,
+		"name":            listed.Skills[0].URI,
+		"expected_digest": listed.Skills[0].Digest,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_skills_read failed: %+v", rpcErr)
+	}
+	if !strings.Contains(string(resRead), "Run red test first") {
+		t.Fatalf("expected skill content in response, got %s", resRead)
+	}
+
+	// 3. g8s_skills_read with mismatched expected_digest fails closed (TOCTOU guard)
+	_, rpcErrMismatch := callTool(t, s, "g8s_skills_read", map[string]any{
+		"bank_dir":        bankDir,
+		"name":            "g8s-red-prove",
+		"expected_digest": "sha256:badbadbad",
+	})
+	if rpcErrMismatch == nil || !strings.Contains(rpcErrMismatch.Message, "E_SKILL_DIGEST_MISMATCH") {
+		t.Fatalf("expected E_SKILL_DIGEST_MISMATCH, got %+v", rpcErrMismatch)
 	}
 }
