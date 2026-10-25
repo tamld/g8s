@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0f172a; rx: 16px; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 700; fill: #f8fafc; }
+      .step-num { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 700; fill: #38bdf8; }
+      .step-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #f8fafc; }
+      .step-desc { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 11px; fill: #cbd5e1; }
+      .cmd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10.5px; fill: #6ee7b7; }
+      .arrow { stroke: #38bdf8; stroke-width: 2; fill: none; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="360" rx="16"/>
+  <text class="title" x="32" y="36">g8s 5-Step Execution Workflow &amp; Command Routing</text>
+
+  <!-- 5 HORIZONTAL PIPELINE CARDS -->
+  <!-- Step 1 -->
+  <rect x="28" y="56" width="166" height="122" rx="10" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+  <text class="step-num" x="42" y="78">STEP 01</text>
+  <text class="step-title" x="42" y="96">Gate &amp; ContextPack</text>
+  <text class="step-desc" x="42" y="116">Validate DoR/CVE gate</text>
+  <text class="step-desc" x="42" y="132">&amp; compress AST budget</text>
+  <text class="cmd" x="42" y="158">g8s brief-issue</text>
+  <text class="cmd" x="42" y="171">g8s context-pack</text>
+
+  <line class="arrow" x1="194" y1="117" x2="210" y2="117" marker-end="url(#arr)"/>
+
+  <!-- Step 2 -->
+  <rect x="212" y="56" width="166" height="122" rx="10" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+  <text class="step-num" x="226" y="78">STEP 02</text>
+  <text class="step-title" x="226" y="96">Receipt &amp; Submit</text>
+  <text class="step-desc" x="226" y="116">Mint single-use scope</text>
+  <text class="step-desc" x="226" y="132">receipt &amp; queue task</text>
+  <text class="cmd" x="226" y="158">g8s receipt issue</text>
+  <text class="cmd" x="226" y="171">g8s submit</text>
+
+  <line class="arrow" x1="378" y1="117" x2="394" y2="117" marker-end="url(#arr)"/>
+
+  <!-- Step 3 -->
+  <rect x="396" y="56" width="166" height="122" rx="10" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+  <text class="step-num" x="410" y="78">STEP 03</text>
+  <text class="step-title" x="410" y="96">Isolated Execution</text>
+  <text class="step-desc" x="410" y="116">Claim CAS lease, spawn</text>
+  <text class="step-desc" x="410" y="132">worktree &amp; skill://g8s</text>
+  <text class="cmd" x="410" y="158">g8s worker --once</text>
+  <text class="cmd" x="410" y="171">g8s llm-call</text>
+
+  <line class="arrow" x1="562" y1="117" x2="578" y2="117" marker-end="url(#arr)"/>
+
+  <!-- Step 4 -->
+  <rect x="580" y="56" width="166" height="122" rx="10" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+  <text class="step-num" x="594" y="78">STEP 04</text>
+  <text class="step-title" x="594" y="96">6-Stage QA &amp; Blind</text>
+  <text class="step-desc" x="594" y="116">Run Holdout suite &amp;</text>
+  <text class="step-desc" x="594" y="132">Seeded Mutant Canary</text>
+  <text class="cmd" x="594" y="158">g8s verify</text>
+  <text class="cmd" x="594" y="171">g8s qa-report</text>
+
+  <line class="arrow" x1="746" y1="117" x2="762" y2="117" marker-end="url(#arr)"/>
+
+  <!-- Step 5 -->
+  <rect x="764" y="56" width="168" height="122" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+  <text class="step-num" x="778" y="78">STEP 05</text>
+  <text class="step-title" x="778" y="96">CAS Deliver &amp; Seal</text>
+  <text class="step-desc" x="778" y="116">Verify target HEAD OID</text>
+  <text class="step-desc" x="778" y="132">&amp; promote clean diff</text>
+  <text class="cmd" x="778" y="158">g8s deliver</text>
+  <text class="cmd" x="778" y="171">--expected-head-oid</text>
+
+  <!-- QUICK DECISION MATRIX (BOTTOM PANEL) -->
+  <rect x="28" y="202" width="904" height="134" rx="10" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+  <text class="step-title" x="46" y="228">Operator Quick-Decision Matrix — Which Mode Should You Run?</text>
+
+  <rect x="46" y="242" width="276" height="78" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text class="step-title" x="60" y="262">1. Fast Read-Only / Gateway Call</text>
+  <text class="step-desc" x="60" y="280">Instant analysis or bounded repair loop</text>
+  <text class="cmd" x="60" y="302">g8s llm-call --context-budget 8000</text>
+
+  <rect x="342" y="242" width="276" height="78" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text class="step-title" x="356" y="262">2. Queued Recon / Security Audit</text>
+  <text class="step-desc" x="356" y="280">Zero-mutation codebase scouting (`S3-A`)</text>
+  <text class="cmd" x="356" y="302">g8s submit --role scout --permission read_only</text>
+
+  <rect x="638" y="242" width="276" height="78" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text class="step-title" x="652" y="262">3. Guarded Feature / Bugfix Mutation</text>
+  <text class="step-desc" x="652" y="280">Receipt-scoped worktree + Blind QA (`S3-M`)</text>
+  <text class="cmd" x="652" y="302">receipt issue → submit → verify → deliver</text>
+</svg>

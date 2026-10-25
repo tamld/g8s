@@ -101,18 +101,24 @@ main() {
         error "Failed to download ${download_url}"
     fi
 
-    # Verify Checksum
-    if curl -fsSL "$checksum_url" -o "${tmp_dir}/checksums.txt" 2>/dev/null; then
-        info "Verifying SHA-256 checksum..."
-        (
-            cd "$tmp_dir"
-            if command -v sha256sum >/dev/null 2>&1; then
-                grep "${asset_name}" checksums.txt | sha256sum -c - >/dev/null 2>&1 || warn "Checksum verification could not be validated automatically"
-            elif command -v shasum >/dev/null 2>&1; then
-                grep "${asset_name}" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 || warn "Checksum verification could not be validated automatically"
-            fi
-        )
+    # Verify Checksum (Fail-Closed Supply Chain Enforcement - Issue #639)
+    if ! curl -fsSL "$checksum_url" -o "${tmp_dir}/checksums.txt" 2>/dev/null; then
+        error "Failed to download ${checksum_url}; refusing unverified binary installation"
     fi
+    info "Verifying SHA-256 checksum..."
+    (
+        cd "$tmp_dir"
+        if ! grep -q "${asset_name}" checksums.txt; then
+            error "Asset ${asset_name} not found in checksums.txt"
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+            grep "${asset_name}" checksums.txt | sha256sum -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
+        elif command -v shasum >/dev/null 2>&1; then
+            grep "${asset_name}" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
+        else
+            error "Neither sha256sum nor shasum is installed; cannot verify binary integrity"
+        fi
+    )
 
     # Unpack binary
     info "Unpacking binary..."

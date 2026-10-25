@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #0f172a; rx: 16px; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #f8fafc; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 12px; font-weight: 500; fill: #94a3b8; }
+      .tier-label { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #f8fafc; }
+      .card-desc { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 11px; fill: #cbd5e1; }
+      .mono-badge { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10.5px; fill: #e2e8f0; }
+      .connector { stroke: #64748b; stroke-width: 2; stroke-dasharray: 4 3; fill: none; }
+      .solid-arrow { stroke: #38bdf8; stroke-width: 2.2; fill: none; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <linearGradient id="f0Grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="kernelGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#064e3b"/>
+      <stop offset="100%" stop-color="#065f46"/>
+    </linearGradient>
+    <linearGradient id="f1Grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0c4a6e"/>
+      <stop offset="100%" stop-color="#075985"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect class="bg" x="0" y="0" width="960" height="540" rx="16"/>
+
+  <!-- Header -->
+  <text class="title" x="32" y="36">g8s Architecture — Zero-Trust Containment Rings (F0/F1/F2) &amp; Control Strata (S0..S3)</text>
+  <text class="subtitle" x="32" y="56">Single pure-Go static binary (&lt;25MB, CGO_ENABLED=0) enforcing capability-scoped AI agent execution</text>
+
+  <!-- TIER 1: F0 BRAIN / SUPERVISOR -->
+  <rect x="32" y="74" width="896" height="104" rx="12" fill="url(#f0Grad)" stroke="#6366f1" stroke-width="1.5"/>
+  <text class="tier-label" x="48" y="96" fill="#a5b4fc">RING F0 — BRAIN &amp; SOVEREIGN SUPERVISOR TIER (FULL TRUST)</text>
+
+  <rect x="48" y="108" width="268" height="56" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1"/>
+  <text class="card-title" x="62" y="128">S0 Principal &amp; S1 Coordinator</text>
+  <text class="card-desc" x="62" y="146">Multi-repo epoch charters (`g8s charter`)</text>
+
+  <rect x="336" y="108" width="284" height="56" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1"/>
+  <text class="card-title" x="350" y="128">S2 Domain Governor (Brain)</text>
+  <text class="card-desc" x="350" y="146">Architecture, WriteReceipt minting, Git merge</text>
+
+  <rect x="640" y="108" width="272" height="56" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1"/>
+  <text class="card-title" x="654" y="128">Lossless Information Firewall</text>
+  <text class="card-desc" x="654" y="146">Consumes compact `RoundReceiptSchema`</text>
+
+  <!-- Arrow F0 -> Kernel -->
+  <line class="solid-arrow" x1="480" y1="178" x2="480" y2="206" marker-end="url(#arrow)"/>
+  <text class="mono-badge" x="492" y="196">Stdio MCP (22 Tools) / CLI Dispatch</text>
+
+  <!-- TIER 2: g8s PURE-GO KERNEL -->
+  <rect x="32" y="210" width="896" height="142" rx="12" fill="url(#kernelGrad)" stroke="#10b981" stroke-width="1.5"/>
+  <text class="tier-label" x="48" y="232" fill="#6ee7b7">g8s HARNESS KERNEL — PURE-GO ZERO-TRUST ENFORCEMENT ENGINE</text>
+
+  <rect x="48" y="244" width="166" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text class="card-title" x="60" y="266">Pre-Exec Gate</text>
+  <text class="card-desc" x="60" y="284">• Lane 0/D/R/F/S</text>
+  <text class="card-desc" x="60" y="300">• CVE &amp; World-State</text>
+  <text class="card-desc" x="60" y="316">• Socratic Debate</text>
+
+  <rect x="226" y="244" width="166" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text class="card-title" x="238" y="266">ContextPack</text>
+  <text class="card-desc" x="238" y="284">• Pre-AST DLP Scrub</text>
+  <text class="card-desc" x="238" y="300">• 4-Tier AST Elision</text>
+  <text class="card-desc" x="238" y="316">• PageRank + Knapsack</text>
+
+  <rect x="404" y="244" width="166" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text class="card-title" x="416" y="266">WriteReceipt &amp; WAL</text>
+  <text class="card-desc" x="416" y="284">• Single-Use Token</text>
+  <text class="card-desc" x="416" y="300">• AllowedPaths Jail</text>
+  <text class="card-desc" x="416" y="316">• Atomic CAS Lease</text>
+
+  <rect x="582" y="244" width="166" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text class="card-title" x="594" y="266">Provider &amp; Scorecard</text>
+  <text class="card-desc" x="594" y="284">• 9router / OpenAI</text>
+  <text class="card-desc" x="594" y="300">• agy / claude / codex</text>
+  <text class="card-desc" x="594" y="316">• Auto-Quarantine</text>
+
+  <rect x="760" y="244" width="152" height="92" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="1"/>
+  <text class="card-title" x="772" y="266">6-Stage QA &amp; Lock</text>
+  <text class="card-desc" x="772" y="284">• Holdout Partition</text>
+  <text class="card-desc" x="772" y="300">• Mutant Canary</text>
+  <text class="card-desc" x="772" y="316">• DeviceLeasePool</text>
+
+  <!-- Arrows Kernel -> F1 -->
+  <line class="solid-arrow" x1="280" y1="352" x2="280" y2="382" marker-end="url(#arrow)"/>
+  <line class="solid-arrow" x1="690" y1="352" x2="690" y2="382" marker-end="url(#arrow)"/>
+  <text class="mono-badge" x="300" y="372">Isolated Git Worktree + Setpgid + skill://g8s/</text>
+
+  <!-- TIER 3: F1 WORKERS & F2 SUBAGENTS -->
+  <rect x="32" y="386" width="896" height="130" rx="12" fill="url(#f1Grad)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text class="tier-label" x="48" y="408" fill="#7dd3fc">RING F1 (WORKER MUSCLE) &amp; RING F2 (RECURSIVE SUBAGENT: F2 ⊆ F1 ⊆ F0)</text>
+
+  <rect x="48" y="420" width="350" height="80" rx="8" fill="#0f172a" stroke="#0284c7" stroke-width="1"/>
+  <text class="card-title" x="62" y="442">F1 / S3-M BoundedMutator</text>
+  <text class="card-desc" x="62" y="460">Roles: `implementer`, `test-runner` (workspace_write)</text>
+  <text class="card-desc" x="62" y="478">Mutates only `WriteReceipt.AllowedPaths` in private worktree</text>
+
+  <rect x="418" y="420" width="230" height="80" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 2"/>
+  <text class="card-title" x="432" y="442">F2 Recursive Subagent</text>
+  <text class="card-desc" x="432" y="460">Spawned inside F1 sandbox</text>
+  <text class="card-desc" x="432" y="478">Inherits F1 receipt &amp; scope</text>
+
+  <line class="connector" x1="398" y1="460" x2="418" y2="460"/>
+
+  <rect x="668" y="420" width="244" height="80" rx="8" fill="#0f172a" stroke="#f59e0b" stroke-width="1"/>
+  <text class="card-title" x="682" y="442">F1 / S3-A BlindAdjudicator</text>
+  <text class="card-desc" x="682" y="460">Roles: `verifier`, `sec-auditor`, `scout`</text>
+  <text class="card-desc" x="682" y="478">Disjoint model family; read_only</text>
+</svg>
