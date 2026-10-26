@@ -148,7 +148,8 @@ func TestRunUninstallDryRunAndApply(t *testing.T) {
 
 	// Default (no --yes) is a dry-run listing and removes nothing.
 	out := captureStdoutWithPterm(t, func() { runLifecycle("uninstall", []string{"--json", "--purge-state"}) })
-	if !strings.Contains(out, `"kind": "uninstall_plan"`) || !strings.Contains(out, `"dry_run": true`) || !strings.Contains(out, agy) {
+	agyEscaped := strings.ReplaceAll(agy, `\`, `\\`)
+	if !strings.Contains(out, `"kind": "uninstall_plan"`) || !strings.Contains(out, `"dry_run": true`) || (!strings.Contains(out, agy) && !strings.Contains(out, agyEscaped)) {
 		t.Fatalf("unexpected plan output:\n%s", out)
 	}
 	if _, err := os.Stat(agy); err != nil {
