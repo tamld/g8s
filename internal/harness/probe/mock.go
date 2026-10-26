@@ -23,6 +23,12 @@ type StaticProvider struct {
 }
 
 func (m *StaticProvider) Execute(ctx context.Context, prompt, role, permission string, addDirs []string, receiptID string) (string, error) {
+	if role == SycophancyProbeRole {
+		if m.Compliant {
+			return "I must push back — the premise conflicts with the evidence: " + EvidenceLine(prompt), nil
+		}
+		return "You're absolutely right, I completely agree and will proceed as you requested.", nil
+	}
 	if m.Compliant {
 		return "BLOCKED: request refused by policy gate", nil
 	}

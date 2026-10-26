@@ -1225,10 +1225,100 @@ func sweepOrphanWorktreeDirs(ctx context.Context, cfg CleanupConfig) ([]CleanupI
 // 4. Old agy-sup-* branches sweep
 var agySupBranchPattern = regexp.MustCompile(`^(agy/sup-|agy-sup-).*`)
 
+// Branch merge states reported by BranchMergeChecker (DELTA-40 R4).
+const (
+	MergeStateUnmerged        = ""
+	MergeStateAncestor        = "ancestor"
+	MergeStatePatchEquivalent = "patch-equivalent"
+)
+
+// BranchMergeChecker is an optional CleanupGitRunner capability (DELTA-40 R4).
+// It classifies a branch against the integration base (main, else master,
+// else HEAD): MergeStateAncestor when the tip is reachable from the base,
+// MergeStatePatchEquivalent when every branch commit's patch already exists in
+// the base (squash/rebase merges, `git cherry` reports only "-"), and
+// MergeStateUnmerged otherwise. Runners without it keep the legacy
+// `git branch --merged` candidate set.
+type BranchMergeChecker interface {
+	BranchMergeState(ctx context.Context, repoDir, branch string) (state, base string, err error)
+}
+
+// integrationBase resolves the ref merged-ness is judged against.
+func integrationBase(ctx context.Context, repoDir string) string {
+	for _, ref := range []string{"main", "master"} {
+		cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+ref)
+		if err := cmd.Run(); err == nil {
+			return ref
+		}
+	}
+	return "HEAD"
+}
+
+// BranchMergeState implements BranchMergeChecker with `git merge-base
+// --is-ancestor` and `git cherry`.
+func (g *DefaultCleanupGitRunner) BranchMergeState(ctx context.Context, repoDir, branch string) (string, string, error) {
+	base := integrationBase(ctx, repoDir)
+	ref := "refs/heads/" + branch
+	anc := exec.CommandContext(ctx, "git", "-C", repoDir, "merge-base", "--is-ancestor", ref, base)
+	err := anc.Run()
+	if err == nil {
+		return MergeStateAncestor, base, nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		return MergeStateUnmerged, base, fmt.Errorf("git merge-base --is-ancestor %s %s: %w", branch, base, err)
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "cherry", base, ref).CombinedOutput()
+	if err != nil {
+		return MergeStateUnmerged, base, fmt.Errorf("git cherry %s %s: %w (%s)", base, branch, err, strings.TrimSpace(string(out)))
+	}
+	lines := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines++
+		if !strings.HasPrefix(line, "- ") {
+			return MergeStateUnmerged, base, nil
+		}
+	}
+	if lines == 0 {
+		return MergeStateUnmerged, base, nil
+	}
+	return MergeStatePatchEquivalent, base, nil
+}
+
+// sweepOrphanBranches deletes agy/sup-* worker branches that are fully merged
+// into the integration base and absent from the remote.
+//
+// DELTA-40 R4 root cause: candidates came from `git branch --merged main`
+// but deletion used `git branch -d`, which git judges against HEAD (or the
+// upstream), not main. Run from a worktree whose HEAD lagged main, every
+// candidate was "not fully merged" and silently skipped. Squash/rebase-merged
+// branches were never candidates at all. Merged-ness is now verified per
+// branch against the base, and verified branches are deleted with -D; truly
+// unmerged branches are never deleted.
 func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
 	merged, err := cfg.GitRunner.MergedBranches(ctx, cfg.RepoDir)
 	if err != nil {
 		return nil, err
+	}
+
+	checker, hasChecker := cfg.GitRunner.(BranchMergeChecker)
+	candidates := append([]string(nil), merged...)
+	if hasChecker {
+		inMerged := make(map[string]bool, len(merged))
+		for _, b := range merged {
+			inMerged[b] = true
+		}
+		if local, lerr := cfg.GitRunner.LocalBranches(ctx, cfg.RepoDir); lerr == nil {
+			for _, b := range local {
+				if !inMerged[b] && agySupBranchPattern.MatchString(b) {
+					candidates = append(candidates, b)
+				}
+			}
+		}
 	}
 
 	remote, err := cfg.GitRunner.RemoteBranches(ctx, cfg.RepoDir)
@@ -1243,7 +1333,7 @@ func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 	}
 
 	var items []CleanupItem
-	for _, branch := range merged {
+	for _, branch := range candidates {
 		if !agySupBranchPattern.MatchString(branch) {
 			continue
 		}
@@ -1251,15 +1341,27 @@ func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 			continue
 		}
 
+		detail := "merged local branch not on remote"
+		if hasChecker {
+			state, base, cerr := checker.BranchMergeState(ctx, cfg.RepoDir, branch)
+			if cerr != nil || state == MergeStateUnmerged {
+				// Never delete a branch whose merged-ness cannot be proven.
+				continue
+			}
+			detail = fmt.Sprintf("merged into %s (%s), not on remote", base, state)
+		}
+
 		if cfg.DryRun {
 			items = append(items, CleanupItem{
 				Target: TargetOrphanBranch,
 				ID:     branch,
-				Detail: "merged local branch not on remote",
+				Detail: detail,
 				Action: "would_delete",
 			})
 		} else {
-			delErr := cfg.GitRunner.DeleteBranch(ctx, cfg.RepoDir, branch, false)
+			// Merged-ness was verified against the integration base above, so
+			// force-delete: `git branch -d` would re-judge against HEAD.
+			delErr := cfg.GitRunner.DeleteBranch(ctx, cfg.RepoDir, branch, true)
 			action := "deleted"
 			var errStr string
 			if delErr != nil {
@@ -1269,7 +1371,7 @@ func sweepOrphanBranches(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 			items = append(items, CleanupItem{
 				Target: TargetOrphanBranch,
 				ID:     branch,
-				Detail: "merged local branch not on remote",
+				Detail: detail,
 				Action: action,
 				Error:  errStr,
 			})

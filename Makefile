@@ -5,7 +5,7 @@ GO ?= go
 all: build
 
 local:
-	@$(GO) build -o bin/g8s ./cmd/g8s
+	@$(GO) build -ldflags="-X main.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown) -X main.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildSource=local-dev" -o bin/g8s ./cmd/g8s
 
 pre-push:
 	@bash tools/pre_push.sh

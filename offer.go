@@ -10,12 +10,24 @@ import (
 	"strings"
 )
 
+//go:embed manifest.json
 //go:embed offer/profiles/*.md offer/ONBOARDING.md offer/README.md
 //go:embed offer/profiles/seeds/*.trust.yml offer/profiles/seeds/*.lanes.yml
 //go:embed tools/ci_spec_code_sync.sh tools/ci_spec_code_sync_test.sh
 //go:embed tools/ci_structure_sync.sh tools/ci_structure_sync_test.sh
 //go:embed tools/ci_link_integrity.sh tools/ci_link_integrity_test.sh
 var bundleFS embed.FS
+
+// EmbeddedManifest returns the raw SSoT manifest.json embedded at compile time
+// so that `g8s --version` always exposes full manifest metadata regardless of
+// the working directory (e.g. C:\Windows\System32) or installation method.
+func EmbeddedManifest() []byte {
+	raw, err := fs.ReadFile(bundleFS, "manifest.json")
+	if err != nil {
+		return nil
+	}
+	return raw
+}
 
 // Profiles returns the embedded profile markdown files keyed by profile
 // name (knowledge, security, infra, utility).

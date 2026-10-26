@@ -247,6 +247,10 @@ func main() {
 		runContextPack(os.Args[2:])
 	case "qa-report":
 		runQAReport(os.Args[2:])
+	case "update", "uninstall":
+		runLifecycle(command, os.Args[2:])
+	case "claim":
+		runClaim(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -341,6 +345,9 @@ func runProviders(args []string) {
 			return
 		case "evaluate":
 			runProvidersEvaluate(args[1:])
+			return
+		case "conformance":
+			runProvidersConformance(args[1:])
 			return
 		}
 	}
@@ -1677,6 +1684,8 @@ func printUsage() {
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
 	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor [--fix])")
 	fmt.Println("  init         Initialize g8s and configure IDE MCP integration (g8s init)")
+	fmt.Println("  update       Self-update from GitHub releases with SHA-256 verification (g8s update [--check] [--version vX.Y.Z])")
+	fmt.Println("  uninstall    Remove binary, MCP entries and service unit; dry-run unless --yes (g8s uninstall [--purge-state] [--yes])")
 	fmt.Println("  config       Manage persistent configuration key-values (g8s config get|set|list)")
 	fmt.Println("  completion   Generate shell autocompletion scripts (g8s completion bash|zsh|fish)")
 	fmt.Println("  service      Manage background daemon lifecycle (g8s service install|start|status)")

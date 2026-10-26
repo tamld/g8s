@@ -48,6 +48,10 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-37`](37-six-stage-ai-qa-pipeline-spec.md)** | End-to-End 6-Stage AI QA Pipeline (BA-to-Spec Matrix, Holdout Partition, and Epistemic QA Report) | `internal/verifier`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-38`](38-device-lease-and-mobile-gate-spec.md)** | Exclusive Device-Lease Concurrency Governor & `g8s-mobile-gate` Emulator Contract | `internal/provider`, `skills/g8s-mobile-gate` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-39`](39-universal-cli-agent-adapter-spec.md)** | Universal CLI Agent Adapter Suite (`opencode`, `commandcode`, `codex`) & Free-Model Tiered Routing | `internal/provider`, `internal/worker`, `internal/routing` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-40`](40-lifecycle-uninstall-update-spec.md)** | Binary Lifecycle CLI (`g8s update`, `g8s uninstall`), Build Manifest & Merged Worker-Branch Sweep Repair | `internal/lifecycle`, `internal/cleanup`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-41`](41-feature-map-v2-collision-domains-spec.md)** | Feature Map v2 — Collision Domains, Exclusive Ownership & Pre-Dispatch Collision Verdicts | `internal/featuremap`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-42`](42-premise-challenge-and-sycophancy-gate-spec.md)** | Premise Challenge & Anti-Sycophancy Evidence Gate | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-43`](43-provider-conformance-matrix-spec.md)** | Provider Conformance Ground-Truth Matrix & Role-Tier Gating | `internal/provider/conformance`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 
 ---
 

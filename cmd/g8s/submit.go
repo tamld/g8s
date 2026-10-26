@@ -20,6 +20,7 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/lane"
+	"github.com/tamld/g8s/internal/premise"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/settings"
@@ -53,6 +54,10 @@ func runSubmit(args []string) {
 	blastRadiusFlag := fs.String("blast-radius", "", "declared blast radius (low|medium|high)")
 	locEstimateFlag := fs.Int("loc-estimate", 0, "declared LOC estimate (positive int)")
 	classFlag := fs.String("class", "", "explicit effort class hint (e.g. docs, test, feature, discovery)")
+	premiseCheck := fs.Bool("premise-check", false, "run the DELTA-42 premise gate on the brief and refuse contradicted premises (E_PREMISE_CONTRADICTED)")
+	premiseRepo := fs.String("premise-repo", "", "repository root for --premise-check probes (defaults to the working directory)")
+	overrideReason := fs.String("override-reason", "", "explicit operator reason to dispatch despite contradicted premises (recorded in the event log)")
+	enforceConformance := fs.Bool("enforce-conformance", false, "refuse dispatch when the provider FAILed required DELTA-43 conformance probes (.g8s/provider-conformance.yml)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
@@ -169,6 +174,28 @@ func runSubmit(args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to resolve working directory", *jsonl)
+	}
+
+	// DELTA-42: optional pre-dispatch premise gate. A brief whose repo
+	// premises are refuted by deterministic probes is not dispatched unless
+	// the operator records an explicit override reason.
+	if strings.TrimSpace(*overrideReason) != "" && !*premiseCheck {
+		exitUsage("submit", "override-reason", *traceID, "--override-reason requires --premise-check", "Add --premise-check or drop --override-reason", *jsonl)
+	}
+	var premiseResult *premiseGateResult
+	if *premiseCheck {
+		repoRoot := *premiseRepo
+		if repoRoot == "" {
+			repoRoot = cwd
+		}
+		res, gateErr := evaluatePremiseGate(context.Background(), prompt, repoRoot, *overrideReason)
+		if gateErr != nil {
+			exitRuntime("submit", "premise-check", *traceID, cli.CodeInvalid, fmt.Errorf("premise check failed: %w", gateErr), "Check --premise-repo", *jsonl)
+		}
+		if res.Blocked {
+			exitRuntime("submit", "premise-check", *traceID, premise.ErrorCodePremiseContradicted, errors.New(contradictionMessage(res.Report)), "Correct the brief, or pass --override-reason \"<why>\" to dispatch anyway (recorded in the event log)", *jsonl)
+		}
+		premiseResult = res
 	}
 
 	dirs := []string(addDirs)
@@ -382,6 +409,14 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
 	}
 
+	// DELTA-43: consult provider conformance ground truth (warn; refuse only when enforced).
+	if warning, refuse := conformanceGate(effectiveProvider, *enforceConformance); warning != "" {
+		if refuse {
+			exitRuntime("submit", "conformance", *traceID, cli.CodeDenied, errors.New(warning), "Re-run 'g8s providers conformance --live' or choose another provider", *jsonl)
+		}
+		fmt.Fprintf(os.Stderr, "[warn] submit: %s\n", warning)
+	}
+
 	dbPath, err := databasePath()
 	if err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to resolve database path", *jsonl)
@@ -446,6 +481,9 @@ func runSubmit(args []string) {
 	if effortRes.BudgetTokens > 0 {
 		payloadMap["effort_budget_tokens"] = effortRes.BudgetTokens
 	}
+	if premiseResult != nil {
+		payloadMap["premise_check"] = premisePayload(premiseResult, *overrideReason)
+	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to serialize task payload", *jsonl)
@@ -503,6 +541,11 @@ func runSubmit(args []string) {
 	})
 	if err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to submit task", *jsonl)
+	}
+	if premiseResult != nil && premiseResult.Overridden {
+		if logErr := recordPremiseOverride(context.Background(), store, task.TaskID, *actor, premiseResult, *overrideReason); logErr != nil {
+			exitRuntime("submit", "premise-check", *traceID, cli.CodeRuntime, logErr, "Premise override could not be recorded in the event log", *jsonl)
+		}
 	}
 
 	env := cli.NewEnvelope("task", "submit", "", task)

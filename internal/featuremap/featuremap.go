@@ -20,34 +20,171 @@ type BlastRadius struct {
 	DirectConsumers []string `yaml:"direct_consumers" json:"direct_consumers"`
 }
 
+// Supported feature map schema versions. Version 2.0 (DELTA-41) is a strict
+// superset of 1.0: every 1.0 document still loads and validates unchanged.
+const (
+	SchemaV1 = "1.0"
+	SchemaV2 = "2.0"
+)
+
+// Interfaces lists the exported contracts a feature owns (DELTA-41). Each entry
+// must be unique across the whole map so that contract ownership is unambiguous.
+type Interfaces struct {
+	CLI           []string `yaml:"cli,omitempty" json:"cli,omitempty"`
+	MCPTools      []string `yaml:"mcp_tools,omitempty" json:"mcp_tools,omitempty"`
+	EnvelopeKinds []string `yaml:"envelope_kinds,omitempty" json:"envelope_kinds,omitempty"`
+	GoPackages    []string `yaml:"go_packages,omitempty" json:"go_packages,omitempty"`
+}
+
 // FeatureNode represents a single functional feature entry in the feature map DAG.
 type FeatureNode struct {
-	ID            string      `yaml:"id" json:"id"`
-	Title         string      `yaml:"title" json:"title"`
-	PersonaStory  string      `yaml:"persona_story" json:"persona_story"`
-	SRSReqs       []string    `yaml:"srs_reqs" json:"srs_reqs"`
-	OpenSpecDelta string      `yaml:"openspec_delta,omitempty" json:"openspec_delta,omitempty"`
-	CodePaths     []string    `yaml:"code_paths" json:"code_paths"`
-	Invariants    []string    `yaml:"invariants" json:"invariants"`
-	VisibleTests  []string    `yaml:"visible_tests" json:"visible_tests"`
-	HoldoutTests  []string    `yaml:"holdout_tests,omitempty" json:"holdout_tests,omitempty"`
-	VerifierClass string      `yaml:"verifier_class" json:"verifier_class"`
-	BlastRadius   BlastRadius `yaml:"blast_radius" json:"blast_radius"`
+	ID            string   `yaml:"id" json:"id"`
+	Title         string   `yaml:"title" json:"title"`
+	PersonaStory  string   `yaml:"persona_story" json:"persona_story"`
+	SRSReqs       []string `yaml:"srs_reqs" json:"srs_reqs"`
+	OpenSpecDelta string   `yaml:"openspec_delta,omitempty" json:"openspec_delta,omitempty"`
+	// OpenSpecDeltas (v2) lists every delta governing the feature. The legacy
+	// single-valued OpenSpecDelta is kept as an alias and folded in by Normalize.
+	OpenSpecDeltas []string `yaml:"openspec_deltas,omitempty" json:"openspec_deltas,omitempty"`
+	CodePaths      []string `yaml:"code_paths" json:"code_paths"`
+	// OwnedPaths (v2) is the feature's exclusive write territory. Entries are
+	// globs; a leading `!` excludes a sub-region. Owned sets of two features
+	// MUST NOT overlap and MUST NOT overlap any hotspot.
+	OwnedPaths []string `yaml:"owned_paths,omitempty" json:"owned_paths,omitempty"`
+	// SharedPaths (v2) declares hotspot paths the feature legitimately edits.
+	// Every entry MUST be covered by a declared top-level hotspot.
+	SharedPaths []string `yaml:"shared_paths,omitempty" json:"shared_paths,omitempty"`
+	// CollisionDomain (v2) groups features that must never run in parallel
+	// (for example two features sharing one Go package). Defaults to ID.
+	CollisionDomain string      `yaml:"collision_domain,omitempty" json:"collision_domain,omitempty"`
+	Interfaces      *Interfaces `yaml:"interfaces,omitempty" json:"interfaces,omitempty"`
+	Invariants      []string    `yaml:"invariants" json:"invariants"`
+	VisibleTests    []string    `yaml:"visible_tests" json:"visible_tests"`
+	HoldoutTests    []string    `yaml:"holdout_tests,omitempty" json:"holdout_tests,omitempty"`
+	VerifierClass   string      `yaml:"verifier_class" json:"verifier_class"`
+	BlastRadius     BlastRadius `yaml:"blast_radius" json:"blast_radius"`
+}
+
+// Domain returns the feature's collision domain, defaulting to its ID.
+func (f *FeatureNode) Domain() string {
+	if d := strings.TrimSpace(f.CollisionDomain); d != "" {
+		return d
+	}
+	return f.ID
+}
+
+// OwnedSet returns the feature's exclusive path set. For v1 nodes without
+// owned_paths it falls back to code_paths so collision analysis still works.
+func (f *FeatureNode) OwnedSet() PathSet {
+	if len(f.OwnedPaths) > 0 {
+		return NewPathSet(f.OwnedPaths)
+	}
+	return NewPathSet(f.CodePaths)
+}
+
+// Hotspot policies (DELTA-41).
+const (
+	PolicySerialize   = "serialize"
+	PolicyAppendOnly  = "append-only"
+	PolicyOwnerPrefix = "owner:"
+)
+
+// Hotspot is a shared, multi-writer region of the repository with an explicit
+// merge policy: `serialize`, `append-only`, or `owner:<FEATURE-ID>`.
+type Hotspot struct {
+	ID        string   `yaml:"id" json:"id"`
+	Path      string   `yaml:"path,omitempty" json:"-"`
+	Paths     []string `yaml:"paths" json:"paths"`
+	Policy    string   `yaml:"policy" json:"policy"`
+	Rationale string   `yaml:"rationale,omitempty" json:"rationale,omitempty"`
+}
+
+// Set returns the hotspot's path set.
+func (h *Hotspot) Set() PathSet { return NewPathSet(h.Paths) }
+
+// Owner returns the owning feature ID for `owner:<FEAT>` policies.
+func (h *Hotspot) Owner() string {
+	if strings.HasPrefix(h.Policy, PolicyOwnerPrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(h.Policy, PolicyOwnerPrefix))
+	}
+	return ""
 }
 
 // FeatureMap represents the top-level declarative feature map schema.
 type FeatureMap struct {
 	SchemaVersion string        `yaml:"schema_version" json:"schema_version"`
+	Hotspots      []Hotspot     `yaml:"hotspots,omitempty" json:"hotspots,omitempty"`
 	Features      []FeatureNode `yaml:"features" json:"features"`
+}
+
+// IsV2 reports whether the map declares schema 2.0.
+func (fm *FeatureMap) IsV2() bool { return fm != nil && fm.SchemaVersion == SchemaV2 }
+
+// Normalize folds legacy aliases into their v2 forms: openspec_delta joins
+// openspec_deltas (and is back-filled from it), and hotspot `path` joins `paths`.
+func (fm *FeatureMap) Normalize() {
+	if fm == nil {
+		return
+	}
+	for i := range fm.Features {
+		f := &fm.Features[i]
+		var deltas []string
+		seen := make(map[string]bool)
+		add := func(d string) {
+			d = strings.TrimSpace(d)
+			if d != "" && !seen[d] {
+				seen[d] = true
+				deltas = append(deltas, d)
+			}
+		}
+		add(f.OpenSpecDelta)
+		for _, d := range f.OpenSpecDeltas {
+			add(d)
+		}
+		f.OpenSpecDeltas = deltas
+		if strings.TrimSpace(f.OpenSpecDelta) == "" && len(deltas) > 0 {
+			f.OpenSpecDelta = deltas[0]
+		}
+	}
+	for i := range fm.Hotspots {
+		h := &fm.Hotspots[i]
+		if p := strings.TrimSpace(h.Path); p != "" {
+			h.Paths = append([]string{p}, h.Paths...)
+			h.Path = ""
+		}
+	}
 }
 
 // ValidationReport contains the outcome of validating a FeatureMap against invariants and codebase structure.
 type ValidationReport struct {
 	Valid                bool     `json:"valid"`
+	SchemaVersion        string   `json:"schema_version,omitempty"`
+	Strict               bool     `json:"strict,omitempty"`
 	FeatureCount         int      `json:"feature_count"`
+	HotspotCount         int      `json:"hotspot_count,omitempty"`
 	Errors               []string `json:"errors,omitempty"`
+	Warnings             []string `json:"warnings,omitempty"`
 	OrphanPaths          []string `json:"orphan_paths,omitempty"`
 	UnverifiedInvariants []string `json:"unverified_invariants,omitempty"`
+	// Ownership coverage statistics (v2 only, populated when a repo root is given).
+	Coverage *OwnershipCoverage `json:"coverage,omitempty"`
+}
+
+// OwnershipCoverage summarises how tracked files partition into owned and hotspot regions.
+type OwnershipCoverage struct {
+	TrackedFiles int      `json:"tracked_files"`
+	OwnedFiles   int      `json:"owned_files"`
+	HotspotFiles int      `json:"hotspot_files"`
+	OrphanFiles  []string `json:"orphan_files,omitempty"`
+}
+
+// ValidateOptions tunes ValidateWithOptions.
+type ValidateOptions struct {
+	// Strict promotes orphan-file warnings to errors.
+	Strict bool
+	// TrackedFiles overrides tracked-file discovery (tests). When nil the files
+	// are discovered with `git ls-files`, falling back to a filesystem walk.
+	TrackedFiles []string
 }
 
 // Load reads and parses a FeatureMap YAML file from the given path.
@@ -65,6 +202,7 @@ func Parse(data []byte) (*FeatureMap, error) {
 	if err := yaml.Unmarshal(data, &fm); err != nil {
 		return nil, fmt.Errorf("parse feature map yaml: %w", err)
 	}
+	fm.Normalize()
 	return &fm, nil
 }
 
@@ -192,15 +330,24 @@ func (fm *FeatureMap) ResolveTransitiveFeatures(featureID string) ([]FeatureNode
 
 // Validate checks the feature map structure, graph acyclicity, and optional codebase anchors under repoRoot.
 func Validate(fm *FeatureMap, repoRoot string) ValidationReport {
+	return ValidateWithOptions(fm, repoRoot, ValidateOptions{})
+}
+
+// ValidateWithOptions is Validate with explicit options (strict orphan-file mode,
+// injected tracked-file list). Schema 2.0 maps additionally get DELTA-41
+// ownership, hotspot, interface, and orphan-file validation.
+func ValidateWithOptions(fm *FeatureMap, repoRoot string, opts ValidateOptions) ValidationReport {
 	var report ValidationReport
+	report.Strict = opts.Strict
 
 	if fm == nil {
 		report.Errors = append(report.Errors, "feature map is nil")
 		return report
 	}
+	report.SchemaVersion = fm.SchemaVersion
 
-	if fm.SchemaVersion != "1.0" {
-		report.Errors = append(report.Errors, fmt.Sprintf("unsupported schema_version: %q (expected 1.0)", fm.SchemaVersion))
+	if fm.SchemaVersion != SchemaV1 && fm.SchemaVersion != SchemaV2 {
+		report.Errors = append(report.Errors, fmt.Sprintf("unsupported schema_version: %q (expected %s or %s)", fm.SchemaVersion, SchemaV1, SchemaV2))
 	}
 
 	if len(fm.Features) == 0 {
@@ -381,9 +528,13 @@ func Validate(fm *FeatureMap, repoRoot string) ValidationReport {
 		if manifestBytes, err := os.ReadFile(manifestPath); err == nil {
 			manifestContent := string(manifestBytes)
 			for _, f := range fm.Features {
-				if f.OpenSpecDelta != "" {
-					if !strings.Contains(manifestContent, f.OpenSpecDelta) {
-						report.Errors = append(report.Errors, fmt.Sprintf("feature %s: openspec_delta %q not found in manifest.json", f.ID, f.OpenSpecDelta))
+				deltas := f.OpenSpecDeltas
+				if len(deltas) == 0 && f.OpenSpecDelta != "" {
+					deltas = []string{f.OpenSpecDelta}
+				}
+				for _, d := range deltas {
+					if !strings.Contains(manifestContent, d) {
+						report.Errors = append(report.Errors, fmt.Sprintf("feature %s: openspec_delta %q not found in manifest.json", f.ID, d))
 					}
 				}
 			}
@@ -433,7 +584,12 @@ func Validate(fm *FeatureMap, repoRoot string) ValidationReport {
 		}
 	}
 
+	if fm.IsV2() {
+		validateV2(fm, repoRoot, opts, &report)
+	}
+
 	sort.Strings(report.Errors)
+	sort.Strings(report.Warnings)
 	sort.Strings(report.OrphanPaths)
 	sort.Strings(report.UnverifiedInvariants)
 

@@ -23,6 +23,7 @@ builds:
       - -X main.Version={{.Version}}
       - -X main.Commit={{.Commit}}
       - -X main.BuildTime={{.Date}}
+      - -X main.BuildSource=release
   - id: g8s-windows
     main: ./cmd/g8s
     binary: g8s
@@ -32,11 +33,13 @@ builds:
       - windows
     goarch:
       - amd64
+      - arm64
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
       - -X main.Commit={{.Commit}}
       - -X main.BuildTime={{.Date}}
+      - -X main.BuildSource=release
 
 universal_binaries:
   - id: darwin_all
@@ -51,6 +54,9 @@ archives:
     files:
       - README.md
       - LICENSE
+      - manifest.json
+      - scripts/install.sh
+      - scripts/install.ps1
       - docs/*
       - spec/constitution.md
     format_overrides:

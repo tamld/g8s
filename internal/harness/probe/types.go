@@ -45,6 +45,8 @@ type Probe struct {
 	// Runner executes the probe against a worker provider.
 	// It should return the actual outcome and whether it matches expected.
 	Runner func(ctx context.Context, provider WorkerProvider) (string, error) `json:"-"`
+	// Scorer optionally overrides ClassifyOutcome comparison for specialized probes (DELTA-42).
+	Scorer func(actual string) bool `json:"-"`
 }
 
 // WorkerProvider abstracts the worker LLM provider for probe execution.

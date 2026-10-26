@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -212,4 +213,66 @@ func atoiOrZero(s string) int {
 		n = n*10 + int(r-'0')
 	}
 	return n
+}
+
+func TestResolveBuildMetadataNeverUnknown(t *testing.T) {
+	origVersion, origCommit, origBuildTime, origSource, origMod := Version, Commit, BuildTime, BuildSource, VCSModified
+	defer func() {
+		Version, Commit, BuildTime, BuildSource, VCSModified = origVersion, origCommit, origBuildTime, origSource, origMod
+	}()
+
+	t.Run("go-install tagged release", func(t *testing.T) {
+		Version, Commit, BuildTime, BuildSource, VCSModified = "0.20.0", "unknown", "unknown", "unknown", "false"
+		resolveBuildMetadata(&debug.BuildInfo{
+			Main: debug.Module{
+				Path:    "github.com/tamld/g8s",
+				Version: "v0.20.0",
+				Sum:     "h1:xyz789=",
+			},
+		}, true)
+		if Commit == "unknown" || !strings.Contains(Commit, "v0.20.0") {
+			t.Errorf("Commit = %q, want non-unknown with v0.20.0", Commit)
+		}
+		if BuildTime == "unknown" || !strings.Contains(BuildTime, "module build") {
+			t.Errorf("BuildTime = %q, want module build", BuildTime)
+		}
+		if BuildSource != "go-install" {
+			t.Errorf("BuildSource = %q, want go-install", BuildSource)
+		}
+	})
+
+	t.Run("go-install pseudo-version", func(t *testing.T) {
+		Version, Commit, BuildTime, BuildSource, VCSModified = "0.20.0", "unknown", "unknown", "unknown", "false"
+		resolveBuildMetadata(&debug.BuildInfo{
+			Main: debug.Module{
+				Path:    "github.com/tamld/g8s",
+				Version: "v0.20.1-0.20261026140000-abcdef123456",
+			},
+		}, true)
+		if !strings.Contains(Commit, "abcdef123456") {
+			t.Errorf("Commit = %q, want pseudo-version hash abcdef123456", Commit)
+		}
+		if BuildSource != "go-install" {
+			t.Errorf("BuildSource = %q, want go-install", BuildSource)
+		}
+	})
+
+	t.Run("local untracked fallback", func(t *testing.T) {
+		Version, Commit, BuildTime, BuildSource, VCSModified = "0.20.0", "unknown", "unknown", "unknown", "false"
+		resolveBuildMetadata(nil, false)
+		if Commit == "unknown" || BuildTime == "unknown" || BuildSource == "unknown" {
+			t.Errorf("expected no unknown values, got Commit=%q BuildTime=%q BuildSource=%q", Commit, BuildTime, BuildSource)
+		}
+		if BuildSource != "local-untracked" {
+			t.Errorf("BuildSource = %q, want local-untracked", BuildSource)
+		}
+	})
+
+	t.Run("release ldflags", func(t *testing.T) {
+		Version, Commit, BuildTime, BuildSource, VCSModified = "0.20.0", "9779457", "2026-10-26T00:00:00Z", "unknown", "false"
+		resolveBuildMetadata(nil, false)
+		if BuildSource != "release" {
+			t.Errorf("BuildSource = %q, want release", BuildSource)
+		}
+	})
 }

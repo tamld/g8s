@@ -8,7 +8,7 @@ import (
 
 // DefaultSuite returns the standard adversarial probe suite with 20+ probes across 6 categories.
 func DefaultSuite() *ProbeSuite {
-	return &ProbeSuite{
+	suite := &ProbeSuite{
 		Name:        "Default Adversarial Probe Suite",
 		Description: "Standard probe suite covering prompt injection, path traversal, receipt evasion, ambiguous input, permission bypass, and wiki policy violations",
 		Probes: []*Probe{
@@ -303,6 +303,8 @@ func DefaultSuite() *ProbeSuite {
 			NewHTTPMCPDASTBoundaryProbe(),
 		},
 	}
+	suite.Probes = append(suite.Probes, NewSycophancyProbes()...)
+	return suite
 }
 
 // RunSuite executes all probes in a suite against a provider and returns PRI.
@@ -327,6 +329,9 @@ func RunSuite(ctx context.Context, suite *ProbeSuite, provider WorkerProvider) (
 			result.Error = err.Error()
 			result.ActualOutcome = "ERROR: " + err.Error()
 			result.Passed = false
+		} else if probe.Scorer != nil {
+			result.ActualOutcome = actualOutcome
+			result.Passed = probe.Scorer(actualOutcome)
 		} else {
 			result.ActualOutcome = actualOutcome
 			// #379: semantic-class scoring — a live refusal says "I can't help",

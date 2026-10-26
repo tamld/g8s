@@ -1,8 +1,166 @@
-schema_version: "1.0"
+schema_version: "2.0"
 # g8s Declarative End-to-End Feature Map (.g8s/feature-map.yml)
 # Maps 15 single-responsibility functional feature nodes to SRS requirements,
 # OpenSpec deltas, code paths, invariants, visible tests, verifier classes,
 # and acyclic blast radius graphs.
+#
+# Schema 2.0 (DELTA-41) adds collision domains: per-feature exclusive
+# owned_paths (`!` excludes a sub-region), shared_paths that must reference a
+# declared hotspot, a collision_domain id, exported interfaces, and
+# openspec_deltas (the legacy single-valued openspec_delta remains an alias).
+# Every tracked file must be matched by exactly one owned_paths set or by a
+# hotspot: `g8s feature verify --strict` enforces the partition and
+# `g8s feature collisions` uses it to decide parallel-safe | split | serialize.
+
+hotspots:
+  - id: "HOT-CLI-MAIN"
+    policy: "serialize"
+    rationale: "Single top-level command switch and help text; every new subcommand adds a registration line here."
+    paths:
+      - "cmd/g8s/main.go"
+
+  - id: "HOT-MANIFEST"
+    policy: "serialize"
+    rationale: "Machine-readable SSoT (deltas, roles, schemas); concurrent JSON edits conflict structurally."
+    paths:
+      - "manifest.json"
+
+  - id: "HOT-AGENTS-FULL"
+    policy: "append-only"
+    rationale: "OpenSpec registry table; each delta appends one row."
+    paths:
+      - "docs/AGENTS_FULL.md"
+
+  - id: "HOT-OPENSPEC-INDEX"
+    policy: "append-only"
+    rationale: "OpenSpec index table; each delta appends one row."
+    paths:
+      - "spec/openspec/README.md"
+
+  - id: "HOT-README"
+    policy: "serialize"
+    rationale: "Public product surface; prose rewrites conflict."
+    paths:
+      - "README.md"
+      - "README.vi.md"
+
+  - id: "HOT-CLI-REFERENCE"
+    policy: "owner:FEAT-PLATFORM-CLI-01"
+    rationale: "Operator CLI reference; other features route command docs through the CLI surface owner."
+    paths:
+      - "docs/user-guide/cli-reference.md"
+
+  - id: "HOT-CHANGELOG"
+    policy: "append-only"
+    rationale: "Release notes; entries are appended."
+    paths:
+      - "CHANGELOG.md"
+
+  - id: "HOT-GO-MODULE"
+    policy: "serialize"
+    rationale: "Module graph; dependency bumps must be serialized to keep go.sum consistent."
+    paths:
+      - "go.mod"
+      - "go.sum"
+
+  - id: "HOT-BUILD-CI"
+    policy: "serialize"
+    rationale: "Shared build, lint, and CI gate infrastructure consumed by every feature."
+    paths:
+      - "Makefile"
+      - ".github/**"
+      - ".golangci.yml"
+      - ".gitleaks.toml"
+      - ".semgrep/**"
+      - ".errcheck_excludes"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".g8s/coverage-baseline"
+      - "tools/pre_push.sh"
+      - "tools/pre_push_test.sh"
+      - "tools/setup_hooks.sh"
+      - "tools/ci_doc_contract_check.sh"
+      - "tools/ci_layer_check*.sh"
+      - "tools/ci_semgrep_check*.sh"
+      - "tools/ci_coverage_ratchet*.sh"
+      - "tools/ai_lint*.sh"
+      - "tools/ci_pr_contract*.sh"
+
+  - id: "HOT-CONSTITUTION"
+    policy: "serialize"
+    rationale: "Invariant laws; amendments are sovereign F0 decisions."
+    paths:
+      - "spec/constitution.md"
+
+  - id: "HOT-OPENSPEC-DELTAS"
+    policy: "append-only"
+    rationale: "One new file per delta; edits to an existing delta are rare and owned by the delta author."
+    paths:
+      - "spec/openspec/**"
+      - "!spec/openspec/README.md"
+
+  - id: "HOT-ADR"
+    policy: "append-only"
+    rationale: "Architecture decision records; one new file per decision."
+    paths:
+      - "docs/decisions/**"
+
+  - id: "HOT-PLANS"
+    policy: "append-only"
+    rationale: "Campaign ledgers and handoffs; new files per campaign."
+    paths:
+      - "plans/**"
+
+  - id: "HOT-REFERENCE"
+    policy: "serialize"
+    rationale: "Frozen Python baseline; read-only reference, any write needs F0 sign-off."
+    paths:
+      - "reference/**"
+
+  - id: "HOT-GOVERNANCE-DOCS"
+    policy: "serialize"
+    rationale: "Cross-cutting architecture, PRD/SRS, and governance prose not owned by a single feature."
+    paths:
+      - "docs/**"
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "LICENSE"
+      - "assets/**"
+      - "!docs/AGENTS_FULL.md"
+      - "!docs/decisions/**"
+      - "!docs/user-guide/cli-reference.md"
+      - "!docs/CLI_AND_EXPERIENCE_DESIGN.md"
+      - "!docs/CODING_SIGNING.md"
+      - "!docs/CONTEXTUAL_DISTILLATION_SPEC.md"
+      - "!docs/DECOUPLED_MEMORY_ARCHITECTURE.md"
+      - "!docs/DOD_DOR.md"
+      - "!docs/RELEASE_READINESS.md"
+      - "!docs/RELEASE_SOP.md"
+      - "!docs/RELEASE_STRATEGY.md"
+      - "!docs/SESSION_HYGIENE.md"
+      - "!docs/SUPERVISOR_PATTERNS.md"
+      - "!docs/VERSIONING.md"
+      - "!docs/WINDOWS_INSTALL.md"
+      - "!docs/claims.yml"
+      - "!docs/designs/gate-lane-routing.md"
+      - "!docs/designs/supervisor-fix-loop.md"
+      - "!docs/examples/**"
+      - "!docs/integrations/**"
+      - "!docs/lessons/**"
+      - "!docs/quickstart.md"
+      - "!docs/user-guide/autopilot.md"
+      - "!docs/user-guide/configuration.md"
+      - "!docs/user-guide/effort.md"
+      - "!docs/user-guide/mcp-tools.md"
+      - "!docs/user-guide/performance.md"
+      - "!docs/user-guide/provider-matrix.md"
+      - "!docs/user-guide/providers.md"
+      - "!docs/user-guide/receipt-workflow.md"
+      - "!docs/user-guide/routing.md"
+      - "!docs/user-guide/service.md"
+      - "!docs/user-guide/tenancy.md"
+      - "!docs/user-guide/verifier-and-autonomy.md"
 
 features:
   - id: "FEAT-CONTROLPLANE-01"
@@ -11,12 +169,56 @@ features:
     srs_reqs:
       - "FR-3"
       - "NFR-3"
-    openspec_delta: "DELTA-03"
+    openspec_deltas:
+      - "DELTA-03"
+      - "DELTA-12"
+      - "DELTA-15"
+      - "DELTA-17"
     code_paths:
       - "internal/controlplane/**"
       - "internal/state/**"
       - "internal/lockfile/**"
       - "internal/heartbeat/**"
+    collision_domain: "state-store"
+    owned_paths:
+      - "internal/controlplane/**"
+      - "internal/state/**"
+      - "internal/lockfile/**"
+      - "internal/heartbeat/**"
+      - "schemas/task-v1.schema.json"
+      - "schemas/result-v1.schema.json"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "submit"
+        - "get"
+        - "tasks"
+        - "cancel"
+        - "resume"
+        - "resubmit"
+        - "lineage"
+        - "children"
+        - "state"
+        - "migrate"
+      mcp_tools:
+        - "g8s_submit"
+        - "g8s_get"
+        - "g8s_list_tasks"
+        - "g8s_cancel_task"
+      envelope_kinds:
+        - "task"
+        - "tasks"
+        - "task_signal"
+        - "task_signal_timeout"
+        - "state"
+        - "resubmit"
+      go_packages:
+        - "internal/controlplane"
+        - "internal/state"
+        - "internal/lockfile"
+        - "internal/heartbeat"
     invariants:
       - "State transitions follow pure WAL SQLite state machine"
       - "Atomic CAS task claiming"
@@ -41,11 +243,37 @@ features:
     persona_story: "As a security supervisor, I need single-use path-scoped write receipts so that worker mutations are cryptographically authorized and strictly confined to assigned paths."
     srs_reqs:
       - "FR-2"
-    openspec_delta: "DELTA-02"
+    openspec_deltas:
+      - "DELTA-02"
+      - "DELTA-31"
     code_paths:
       - "internal/receipt/**"
       - "internal/signing/**"
       - "cmd/g8s/receipt_export.go"
+    collision_domain: "receipt-trust"
+    owned_paths:
+      - "internal/receipt/**"
+      - "internal/signing/**"
+      - "cmd/g8s/receipt_export*.go"
+      - "schemas/receipt-v1.schema.json"
+      - "docs/user-guide/receipt-workflow.md"
+      - "docs/CODING_SIGNING.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "receipt"
+        - "receipt-export"
+      mcp_tools:
+        - "g8s_receipt_issue"
+      envelope_kinds:
+        - "receipt"
+        - "receipts"
+        - "receipt_verification"
+      go_packages:
+        - "internal/receipt"
+        - "internal/signing"
     invariants:
       - "Single-use consumption (ValidateAndConsume)"
       - "Path scope enforcement"
@@ -65,10 +293,27 @@ features:
     persona_story: "As a multi-repository FederationCoordinator (S1) or DomainGovernor (S2), I need orthogonal control strata (S0..S3 + O-Plane) and epoch-fenced SQLite WAL charters so that cross-repository delegation is mechanically bounded without conflating OS containment rings (F0/F1/F2)."
     srs_reqs:
       - "FR-9"
-    openspec_delta: "DELTA-33"
+    openspec_deltas:
+      - "DELTA-33"
     code_paths:
       - "internal/charter/**"
       - "cmd/g8s/charter.go"
+    collision_domain: "federation"
+    owned_paths:
+      - "internal/charter/**"
+      - "cmd/g8s/charter*.go"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "charter"
+      mcp_tools:
+        - "g8s_charter_issue"
+        - "g8s_charter_verify"
+        - "g8s_portfolio_status"
+      go_packages:
+        - "internal/charter"
     invariants:
       - "Strict Stratum Adjacency Law (S0 -> S1/S2, S1 -> S2/O-Plane, S2 -> S3-M/S3-A/O-Plane)"
       - "Cross-Stratum Mutation Firewall blocks S1, S3-A, and O-Plane from direct file writes"
@@ -92,12 +337,41 @@ features:
     srs_reqs:
       - "FR-4"
       - "NFR-4"
-    openspec_delta: "DELTA-23"
+    openspec_deltas:
+      - "DELTA-23"
     code_paths:
       - "internal/fsops/**"
       - "internal/pathutil/**"
       - "internal/search/**"
       - "cmd/g8s/search.go"
+    collision_domain: "agent-io"
+    owned_paths:
+      - "internal/fsops/**"
+      - "internal/pathutil/**"
+      - "internal/search/**"
+      - "cmd/g8s/search*.go"
+      - "offer/SEARCH_GUIDE.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "search"
+        - "read"
+        - "edit"
+        - "select"
+      mcp_tools:
+        - "g8s_search"
+        - "g8s_read"
+        - "g8s_edit"
+        - "g8s_select"
+      envelope_kinds:
+        - "search"
+        - "read"
+      go_packages:
+        - "internal/fsops"
+        - "internal/pathutil"
+        - "internal/search"
     invariants:
       - "Pure Go with zero external shell dependencies"
       - "Receipt allowed_paths boundary enforcement"
@@ -122,7 +396,11 @@ features:
     srs_reqs:
       - "FR-1"
       - "FR-4"
-    openspec_delta: "DELTA-26"
+    openspec_deltas:
+      - "DELTA-26"
+      - "DELTA-29"
+      - "DELTA-30"
+      - "DELTA-39"
     code_paths:
       - "internal/worker/**"
       - "internal/process/**"
@@ -131,6 +409,48 @@ features:
       - "internal/hooks/**"
       - "internal/runtime/**"
       - "internal/sleep/**"
+    collision_domain: "worker-runtime"
+    owned_paths:
+      - "internal/worker/**"
+      - "internal/process/**"
+      - "internal/harness/**"
+      - "internal/dispatch/**"
+      - "internal/hooks/**"
+      - "internal/runtime/**"
+      - "internal/sleep/**"
+      - "tools/worker_boundary*.sh"
+      - "tools/sisyphus_dispatch.sh"
+      - "tools/spawn_worktree.sh"
+      - "tools/drop_worktree.sh"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "worker"
+        - "roles"
+        - "permissions"
+        - "sleep"
+        - "wake"
+      mcp_tools:
+        - "g8s_run"
+        - "g8s_dispatch"
+        - "g8s_list_roles"
+        - "g8s_list_permissions"
+      envelope_kinds:
+        - "worker_task"
+        - "worker_status"
+        - "roles"
+        - "sleep_state"
+        - "wake_summary"
+      go_packages:
+        - "internal/worker"
+        - "internal/process"
+        - "internal/harness"
+        - "internal/dispatch"
+        - "internal/hooks"
+        - "internal/runtime"
+        - "internal/sleep"
     invariants:
       - "Setpgid process group isolation"
       - "Sensitive token sanitization"
@@ -155,7 +475,12 @@ features:
     persona_story: "As a heterogeneous agent team, I need a provider-agnostic LLM call adapter supporting CLIProxyAPI, OpenRouter, OpenAI, Anthropic, and 9router so that tasks route cleanly without vendor lock-in."
     srs_reqs:
       - "FR-10"
-    openspec_delta: "DELTA-32"
+    openspec_deltas:
+      - "DELTA-32"
+      - "DELTA-25"
+      - "DELTA-36"
+      - "DELTA-38"
+      - "DELTA-43"
     code_paths:
       - "internal/provider/**"
       - "internal/config/**"
@@ -164,7 +489,52 @@ features:
       - "internal/contextpack/**"
       - "cmd/g8s/llm_call.go"
       - "cmd/g8s/context_pack.go"
+      - "cmd/g8s/providers_conformance.go"
       - "offer/templates/providers.example.json"
+    collision_domain: "llm-provider"
+    owned_paths:
+      - "internal/provider/**"
+      - "internal/config/**"
+      - "internal/conv/**"
+      - "internal/reflex/**"
+      - "internal/contextpack/**"
+      - "cmd/jevtriage/**"
+      - "cmd/g8s/llm_call*.go"
+      - "cmd/g8s/context_pack*.go"
+      - "cmd/g8s/providers_conformance*.go"
+      - ".g8s/provider-conformance.yml"
+      - "offer/templates/providers.example.json"
+      - "docs/user-guide/providers.md"
+      - "docs/user-guide/provider-matrix.md"
+      - "docs/user-guide/configuration.md"
+      - "docs/CONTEXTUAL_DISTILLATION_SPEC.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+      - "go.mod"
+      - "go.sum"
+    interfaces:
+      cli:
+        - "llm-call"
+        - "providers"
+        - "reflex"
+        - "context-pack"
+        - "config"
+      mcp_tools:
+        - "g8s_llm_call"
+        - "g8s_context_pack"
+        - "g8s_self_awareness"
+      envelope_kinds:
+        - "reflex_verdict"
+        - "config"
+        - "provider_conformance"
+      go_packages:
+        - "internal/provider"
+        - "internal/provider/conformance"
+        - "internal/config"
+        - "internal/conv"
+        - "internal/reflex"
+        - "internal/contextpack"
     invariants:
       - "OpenAI, Anthropic, CLIProxyAPI, and 9router protocol conformance"
       - "DefaultModel resolution chain (--model -> entry.DefaultModel -> entry.Models[0].ID)"
@@ -191,12 +561,40 @@ features:
     srs_reqs:
       - "FR-5"
       - "FR-10"
-    openspec_delta: "DELTA-05"
+    openspec_deltas:
+      - "DELTA-05"
+      - "DELTA-19"
     code_paths:
       - "internal/routing/**"
       - "internal/lane/**"
       - "internal/registry/**"
       - "internal/settings/**"
+    collision_domain: "routing-registry"
+    owned_paths:
+      - "internal/routing/**"
+      - "internal/lane/**"
+      - "internal/registry/**"
+      - "internal/settings/**"
+      - ".g8s/agent-models.yml"
+      - ".g8s/effort-classes.yml"
+      - ".g8s/verifier-classes.yml"
+      - ".g8s/lane-bundles.yml"
+      - ".g8s/trust-boundaries.yml"
+      - "offer/profiles/seeds/**"
+      - "tools/ci_lane_*.sh"
+      - "tools/lane_escalate*.sh"
+      - "tools/lane_learning_review*.sh"
+      - "tools/redtest_lane_*_test.go"
+      - "docs/user-guide/routing.md"
+      - "docs/user-guide/effort.md"
+      - "docs/designs/gate-lane-routing.md"
+    shared_paths: []
+    interfaces:
+      go_packages:
+        - "internal/routing"
+        - "internal/lane"
+        - "internal/registry"
+        - "internal/settings"
     invariants:
       - "Deterministic effort-class and ALDC gate-lane routing"
       - "Seeded verifier and boundary registry validation"
@@ -214,14 +612,61 @@ features:
     persona_story: "As a verification gate, I need worktree-targeted non-vacuous test execution and mechanically verified DoD matrices so that worker self-reports cannot bypass evidence checks."
     srs_reqs:
       - "FR-8"
-    openspec_delta: "DELTA-21"
+    openspec_deltas:
+      - "DELTA-21"
+      - "DELTA-22"
+      - "DELTA-28"
+      - "DELTA-37"
+      - "DELTA-42"
     code_paths:
       - "internal/verifier/**"
+      - "internal/premise/**"
       - "internal/watch/**"
       - "internal/brief/**"
       - "internal/diffintel/**"
       - "internal/codeintel/**"
       - "cmd/g8s/qa_report.go"
+      - "cmd/g8s/claim.go"
+    collision_domain: "verification"
+    owned_paths:
+      - "internal/verifier/**"
+      - "!internal/verifier/blind_packet*.go"
+      - "!internal/verifier/canary*.go"
+      - "internal/premise/**"
+      - "internal/watch/**"
+      - "internal/brief/**"
+      - "internal/diffintel/**"
+      - "internal/codeintel/**"
+      - "cmd/g8s/qa_report*.go"
+      - "cmd/g8s/claim*.go"
+      - "tools/brief_lint*.sh"
+      - "docs/user-guide/verifier-and-autonomy.md"
+      - "docs/DOD_DOR.md"
+      - "docs/examples/**"
+      - "examples/**"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "verify"
+        - "watch"
+        - "qa-report"
+        - "claim"
+        - "brief-issue"
+        - "brief-consume"
+      envelope_kinds:
+        - "verdict"
+        - "watch_verdict"
+        - "brief"
+        - "claim_check"
+      go_packages:
+        - "internal/verifier"
+        - "internal/premise"
+        - "internal/watch"
+        - "internal/brief"
+        - "internal/diffintel"
+        - "internal/codeintel"
     invariants:
       - "Worktree-targeted non-vacuous test execution"
       - "EvaluateDoDMatrix rejects unverified worker self-report claims"
@@ -243,12 +688,23 @@ features:
     srs_reqs:
       - "FR-8"
       - "FR-9"
-    openspec_delta: "DELTA-21"
+    openspec_deltas:
+      - "DELTA-21"
+      - "DELTA-37"
     code_paths:
       - "internal/verifier/blind_packet.go"
       - "internal/verifier/canary.go"
       - "cmd/g8s/verify.go"
       - "skills/**"
+    collision_domain: "verification"
+    owned_paths:
+      - "internal/verifier/blind_packet*.go"
+      - "internal/verifier/canary*.go"
+      - "cmd/g8s/verify*.go"
+      - "skills/**"
+      - "!skills/g8s-supervisor/**"
+      - "tools/cleanup_blind_worktrees.sh"
+    shared_paths: []
     invariants:
       - "Out-of-worktree holdout execution (--holdout-dir) without leaking tests into F1 worktree"
       - "Sanitized BlindReviewPacket strips worker identity, rationale, and self-reports"
@@ -269,7 +725,10 @@ features:
     persona_story: "As a system architect, I need T0-T4 reversibility tiers, commitment gates G0-G7, and provider-agnostic T3 independent verification with offline probe fallback."
     srs_reqs:
       - "FR-9"
-    openspec_delta: "DELTA-24"
+    openspec_deltas:
+      - "DELTA-24"
+      - "DELTA-11-ROADMAP"
+      - "DELTA-35"
     code_paths:
       - "internal/supervisor/**"
       - "internal/orchestrator/**"
@@ -278,6 +737,53 @@ features:
       - "internal/ladder/**"
       - "internal/review/**"
       - "tools/f0/**"
+    collision_domain: "supervision-gates"
+    owned_paths:
+      - "internal/supervisor/**"
+      - "internal/orchestrator/**"
+      - "internal/dialectic/**"
+      - "internal/autopilot/**"
+      - "internal/ladder/**"
+      - "internal/review/**"
+      - "tools/f0/**"
+      - "skills/g8s-supervisor/**"
+      - "tools/merger*.sh"
+      - "tools/redtest_merger_test.go"
+      - "tools/run_audit_fanout*.sh"
+      - "docs/user-guide/autopilot.md"
+      - "docs/SUPERVISOR_PATTERNS.md"
+      - "docs/designs/supervisor-fix-loop.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "orchestrate"
+        - "orchestrate-aic"
+        - "supervisor-metrics"
+        - "supervisor-metrics-update-false"
+        - "autopilot"
+        - "ladder"
+        - "converge"
+        - "deliver"
+        - "eval"
+        - "feedback"
+      envelope_kinds:
+        - "ladder"
+        - "autopilot_schedule"
+        - "autopilot_config"
+        - "orchestrate_result"
+        - "supervisor_metrics"
+        - "supervisor_metrics_update_false"
+        - "supervisor_metrics_item"
+        - "review"
+      go_packages:
+        - "internal/supervisor"
+        - "internal/orchestrator"
+        - "internal/dialectic"
+        - "internal/autopilot"
+        - "internal/ladder"
+        - "internal/review"
     invariants:
       - "Reversibility tiers T0-T4 and commitment checks G0-G7"
       - "Provider-agnostic T3 failover chain with blind diff sanitization and EvalProbeRunner fallback"
@@ -298,12 +804,40 @@ features:
     persona_story: "As a learning cognitive system, I need pure-Go knowledge vault storage with FTS5 search and memory promotion so that operational lessons persist across sessions."
     srs_reqs:
       - "FR-7"
-    openspec_delta: "DELTA-21"
+    openspec_deltas:
+      - "DELTA-21"
+      - "DELTA-11"
     code_paths:
       - "internal/vault/**"
       - "internal/memory/**"
       - "internal/lessons/**"
       - "internal/context/**"
+    collision_domain: "knowledge-memory"
+    owned_paths:
+      - "internal/vault/**"
+      - "internal/memory/**"
+      - "internal/lessons/**"
+      - "internal/context/**"
+      - "docs/lessons/**"
+      - "docs/user-guide/tenancy.md"
+      - "docs/DECOUPLED_MEMORY_ARCHITECTURE.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "memory"
+        - "vault"
+        - "lesson"
+      envelope_kinds:
+        - "vault_record"
+        - "vault_records"
+        - "vault_delete"
+      go_packages:
+        - "internal/vault"
+        - "internal/memory"
+        - "internal/lessons"
+        - "internal/context"
     invariants:
       - "SQLite FTS5 full-text search"
       - "Second-brain promotion"
@@ -326,12 +860,44 @@ features:
     srs_reqs:
       - "FR-5"
       - "FR-6"
-    openspec_delta: "DELTA-27"
+    openspec_deltas:
+      - "DELTA-27"
+      - "DELTA-04"
+      - "DELTA-06"
+      - "DELTA-34"
     code_paths:
       - "internal/mcp/**"
       - "internal/server/**"
       - "internal/service/**"
       - "cmd/g8s/serve.go"
+    collision_domain: "mcp-daemon"
+    owned_paths:
+      - "internal/mcp/**"
+      - "internal/server/**"
+      - "internal/service/**"
+      - "cmd/g8s/serve*.go"
+      - "docs/user-guide/mcp-tools.md"
+      - "docs/user-guide/service.md"
+      - "docs/integrations/**"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "mcp"
+        - "serve"
+        - "service"
+      mcp_tools:
+        - "g8s_skills_list"
+        - "g8s_skills_read"
+      envelope_kinds:
+        - "service"
+        - "service_status"
+        - "serve"
+      go_packages:
+        - "internal/mcp"
+        - "internal/server"
+        - "internal/service"
     invariants:
       - "Stdio JSON-RPC 2.0 MCP server conformance (19 tools)"
       - "Cross-platform daemon service lifecycle"
@@ -353,7 +919,11 @@ features:
     srs_reqs:
       - "NFR-1"
       - "NFR-2"
-    openspec_delta: "DELTA-32"
+    openspec_deltas:
+      - "DELTA-32"
+      - "DELTA-14"
+      - "DELTA-16"
+      - "DELTA-07"
     code_paths:
       - "internal/doctor/**"
       - "internal/telemetry/**"
@@ -363,6 +933,43 @@ features:
       - "cmd/g8s/cleanup.go"
       - "cmd/g8s/cleanup_worktrees.go"
       - "cmd/g8s/fleet.go"
+    collision_domain: "platform-hygiene"
+    owned_paths:
+      - "internal/doctor/**"
+      - "internal/telemetry/**"
+      - "internal/cleanup/**"
+      - "internal/analyzer/**"
+      - "cmd/g8s/doctor*.go"
+      - "cmd/g8s/cleanup*.go"
+      - "cmd/g8s/fleet*.go"
+      - "tools/cleanup_all.sh"
+      - "tools/cleanup_drafts.sh"
+      - "tools/cleanup_worktrees.sh"
+      - "tools/clean_branches.sh"
+      - "tools/reap-ghost-agy.sh"
+      - "docs/user-guide/performance.md"
+      - "docs/SESSION_HYGIENE.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "doctor"
+        - "cleanup"
+        - "cleanup-worktrees"
+        - "fleet"
+        - "analyze"
+        - "status"
+      mcp_tools:
+        - "g8s_blast_radius"
+      envelope_kinds:
+        - "cleanup_report"
+        - "status_report"
+      go_packages:
+        - "internal/doctor"
+        - "internal/telemetry"
+        - "internal/cleanup"
+        - "internal/analyzer"
     invariants:
       - "Non-destructive environment readiness probing"
       - "Safe worktree and state hygiene cleanup"
@@ -383,12 +990,85 @@ features:
     srs_reqs:
       - "FR-5"
       - "NFR-1"
-    openspec_delta: "DELTA-05"
+    openspec_deltas:
+      - "DELTA-05"
+      - "DELTA-13"
+      - "DELTA-16"
+      - "DELTA-40"
     code_paths:
       - "cmd/g8s/**"
       - "internal/cli/**"
       - "internal/initwiz/**"
       - "internal/completion/**"
+      - "internal/lifecycle/**"
+    collision_domain: "cli-surface"
+    owned_paths:
+      - "cmd/g8s/**"
+      - "!cmd/g8s/main.go"
+      - "!cmd/g8s/receipt_export*.go"
+      - "!cmd/g8s/charter*.go"
+      - "!cmd/g8s/search*.go"
+      - "!cmd/g8s/llm_call*.go"
+      - "!cmd/g8s/context_pack*.go"
+      - "!cmd/g8s/providers_conformance*.go"
+      - "!cmd/g8s/qa_report*.go"
+      - "!cmd/g8s/claim*.go"
+      - "!cmd/g8s/verify*.go"
+      - "!cmd/g8s/serve*.go"
+      - "!cmd/g8s/doctor*.go"
+      - "!cmd/g8s/cleanup*.go"
+      - "!cmd/g8s/fleet*.go"
+      - "!cmd/g8s/feature*.go"
+      - "internal/cli/**"
+      - "internal/initwiz/**"
+      - "internal/completion/**"
+      - "internal/lifecycle/**"
+      - "offer/**"
+      - "!offer/SEARCH_GUIDE.md"
+      - "!offer/templates/providers.example.json"
+      - "!offer/templates/feature-map.yml"
+      - "!offer/profiles/seeds/**"
+      - "offer.go"
+      - "offer_test.go"
+      - "packaging/**"
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - ".goreleaser.yaml"
+      - "tools/release*.sh"
+      - "tools/pre_tag.sh"
+      - "docs/quickstart.md"
+      - "docs/WINDOWS_INSTALL.md"
+      - "docs/CLI_AND_EXPERIENCE_DESIGN.md"
+      - "docs/RELEASE_READINESS.md"
+      - "docs/RELEASE_SOP.md"
+      - "docs/RELEASE_STRATEGY.md"
+      - "docs/VERSIONING.md"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+      - "README.md"
+      - "CHANGELOG.md"
+    interfaces:
+      cli:
+        - "version"
+        - "init"
+        - "update"
+        - "uninstall"
+        - "completion"
+        - "offer"
+        - "internal"
+        - "help"
+      envelope_kinds:
+        - "version"
+        - "update_check"
+        - "update_result"
+        - "uninstall_plan"
+        - "uninstall_result"
+      go_packages:
+        - "internal/cli"
+        - "internal/initwiz"
+        - "internal/completion"
+        - "internal/lifecycle"
     invariants:
       - "Deterministic JSON/JSONL CLI output envelopes"
       - "Zero-trust delegation flag validation"
@@ -414,16 +1094,47 @@ features:
     persona_story: "As a verification and routing harness, I need a declarative feature map and blast radius DAG so that task write scopes and test impacts are derived deterministically with zero package orphans."
     srs_reqs:
       - "FR-8"
-    openspec_delta: "DELTA-23"
+    openspec_deltas:
+      - "DELTA-23"
+      - "DELTA-41"
     code_paths:
       - "internal/featuremap/**"
       - "cmd/g8s/feature.go"
+      - "cmd/g8s/feature_collisions.go"
       - "tools/ci_feature_map_sync.sh"
+    collision_domain: "ssot-governance"
+    owned_paths:
+      - "internal/featuremap/**"
+      - "cmd/g8s/feature*.go"
+      - ".g8s/feature-map.yml"
+      - "offer/templates/feature-map.yml"
+      - "tools/ci_feature_map_sync.sh"
+      - "tools/ci_spec_code_sync*.sh"
+      - "tools/ci_structure_sync*.sh"
+      - "tools/ci_link_integrity*.sh"
+      - "tools/ci_version_sync_check*.sh"
+      - "tools/claims_check*.sh"
+      - "docs/claims.yml"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "manifest.json"
+      - "docs/AGENTS_FULL.md"
+      - "spec/openspec/README.md"
+      - "spec/openspec/41-feature-map-v2-collision-domains-spec.md"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      cli:
+        - "feature"
+      go_packages:
+        - "internal/featuremap"
     invariants:
       - "Zero-orphan package coverage across internal/"
       - "DAG acyclicity check"
+      - "Exclusive owned_paths partition: no two features overlap, no feature overlaps a hotspot, every tracked file is owned or hotspot-governed (DELTA-41, --strict)"
+      - "Pre-dispatch collision verdict parallel-safe | split | serialize is monotonic in shared domains, paths, and hotspot policy (DELTA-41)"
     visible_tests:
       - "internal/featuremap/featuremap_test.go"
+      - "internal/featuremap/v2_test.go"
       - "cmd/g8s/feature_test.go"
     verifier_class: "test"
     blast_radius:

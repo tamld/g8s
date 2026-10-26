@@ -131,6 +131,10 @@ Incoming Task:
 | **DELTA-37** | [`37-six-stage-ai-qa-pipeline-spec.md`](../spec/openspec/37-six-stage-ai-qa-pipeline-spec.md) | `internal/verifier`, `cmd/g8s` | APPLIED |
 | **DELTA-38** | [`38-device-lease-and-mobile-gate-spec.md`](../spec/openspec/38-device-lease-and-mobile-gate-spec.md) | `internal/provider`, `skills/g8s-mobile-gate` | APPLIED |
 | **DELTA-39** | [`39-universal-cli-agent-adapter-spec.md`](../spec/openspec/39-universal-cli-agent-adapter-spec.md) | `internal/provider`, `internal/worker`, `internal/routing` | APPLIED |
+| **DELTA-40** | [`40-lifecycle-uninstall-update-spec.md`](../spec/openspec/40-lifecycle-uninstall-update-spec.md) | `internal/lifecycle`, `internal/cleanup`, `cmd/g8s` | APPLIED |
+| **DELTA-41** | [`41-feature-map-v2-collision-domains-spec.md`](../spec/openspec/41-feature-map-v2-collision-domains-spec.md) | `internal/featuremap`, `cmd/g8s` | APPLIED |
+| **DELTA-42** | [`42-premise-challenge-and-sycophancy-gate-spec.md`](../spec/openspec/42-premise-challenge-and-sycophancy-gate-spec.md) | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | APPLIED |
+| **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
 
 ---
 

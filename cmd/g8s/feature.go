@@ -20,7 +20,7 @@ type FeatureInspectOutput struct {
 
 func runFeature(args []string) {
 	if len(args) == 0 {
-		exitUsage("feature", "", "", "usage: g8s feature <verify|inspect|list> [options]", "Supported subcommands: verify, inspect, list", false)
+		exitUsage("feature", "", "", "usage: g8s feature <verify|inspect|list|collisions> [options]", "Supported subcommands: verify, inspect, list, collisions", false)
 	}
 
 	subcmd := args[0]
@@ -33,18 +33,28 @@ func runFeature(args []string) {
 		runFeatureInspect(subargs)
 	case "list":
 		runFeatureList(subargs)
+	case "collisions":
+		os.Exit(runFeatureCollisions(subargs, os.Stdout, os.Stderr))
 	case "help", "-h", "--help":
 		printFeatureUsage()
 	default:
-		exitUsage("feature", subcmd, "", fmt.Sprintf("unknown feature subcommand %q", subcmd), "Supported subcommands: verify, inspect, list", false)
+		exitUsage("feature", subcmd, "", fmt.Sprintf("unknown feature subcommand %q", subcmd), "Supported subcommands: verify, inspect, list, collisions", false)
 	}
 }
 
 func printFeatureUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  g8s feature verify [--file .g8s/feature-map.yml] [--repo .] [--json]")
+	fmt.Println("  g8s feature verify [--file .g8s/feature-map.yml] [--repo .] [--strict] [--json]")
 	fmt.Println("  g8s feature inspect <feature-id> [--file .g8s/feature-map.yml] [--json]")
 	fmt.Println("  g8s feature list [--file .g8s/feature-map.yml] [--json]")
+	fmt.Println("  g8s feature collisions --paths <glob,...> [--file .g8s/feature-map.yml] [--json]")
+	fmt.Println("  g8s feature collisions --task-a <glob,...|task:<id>> --task-b <glob,...|task:<id>> [--strict] [--json]")
+}
+
+// featureValueFlags lists flags (without dashes) that consume the following argument.
+var featureValueFlags = map[string]bool{
+	"file": true, "repo": true, "id": true,
+	"paths": true, "task-a": true, "task-b": true, "label-a": true, "label-b": true,
 }
 
 func normalizeFlags(args []string) []string {
@@ -54,7 +64,7 @@ func normalizeFlags(args []string) []string {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
-			if (arg == "--file" || arg == "-file" || arg == "--repo" || arg == "-repo" || arg == "--id" || arg == "-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if featureValueFlags[strings.TrimLeft(arg, "-")] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flags = append(flags, args[i])
 			}
@@ -70,10 +80,11 @@ func runFeatureVerify(args []string) {
 	fileFlag := fs.String("file", featuremap.DefaultFeatureMapPath, "Path to feature map YAML")
 	repoFlag := fs.String("repo", ".", "Path to repository root")
 	jsonFlag := fs.Bool("json", false, "Output verification report as JSON")
+	strictFlag := fs.Bool("strict", false, "Treat orphan files (tracked files outside every owned_paths/hotspot) as errors (schema 2.0)")
 
 	args = normalizeFlags(args)
 	if err := fs.Parse(args); err != nil {
-		exitUsage("feature", "verify", "", err.Error(), "usage: g8s feature verify [--file <path>] [--repo <dir>] [--json]", false)
+		exitUsage("feature", "verify", "", err.Error(), "usage: g8s feature verify [--file <path>] [--repo <dir>] [--strict] [--json]", false)
 	}
 
 	fm, err := featuremap.Load(*fileFlag)
@@ -91,7 +102,7 @@ func runFeatureVerify(args []string) {
 		os.Exit(1)
 	}
 
-	report := featuremap.Validate(fm, *repoFlag)
+	report := featuremap.ValidateWithOptions(fm, *repoFlag, featuremap.ValidateOptions{Strict: *strictFlag})
 
 	if *jsonFlag {
 		out, err := json.MarshalIndent(report, "", "  ")
@@ -106,6 +117,9 @@ func runFeatureVerify(args []string) {
 		return
 	}
 
+	for _, w := range report.Warnings {
+		fmt.Fprintf(os.Stderr, "  warning: %s\n", w)
+	}
 	if report.Valid {
 		fmt.Printf("Feature map %s is valid (%d features)\n", *fileFlag, report.FeatureCount)
 		return

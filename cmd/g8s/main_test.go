@@ -106,6 +106,7 @@ func TestPrintUsageMentionsEveryLiveCommand(t *testing.T) {
 		"analyze", "vault", "worker", "mcp", "roles", "permissions", "providers", "llm-call",
 		"version", "orchestrate", "orchestrate-aic", "supervisor-metrics",
 		"brief-issue", "brief-consume", "cleanup-worktrees", "cleanup", "migrate", "status",
+		"update", "uninstall",
 	}
 	for _, cmd := range commands {
 		if !strings.Contains(usage, cmd) {
