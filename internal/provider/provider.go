@@ -372,7 +372,6 @@ func (r *PoolRegistry) LoadProvidersJSON(path string) error {
 func (r *PoolRegistry) SelectForModel(ctx context.Context, modelID string) (string, func(), error) {
 	r.mu.Lock()
 	candidates := make([]string, 0, 2)
-	lowered := strings.ToLower(modelID)
 	for name := range r.states {
 		st := r.states[name]
 		serves := false
@@ -382,8 +381,10 @@ func (r *PoolRegistry) SelectForModel(ctx context.Context, modelID string) (stri
 				break
 			}
 			if strings.HasSuffix(m.ID, "/*") || strings.HasSuffix(m.ID, "*") {
-				prefix := strings.TrimSuffix(strings.ToLower(m.ID), "*")
-				if strings.HasPrefix(lowered, prefix) {
+				prefix := strings.TrimSuffix(m.ID, "*")
+				// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+				// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+				if len(modelID) >= len(prefix) && strings.EqualFold(modelID[:len(prefix)], prefix) {
 					serves = true
 					break
 				}

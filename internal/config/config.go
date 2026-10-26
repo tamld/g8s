@@ -78,14 +78,15 @@ func (p ProviderEntry) ServesModel(modelID string) bool {
 	if p.AllowUnlistedModels {
 		return true
 	}
-	lowered := strings.ToLower(modelID)
 	for _, m := range p.Models {
 		if strings.EqualFold(m.ID, modelID) {
 			return true
 		}
 		if strings.HasSuffix(m.ID, "/*") || strings.HasSuffix(m.ID, "*") {
-			prefix := strings.TrimSuffix(strings.ToLower(m.ID), "*")
-			if strings.HasPrefix(lowered, prefix) {
+			prefix := strings.TrimSuffix(m.ID, "*")
+			// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+			// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+			if len(modelID) >= len(prefix) && strings.EqualFold(modelID[:len(prefix)], prefix) {
 				return true
 			}
 		}
