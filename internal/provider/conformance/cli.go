@@ -136,17 +136,47 @@ func DefaultCLIProfiles() []CLIProfile {
 			Name:        "commandcode",
 			BinEnv:      "COMMANDCODE_BIN",
 			VersionArgs: []string{"--version"},
-			HelpArgs:    [][]string{{"run", "--help"}},
+			HelpArgs:    [][]string{{"--help"}},
 			OneShot: func(prompt, model string, extra []string) []string {
-				a := withModel([]string{"run"}, model)
+				a := withModel([]string{"--no-session", "--skip-onboarding", "--no-auto-update", "--yolo"}, model)
 				a = append(a, extra...)
-				return append(a, prompt)
+				return append(a, "-p", prompt)
+			},
+			JSONArgs: []string{"--output-format", "json"},
+			Markers: map[ProbeID][]string{
+				ProbeP1: {"--print"},
+				ProbeP2: {"--output-format"},
+				ProbeP5: {"--permission-mode", "--add-dir", "--worktree"},
+				ProbeP7: {"--json-schema", "--output-schema"},
+			},
+			Policy:       PolicyFree,
+			DefaultModel: "9router/docs-retriever",
+			NewProvider:  func() provider.Provider { return provider.NewCommandCodeProvider() },
+		},
+		{
+			Name:        "qwen",
+			BinEnv:      "QWEN_BIN",
+			VersionArgs: []string{"--version"},
+			HelpArgs:    [][]string{{"--help"}},
+			OneShot: func(prompt, model string, extra []string) []string {
+				a := withModel([]string{"--yolo"}, model)
+				a = append(a, extra...)
+				return append(a, "-p", prompt)
+			},
+			JSONArgs: []string{"-o", "json"},
+			SchemaArgs: func(schemaJSON, _ string) []string {
+				return []string{"--json-schema", schemaJSON}
 			},
 			Markers: map[ProbeID][]string{
-				ProbeP1: {"run"},
+				ProbeP1: {"--prompt"},
+				ProbeP2: {"--output-format"},
+				ProbeP4: {"--max-wall-time"},
+				ProbeP5: {"--sandbox", "--approval-mode", "--include-directories"},
+				ProbeP7: {"--json-schema"},
 			},
-			Policy:      PolicyPaid,
-			NewProvider: func() provider.Provider { return provider.NewCommandCodeProvider() },
+			Policy:       PolicyFree,
+			DefaultModel: "docs-retriever",
+			NewProvider:  func() provider.Provider { return provider.NewQwenProvider() },
 		},
 	}
 }

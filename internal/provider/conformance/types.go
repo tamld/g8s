@@ -155,7 +155,7 @@ func ApplyRoleProfile(r *ProviderReport) {
 	case "claude", "codex":
 		r.RolesEligible = []string{"brain", "worker", "scout"}
 		r.RecommendedFor = []string{"f0-brain", "t3-t4-architecture", "complex-decomposition"}
-	case "9router", "opencode":
+	case "9router", "opencode", "commandcode", "qwen":
 		r.RolesEligible = []string{"worker", "scout"}
 		r.RecommendedFor = []string{"f1-worker", "f1-scout", "bounded-swe"}
 	case "gemini":

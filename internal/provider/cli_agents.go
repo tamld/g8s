@@ -201,7 +201,7 @@ func (c *CommandCodeProvider) Version(ctx context.Context) (string, error) {
 	return c.version, nil
 }
 
-// Spawn launches a commandcode run subprocess with the requested spec.
+// Spawn launches a commandcode headless subprocess with the requested spec.
 func (c *CommandCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err := c.Available(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
@@ -211,12 +211,18 @@ func (c *CommandCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, err
 	bin := c.binary
 	c.mu.RUnlock()
 
-	args := []string{"run"}
+	args := []string{"--no-session", "--skip-onboarding", "--no-auto-update"}
+	if strings.ToLower(strings.TrimSpace(spec.Permission)) != "read_only" {
+		args = append(args, "--yolo")
+	}
 	if spec.Model != "" {
 		args = append(args, "--model", spec.Model)
 	}
+	if spec.Effort != "" {
+		args = append(args, "--effort", spec.Effort)
+	}
 	if spec.Brief != "" {
-		args = append(args, spec.Brief)
+		args = append(args, "-p", spec.Brief)
 	}
 
 	cmd := exec.Command(bin, args...)
@@ -235,4 +241,122 @@ func (c *CommandCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, err
 	}
 
 	return newProcessHandle("commandcode", cmd, start, &stdoutBuf, &stderrBuf), nil
+}
+
+// QwenProvider manages Qwen Code CLI worker execution.
+type QwenProvider struct {
+	mu       sync.RWMutex
+	binary   string
+	version  string
+	lookPath func(string) (string, error)
+}
+
+// NewQwenProvider creates a new QwenProvider instance.
+func NewQwenProvider() *QwenProvider {
+	return &QwenProvider{
+		lookPath: exec.LookPath,
+	}
+}
+
+// WithLookPath overrides the binary lookup function for testing.
+func (q *QwenProvider) WithLookPath(lp func(string) (string, error)) *QwenProvider {
+	q.lookPath = lp
+	return q
+}
+
+// Name returns the canonical provider name.
+func (q *QwenProvider) Name() string {
+	return "qwen"
+}
+
+// Binary returns the resolved path or executable name.
+func (q *QwenProvider) Binary() string {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	if q.binary != "" {
+		return q.binary
+	}
+	return "qwen"
+}
+
+// Available checks whether qwen is resolvable in PATH or via QWEN_BIN and verifies --version.
+func (q *QwenProvider) Available(ctx context.Context) error {
+	bin := os.Getenv("QWEN_BIN")
+	if bin == "" {
+		p, err := q.lookPath("qwen")
+		if err != nil {
+			return fmt.Errorf("not found in PATH")
+		}
+		bin = p
+	}
+
+	cmd := exec.CommandContext(ctx, bin, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("qwen --version: %w", err)
+	}
+
+	q.mu.Lock()
+	q.binary = bin
+	q.version = strings.TrimSpace(string(out))
+	q.mu.Unlock()
+
+	return nil
+}
+
+// Version returns the discovered version string.
+func (q *QwenProvider) Version(ctx context.Context) (string, error) {
+	q.mu.RLock()
+	v := q.version
+	q.mu.RUnlock()
+	if v != "" {
+		return v, nil
+	}
+	if err := q.Available(ctx); err != nil {
+		return "", err
+	}
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return q.version, nil
+}
+
+// Spawn launches a qwen non-interactive subprocess with the requested spec.
+func (q *QwenProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
+	if err := q.Available(ctx); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+	}
+
+	q.mu.RLock()
+	bin := q.binary
+	q.mu.RUnlock()
+
+	var args []string
+	if strings.ToLower(strings.TrimSpace(spec.Permission)) == "read_only" {
+		args = append(args, "--approval-mode", "plan")
+	} else {
+		args = append(args, "--yolo")
+	}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.Brief != "" {
+		args = append(args, "-p", spec.Brief)
+	}
+
+	cmd := exec.Command(bin, args...)
+	if spec.WorktreeDir != "" {
+		cmd.Dir = spec.WorktreeDir
+	}
+	configureSysProcAttr(cmd)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start qwen process: %w", err)
+	}
+
+	return newProcessHandle("qwen", cmd, start, &stdoutBuf, &stderrBuf), nil
 }

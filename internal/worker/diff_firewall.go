@@ -14,11 +14,12 @@ import (
 )
 
 // DefaultCLIProviderTemplates returns built-in non-interactive CLI invocation templates
-// for external coding agents (DELTA-39: opencode, commandcode, codex).
+// for external coding agents (DELTA-39: opencode, commandcode, qwen, codex).
 func DefaultCLIProviderTemplates() map[string][]string {
 	return map[string][]string{
 		"opencode":    {"opencode", "run", "--model", "{model}", "{prompt}"},
-		"commandcode": {"commandcode", "run", "--model", "{model}", "{prompt}"},
+		"commandcode": {"commandcode", "--no-session", "--skip-onboarding", "--no-auto-update", "--yolo", "--model", "{model}", "-p", "{prompt}"},
+		"qwen":        {"qwen", "--yolo", "--model", "{model}", "-p", "{prompt}"},
 		"codex":       {"codex", "exec", "--model", "{model}", "{prompt}"},
 	}
 }
@@ -73,7 +74,12 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 		}
 		entry = strings.Trim(entry, `"`)
 		relSlash := filepath.ToSlash(filepath.Clean(entry))
-		if relSlash == "." || relSlash == "" || strings.HasPrefix(relSlash, ".g8s") {
+		if relSlash == "." || relSlash == "" ||
+			strings.HasPrefix(relSlash, ".g8s") ||
+			strings.HasPrefix(relSlash, ".opencode") ||
+			strings.HasPrefix(relSlash, ".omo") ||
+			strings.HasPrefix(relSlash, ".commandcode") ||
+			strings.HasPrefix(relSlash, ".qwen") {
 			continue
 		}
 		if !seen[relSlash] {

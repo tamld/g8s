@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -236,7 +237,7 @@ func TestUpdateApplyTable(t *testing.T) {
 					t.Errorf("sha fields not populated: %+v", res)
 				}
 				info, _ := os.Stat(target)
-				if info.Mode().Perm()&0o100 == 0 {
+				if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 					t.Errorf("installed binary not executable: %v", info.Mode())
 				}
 			}

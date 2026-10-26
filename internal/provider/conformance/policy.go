@@ -79,6 +79,12 @@ func DecideLive(name string, policy LivePolicy, model string, allowPaid map[stri
 			return LiveDecision{Allowed: true, Reason: "opencode free-tier model"}
 		}
 		return LiveDecision{Reason: fmt.Sprintf("E_PAID_MODEL_NOT_ALLOWED: opencode model %q is not a *free* model; pass --allow-paid opencode", model)}
+	case "commandcode", "qwen":
+		trimmed := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "9router/")
+		if free9RouterCombos[trimmed] || isFreeModel(model) {
+			return LiveDecision{Allowed: true, Reason: key + " free-tier model"}
+		}
+		return LiveDecision{Reason: fmt.Sprintf("E_PAID_MODEL_NOT_ALLOWED: %s model %q is not a free-tier model (*free*, docs-retriever, reasoning-free, fast-agent); pass --allow-paid %s", name, model, key)}
 	}
 	return LiveDecision{Allowed: true, Reason: "local/free provider"}
 }

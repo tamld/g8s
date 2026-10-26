@@ -24,6 +24,9 @@ go.work*
 # Tooling and Review metadata
 .code-review-graph/
 .opencode/
+.omo/
+.commandcode/
+.qwen/
 
 # Python artifacts
 __pycache__/

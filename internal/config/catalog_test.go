@@ -168,16 +168,16 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	if cat.SchemaVersion != CurrentCatalogSchemaVersion {
 		t.Fatalf("SchemaVersion = %q, want %q", cat.SchemaVersion, CurrentCatalogSchemaVersion)
 	}
-	if len(cat.Providers) != 9 {
-		t.Fatalf("got %d providers, want 9", len(cat.Providers))
+	if len(cat.Providers) != 12 {
+		t.Fatalf("got %d providers, want 12", len(cat.Providers))
 	}
 
 	totalModels := 0
 	for _, prov := range cat.Providers {
 		totalModels += len(prov.Models)
 	}
-	if totalModels != 36 {
-		t.Fatalf("got %d total models across providers, want 36", totalModels)
+	if totalModels != 51 {
+		t.Fatalf("got %d total models across providers, want 51", totalModels)
 	}
 
 	// Spot-check 9router

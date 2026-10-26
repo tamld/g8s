@@ -22,7 +22,22 @@ import (
 // NormalizePattern canonicalises a repo-relative glob pattern.
 func NormalizePattern(p string) string {
 	p = strings.TrimSpace(p)
+	// Preserve glob character escapes (\*, \?, \[, \]) across filepath.ToSlash on Windows.
+	const (
+		escStar   = "\x00ESC_STAR\x00"
+		escQmark  = "\x00ESC_QMARK\x00"
+		escLBrack = "\x00ESC_LBRACK\x00"
+		escRBrack = "\x00ESC_RBRACK\x00"
+	)
+	p = strings.ReplaceAll(p, `\*`, escStar)
+	p = strings.ReplaceAll(p, `\?`, escQmark)
+	p = strings.ReplaceAll(p, `\[`, escLBrack)
+	p = strings.ReplaceAll(p, `\]`, escRBrack)
 	p = filepath.ToSlash(p)
+	p = strings.ReplaceAll(p, escStar, `\*`)
+	p = strings.ReplaceAll(p, escQmark, `\?`)
+	p = strings.ReplaceAll(p, escLBrack, `\[`)
+	p = strings.ReplaceAll(p, escRBrack, `\]`)
 	for strings.HasPrefix(p, "./") {
 		p = strings.TrimPrefix(p, "./")
 	}

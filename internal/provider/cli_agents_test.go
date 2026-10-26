@@ -16,10 +16,11 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 	tmpDir := t.TempDir()
 	opencodeBin := writeMockWorkerScript(t, tmpDir, "opencode")
 	commandcodeBin := writeMockWorkerScript(t, tmpDir, "commandcode")
+	qwenBin := writeMockWorkerScript(t, tmpDir, "qwen")
 	codexBin := writeMockWorkerScript(t, tmpDir, "codex")
 
 	reg := NewRegistry()
-	for _, name := range []string{"opencode", "commandcode", "codex"} {
+	for _, name := range []string{"opencode", "commandcode", "qwen", "codex"} {
 		if _, err := reg.Get(name); err != nil {
 			t.Fatalf("expected provider %q registered in NewRegistry(), got %v", name, err)
 		}
@@ -92,6 +93,42 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 		t.Setenv("COMMANDCODE_BIN", "")
 		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
 			t.Fatal("expected error when commandcode binary is missing")
+		}
+	})
+
+	t.Run("qwen adapter", func(t *testing.T) {
+		p := NewQwenProvider()
+		if p.Binary() != "qwen" {
+			t.Fatalf("Binary() = %q, want qwen", p.Binary())
+		}
+		t.Setenv("QWEN_BIN", qwenBin)
+		if err := p.Available(context.Background()); err != nil {
+			t.Fatalf("Available failed: %v", err)
+		}
+		ver, err := p.Version(context.Background())
+		if err != nil || !strings.Contains(ver, "qwen") {
+			t.Fatalf("Version = %q, err = %v", ver, err)
+		}
+		handle, err := p.Spawn(context.Background(), Spec{
+			Model:       "docs-retriever",
+			Brief:       "verify tests",
+			Permission:  "read_only",
+			WorktreeDir: tmpDir,
+		})
+		if err != nil {
+			t.Fatalf("Spawn failed: %v", err)
+		}
+		rc, err := handle.Wait(context.Background())
+		if err != nil || rc.Status != "COMPLETED" {
+			t.Fatalf("Wait status = %q, err = %v", rc.Status, err)
+		}
+
+		pMissing := NewQwenProvider().WithLookPath(func(string) (string, error) {
+			return "", os.ErrNotExist
+		})
+		t.Setenv("QWEN_BIN", "")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
+			t.Fatal("expected error when qwen binary is missing")
 		}
 	})
 

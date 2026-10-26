@@ -43,8 +43,9 @@ func DefaultHTTPTargets(cfg *config.File) []HTTPTarget {
 			model := e.DefaultModel
 			if name == "9router" {
 				policy = PolicyFree
-				if model == "" {
-					model = "fast-agent"
+				m := strings.ToLower(strings.TrimSpace(model))
+				if m == "" || (!free9RouterCombos[m] && !isFreeModel(m)) {
+					model = "docs-retriever"
 				}
 			}
 			out = append(out, HTTPTarget{
@@ -64,7 +65,7 @@ func DefaultHTTPTargets(cfg *config.File) []HTTPTarget {
 		if v := strings.TrimSpace(os.Getenv("NINEROUTER_URL")); v != "" {
 			base = v
 		}
-		out = append(out, HTTPTarget{Name: "9router", BaseURL: base, AuthEnv: "OPENAI_API_KEY", Model: "fast-agent", Policy: PolicyFree, Protocol: "9router"})
+		out = append(out, HTTPTarget{Name: "9router", BaseURL: base, AuthEnv: "OPENAI_API_KEY", Model: "docs-retriever", Policy: PolicyFree, Protocol: "9router"})
 	}
 	if !seen["ollama"] {
 		host := strings.TrimSpace(os.Getenv("OLLAMA_HOST"))

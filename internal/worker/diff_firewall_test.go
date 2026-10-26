@@ -38,9 +38,9 @@ func initGitRepoForDiffFirewall(t *testing.T) string {
 }
 
 func TestWorktreeDiffFirewallScopeEnforcement(t *testing.T) {
-	t.Run("default CLI templates resolve for opencode, commandcode, codex", func(t *testing.T) {
+	t.Run("default CLI templates resolve for opencode, commandcode, qwen, codex", func(t *testing.T) {
 		resolver := NewProviderCommandResolver(ProviderResolverOptions{
-			PlatformDispatchNames: []string{"opencode", "commandcode", "codex"},
+			PlatformDispatchNames: []string{"opencode", "commandcode", "qwen", "codex"},
 		})
 
 		argv, err := resolver("scan repo", "opencode", "opencode/free", "30s")
@@ -56,16 +56,33 @@ func TestWorktreeDiffFirewallScopeEnforcement(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		wantNoModel := []string{"commandcode", "run", "scan repo"}
+		wantNoModel := []string{"commandcode", "--no-session", "--skip-onboarding", "--no-auto-update", "--yolo", "-p", "scan repo"}
 		if !reflect.DeepEqual(argvNoModel, wantNoModel) {
 			t.Fatalf("got %v, want %v", argvNoModel, wantNoModel)
 		}
+
+		argvQwen, err := resolver("scan repo", "qwen", "docs-retriever", "30s")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantQwen := []string{"qwen", "--yolo", "--model", "docs-retriever", "-p", "scan repo"}
+		if !reflect.DeepEqual(argvQwen, wantQwen) {
+			t.Fatalf("got %v, want %v", argvQwen, wantQwen)
+		}
 	})
 
-	t.Run("in-scope mutation under workspace_write passes", func(t *testing.T) {
+	t.Run("in-scope mutation under workspace_write passes and ignores CLI runtime dirs", func(t *testing.T) {
 		dir := initGitRepoForDiffFirewall(t)
 		if err := os.WriteFile(filepath.Join(dir, "src", "allowed.go"), []byte("package src\n// updated\n"), 0o644); err != nil {
 			t.Fatal(err)
+		}
+		for _, metaDir := range []string{".omo", ".opencode", ".commandcode", ".qwen"} {
+			if err := os.MkdirAll(filepath.Join(dir, metaDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, metaDir, "session.json"), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 		violations, err := VerifyWorktreeDiffScope(dir, "workspace_write", []string{"src/**"})
 		if err != nil || len(violations) != 0 {

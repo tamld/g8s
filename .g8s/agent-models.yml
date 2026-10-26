@@ -205,3 +205,77 @@ providers:
       - id: docs-retriever
         supported_efforts: [low, medium, high]
         default_effort: medium
+
+  opencode:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: medium
+    mandatory: false
+    notes: "OpenCode CLI built-in zero-cost (*free*) models verified live via opencode run"
+    models:
+      - id: opencode/beam-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/deepseek-v4.1-flash-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/flint-40b-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/glm-5.3-flash-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/mimo-v2.6-flash-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/nemotron-3.5-lightning-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: opencode/nemotron-3.5-super-vl-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+
+  commandcode:
+    effort_style: named
+    field: effort
+    default_effort: medium
+    mandatory: false
+    notes: "Command Code CLI (v1.88.0): built-in $0 models (reflection/beam:free, poolside/laguna-s-2.1-free, stealth/glyph-cluster:free on Go+ plan) plus zero-cost BYOK models via ~/.commandcode/providers.json (9router/*)"
+    models:
+      - id: reflection/beam:free
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: medium
+        notes: "Beam 1.0 (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
+      - id: poolside/laguna-s-2.1-free
+        supported_efforts: []
+        notes: "Laguna S 2.1 (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
+      - id: stealth/glyph-cluster:free
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: medium
+        notes: "Glyph Cluster (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
+      - id: 9router/docs-retriever
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
+      - id: 9router/reasoning-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
+      - id: 9router/fast-agent
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
+
+  qwen:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: medium
+    mandatory: false
+    notes: "Qwen Code CLI (v0.15.9+): ready-to-use via ~/.qwen/settings.json OpenAI-compatible 9router gateway or Qwen OAuth free tier"
+    models:
+      - id: docs-retriever
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: reasoning-free
+        supported_efforts: [low, medium, high]
+        default_effort: medium

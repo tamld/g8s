@@ -3,6 +3,7 @@ package routing
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/tamld/g8s/internal/config"
@@ -124,12 +125,12 @@ func TestComputeScorecardAndDynamicQuarantine(t *testing.T) {
 		t.Errorf("RouteDeterministic selected %q, want 'fast-agent'", dec.Model)
 	}
 
-	// Ensure ledger file exists with 0600 permissions
+	// Ensure ledger file exists with 0600 permissions on POSIX filesystems
 	info, statErr := os.Stat(ledgerPath)
 	if statErr != nil {
 		t.Fatalf("stat ledger: %v", statErr)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("ledger perm = %o, want 0600", info.Mode().Perm())
 	}
 }
