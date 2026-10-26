@@ -23,7 +23,7 @@ jobs:
       - name: Reject force-push
         run: |
           if git log --since="7 days ago" --pretty=format:"%H" | \
-             xargs -I{} git show {} --name-only --pretty=format: | \
+             xargs -I{} git show --end-of-options {} --name-only --pretty=format: | \
              sort -u | head -1000 > /tmp/recent.txt; then
             # Count files in recent commits
             if [ $(wc -l < /tmp/recent.txt) -gt 500 ]; then

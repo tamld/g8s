@@ -57,6 +57,10 @@ jobs:
           version: latest
           args: check
 
+      - name: Install Syft
+        if: env.CI_LANE != 'docs'
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
       - name: Run GoReleaser Snapshot Build
         if: env.CI_LANE != 'docs'
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
