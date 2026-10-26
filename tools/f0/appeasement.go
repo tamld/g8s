@@ -107,20 +107,20 @@ func getGitDiffAndFiles(repoDir, baseRef, headSHA string) (string, []string, err
 	var err error
 
 	if baseRef != "" {
-		diffText, err = runGit("diff", "-U0", baseRef, headSHA)
+		diffText, err = runGit("diff", "-U0", "--end-of-options", baseRef, headSHA)
 		if err == nil {
-			filesText, _ = runGit("diff", "--name-only", baseRef, headSHA)
+			filesText, _ = runGit("diff", "--name-only", "--end-of-options", baseRef, headSHA)
 		}
 	}
 
 	if diffText == "" || err != nil || baseRef == "" {
-		diffText, err = runGit("diff", "-U0", headSHA+"~1", headSHA)
+		diffText, err = runGit("diff", "-U0", "--end-of-options", headSHA+"~1", headSHA)
 		if err == nil {
-			filesText, _ = runGit("diff", "--name-only", headSHA+"~1", headSHA)
+			filesText, _ = runGit("diff", "--name-only", "--end-of-options", headSHA+"~1", headSHA)
 		} else {
-			diffText, err = runGit("diff", "-U0", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", headSHA)
+			diffText, err = runGit("diff", "-U0", "--end-of-options", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", headSHA)
 			if err == nil {
-				filesText, _ = runGit("diff", "--name-only", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", headSHA)
+				filesText, _ = runGit("diff", "--name-only", "--end-of-options", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", headSHA)
 			}
 		}
 	}

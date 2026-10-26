@@ -409,7 +409,7 @@ func findDefaultBranch(repoDir string) string {
 // collectGitAnchors scans commit messages on the default branch for F0-Ledger-Head trailers.
 func collectGitAnchors(repoDir string) ([]Anchor, error) {
 	branch := findDefaultBranch(repoDir)
-	cmd := exec.Command("git", "-C", repoDir, "log", "--format=%B", branch)
+	cmd := exec.Command("git", "-C", repoDir, "log", "--format=%B", "--end-of-options", branch)
 	out, err := cmd.Output()
 	if err != nil {
 		// If git log fails (e.g. no commits exist yet), return empty

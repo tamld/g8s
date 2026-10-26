@@ -134,10 +134,10 @@ func RunT3Verification(opts T3VerifyOptions) (T3Verdict, error) {
 	// Compute diff
 	var diff string
 	if headSHA != "" && baseRef != "" {
-		diffCmd := exec.Command("git", "-C", absRepo, "diff", baseRef+"..."+headSHA)
+		diffCmd := exec.Command("git", "-C", absRepo, "diff", "--end-of-options", baseRef+"..."+headSHA)
 		diffOut, err := diffCmd.Output()
 		if err != nil {
-			diffCmd = exec.Command("git", "-C", absRepo, "diff", baseRef, headSHA)
+			diffCmd = exec.Command("git", "-C", absRepo, "diff", "--end-of-options", baseRef, headSHA)
 			diffOut, _ = diffCmd.Output()
 		}
 		diff = sanitizeT3Diff(string(diffOut))
