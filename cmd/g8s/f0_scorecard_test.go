@@ -11,22 +11,36 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 )
 
-func TestCLISurfaceContractParity(t *testing.T) {
-	// Capture printUsage() output and verify every canonical command (except internal plumbing)
-	// appears in `g8s help`.
+func captureStdoutFn(t *testing.T, fn func()) []byte {
+	t.Helper()
 	origStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	os.Stdout = w
-	printUsage()
-	_ = w.Close()
-	os.Stdout = origStdout
+	done := make(chan []byte, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.Bytes()
+	}()
 
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	helpOut := buf.String()
+	os.Stdout = w
+	fn()
+	os.Stdout = origStdout
+	_ = w.Close()
+
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+func TestCLISurfaceContractParity(t *testing.T) {
+	// Capture printUsage() output via concurrent reader goroutine (prevents 4KB Windows pipe buffer deadlock)
+	// and verify every canonical command (except internal plumbing) appears in `g8s help`.
+	helpOut := string(captureStdoutFn(t, func() {
+		printUsage()
+	}))
 
 	for _, cmd := range cli.CanonicalCommands() {
 		if cmd == "internal" {
@@ -42,21 +56,12 @@ func TestFiveAxisScorecardAndF0Gate(t *testing.T) {
 	t.Setenv("G8S_STATE_DIR", t.TempDir())
 
 	// 1. Test `g8s scorecard status --json`
-	origStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-	runScorecard([]string{"status", "--json"})
-	_ = w.Close()
-	os.Stdout = origStdout
-
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	raw1 := captureStdoutFn(t, func() {
+		runScorecard([]string{"status", "--json"})
+	})
 	var env map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-		t.Fatalf("unmarshal scorecard json: %v (raw=%s)", err, buf.String())
+	if err := json.Unmarshal(raw1, &env); err != nil {
+		t.Fatalf("unmarshal scorecard json: %v (raw=%s)", err, string(raw1))
 	}
 	if env["kind"] != "scorecard_5axis" {
 		t.Errorf("expected kind=scorecard_5axis, got %v", env["kind"])
@@ -76,20 +81,12 @@ func TestFiveAxisScorecardAndF0Gate(t *testing.T) {
 	}
 
 	// 2. Test `g8s f0 gate check --repo ../.. --json`
-	r2, w2, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe2: %v", err)
-	}
-	os.Stdout = w2
-	runF0([]string{"gate", "check", "--repo", "../..", "--json"})
-	_ = w2.Close()
-	os.Stdout = origStdout
-
-	var buf2 bytes.Buffer
-	_, _ = io.Copy(&buf2, r2)
+	raw2 := captureStdoutFn(t, func() {
+		runF0([]string{"gate", "check", "--repo", "../..", "--json"})
+	})
 	var gateEnv map[string]any
-	if err := json.Unmarshal(buf2.Bytes(), &gateEnv); err != nil {
-		t.Fatalf("unmarshal f0 gate json: %v (raw=%s)", err, buf2.String())
+	if err := json.Unmarshal(raw2, &gateEnv); err != nil {
+		t.Fatalf("unmarshal f0 gate json: %v (raw=%s)", err, string(raw2))
 	}
 	if gateEnv["kind"] != "f0_gate_check" {
 		t.Errorf("expected kind=f0_gate_check, got %v", gateEnv["kind"])
