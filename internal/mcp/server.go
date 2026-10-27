@@ -242,7 +242,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "g8s", "version": "0.20.0"},
+			"serverInfo":      map[string]any{"name": "g8s", "version": "0.21.0"},
 		})
 	case "tools/list":
 		return okResponse(req.ID, map[string]any{"tools": s.list})
@@ -410,7 +410,7 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 			RulesetVersion: "v1",
 			PipelineDigest: "mcp-server-default",
 		}),
-		receipt.WithProvenanceContext("g8s/0.20.0", "", ""),
+		receipt.WithProvenanceContext("g8s/0.21.0", "", ""),
 	)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
