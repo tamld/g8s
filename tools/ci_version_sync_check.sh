@@ -243,5 +243,23 @@ if [[ ! "$VERSION_GO" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
     fail "VERSION ($VERSION_GO) does not follow semantic versioning (MAJOR.MINOR.PATCH[-PRERELEASE])"
 fi
 
+# Check packaging installer templates match VERSION_GO
+for f in packaging/windows/g8s.nsi packaging/windows/g8s.wxs; do
+    if [ -f "$f" ]; then
+        LITERAL=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$f" | head -1 | tr -d '"')
+        if [ "$LITERAL" != "$VERSION_GO" ]; then
+            fail "Installer template version drift in $f: template=$LITERAL, canonical=$VERSION_GO"
+        fi
+    fi
+done
+if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
+    CHOCO_VER=$(grep -oE 'download/v[0-9]+\.[0-9]+\.[0-9]+/' packaging/chocolatey/tools/chocolateyinstall.ps1 | head -1 | sed 's|download/v||; s|/$||')
+    if [ "$CHOCO_VER" != "$VERSION_GO" ]; then
+        fail "Chocolatey download URL drift: url=v$CHOCO_VER, canonical=$VERSION_GO"
+    fi
+fi
+pass "Packaging templates match codebase version ($VERSION_GO)"
+
 pass "Version sync check passed"
+
 exit 0
