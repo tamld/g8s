@@ -866,8 +866,9 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		isolatedWorktreeDir = wt
 		fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
 	}
+	keepWorktree := false
 	if releaseWorktree != nil {
-		defer func() { releaseWorktree(true) }()
+		defer func() { releaseWorktree(keepWorktree) }()
 	}
 
 	marker := attemptMarker(task.TaskID, task.Attempts)
@@ -943,8 +944,32 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	errWriter.Close()
 	outFile.Close()
 	errFile.Close()
-	return s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
+	finalTask, collectErr := s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
 		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, startTime, isolatedWorktreeDir, req)
+	if collectErr == nil && finalTask != nil && isAttemptResultOK(finalTask.Result) {
+		keepWorktree = true
+	}
+	return finalTask, collectErr
+}
+
+func isAttemptResultOK(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var probe struct {
+		OK bool `json:"ok"`
+	}
+	return json.Unmarshal(raw, &probe) == nil && probe.OK
+}
+
+func extractWorkerAPIErrorLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "[API Error:") {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // awaitOutcome polls lease signals until the child exits or a terminal
@@ -1477,6 +1502,15 @@ func (s *Supervisor) collect(
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResult(rawResult, stdoutText, code)
 		success := code == 0 && wr.OK
+		if success && strings.TrimSpace(stdoutText) == "" {
+			if apiErr := extractWorkerAPIErrorLine(stderrText); apiErr != "" {
+				wr.OK = false
+				wr.Status = "failed"
+				wr.Reason = apiErr
+				wr.Summary = "CLI agent reported API error on stderr with empty output"
+				success = false
+			}
+		}
 		if toolPolicyEvidence != nil && toolPolicyEvidence.InvokedCount > 0 {
 			wr.OK = false
 			wr.Status = "contract_violation"

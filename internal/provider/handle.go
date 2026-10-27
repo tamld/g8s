@@ -4,11 +4,25 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
+
+// extractCLIAPIErrorLine scans stderr/stdout for silent CLI agent API error lines
+// (such as qwen printing "[API Error: 404 ...]" on stderr while exiting 0).
+func extractCLIAPIErrorLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "[API Error:") {
+			return trimmed
+		}
+	}
+	return ""
+}
 
 // execHandle implements Handle for an OS subprocess.
 type execHandle struct {
@@ -64,26 +78,33 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 	}
 
 	duration := time.Since(h.start).Milliseconds()
+	stdoutStr := h.stdout.String()
+	stderrStr := h.stderr.String()
 	exitCode := 0
 	status := "COMPLETED"
-	if h.waitErr != nil {
+	waitErr := h.waitErr
+	if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(h.waitErr, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
 		}
 		status = "FAILED"
+	} else if apiErr := extractCLIAPIErrorLine(stderrStr + "\n" + stdoutStr); apiErr != "" && strings.TrimSpace(stdoutStr) == "" {
+		exitCode = 1
+		status = "FAILED"
+		waitErr = fmt.Errorf("cli agent reported API error with empty output: %s", apiErr)
 	}
 
 	return Receipt{
 		Provider:   h.provider,
 		Status:     status,
-		Stdout:     h.stdout.String(),
-		Stderr:     h.stderr.String(),
+		Stdout:     stdoutStr,
+		Stderr:     stderrStr,
 		ExitCode:   exitCode,
 		DurationMs: duration,
-	}, h.waitErr
+	}, waitErr
 }
 
 // Cancel terminates the process group.

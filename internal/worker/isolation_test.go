@@ -149,3 +149,37 @@ func TestIsolatorFailureFailsClosed(t *testing.T) {
 		t.Fatalf("expected release(false) called exactly once on failure, got released=%d keep=%v", iso.released, iso.keepFlag)
 	}
 }
+
+// #678: When a workspace_write attempt fails or reports [API Error:] on stderr with empty output,
+// the worktree must be released with keep=false so wt/<task-id> branches do not leak.
+func TestWorkspaceWriteFailedAttemptReleasesWorktreeWithKeepFalse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "wt-failed-task")
+	iso := &fakeWorktreeIsolator{dir: dir}
+	env := newIsolationEnv(t, iso)
+	env.runner.factory = func(opts SpawnOptions) Child {
+		if opts.Stderr != nil {
+			_, _ = opts.Stderr.Write([]byte("[API Error: 404 No active credentials for provider: openai]\n"))
+		}
+		child := newFakeChild(0)
+		child.finishLater(opts.ResultPath, `{"ok":true,"exit_code":0}`, 5*time.Millisecond)
+		return child
+	}
+	task := submitTask(t, env, "iso-write-api-err", 1, map[string]any{"permission": "workspace_write"})
+	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-iso-fail", LeaseSeconds: 60}); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if iso.released != 1 || iso.keepFlag {
+		t.Fatalf("failed workspace_write attempt must call release(false) to prune wt/<task-id>, got released=%d keep=%v", iso.released, iso.keepFlag)
+	}
+	got, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil || got == nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	var resultMap map[string]any
+	if err := json.Unmarshal(got.Result, &resultMap); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if resultMap["ok"] != false {
+		t.Fatalf("expected ok=false on silent [API Error:], got %v", resultMap["ok"])
+	}
+}
