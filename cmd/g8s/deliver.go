@@ -600,7 +600,7 @@ func runDeliver(args []string) {
 
 func isEphemeralCLIAgentArtifact(relSlash string) bool {
 	p := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relSlash)), "./")
-	for _, prefix := range []string{".omo", ".opencode", ".commandcode", ".qwen"} {
+	for _, prefix := range []string{".omo", ".opencode", ".commandcode", ".qwen", ".cursor"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
 		}

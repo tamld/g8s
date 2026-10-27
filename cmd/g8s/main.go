@@ -436,7 +436,8 @@ func runProvidersDiscover(args []string) {
 	}
 
 	var targetEntries []config.ProviderEntry
-	if *providerFlag != "" {
+	discoverCursorOnly := strings.EqualFold(*providerFlag, "cursor") || strings.EqualFold(*providerFlag, "cursor-agent")
+	if *providerFlag != "" && !discoverCursorOnly {
 		if cfgFile != nil {
 			if p, ok := config.FindProvider(cfgFile, *providerFlag); ok && p.Class == "api_call" {
 				targetEntries = append(targetEntries, *p)
@@ -454,10 +455,10 @@ func runProvidersDiscover(args []string) {
 					AllowUnlistedModels: true,
 				})
 			} else {
-				exitUsage("providers", "discover", *traceID, fmt.Sprintf("provider %q not found or not an api_call provider", *providerFlag), "Declare provider in providers.json or use 9router", *jsonl)
+				exitUsage("providers", "discover", *traceID, fmt.Sprintf("provider %q not found or not an api_call provider", *providerFlag), "Declare provider in providers.json or use 9router / cursor", *jsonl)
 			}
 		}
-	} else {
+	} else if !discoverCursorOnly {
 		if cfgFile != nil {
 			for _, p := range cfgFile.Providers {
 				if p.Class == "api_call" {
@@ -487,6 +488,18 @@ func runProvidersDiscover(args []string) {
 		Error    string   `json:"error,omitempty"`
 	}
 	var results []discoveryResult
+
+	if discoverCursorOnly {
+		cp := provider.NewCursorProvider()
+		models, err := cp.DiscoverModels(ctx)
+		if err != nil {
+			exitRuntime("providers", "discover", *traceID, cli.CodeRuntime, fmt.Errorf("provider cursor discover failed: %w", err), "", *jsonl)
+		}
+		results = append(results, discoveryResult{
+			Provider: "cursor",
+			Models:   models,
+		})
+	}
 
 	for _, entry := range targetEntries {
 		p := provider.NewHTTPProviderFromConfig(entry)
@@ -1689,6 +1702,12 @@ func printUsage() {
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
 }
 
+func hydrateCursorAPIKeyEnv() {
+	if apiKey := provider.ResolveCursorAPIKey(); apiKey != "" {
+		_ = os.Setenv("CURSOR_API_KEY", apiKey)
+	}
+}
+
 // runWorker runs the supervisor loop claiming tasks from the queue,
 // resolving provider command templates from providers.json when present
 // (DELTA-10 phase-2 registry-to-worker bridge).
@@ -1780,7 +1799,7 @@ func runWorker(args []string) {
 			}
 		}
 	}
-	for _, builtinName := range []string{"agy", "claude", "codex", "opencode", "commandcode", "qwen"} {
+	for _, builtinName := range []string{"agy", "claude", "codex", "opencode", "commandcode", "qwen", "cursor"} {
 		found := false
 		for _, existing := range platformDispatchNames {
 			if existing == builtinName {
@@ -1791,6 +1810,9 @@ func runWorker(args []string) {
 		if !found && !apiCallNames[builtinName] {
 			platformDispatchNames = append(platformDispatchNames, builtinName)
 		}
+	}
+	if os.Getenv("CURSOR_API_KEY") == "" {
+		hydrateCursorAPIKeyEnv()
 	}
 
 	store, cpErr := controlplane.NewControlPlane(dbPath, nil)

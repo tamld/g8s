@@ -361,7 +361,16 @@ func runLLMCall(args []string) {
 	}
 
 	if entry.Name == "" {
-		if strings.EqualFold(*providerFlag, "cliproxyapi") || strings.EqualFold(*providerFlag, "cliproxy") {
+		if strings.EqualFold(*providerFlag, "cursor") || strings.EqualFold(*providerFlag, "cursor-agent") {
+			entry = config.ProviderEntry{
+				Class:               "platform_dispatch",
+				Name:                "cursor",
+				BaseURL:             "https://api.cursor.com",
+				AuthEnv:             "CURSOR_API_KEY",
+				DefaultModel:        "composer-2.5",
+				AllowUnlistedModels: true,
+			}
+		} else if strings.EqualFold(*providerFlag, "cliproxyapi") || strings.EqualFold(*providerFlag, "cliproxy") {
 			proto := *protocolFlag
 			if proto == "" {
 				proto = "openai"
@@ -443,7 +452,12 @@ func runLLMCall(args []string) {
 	}
 	startTime := time.Now()
 
-	p := provider.NewHTTPProviderFromConfig(entry)
+	var p provider.Provider
+	if strings.EqualFold(entry.Name, "cursor") || strings.EqualFold(entry.Name, "cursor-agent") {
+		p = provider.NewCursorProvider()
+	} else {
+		p = provider.NewHTTPProviderFromConfig(entry)
+	}
 	spec := provider.Spec{
 		Brief:        prompt,
 		Model:        modelID,
