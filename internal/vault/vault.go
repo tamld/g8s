@@ -599,7 +599,7 @@ func (v *Vault) matchSpatialInternal(ctx context.Context, filePath string, activ
 
 	statusFilter := ""
 	if activeOnly {
-		statusFilter = "AND status IN ('APPLIED', 'ACCEPTED') "
+		statusFilter = "AND status IN ('APPLIED', 'ACCEPTED', 'DOCTRINE') "
 	}
 
 	query := fmt.Sprintf(`
@@ -830,4 +830,171 @@ func FormatJITWhisper(records []DistillationRecord) []string {
 		whispers = append(whispers, line)
 	}
 	return whispers
+}
+
+// VerifyAnchors checks every non-deprecated Vault record against the live workspace
+// at rootDir to detect Citation Rot (missing SpatialCoordinates.File/Symbol or
+// missing ForensicVerification.TestFile/TestCase). When markStale is true, any
+// record whose anchored file or symbol no longer exists is updated to status
+// "STALE_ANCHOR" so stale rules are never injected into worker context.
+func (v *Vault) VerifyAnchors(ctx context.Context, rootDir string, markStale bool) ([]string, error) {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "" {
+		return nil, fmt.Errorf("vault: rootDir is required for VerifyAnchors")
+	}
+
+	rows, err := v.db.QueryContext(ctx, `
+		SELECT raw_json FROM vault_records
+		WHERE status NOT IN ('DEPRECATED', 'STALE_ANCHOR')
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("vault: query records for anchor verification: %w", err)
+	}
+	defer rows.Close()
+
+	var candidates []DistillationRecord
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("vault: scan record: %w", err)
+		}
+		var rec DistillationRecord
+		if err := json.Unmarshal([]byte(raw), &rec); err == nil {
+			candidates = append(candidates, rec)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var staleIDs []string
+	for _, rec := range candidates {
+		hasSpatialFile := strings.TrimSpace(rec.SpatialCoordinates.File) != ""
+		hasTestFile := strings.TrimSpace(rec.ForensicVerification.TestFile) != ""
+		if !hasSpatialFile && !hasTestFile {
+			continue
+		}
+
+		isStale := false
+		if hasSpatialFile {
+			fullPath := filepath.Join(rootDir, filepath.FromSlash(strings.TrimSpace(rec.SpatialCoordinates.File)))
+			b, err := os.ReadFile(fullPath)
+			if err != nil {
+				isStale = true
+			} else if sym := strings.TrimSpace(rec.SpatialCoordinates.Symbol); sym != "" {
+				if !strings.Contains(string(b), sym) {
+					isStale = true
+				}
+			}
+		}
+
+		if !isStale && hasTestFile {
+			fullTestPath := filepath.Join(rootDir, filepath.FromSlash(strings.TrimSpace(rec.ForensicVerification.TestFile)))
+			b, err := os.ReadFile(fullTestPath)
+			if err != nil {
+				isStale = true
+			} else if tc := strings.TrimSpace(rec.ForensicVerification.TestCase); tc != "" {
+				if !strings.Contains(string(b), tc) {
+					isStale = true
+				}
+			}
+		}
+
+		if isStale {
+			staleIDs = append(staleIDs, rec.ID)
+			if markStale {
+				rec.Status = "STALE_ANCHOR"
+				if _, err := v.Store(ctx, rec); err != nil {
+					return staleIDs, fmt.Errorf("vault: mark record %s stale: %w", rec.ID, err)
+				}
+			}
+		}
+	}
+
+	return staleIDs, nil
+}
+
+// ExportPortableJSONL exports active/doctrine Vault distillation records to a
+// self-contained JSONL file (e.g. .g8s/knowledge-vault.jsonl) so any repository
+// can version and share verified engineering knowledge without external tools.
+func (v *Vault) ExportPortableJSONL(ctx context.Context, filePath string, repoID string) (int, error) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return 0, fmt.Errorf("vault: export filePath is required")
+	}
+
+	query := `
+		SELECT raw_json FROM vault_records
+		WHERE status NOT IN ('DEPRECATED', 'STALE_ANCHOR')
+	`
+	var args []any
+	if strings.TrimSpace(repoID) != "" {
+		query += ` AND (repo_id = ? OR repo_id = '' OR scope_tier IN ('domain', 'global'))`
+		args = append(args, strings.TrimSpace(repoID))
+	}
+	query += ` ORDER BY id ASC`
+
+	rows, err := v.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("vault: query export records: %w", err)
+	}
+	defer rows.Close()
+
+	var lines []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return 0, err
+		}
+		var rec DistillationRecord
+		if err := json.Unmarshal([]byte(raw), &rec); err != nil {
+			continue
+		}
+		b, err := json.Marshal(rec)
+		if err != nil {
+			return 0, err
+		}
+		lines = append(lines, string(b))
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+		return 0, fmt.Errorf("vault: create export dir: %w", err)
+	}
+	content := ""
+	if len(lines) > 0 {
+		content = strings.Join(lines, "\n") + "\n"
+	}
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		return 0, fmt.Errorf("vault: write export file: %w", err)
+	}
+	return len(lines), nil
+}
+
+// ImportPortableJSONL imports Tri-Anchor distillation records from a portable
+// JSONL file (e.g. .g8s/knowledge-vault.jsonl) into the local SQLite Vault.
+func (v *Vault) ImportPortableJSONL(ctx context.Context, filePath string) (int, error) {
+	b, err := os.ReadFile(strings.TrimSpace(filePath))
+	if err != nil {
+		return 0, fmt.Errorf("vault: read import file: %w", err)
+	}
+	count := 0
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		var rec DistillationRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return count, fmt.Errorf("vault: unmarshal JSONL line %d: %w", count+1, err)
+		}
+		if _, err := v.Store(ctx, rec); err != nil {
+			return count, fmt.Errorf("vault: store imported record %s: %w", rec.ID, err)
+		}
+		count++
+	}
+	return count, nil
 }

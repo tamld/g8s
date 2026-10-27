@@ -11,10 +11,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/vault"
 )
 
 // MemoryKind classifies the entry (ADR-0023 §2): the kind determines sharing
@@ -59,22 +62,25 @@ const (
 	ScopeGlobal  MemoryScope = "global"
 )
 
-// MemoryEntry is one lifecycle-tracked memory item (MemoryEntry v1).
+// MemoryEntry is one lifecycle-tracked memory item (MemoryEntry v1 + Contextual Envelope).
 type MemoryEntry struct {
-	ID          string
-	Kind        MemoryKind
-	Lifecycle   MemoryLifecycle
-	Trust       MemoryTrust
-	Salience    int
-	LastUsedAt  float64
-	Scope       MemoryScope
-	SessionID   string
-	TaskID      string
-	PromotedBy  string
-	Payload     string
-	PayloadHash string
-	CreatedAt   float64
-	UpdatedAt   float64
+	ID            string            `json:"id"`
+	Kind          MemoryKind        `json:"kind"`
+	Lifecycle     MemoryLifecycle   `json:"lifecycle"`
+	Trust         MemoryTrust       `json:"trust"`
+	Salience      int               `json:"salience"`
+	LastUsedAt    float64           `json:"last_used_at"`
+	Scope         MemoryScope       `json:"scope"`
+	SessionID     string            `json:"session_id"`
+	TaskID        string            `json:"task_id"`
+	PromotedBy    string            `json:"promoted_by"`
+	Payload       string            `json:"payload"`
+	PayloadHash   string            `json:"payload_hash"`
+	Preconditions map[string]string `json:"preconditions,omitempty"`
+	SupersededBy  string            `json:"superseded_by,omitempty"`
+	ValidUntil    float64           `json:"valid_until,omitempty"`
+	CreatedAt     float64           `json:"created_at"`
+	UpdatedAt     float64           `json:"updated_at"`
 }
 
 // GateSensor scores the NAKED payload (trust labels stripped — G3). The
@@ -259,28 +265,41 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 	}
 
 	if rowID != "" {
+		precondJSON := marshalPreconditions(e.Preconditions)
 		if _, err := a.db.ExecContext(ctx, `
 			UPDATE memory_entries
-			SET lifecycle = ?, trust = ?, payload_hash = ?, promoted_by = ?, updated_at = ?
+			SET lifecycle = ?, trust = ?, payload_hash = ?, promoted_by = ?, preconditions = ?, superseded_by = ?, valid_until = ?, updated_at = ?
 			WHERE id = ?`,
-			string(LifecycleActive), string(trust), hash, e.PromotedBy, now, rowID); err != nil {
+			string(LifecycleActive), string(trust), hash, e.PromotedBy, precondJSON, e.SupersededBy, e.ValidUntil, now, rowID); err != nil {
 			return fmt.Errorf("memory: promote %s: %w", rowID, err)
 		}
 		e.ID = rowID
 	} else {
+		precondJSON := marshalPreconditions(e.Preconditions)
 		if _, err := a.db.ExecContext(ctx, `
 			INSERT INTO memory_entries
 				(id, kind, lifecycle, trust, salience, last_used_at, scope,
-				 session_id, task_id, promoted_by, payload, payload_hash, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.ID, string(e.Kind), string(LifecycleActive), string(trust), string(e.Scope),
-			e.SessionID, e.TaskID, e.PromotedBy, e.Payload, hash, now, now); err != nil {
+			e.SessionID, e.TaskID, e.PromotedBy, e.Payload, hash, precondJSON, e.SupersededBy, e.ValidUntil, now, now); err != nil {
 			return fmt.Errorf("memory: insert entry: %w", err)
 		}
 	}
 	e.CreatedAt = now
 	e.UpdatedAt = now
 	return nil
+}
+
+func marshalPreconditions(m map[string]string) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // CaptureScratch records a freshly distilled entry in the scratch state
@@ -298,13 +317,14 @@ func (a *LocalSQLiteMemoryAdapter) CaptureScratch(ctx context.Context, e *Memory
 	e.PayloadHash = payloadHash(e.Payload)
 	e.CreatedAt = now
 	e.UpdatedAt = now
+	precondJSON := marshalPreconditions(e.Preconditions)
 	_, err := a.db.ExecContext(ctx, `
 		INSERT INTO memory_entries
 			(id, kind, lifecycle, trust, salience, last_used_at, scope,
-			 session_id, task_id, promoted_by, payload, payload_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, string(e.Kind), string(e.Lifecycle), string(e.Trust), string(e.Scope),
-		e.SessionID, e.TaskID, e.PromotedBy, e.Payload, e.PayloadHash, e.CreatedAt, e.UpdatedAt)
+		e.SessionID, e.TaskID, e.PromotedBy, e.Payload, e.PayloadHash, precondJSON, e.SupersededBy, e.ValidUntil, e.CreatedAt, e.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("memory: capture scratch: %w", err)
 	}
@@ -471,15 +491,16 @@ func (a *LocalSQLiteMemoryAdapter) ListEntries(ctx context.Context, filter Memor
 	return out, rows.Err()
 }
 
-const entryColumns = `id, kind, lifecycle, trust, salience, last_used_at, scope, session_id, task_id, promoted_by, payload, payload_hash, created_at, updated_at`
+const entryColumns = `id, kind, lifecycle, trust, salience, last_used_at, scope, session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, created_at, updated_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanEntry(row rowScanner) (*MemoryEntry, error) {
 	e := &MemoryEntry{}
-	var kind, lifecycle, trust, scope string
+	var kind, lifecycle, trust, scope, precondJSON string
 	err := row.Scan(&e.ID, &kind, &lifecycle, &trust, &e.Salience, &e.LastUsedAt, &scope,
-		&e.SessionID, &e.TaskID, &e.PromotedBy, &e.Payload, &e.PayloadHash, &e.CreatedAt, &e.UpdatedAt)
+		&e.SessionID, &e.TaskID, &e.PromotedBy, &e.Payload, &e.PayloadHash,
+		&precondJSON, &e.SupersededBy, &e.ValidUntil, &e.CreatedAt, &e.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrUnknownEntry
 	}
@@ -490,7 +511,123 @@ func scanEntry(row rowScanner) (*MemoryEntry, error) {
 	e.Lifecycle = MemoryLifecycle(lifecycle)
 	e.Trust = MemoryTrust(trust)
 	e.Scope = MemoryScope(scope)
+	if precondJSON != "" && precondJSON != "{}" {
+		_ = json.Unmarshal([]byte(precondJSON), &e.Preconditions)
+	}
 	return e, nil
+}
+
+// SupersedeEntry proposes newEntry through the gate and atomically links oldID
+// to newEntry via SupersededBy while archiving oldID so RecallContextualEntries
+// never surfaces superseded operational decisions.
+func (a *LocalSQLiteMemoryAdapter) SupersedeEntry(ctx context.Context, oldID string, newEntry *MemoryEntry) error {
+	if strings.TrimSpace(oldID) == "" || newEntry == nil {
+		return ErrInvalidEntry
+	}
+	if _, err := a.GetEntry(ctx, oldID); err != nil {
+		return err
+	}
+	if err := a.ProposeEntry(ctx, newEntry); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := float64(time.Now().UnixNano()) / 1e9
+	_, err := a.db.ExecContext(ctx, `
+		UPDATE memory_entries
+		SET lifecycle = ?, superseded_by = ?, updated_at = ?
+		WHERE id = ?`,
+		string(LifecycleArchived), newEntry.ID, now, oldID)
+	if err != nil {
+		return fmt.Errorf("memory: mark %s superseded by %s: %w", oldID, newEntry.ID, err)
+	}
+	return nil
+}
+
+// RecallContextualEntries returns active/distilled/doctrine memory entries that
+// have not been superseded, have not expired (when nowUnix > 0 and ValidUntil > 0),
+// and whose Preconditions are all satisfied by activeContext.
+func (a *LocalSQLiteMemoryAdapter) RecallContextualEntries(ctx context.Context, activeContext map[string]string, nowUnix float64) ([]*MemoryEntry, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT `+entryColumns+`
+		FROM memory_entries
+		WHERE lifecycle IN ('active', 'distilled', 'doctrine')
+		  AND superseded_by = ''
+		ORDER BY salience DESC, updated_at DESC
+		LIMIT 200
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("memory: recall contextual entries: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*MemoryEntry
+	for rows.Next() {
+		e, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		if nowUnix > 0 && e.ValidUntil > 0 && e.ValidUntil < nowUnix {
+			continue
+		}
+		if !matchPreconditions(e.Preconditions, activeContext) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func matchPreconditions(required, active map[string]string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	for k, reqVal := range required {
+		actVal, ok := active[k]
+		if !ok || actVal != reqVal {
+			return false
+		}
+	}
+	return true
+}
+
+// PromoteToVault promotes a contextual MemoryEntry into a Tri-Anchor Knowledge
+// Vault record inside g8s's own SQLite Vault (zero external dependencies) and
+// transitions the MemoryEntry to LifecycleDoctrine.
+func (a *LocalSQLiteMemoryAdapter) PromoteToVault(ctx context.Context, entryID string, rec vault.DistillationRecord) (*vault.DistillationRecord, error) {
+	if a.vault == nil {
+		return nil, fmt.Errorf("memory: semantic vault not configured")
+	}
+	if strings.TrimSpace(rec.SpatialCoordinates.File) == "" || strings.TrimSpace(rec.ForensicVerification.TestFile) == "" {
+		return nil, fmt.Errorf("%w: promotion to Knowledge Vault requires both SpatialCoordinates.File and ForensicVerification.TestFile", ErrInvalidEntry)
+	}
+	e, err := a.GetEntry(ctx, entryID)
+	if err != nil {
+		return nil, err
+	}
+	if rec.Status == "" {
+		rec.Status = "DOCTRINE"
+	}
+	if strings.TrimSpace(rec.Causality.TradeOff) == "" {
+		rec.Causality.TradeOff = e.Payload
+	}
+	stored, err := a.vault.Store(ctx, rec)
+	if err != nil {
+		return nil, fmt.Errorf("memory: store promoted record in vault: %w", err)
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := float64(time.Now().UnixNano()) / 1e9
+	if _, err := a.db.ExecContext(ctx, `
+		UPDATE memory_entries SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+		string(LifecycleDoctrine), now, entryID); err != nil {
+		return nil, fmt.Errorf("memory: transition %s to doctrine: %w", entryID, err)
+	}
+	return stored, nil
 }
 
 // SetGateEventSink wires the DEGRADED observability sink (e.g. telemetry

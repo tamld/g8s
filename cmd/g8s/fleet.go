@@ -47,10 +47,12 @@ func runFleet(args []string) {
 	switch sub {
 	case "status":
 		runFleetStatus(args)
+	case "gc":
+		runFleetGC(args)
 	case "help", "-h", "--help":
-		fmt.Println("Usage: g8s fleet status [--dir <workspace>] [--require-clean] [--json]")
+		fmt.Println("Usage: g8s fleet <status|gc> [--dir <workspace>] [--require-clean] [--dry-run] [--json]")
 	default:
-		exitUsage("fleet", sub, "", fmt.Sprintf("unknown fleet subcommand %q (expected 'status')", sub), "Run 'g8s fleet status --help'", false)
+		exitUsage("fleet", sub, "", fmt.Sprintf("unknown fleet subcommand %q (expected 'status' or 'gc')", sub), "Run 'g8s fleet --help'", false)
 	}
 }
 
@@ -267,4 +269,135 @@ func inspectGitRepo(repoPath string) FleetRepoStatus {
 
 	st.Clean = st.DirtyCount == 0 && st.UnpushedCount == 0 && st.WorktreeCount <= 1 && len(st.ExtraBranches) == 0
 	return st
+}
+
+// FleetRepoGCResult records merged branches pruned and unmerged branches preserved for one repo.
+type FleetRepoGCResult struct {
+	Name            string   `json:"name"`
+	Path            string   `json:"path"`
+	BaseBranch      string   `json:"base_branch"`
+	PrunedBranches  []string `json:"pruned_branches"`
+	SkippedBranches []string `json:"skipped_branches"`
+}
+
+// FleetGCReport aggregates safe garbage-collection across a multi-repo workspace.
+type FleetGCReport struct {
+	WorkspaceDir string              `json:"workspace_dir"`
+	DryRun       bool                `json:"dry_run"`
+	TotalPruned  int                 `json:"total_pruned"`
+	TotalSkipped int                 `json:"total_skipped"`
+	Repositories []FleetRepoGCResult `json:"repositories"`
+}
+
+func runFleetGC(args []string) {
+	fs := flag.NewFlagSet("fleet gc", flag.ContinueOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	dirFlag := fs.String("dir", "", "workspace directory containing git repositories")
+	dryRunFlag := fs.Bool("dry-run", false, "report merged branches that would be pruned without deleting them")
+
+	fs.SetOutput(os.Stdout)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		exitUsage("fleet", "gc", *traceID, err.Error(), "Run 'g8s fleet gc --help'", *jsonl)
+	}
+
+	workspaceDir := strings.TrimSpace(*dirFlag)
+	if workspaceDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			exitRuntime("fleet", "gc", *traceID, cli.CodeIO, err, "Failed to resolve current working directory", *jsonl)
+		}
+		parentDir := filepath.Dir(cwd)
+		if isGitRepo(cwd) && countChildGitRepos(parentDir) > 1 {
+			workspaceDir = parentDir
+		} else {
+			workspaceDir = cwd
+		}
+	}
+
+	absWorkspace, err := filepath.Abs(workspaceDir)
+	if err != nil {
+		exitRuntime("fleet", "gc", *traceID, cli.CodeIO, err, "Invalid workspace path", *jsonl)
+	}
+
+	repoPaths := discoverGitRepos(absWorkspace)
+	results := make([]FleetRepoGCResult, 0, len(repoPaths))
+	totalPruned := 0
+	totalSkipped := 0
+	for _, rp := range repoPaths {
+		res := gcFleetRepository(rp, *dryRunFlag)
+		totalPruned += len(res.PrunedBranches)
+		totalSkipped += len(res.SkippedBranches)
+		results = append(results, res)
+	}
+
+	report := FleetGCReport{
+		WorkspaceDir: absWorkspace,
+		DryRun:       *dryRunFlag,
+		TotalPruned:  totalPruned,
+		TotalSkipped: totalSkipped,
+		Repositories: results,
+	}
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("fleet_gc", "fleet", "gc", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("Fleet GC (%s): pruned=%d skipped_unmerged=%d\n", report.WorkspaceDir, report.TotalPruned, report.TotalSkipped)
+}
+
+func gcFleetRepository(repoPath string, dryRun bool) FleetRepoGCResult {
+	res := FleetRepoGCResult{
+		Name:            filepath.Base(repoPath),
+		Path:            repoPath,
+		PrunedBranches:  make([]string, 0),
+		SkippedBranches: make([]string, 0),
+	}
+
+	if !dryRun {
+		_, _ = runGitTrimmed(repoPath, "worktree", "prune")
+	}
+
+	curBranch, _ := runGitTrimmed(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	baseBranch := curBranch
+	for _, candidate := range []string{"main", "master"} {
+		if _, err := runGitTrimmed(repoPath, "rev-parse", "--verify", candidate); err == nil {
+			baseBranch = candidate
+			break
+		}
+	}
+	res.BaseBranch = baseBranch
+	if baseBranch == "" {
+		return res
+	}
+
+	brOut, err := runGitTrimmed(repoPath, "branch", "--format=%(refname:short)")
+	if err != nil || brOut == "" {
+		return res
+	}
+
+	for _, b := range strings.Split(brOut, "\n") {
+		b = strings.TrimSpace(b)
+		if b == "" || b == curBranch || b == baseBranch || b == "main" || b == "master" {
+			continue
+		}
+		// Verify ancestry: only prune if b is a strict/merged ancestor of baseBranch
+		ancCmd := exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", b, baseBranch)
+		if ancCmd.Run() == nil {
+			if !dryRun {
+				if _, delErr := runGitTrimmed(repoPath, "branch", "-d", b); delErr != nil {
+					res.SkippedBranches = append(res.SkippedBranches, b)
+					continue
+				}
+			}
+			res.PrunedBranches = append(res.PrunedBranches, b)
+		} else {
+			res.SkippedBranches = append(res.SkippedBranches, b)
+		}
+	}
+	return res
 }

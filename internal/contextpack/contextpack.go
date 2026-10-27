@@ -2,6 +2,7 @@
 package contextpack
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,6 +14,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/tamld/g8s/internal/vault"
 )
 
 // Tier represents one of the 4 AST/structural elision levels in DELTA-36.
@@ -33,6 +36,7 @@ type PackRequest struct {
 	FocusQuery   string   `json:"focus_query,omitempty"`
 	BudgetTokens int      `json:"budget_tokens"`
 	MaxFiles     int      `json:"max_files,omitempty"`
+	VaultDBPath  string   `json:"vault_db_path,omitempty"`
 }
 
 // FileEntry records the optimization decision and compressed output for a single file.
@@ -61,6 +65,7 @@ type PackResult struct {
 	BudgetUtilization float64     `json:"budget_utilization"`
 	SecretsRedacted   int         `json:"secrets_redacted"`
 	Files             []FileEntry `json:"files"`
+	KnowledgeWhispers []string    `json:"knowledge_whispers,omitempty"`
 	RenderedMarkdown  string      `json:"rendered_markdown"`
 }
 
@@ -523,6 +528,15 @@ func Pack(req PackRequest) (*PackResult, error) {
 		_, _ = fmt.Fprintf(&mdBuilder, "## %s [%s]\n```\n%s\n```\n\n", c.relPath, chosen, content)
 	}
 
+	whispers := collectVerifiedVaultWhispers(absRoot, req.VaultDBPath, entries)
+	if len(whispers) > 0 {
+		_, _ = fmt.Fprintf(&mdBuilder, "## Verified Knowledge Whispers\n")
+		for _, w := range whispers {
+			_, _ = fmt.Fprintf(&mdBuilder, "- %s\n", w)
+		}
+		_, _ = fmt.Fprintf(&mdBuilder, "\n")
+	}
+
 	ratio := 1.0
 	savings := 0.0
 	if totalCompressedTokens > 0 && totalOriginalTokens > 0 {
@@ -545,8 +559,56 @@ func Pack(req PackRequest) (*PackResult, error) {
 		BudgetUtilization: round4(utilization),
 		SecretsRedacted:   totalRedacted,
 		Files:             entries,
+		KnowledgeWhispers: whispers,
 		RenderedMarkdown:  mdBuilder.String(),
 	}, nil
+}
+
+func collectVerifiedVaultWhispers(absRoot, explicitVaultDB string, entries []FileEntry) []string {
+	vdbPath := strings.TrimSpace(explicitVaultDB)
+	if vdbPath == "" {
+		vdbPath = strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
+	}
+	if vdbPath == "" {
+		if stateDir := strings.TrimSpace(os.Getenv("G8S_STATE_DIR")); stateDir != "" {
+			vdbPath = filepath.Join(stateDir, "vault.db")
+		}
+	}
+	if vdbPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(vdbPath); err != nil {
+		return nil
+	}
+	v, err := vault.NewVault(vdbPath, nil)
+	if err != nil {
+		return nil
+	}
+	defer v.Close()
+
+	ctx := context.Background()
+	_, _ = v.VerifyAnchors(ctx, absRoot, true)
+
+	maxRules := vault.ResolveMaxActiveRules()
+	if maxRules <= 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var matched []vault.DistillationRecord
+	for _, e := range entries {
+		recs, err := v.MatchSpatial(ctx, e.Path, maxRules)
+		if err != nil {
+			continue
+		}
+		for _, r := range recs {
+			if !seen[r.ID] {
+				seen[r.ID] = true
+				matched = append(matched, r)
+			}
+		}
+	}
+	return vault.FormatJITWhisper(matched)
 }
 
 func tierUtilityMultiplier(t Tier) float64 {

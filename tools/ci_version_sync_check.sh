@@ -260,6 +260,16 @@ if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
 fi
 pass "Packaging templates match codebase version ($VERSION_GO)"
 
+# Check SBOM release tooling parity (.goreleaser.yaml sboms: <-> .github/workflows/release.yml syft)
+if [ -f ".goreleaser.yaml" ] && [ -f ".github/workflows/release.yml" ]; then
+    if grep -qE '^[[:space:]]*sboms:' .goreleaser.yaml; then
+        if ! grep -qi 'syft' .github/workflows/release.yml; then
+            fail ".goreleaser.yaml configures sboms:, but .github/workflows/release.yml does not install syft"
+        fi
+        pass "Release workflow SBOM dependency (syft) matches .goreleaser.yaml"
+    fi
+fi
+
 pass "Version sync check passed"
 
 exit 0

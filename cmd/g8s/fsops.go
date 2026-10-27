@@ -119,6 +119,7 @@ func runRead(args []string) {
 	startLineFlag := fs.Int("start-line", 0, "1-indexed starting line number")
 	endLineFlag := fs.Int("end-line", 0, "1-indexed ending line number")
 	maxBytesFlag := fs.Int("max-bytes", 0, "maximum bytes to return before truncation")
+	tierFlag := fs.String("tier", "", "AST/lexical compression tier (full|skel|sigs|tree)")
 	scopeRoot := fs.String("scope-root", "", "base directory for read scope evaluation")
 	receiptID := fs.String("receipt-id", "", "write receipt ID for delegation boundary validation")
 
@@ -131,6 +132,8 @@ func runRead(args []string) {
 		"--end-line":   true,
 		"-max-bytes":   true,
 		"--max-bytes":  true,
+		"-tier":        true,
+		"--tier":       true,
 		"-scope-root":  true,
 		"--scope-root": true,
 		"-receipt-id":  true,
@@ -200,6 +203,7 @@ func runRead(args []string) {
 		StartLine:    startLine,
 		EndLine:      endLine,
 		MaxBytes:     *maxBytesFlag,
+		Tier:         *tierFlag,
 		AllowedPaths: allowedPaths,
 	}
 
@@ -232,6 +236,7 @@ func runEdit(args []string) {
 	newStr := fs.String("new", "", "replacement string")
 	allFlag := fs.Bool("all", false, "replace all occurrences instead of only a single occurrence")
 	ifSHA := fs.String("if-sha256", "", "precondition SHA-256 hash expected before editing")
+	batchFile := fs.String("batch", "", "path to JSON file containing an array of atomic EditOptions")
 	scopeRoot := fs.String("scope-root", "", "base directory for edit scope evaluation")
 	receiptID := fs.String("receipt-id", "", "write receipt ID for delegation boundary validation")
 
@@ -242,6 +247,8 @@ func runEdit(args []string) {
 		"--new":        true,
 		"-if-sha256":   true,
 		"--if-sha256":  true,
+		"-batch":       true,
+		"--batch":      true,
 		"-scope-root":  true,
 		"--scope-root": true,
 		"-receipt-id":  true,
@@ -283,8 +290,21 @@ func runEdit(args []string) {
 		exitUsage("edit", "", *traceID, err.Error(), "Check g8s edit flags", *jsonl)
 	}
 
+	if strings.TrimSpace(*batchFile) != "" {
+		scope, allowedPaths := resolveReceiptAllowedPaths("edit", *receiptID, *scopeRoot, true, *jsonl)
+		results, err := executeBatchEditFromFile(*batchFile, scope, allowedPaths)
+		if err != nil {
+			exitRuntime("edit", "batch", *traceID, cli.CodeIO, err, "Batch edit failed atomically (zero files mutated)", *jsonl)
+		}
+		_ = jsonMode
+		env := cli.NewEnvelope("edit_batch", "edit", "batch", map[string]any{"results": results, "count": len(results)})
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+
 	if fs.NArg() == 0 {
-		exitUsage("edit", "", *traceID, "usage: g8s edit [flags] <file>", "Provide target file path", *jsonl)
+		exitUsage("edit", "", *traceID, "usage: g8s edit [flags] <file>", "Provide target file path or --batch <file.json>", *jsonl)
 	}
 	targetPath := fs.Arg(0)
 	if *oldStr == "" {
@@ -312,6 +332,22 @@ func runEdit(args []string) {
 	env := cli.NewEnvelope("edit", "edit", "", res)
 	env.TraceID = *traceID
 	_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+}
+
+func executeBatchEditFromFile(batchFilePath, scopeRoot string, allowedPaths []string) ([]*fsops.EditResult, error) {
+	raw, err := os.ReadFile(strings.TrimSpace(batchFilePath))
+	if err != nil {
+		return nil, fmt.Errorf("read batch edit file: %w", err)
+	}
+	var edits []fsops.EditOptions
+	if err := json.Unmarshal(raw, &edits); err != nil {
+		return nil, fmt.Errorf("parse batch edit JSON: %w", err)
+	}
+	for i := range edits {
+		edits[i].ScopeRoot = scopeRoot
+		edits[i].AllowedPaths = allowedPaths
+	}
+	return fsops.ApplyBatchEdits(context.Background(), edits)
 }
 
 func runSelect(args []string) {

@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/tamld/g8s/internal/charter"
+	"github.com/tamld/g8s/internal/contextpack"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/vault"
@@ -31,6 +32,7 @@ type ReadOptions struct {
 	StartLine    int      `json:"start_line"`
 	EndLine      int      `json:"end_line"`
 	MaxBytes     int      `json:"max_bytes"`
+	Tier         string   `json:"tier,omitempty"`
 	AllowedPaths []string `json:"allowed_paths"`
 }
 
@@ -43,6 +45,7 @@ type LineEntry struct {
 // ReadResult represents the result of a bounded file read operation.
 type ReadResult struct {
 	File       string      `json:"file"`
+	Tier       string      `json:"tier,omitempty"`
 	TotalLines int         `json:"total_lines"`
 	StartLine  int         `json:"start_line"`
 	EndLine    int         `json:"end_line"`
@@ -408,12 +411,27 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	sum := sha256.Sum256(raw)
 	fileSHA := hex.EncodeToString(sum[:])
 
+	var resolvedTier string
+	sourceText := string(raw)
+	if rawTier := strings.TrimSpace(opts.Tier); rawTier != "" {
+		upperTier := contextpack.Tier(strings.ToUpper(rawTier))
+		switch upperTier {
+		case contextpack.TierFull, contextpack.TierSkel, contextpack.TierSigs, contextpack.TierTree:
+			resolvedTier = string(upperTier)
+			if upperTier != contextpack.TierFull {
+				sourceText = contextpack.ElideFile(relSlash, sourceText, upperTier)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported read tier %q (expected full, skel, sigs, or tree)", opts.Tier)
+		}
+	}
+
 	var rawLines []string
 	var totalLines int
-	if len(raw) == 0 {
+	if len(sourceText) == 0 {
 		totalLines = 0
 	} else {
-		contentStr := string(raw)
+		contentStr := sourceText
 		if strings.HasSuffix(contentStr, "\r\n") {
 			contentStr = strings.TrimSuffix(contentStr, "\r\n")
 		} else if strings.HasSuffix(contentStr, "\n") {
@@ -482,6 +500,7 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 
 	return &ReadResult{
 		File:       filepath.ToSlash(opts.Path),
+		Tier:       resolvedTier,
 		TotalLines: totalLines,
 		StartLine:  startLine,
 		EndLine:    endLine,
@@ -629,6 +648,194 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		NewSHA256:    newHex,
 		JITWhisper:   lookupJITWhisper(ctx, relSlash),
 	}, nil
+}
+
+// ApplyBatchEdits validates and applies a slice of EditOptions atomically.
+// Phase 1 validates every edit in memory (scope, binary check, IfSHA256, OldString match)
+// so that if any edit fails, zero files on disk are mutated. Phase 2 writes temp files
+// and renames them into place, rolling back any prior renames if an OS write error occurs.
+func ApplyBatchEdits(ctx context.Context, edits []EditOptions) ([]*EditResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(edits) == 0 {
+		return nil, fmt.Errorf("batch edits must not be empty")
+	}
+	editMu.Lock()
+	defer editMu.Unlock()
+
+	type stagedFile struct {
+		canonTarget string
+		canonScope  string
+		scopeRoot   string
+		mode        os.FileMode
+		origBytes   []byte
+		curBytes    []byte
+		curHex      string
+	}
+
+	stagedByTarget := make(map[string]*stagedFile)
+	var targetOrder []string
+	results := make([]*EditResult, 0, len(edits))
+
+	for idx, opts := range edits {
+		relSlash, err := VerifyWriteScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
+		if err != nil {
+			return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+		}
+		if opts.OldString == "" {
+			return nil, fmt.Errorf("batch edit[%d] (%s): old_string must not be empty", idx, opts.Path)
+		}
+		canonTarget, err := evalCanonicalPath(opts.Path)
+		if err != nil {
+			return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+		}
+		if _, err := VerifyWriteScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
+			return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+		}
+		scopeRoot := opts.ScopeRoot
+		if scopeRoot == "" {
+			scopeRoot = "."
+		}
+		canonScope, err := evalCanonicalPath(scopeRoot)
+		if err != nil {
+			return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+		}
+		if !strings.HasPrefix(canonTarget, canonScope) {
+			return nil, fmt.Errorf("batch edit[%d]: path %q escapes scope root %q", idx, opts.Path, opts.ScopeRoot)
+		}
+
+		sf, exists := stagedByTarget[canonTarget]
+		if !exists {
+			info, err := os.Stat(canonTarget)
+			if err != nil {
+				return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+			}
+			raw, err := os.ReadFile(canonTarget)
+			if err != nil {
+				return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+			}
+			checkLen := len(raw)
+			if checkLen > 512 {
+				checkLen = 512
+			}
+			if bytes.IndexByte(raw[:checkLen], 0) >= 0 {
+				return nil, fmt.Errorf("batch edit[%d] (%s): binary file cannot be edited as text", idx, opts.Path)
+			}
+			sum := sha256.Sum256(raw)
+			sf = &stagedFile{
+				canonTarget: canonTarget,
+				canonScope:  canonScope,
+				scopeRoot:   opts.ScopeRoot,
+				mode:        info.Mode().Perm(),
+				origBytes:   raw,
+				curBytes:    raw,
+				curHex:      hex.EncodeToString(sum[:]),
+			}
+			stagedByTarget[canonTarget] = sf
+			targetOrder = append(targetOrder, canonTarget)
+		}
+
+		oldHex := sf.curHex
+		if opts.IfSHA256 != "" && !strings.EqualFold(opts.IfSHA256, oldHex) {
+			return nil, fmt.Errorf("batch edit[%d] sha256 conflict on %s: expected %s, got %s", idx, opts.Path, opts.IfSHA256, oldHex)
+		}
+
+		isCRLF := bytes.Contains(sf.curBytes, []byte("\r\n"))
+		normContent := strings.ReplaceAll(string(sf.curBytes), "\r\n", "\n")
+		normOld := strings.ReplaceAll(opts.OldString, "\r\n", "\n")
+		normNew := strings.ReplaceAll(opts.NewString, "\r\n", "\n")
+
+		count := strings.Count(normContent, normOld)
+		if count == 0 {
+			return nil, fmt.Errorf("batch edit[%d] (%s): old_string not found in file", idx, opts.Path)
+		}
+		if count > 1 && !opts.ReplaceAll {
+			return nil, fmt.Errorf("batch edit[%d] (%s): old_string found %d times; set --all to replace all occurrences", idx, opts.Path, count)
+		}
+
+		var replaced string
+		var replacedCount int
+		if opts.ReplaceAll {
+			replaced = strings.ReplaceAll(normContent, normOld, normNew)
+			replacedCount = count
+		} else {
+			replaced = strings.Replace(normContent, normOld, normNew, 1)
+			replacedCount = 1
+		}
+		if isCRLF {
+			replaced = strings.ReplaceAll(replaced, "\n", "\r\n")
+		}
+
+		newBytes := []byte(replaced)
+		newSum := sha256.Sum256(newBytes)
+		newHex := hex.EncodeToString(newSum[:])
+		sf.curBytes = newBytes
+		sf.curHex = newHex
+
+		results = append(results, &EditResult{
+			File:         filepath.ToSlash(opts.Path),
+			Replacements: replacedCount,
+			OldSHA256:    oldHex,
+			NewSHA256:    newHex,
+			JITWhisper:   lookupJITWhisper(ctx, relSlash),
+		})
+	}
+
+	var committed []*stagedFile
+	rollback := func() {
+		for _, c := range committed {
+			if rbErr := os.WriteFile(c.canonTarget, c.origBytes, c.mode); rbErr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] fsops: rollback %s: %v\n", c.canonTarget, rbErr)
+			}
+		}
+	}
+
+	for _, target := range targetOrder {
+		sf := stagedByTarget[target]
+		dir := filepath.Dir(sf.canonTarget)
+		if !strings.HasPrefix(dir, sf.canonScope) {
+			rollback()
+			return nil, fmt.Errorf("directory %q escapes scope root %q", dir, sf.scopeRoot)
+		}
+		tmpFile, err := os.CreateTemp(dir, ".g8s-batch-edit-*")
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		tmpName := tmpFile.Name()
+		if _, err := tmpFile.Write(sf.curBytes); err != nil {
+			tmpFile.Close()
+			_ = os.Remove(tmpName)
+			rollback()
+			return nil, err
+		}
+		if err := tmpFile.Chmod(sf.mode); err != nil {
+			tmpFile.Close()
+			_ = os.Remove(tmpName)
+			rollback()
+			return nil, err
+		}
+		if err := tmpFile.Sync(); err != nil {
+			tmpFile.Close()
+			_ = os.Remove(tmpName)
+			rollback()
+			return nil, err
+		}
+		if err := tmpFile.Close(); err != nil {
+			_ = os.Remove(tmpName)
+			rollback()
+			return nil, err
+		}
+		if err := os.Rename(tmpName, sf.canonTarget); err != nil {
+			_ = os.Remove(tmpName)
+			rollback()
+			return nil, err
+		}
+		committed = append(committed, sf)
+	}
+
+	return results, nil
 }
 
 // lookupJITWhisper performs a non-blocking, fail-open spatial query against the

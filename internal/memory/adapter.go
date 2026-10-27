@@ -151,6 +151,9 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 		promoted_by TEXT NOT NULL DEFAULT '',
 		payload TEXT NOT NULL,
 		payload_hash TEXT NOT NULL,
+		preconditions TEXT NOT NULL DEFAULT '{}',
+		superseded_by TEXT NOT NULL DEFAULT '',
+		valid_until REAL NOT NULL DEFAULT 0,
 		created_at REAL NOT NULL,
 		updated_at REAL NOT NULL
 	);
@@ -166,8 +169,18 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 		created_at REAL NOT NULL
 	);
 	`
-	_, err := a.db.Exec(schema)
-	return err
+	if _, err := a.db.Exec(schema); err != nil {
+		return err
+	}
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN preconditions TEXT NOT NULL DEFAULT '{}'`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN valid_until REAL NOT NULL DEFAULT 0`)
+	return nil
+}
+
+// Vault returns the underlying semantic Knowledge Vault configured on the adapter.
+func (a *LocalSQLiteMemoryAdapter) Vault() *vault.Vault {
+	return a.vault
 }
 
 // Close closes the underlying SQLite database.
