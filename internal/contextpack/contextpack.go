@@ -579,16 +579,31 @@ func computeBM25FAndPageRank(candidates []*candidateFile, focusQuery string) {
 	} else {
 		avgLen := 0.0
 		docLengths := make([]float64, n)
+
+		// ⚡ Bolt Optimization: Precompute lowercase strings outside the nested loop
+		// to avoid O(N*M) memory allocations and reduce Garbage Collection pressure.
+		type loweredCandidate struct {
+			path string
+			syms string
+			body string
+		}
+		loweredDocs := make([]loweredCandidate, n)
+
 		for i, c := range candidates {
 			docLengths[i] = float64(len(c.sanitizedSrc)) + 1.0
 			avgLen += docLengths[i]
+			loweredDocs[i] = loweredCandidate{
+				path: strings.ToLower(c.relPath),
+				syms: strings.ToLower(strings.Join(c.definedSyms, " ")),
+				body: strings.ToLower(c.sanitizedSrc),
+			}
 		}
 		avgLen /= float64(n)
 
 		df := make(map[string]int, len(queryTerms))
 		for _, q := range queryTerms {
-			for _, c := range candidates {
-				if strings.Contains(strings.ToLower(c.relPath), q) || strings.Contains(strings.ToLower(c.sanitizedSrc), q) {
+			for i := 0; i < n; i++ {
+				if strings.Contains(loweredDocs[i].path, q) || strings.Contains(loweredDocs[i].body, q) {
 					df[q]++
 				}
 			}
@@ -598,21 +613,18 @@ func computeBM25FAndPageRank(candidates []*candidateFile, focusQuery string) {
 		const b = 0.75
 		maxBM25 := 0.0
 		for i, c := range candidates {
-			lowerPath := strings.ToLower(c.relPath)
-			lowerSyms := strings.ToLower(strings.Join(c.definedSyms, " "))
-			lowerBody := strings.ToLower(c.sanitizedSrc)
 			dlNorm := 1.0 - b + b*(docLengths[i]/avgLen)
 
 			score := 0.0
 			for _, q := range queryTerms {
 				tf := 0.0
-				if strings.Contains(lowerPath, q) {
+				if strings.Contains(loweredDocs[i].path, q) {
 					tf += 2.5
 				}
-				if strings.Contains(lowerSyms, q) {
+				if strings.Contains(loweredDocs[i].syms, q) {
 					tf += 3.0
 				}
-				bodyHits := strings.Count(lowerBody, q)
+				bodyHits := strings.Count(loweredDocs[i].body, q)
 				if bodyHits > 20 {
 					bodyHits = 20
 				}
