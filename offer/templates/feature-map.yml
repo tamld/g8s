@@ -1,4 +1,5 @@
 schema_version: "1.0"
+inherits_spec_kit: "g8s/offer/profiles/utility@v0.21"
 # ==============================================================================
 # Feature Map Starter Template (.g8s/feature-map.yml)
 # ==============================================================================

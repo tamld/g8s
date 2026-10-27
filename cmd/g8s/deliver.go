@@ -343,6 +343,7 @@ func runDeliver(args []string) {
 		}
 	}
 	if len(offending) > 0 {
+		recordDeliverTaskTelemetry(task, len(candidates)+len(deletedCandidates), len(rc.AllowedPaths), len(offending), false)
 		for _, off := range offending {
 			fmt.Fprintf(os.Stderr, "out of scope path: %s\n", off)
 		}
@@ -555,6 +556,8 @@ func runDeliver(args []string) {
 		brCmd.Dir = cwd
 		_, _ = brCmd.CombinedOutput()
 	}
+
+	recordDeliverTaskTelemetry(task, len(applied)+len(deleted), len(rc.AllowedPaths), 0, true)
 
 	data := deliverData{
 		TaskID:         taskID,

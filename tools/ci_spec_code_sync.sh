@@ -59,6 +59,7 @@ for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md "$GO_ROOT/spec/domains"/*/*.md
 
     # Boundary 1 (#679): Verify domain_href bidirectional anchor lineage (E_BROKEN_SPEC_LINEAGE).
     domain_href=$(grep -m1 -E '^[-*] \*\*domain_href\*\*:' "$spec" | sed -E 's/.*`([^`]+)`.*/\1/' || true)
+    spec_id=$(grep -m1 -E '^[-*] \*\*Specification ID\*\*:' "$spec" | sed -E 's/.*`([^`]+)`.*/\1/' || true)
     if [ -n "$domain_href" ]; then
         target_file="${domain_href%%#*}"
         target_anchor="${domain_href#*#}"
@@ -67,6 +68,9 @@ for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md "$GO_ROOT/spec/domains"/*/*.md
             FAIL=$((FAIL + 1))
         elif [ "$target_anchor" != "$domain_href" ] && ! grep -qF "{#$target_anchor}" "$GO_ROOT/$target_file"; then
             echo "::error::E_BROKEN_SPEC_LINEAGE: $spec references missing anchor '#$target_anchor' in '$target_file'"
+            FAIL=$((FAIL + 1))
+        elif [ "$enforced" -eq 1 ] && [ -n "$spec_id" ] && ! grep -qE "inherited-from:.*$spec_id" "$GO_ROOT/$target_file"; then
+            echo "::error::E_BROKEN_SPEC_LINEAGE: $target_file is missing reciprocal 'inherited-from: ... $spec_id' for enforced delta $spec"
             FAIL=$((FAIL + 1))
         fi
     fi

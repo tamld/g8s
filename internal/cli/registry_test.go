@@ -1,15 +1,23 @@
 package cli
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestCanonicalCommandsAndAliases(t *testing.T) {
+	contracts := CanonicalCommandContracts()
 	cmds := CanonicalCommands()
-	if len(cmds) < 55 {
-		t.Fatalf("expected at least 55 canonical commands, got %d", len(cmds))
+	if len(cmds) != len(contracts) || len(cmds) < 60 {
+		t.Fatalf("expected >=60 canonical commands matching contracts, got cmds=%d contracts=%d", len(cmds), len(contracts))
+	}
+	for _, c := range contracts {
+		if c.Name == "" || c.Stratum == "" || c.Description == "" {
+			t.Errorf("incomplete CommandContract: %+v", c)
+		}
 	}
 	required := []string{"submit", "worker", "verify", "deliver", "reflex", "f0", "scorecard", "receipt-export", "charter", "fleet"}
 	for _, req := range required {
@@ -51,6 +59,18 @@ func TestScanRepoCoreMarkdownFilesBound(t *testing.T) {
 		"README.md",
 		"spec/constitution.md",
 		"skills/g8s-supervisor/SKILL.md",
+	}
+	// Also walk spec/domains and docs/user-guide (#677 R3).
+	for _, dir := range []string{"spec/domains", "docs/user-guide"} {
+		_ = filepath.WalkDir(filepath.Join(repoRoot, dir), func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+				return nil
+			}
+			if rel, rErr := filepath.Rel(repoRoot, p); rErr == nil {
+				targets = append(targets, filepath.ToSlash(rel))
+			}
+			return nil
+		})
 	}
 	for _, rel := range targets {
 		p := filepath.Join(repoRoot, rel)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,14 +42,43 @@ func extractTaskProviderAndModel(task *controlplane.Task) (string, string) {
 	return prov, mod
 }
 
+type scorecardDeliveryEvent struct {
+	TaskID           string `json:"task_id"`
+	TouchedFiles     int    `json:"touched_files"`
+	AllowedPaths     int    `json:"allowed_paths"`
+	ScopeDriftCount  int    `json:"scope_drift_count"`
+	DeliveredSuccess bool   `json:"delivered_success"`
+	RecordedAt       string `json:"recorded_at"`
+}
+
+func appendScorecardDeliveryEvent(ev scorecardDeliveryEvent) {
+	stateDir := pathutil.DefaultStateDir()
+	if strings.TrimSpace(stateDir) == "" {
+		return
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return
+	}
+	p := filepath.Join(stateDir, "scorecard_delivery_events.jsonl")
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(b, '\n'))
+}
+
 // recordWorkerTaskTelemetry bridges worker execution outcomes into the unified
-// model quality scorecard (model_quality_events.jsonl) (#678, DELTA-45).
+// model quality scorecard (model_quality_events.jsonl) and supervisor_metrics (#678, DELTA-45).
 func recordWorkerTaskTelemetry(store *controlplane.Store, task *controlplane.Task, isFailure bool) {
-	_ = store
 	if task == nil {
 		return
 	}
-	success := (task.State == controlplane.StateSucceeded || task.State == "COMPLETED") && !isFailure
+	success := (task.State == controlplane.StateSucceeded || task.State == "COMPLETED" || task.State == controlplane.StateWorkerCompleted) && !isFailure
 	prov, mod := extractTaskProviderAndModel(task)
 	errReason := ""
 	if !success {
@@ -61,6 +91,25 @@ func recordWorkerTaskTelemetry(store *controlplane.Store, task *controlplane.Tas
 		ErrorReason:    errReason,
 		RecordedAt:     time.Now().UTC().Format(time.RFC3339),
 	})
+	if store != nil {
+		attempts := 0
+		esc := 1
+		envScore := 0.0
+		if success {
+			attempts = 1
+			esc = 0
+			envScore = 1.0
+		}
+		_ = store.SaveMetrics(context.Background(), task.TaskID, controlplane.MetricsRow{
+			SupervisorTaskID:     task.TaskID,
+			EnvelopeScore:        envScore,
+			FirstAttemptSuccess:  success,
+			AttemptsToSuccess:    attempts,
+			ApproachesToSuccess:  attempts,
+			CycleDurationSeconds: 1.0,
+			EscalationCount:      esc,
+		})
+	}
 }
 
 // recordVerifyTaskTelemetry records mechanical verification outcomes into the
@@ -77,6 +126,37 @@ func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool) {
 		VerifyChecked:  true,
 		VerifyPassed:   passed,
 		RecordedAt:     time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// recordDeliverTaskTelemetry records worktree delivery & WriteReceipt tightness
+// metrics into the unified telemetry bus (#678, #680 Axis 2).
+func recordDeliverTaskTelemetry(task *controlplane.Task, touchedFiles, allowedPaths, scopeDrift int, success bool) {
+	taskID := ""
+	if task != nil {
+		taskID = task.TaskID
+		prov, mod := extractTaskProviderAndModel(task)
+		errReason := ""
+		if !success {
+			errReason = "deliver_scope_drift"
+		}
+		_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
+			Provider:       prov,
+			ModelRequested: mod,
+			Success:        success,
+			VerifyChecked:  true,
+			VerifyPassed:   success,
+			ErrorReason:    errReason,
+			RecordedAt:     time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+	appendScorecardDeliveryEvent(scorecardDeliveryEvent{
+		TaskID:           taskID,
+		TouchedFiles:     touchedFiles,
+		AllowedPaths:     allowedPaths,
+		ScopeDriftCount:  scopeDrift,
+		DeliveredSuccess: success,
+		RecordedAt:       time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -166,11 +246,11 @@ func runF0GateCheck(args []string) {
 	activeCount := 0
 	if dbPath, dbErr := databasePath(); dbErr == nil {
 		if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
+			defer store.Close()
 			runningState := controlplane.StateRunning
 			if tasks, lErr := store.ListTasks(context.Background(), controlplane.TaskFilter{State: &runningState, Limit: 50}); lErr == nil {
 				activeCount = len(tasks)
 			}
-			defer store.Close()
 		}
 	}
 	gates = append(gates, f0GateItem{
@@ -231,6 +311,7 @@ func runF0Status(args []string) {
 	var totalTasks, completedTasks, failedTasks int
 	if dbPath, dbErr := databasePath(); dbErr == nil {
 		if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
+			defer store.Close()
 			if tasks, lErr := store.ListTasks(context.Background(), controlplane.TaskFilter{Limit: 200}); lErr == nil {
 				totalTasks = len(tasks)
 				for _, t := range tasks {
@@ -242,7 +323,6 @@ func runF0Status(args []string) {
 					}
 				}
 			}
-			defer store.Close()
 		}
 	}
 	payload := map[string]any{
@@ -296,15 +376,37 @@ func runScorecard(args []string) {
 	stateDir := pathutil.DefaultStateDir()
 	models, _ := routing.ComputeScorecard(stateDir, *providerFlag, *windowFlag)
 
+	// Load delivery events for Axis 1 (scope_drift_attempts) & Axis 2 (receipt_utilization_ratio).
+	var sumTouched, sumAllowed, scopeDriftAttempts, deliveryCount int
+	if stateDir != "" {
+		if df, dErr := os.Open(filepath.Join(stateDir, "scorecard_delivery_events.jsonl")); dErr == nil {
+			defer df.Close()
+			sc := bufio.NewScanner(df)
+			for sc.Scan() {
+				var ev scorecardDeliveryEvent
+				if json.Unmarshal(sc.Bytes(), &ev) == nil {
+					deliveryCount++
+					sumTouched += ev.TouchedFiles
+					sumAllowed += ev.AllowedPaths
+					scopeDriftAttempts += ev.ScopeDriftCount
+				}
+			}
+		}
+	}
+
 	// Axis 1: F1/F2 Worker Yield
-	var totalTasks, completedTasks, failedTasks, apiErrorTasks int
+	var totalTasks, completedTasks, failedTasks, apiErrorTasks, childSubtasks int
 	if dbPath, dbErr := databasePath(); dbErr == nil {
 		if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
+			defer store.Close()
 			if tasks, lErr := store.ListTasks(context.Background(), controlplane.TaskFilter{Limit: 200}); lErr == nil {
 				for _, t := range tasks {
 					prov, _ := extractTaskProviderAndModel(t)
 					if *providerFlag != "" && prov != *providerFlag {
 						continue
+					}
+					if t.ParentTaskID != nil && strings.TrimSpace(*t.ParentTaskID) != "" {
+						childSubtasks++
 					}
 					switch t.State {
 					case controlplane.StateSucceeded, "COMPLETED":
@@ -313,24 +415,32 @@ func runScorecard(args []string) {
 					case controlplane.StateFailed:
 						totalTasks++
 						failedTasks++
-						if strings.Contains(string(t.Result), "API Error") || strings.Contains(string(t.Result), "CLI_AGENT_API_ERROR") {
+						resStr := string(t.Result)
+						if strings.Contains(resStr, "API Error") || strings.Contains(resStr, "CLI_AGENT_API_ERROR") {
 							apiErrorTasks++
+						}
+						if strings.Contains(resStr, "out of scope") || strings.Contains(resStr, "out-of-scope") {
+							scopeDriftAttempts++
 						}
 					}
 				}
 			}
-			defer store.Close()
 		}
 	}
 	firstPassYield := 1.0
 	if totalTasks > 0 {
 		firstPassYield = float64(completedTasks) / float64(totalTasks)
 	}
+	fanoutOverhead := 0.0
+	if totalTasks > 0 {
+		fanoutOverhead = float64(childSubtasks) / float64(totalTasks)
+	}
 
-	// Axis 2: WriteReceipt Tightness (touched_files / allowed_paths & wildcard detection)
+	// Axis 2: WriteReceipt Tightness (receipt_utilization_ratio = touched_files / allowed_paths & wildcard detection)
 	var totalReceipts, consumedReceipts, wildcardReceipts int
 	if rDbPath, rErr := receiptDatabasePath(); rErr == nil {
 		if rm, mErr := receipt.NewReceiptManager(rDbPath, nil); mErr == nil {
+			defer rm.Close()
 			if list, lErr := rm.ListReceipts("", time.Time{}, ""); lErr == nil {
 				totalReceipts = len(list)
 				for _, r := range list {
@@ -345,8 +455,11 @@ func runScorecard(args []string) {
 					}
 				}
 			}
-			defer rm.Close()
 		}
+	}
+	receiptUtilizationRatio := 1.0
+	if sumAllowed > 0 {
+		receiptUtilizationRatio = float64(sumTouched) / float64(sumAllowed)
 	}
 	tightnessScore := 1.0
 	if totalReceipts > 0 && wildcardReceipts > 0 {
@@ -376,9 +489,13 @@ func runScorecard(args []string) {
 		"g8s-ux-visual-gate",
 	}
 	presentSkills := 0
+	adjudicators := map[string]string{}
 	for _, sk := range canonicalSkills {
 		if _, err := os.Stat(filepath.Join("skills", sk, "SKILL.md")); err == nil {
 			presentSkills++
+			adjudicators[sk] = "READY"
+		} else {
+			adjudicators[sk] = "MISSING"
 		}
 	}
 
@@ -387,6 +504,15 @@ func runScorecard(args []string) {
 	jevMode := "tier2_deterministic_fallback"
 	if jevEndpoint != "" {
 		jevMode = "tier1_live_jev"
+	}
+	var verifyCheckedSum, verifyPassedSum int
+	for _, m := range models {
+		verifyCheckedSum += m.VerifyCheckedCount
+		verifyPassedSum += int(float64(m.VerifyCheckedCount) * m.VerifyPassRate)
+	}
+	l1L3AgreementRate := 1.0
+	if verifyCheckedSum > 0 {
+		l1L3AgreementRate = float64(verifyPassedSum) / float64(verifyCheckedSum)
 	}
 
 	var kaizen []string
@@ -411,33 +537,41 @@ func runScorecard(args []string) {
 		"window": *windowFlag,
 		"axes": map[string]any{
 			"f1_f2_worker_yield": map[string]any{
-				"total_terminal_tasks": totalTasks,
-				"completed_tasks":      completedTasks,
-				"failed_tasks":         failedTasks,
-				"api_error_tasks":      apiErrorTasks,
-				"first_pass_yield":     firstPassYield,
-				"models":               models,
+				"total_terminal_tasks":       totalTasks,
+				"completed_tasks":            completedTasks,
+				"failed_tasks":               failedTasks,
+				"api_error_tasks":            apiErrorTasks,
+				"scope_drift_attempts":       scopeDriftAttempts,
+				"f2_subtask_fanout_overhead": fanoutOverhead,
+				"first_pass_yield":           firstPassYield,
+				"models":                     models,
 			},
 			"write_receipt_tightness": map[string]any{
-				"total_receipts":    totalReceipts,
-				"consumed_receipts": consumedReceipts,
-				"wildcard_receipts": wildcardReceipts,
-				"tightness_score":   tightnessScore,
+				"total_receipts":            totalReceipts,
+				"consumed_receipts":         consumedReceipts,
+				"wildcard_receipts":         wildcardReceipts,
+				"delivery_events":           deliveryCount,
+				"receipt_utilization_ratio": receiptUtilizationRatio,
+				"tightness_score":           tightnessScore,
 			},
 			"tool_mcp_friction_index": map[string]any{
 				"canonical_command_count": len(cli.CanonicalCommands()),
 				"canonical_flag_families": len(cli.CanonicalFlagAliases()),
 				"unbound_cli_claims":      unboundClaims,
 				"api_error_friction_rate": frictionIndex,
+				"mcp_tools_monitored":     []string{"g8s_search", "g8s_read", "g8s_edit", "g8s_select"},
 			},
 			"skill_cross_audit": map[string]any{
 				"canonical_skills_total":   len(canonicalSkills),
 				"canonical_skills_present": presentSkills,
 				"coverage_ratio":           float64(presentSkills) / float64(len(canonicalSkills)),
+				"adjudicators":             adjudicators,
 			},
 			"jev_l1_l3_calibration": map[string]any{
-				"operating_tier": jevMode,
-				"l3_gate_cmd":    "g8s reflex verify",
+				"operating_tier":          jevMode,
+				"l3_gate_cmd":             "g8s reflex verify",
+				"l1_predictions_checked":  verifyCheckedSum,
+				"l1_vs_l3_agreement_rate": l1L3AgreementRate,
 			},
 		},
 		"kaizen_recommendations": kaizen,

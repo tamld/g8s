@@ -22,6 +22,6 @@ Every top-level subcommand registered in `cmd/g8s/main.go` MUST appear in `inter
 
 #### Scenario: Markdown CLI invocation guard rejects unbound subcommands
 <!-- tests: TestScanMarkdownCLIInvocationsDetectsUnbound -->
-- **GIVEN** a Markdown document containing `./bin/g8s nonexistent-cmd --json`
+- **GIVEN** a Markdown document containing an unregistered `./bin/g8s nonexistent-cmd --json` invocation (`E_UNBOUND_CLI_CLAIM`)
 - **WHEN** `ScanMarkdownCLIInvocations` scans the document
 - **THEN** it returns an `E_UNBOUND_CLI_CLAIM` violation

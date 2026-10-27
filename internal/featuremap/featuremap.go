@@ -112,9 +112,10 @@ func (h *Hotspot) Owner() string {
 
 // FeatureMap represents the top-level declarative feature map schema.
 type FeatureMap struct {
-	SchemaVersion string        `yaml:"schema_version" json:"schema_version"`
-	Hotspots      []Hotspot     `yaml:"hotspots,omitempty" json:"hotspots,omitempty"`
-	Features      []FeatureNode `yaml:"features" json:"features"`
+	SchemaVersion   string        `yaml:"schema_version" json:"schema_version"`
+	InheritsSpecKit string        `yaml:"inherits_spec_kit,omitempty" json:"inherits_spec_kit,omitempty"`
+	Hotspots        []Hotspot     `yaml:"hotspots,omitempty" json:"hotspots,omitempty"`
+	Features        []FeatureNode `yaml:"features" json:"features"`
 }
 
 // IsV2 reports whether the map declares schema 2.0.
