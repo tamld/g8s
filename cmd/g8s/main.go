@@ -1823,7 +1823,7 @@ func runWorker(args []string) {
 			}
 		}
 	}
-	for _, builtinName := range []string{"agy", "claude", "codex", "opencode", "commandcode"} {
+	for _, builtinName := range []string{"agy", "claude", "codex", "opencode", "commandcode", "qwen"} {
 		found := false
 		for _, existing := range platformDispatchNames {
 			if existing == builtinName {
