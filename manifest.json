@@ -3,12 +3,12 @@
   "name": "g8s",
   "display_name": "g8s (The Gatekeepers)",
   "tagline": "A Lightweight, Zero-Trust Process Execution & Capability Harness for AI Agent CLI Workers",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "go_version": "1.26.10",
   "latest_release": {
-    "tag": "v0.20.0",
-    "commit": "3bcca92",
-    "date": "2026-10-22"
+    "tag": "v0.21.0",
+    "commit": "32020e8",
+    "date": "2026-10-27"
   },
   "license": "MIT",
   "repository": "https://github.com/tamld/g8s",

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-27
+
+### Added
+
+- **Universal CLI Agent Adapter Suite & Dual-Path Cursor Integration (`DELTA-39..44`, `#672`, `#683`)**:
+  - Added first-class CLI worker adapters for `opencode`, `commandcode`, `qwen`, `codex`, and `cursor` (`CursorProvider` in `internal/provider/cli_agents.go` supporting both Cursor Cloud REST `/v0/models` discovery via `CURSOR_API_KEY` and local `cursor-agent` headless execution, alongside `9router` `cu/*` Auto Bucket & Named Frontier models in `.g8s/agent-models.yml`).
+  - Implemented `internal/worker/diff_firewall.go` (`DELTA-39`) to snapshot worktree state before CLI agent execution and fail closed if any modified/untracked file escapes `WriteReceipt.AllowedPaths` (`E_OUT_OF_SCOPE_MUTATION`).
+  - Enforced fail-closed detection of silent CLI agent `[API Error:` exit-0 failures and automatic pruning of failed-attempt worktrees (`#678`).
+- **Spec-Kit v2 (`@v0.21`), 8 Living Domain Specs & 40-Repo Crucible Rollout (`#679`, `#682`)**:
+  - Consolidated architectural specifications into 8 MECE living domain specs under `spec/domains/01-control-plane` through `08-offer-and-spec-kit` with reciprocal `domain_href` links in `.g8s/feature-map.yml`.
+  - Updated `g8s offer init` and `offer/templates/feature-map.yml` to scaffold `.g8s/feature-map.yml` v2 with `inherits_spec_kit: "g8s/offer/profiles/<profile>@v0.21"` and validated across 40/40 production repositories (20 public + 20 private).
+- **Generative CLI Surface Contract v2, Unified Telemetry Bus & 5-Axis Kaizen Scorecard (`DELTA-45`, `#677`, `#678`, `#680`)**:
+  - Introduced `internal/cli/registry.go` (`CanonicalCommandContracts`, `ScanMarkdownCLIInvocations`) driving generative `g8s help` output and blocking unbound markdown CLI claims (`E_UNBOUND_CLI_CLAIM`).
+  - Added `g8s scorecard [status|audit|kaizen] [--json]` and `g8s f0 <gate check|status> [--json]` (`cmd/g8s/f0_scorecard.go`), bridging `worker`, `verify`, `deliver`, and `reflex` outcomes into the 5-Axis Kaizen Engine (`F1/F2 Worker Yield`, `WriteReceipt Tightness`, `Tool/MCP Friction Index`, `Skill-vs-Skill Cross-Audit`, `Jev L1-vs-L3 Calibration`).
+- **Transactional Enterprise Access-Audit Log & Capability-Scoped Skill/MCP Hydration (`#441`, `DELTA-34/35`)**:
+  - Implemented transactional `access_audit` persistence in `internal/controlplane/access_audit.go` with automatic bearer/API key redaction (`sanitizeAuditDetail`) and exposed `g8s audit list [--actor] [--action] [--subject] [--since] [--limit] [--json]` (`cmd/g8s/audit.go`), promoting Enterprise Access-Audit Log to `PROVEN` in `docs/ENTERPRISE_LEDGER.md`.
+  - Added `internal/harness/hydration.go` (`ResolveCapabilityHydration`) to inject role- and permission-scoped `G8S_STRATUM`, `G8S_RECOMMENDED_SKILLS`, and `G8S_MCP_TOOLS_ALLOWED` into F1/F2 worker environments (`read_only` strictly excludes `g8s_edit`).
+- **Orthogonal Stratum Federation & Pure-Go Context Compressor (`ADR-0035`, `DELTA-33..38`, `#671`, `#673`)**:
+  - Added `g8s charter` CLI (`S0..S3 + O-Plane` epoch-fenced charter store), `g8s context-pack` (pure-Go AST + 0/1 Knapsack context compressor with precomputed BM25F scoring `#681`), `g8s qa-report` (6-stage AI QA pipeline), and `DeviceLeasePool`.
+
+### Security & Verification
+
+- **Gate 7 (Red Cell D-01) & Gate 8 (Self-Audit Probes D-02)**:
+  - Fixed command option injection in Git invocations (`#675`) and Windows 4KB pipe buffer deadlock in `cmd/g8s/f0_scorecard_test.go`.
+  - `g8s eval run --category self-audit --json` passed `5/5` probes (`sa-001` refusal-echo, `sa-002` worktree-discard, `sa-003` sanitizer-fidelity, `sa-004` receipt-bypass, `sa-005` f2-recursive-containment; score `1.0`).
+
 ## [0.20.0] - 2026-10-24
 
 ### Added

@@ -16,7 +16,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 )
 
-const offerBundleVersion = "0.20.0"
+const offerBundleVersion = "0.21.0"
 
 func featureMapSeedForProfile(profile string) string {
 	return fmt.Sprintf(`schema_version: "2.0"
