@@ -233,11 +233,11 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 
 	// Diff paths between base and head
 	var diffPaths []string
-	diffCmd := exec.Command("git", "-C", absRepo, "diff", "--name-only", baseRef+"..."+headSHA)
+	diffCmd := exec.Command("git", "-C", absRepo, "diff", "--name-only", "--end-of-options", baseRef+"..."+headSHA)
 	diffOut, err := diffCmd.Output()
 	if err != nil {
 		// Fallback to two-dot diff
-		diffCmd = exec.Command("git", "-C", absRepo, "diff", "--name-only", baseRef, headSHA)
+		diffCmd = exec.Command("git", "-C", absRepo, "diff", "--name-only", "--end-of-options", baseRef, headSHA)
 		diffOut, _ = diffCmd.Output()
 	}
 	for _, p := range strings.Split(string(diffOut), "\n") {
@@ -582,7 +582,7 @@ func EvaluateGate(opts GateOptions) (*GateOutput, error) {
 		// Find merge base commit time if no taskIDs given
 		var mbCommitTime time.Time
 		if len(taskIDs) == 0 {
-			mbOut, mbErr := exec.Command("git", "-C", absRepo, "merge-base", baseRef, headSHA).Output()
+			mbOut, mbErr := exec.Command("git", "-C", absRepo, "merge-base", "--end-of-options", baseRef, headSHA).Output()
 			if mbErr == nil {
 				mbSHA := strings.TrimSpace(string(mbOut))
 				tsOut, tsErr := exec.Command("git", "-C", absRepo, "show", "-s", "--format=%cI", mbSHA).Output()
