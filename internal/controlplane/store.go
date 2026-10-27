@@ -137,6 +137,7 @@ func (s *Store) initialize() error {
 	// Fast-path: if database already matches current schema version, skip exclusive lock
 	var version int
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err == nil && version == SchemaVersion {
+		_ = applyAccessAuditSchema(conn)
 		return nil
 	}
 
@@ -185,6 +186,10 @@ func (s *Store) initialize() error {
 		return err
 	}
 	if err := migrateEventLogSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := applyAccessAuditSchema(conn); err != nil {
 		rollbackInit(conn)
 		return err
 	}
@@ -767,6 +772,9 @@ func insertTaskEvent(tx *sql.Tx, taskID string, eventType string, actor string, 
 		"INSERT INTO task_events(task_id, timestamp, event_type, actor, details_json) VALUES (?, ?, ?, ?, ?)",
 		taskID, ts, eventType, actor, encoded); err != nil {
 		return fmt.Errorf("insert task event: %w", err)
+	}
+	if err := insertAccessAuditTx(tx, ts, actor, mapTaskEventToAuditAction(eventType), taskID, encoded); err != nil {
+		return fmt.Errorf("insert access audit event: %w", err)
 	}
 	return nil
 }

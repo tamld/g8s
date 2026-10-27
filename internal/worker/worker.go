@@ -29,6 +29,7 @@ import (
 	g8scontext "github.com/tamld/g8s/internal/context"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
@@ -879,6 +880,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		"G8S_TASK_ID=" + task.TaskID,
 		"G8S_PERMISSION=" + req.Permission,
 	}
+	childEnv = append(childEnv, harness.ResolveCapabilityHydration(req.Role, req.Permission).EnvVars()...)
 	if req.ReceiptID != "" {
 		childEnv = append(childEnv, "G8S_RECEIPT_ID="+req.ReceiptID)
 	}
