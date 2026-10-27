@@ -36,6 +36,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	_ = jsonMode
 
 	taskFlag := fs.String("task", "", "task ID to verify")
+	fs.StringVar(taskFlag, "task-id", "", "alias for --task")
 	asTaskFlag := fs.String("as-task", "", "caller task ID (self-grade guard)")
 	overrideReasonFlag := fs.String("override-reason", "", "F0 override rationale for advisory diff-guard signals (#595)")
 	briefFlag := fs.String("brief", "", "brief ID to load Definition of Done items from")
@@ -71,6 +72,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 
 	var target verifier.TaskRef
 	var targetRepoDir string
+	var verifiedTask *controlplane.Task
 
 	if isStandaloneFeature {
 		target = verifier.TaskRef{
@@ -131,6 +133,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 			exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeNotFound, fmt.Errorf("task %q not found", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
 			return 1
 		}
+		verifiedTask = task
 
 		target = verifier.TaskRef{
 			ID:             taskID,
@@ -345,6 +348,8 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeInvalid, err, "", *jsonl)
 		return 1
 	}
+	passedVerify := verdict.Outcome == verifier.OutcomePass && verdict.VetoReason == "" && (verdict.HoldoutChecksOK == nil || *verdict.HoldoutChecksOK)
+	recordVerifyTaskTelemetry(verifiedTask, passedVerify)
 
 	env := cli.NewEnvelope("verdict", "verify", taskID, verdict)
 	env.TraceID = *traceID

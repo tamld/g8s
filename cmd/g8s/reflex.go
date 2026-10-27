@@ -24,8 +24,12 @@ import (
 //
 //	g8s reflex triage --summary "..." --files "a.go,b.go" --allowed "pkg/*"
 func runReflex(args []string) {
+	if len(args) > 0 && args[0] == "verify" {
+		runReflexVerify(args[1:])
+		return
+	}
 	if len(args) == 0 || args[0] != "triage" {
-		exitUsage("reflex", strings.Join(args, " "), "", "unknown reflex subcommand; usage: g8s reflex triage [flags]", "g8s reflex triage --summary '...' --files 'internal/x/y.go' --allowed 'internal/x/*'", false)
+		exitUsage("reflex", strings.Join(args, " "), "", "unknown reflex subcommand; usage: g8s reflex <triage|verify> [flags]", "g8s reflex triage --summary '...' --files 'internal/x/y.go' --allowed 'internal/x/*'", false)
 		return
 	}
 
@@ -33,7 +37,10 @@ func runReflex(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
 	_ = actor
 	taskID := fs.String("task", "cli-reflex-triage", "mutation task id for the audit trail")
+	fs.StringVar(taskID, "task-id", "cli-reflex-triage", "alias for --task")
 	filesFlag := fs.String("files", "", "comma-separated files the mutation will touch")
+	fs.StringVar(filesFlag, "paths", "", "alias for --files")
+	fs.StringVar(filesFlag, "path", "", "alias for --files")
 	summaryFlag := fs.String("summary", "", "one-line diff summary of the planned mutation")
 	allowedFlag := fs.String("allowed", "", "comma-separated allowed path globs for the mutation")
 	noEnrich := fs.Bool("no-enrich", false, "skip Context Broker enrichment (legacy minimal request, #396)")
@@ -83,6 +90,49 @@ func runReflex(args []string) {
 	pterm.Info.Printf("Latency: %dms | Fallback: %v\n", verdict.LatencyMs, verdict.IsFallback)
 	pterm.Println(verdict.Reason)
 	_ = fmt.Sprint()
+}
+
+// runReflexVerify implements the L3 post-run Output Quality & Memory Promotion Gate (#678).
+func runReflexVerify(args []string) {
+	fs := flag.NewFlagSet("reflex verify", flag.ExitOnError)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
+	_ = actor
+	taskID := fs.String("task", "cli-reflex-verify", "task ID for L3 post-run verification")
+	fs.StringVar(taskID, "task-id", "cli-reflex-verify", "alias for --task")
+	excerptFlag := fs.String("output", "", "output excerpt or summary to assess")
+	fs.StringVar(excerptFlag, "summary", "", "alias for --output")
+	shapeFlag := fs.String("shape", "analysis", "expected output shape (analysis, patch, test_report)")
+	exitCodeFlag := fs.Int("exit-code", 0, "worker process exit code")
+	durationFlag := fs.Int("duration-sec", 1, "worker execution duration in seconds")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("reflex", "verify", *traceID, err.Error(), "", *jsonl)
+	}
+
+	gate := reflex.NewReflexGate()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req := reflex.OutputQualityRequest{
+		TaskID:        *taskID,
+		OutputExcerpt: *excerptFlag,
+		ExpectedShape: *shapeFlag,
+		ExitCode:      *exitCodeFlag,
+		DurationSec:   *durationFlag,
+	}
+	sig, err := gate.EmitOutputQualitySignal(ctx, req)
+	if err != nil {
+		exitRuntime("reflex", "verify", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		return
+	}
+	verdict := reflex.EvaluateOutputQuality(sig)
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("reflex_l3_verdict", "reflex", "verify", verdict)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("L3 Verdict: action=%s quality=%.2f confidence=%.2f fallback=%v reason=%s\n",
+		verdict.Action, verdict.Quality, verdict.Confidence, sig.IsFallback, verdict.Reason)
 }
 
 // attachContextPacket assembles the Context Broker packet (L1 pilot, #396)

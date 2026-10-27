@@ -94,10 +94,11 @@ hotspots:
 
   - id: "HOT-OPENSPEC-DELTAS"
     policy: "append-only"
-    rationale: "One new file per delta; edits to an existing delta are rare and owned by the delta author."
+    rationale: "One new file per delta and living domain spec; edits to an existing delta are rare and owned by the delta author."
     paths:
       - "spec/openspec/**"
       - "!spec/openspec/README.md"
+      - "spec/domains/**"
 
   - id: "HOT-ADR"
     policy: "append-only"
@@ -564,6 +565,7 @@ features:
     openspec_deltas:
       - "DELTA-05"
       - "DELTA-19"
+      - "DELTA-45"
     code_paths:
       - "internal/routing/**"
       - "internal/lane/**"
@@ -590,6 +592,10 @@ features:
       - "docs/designs/gate-lane-routing.md"
     shared_paths: []
     interfaces:
+      cli:
+        - "scorecard"
+      envelope_kinds:
+        - "scorecard_5axis"
       go_packages:
         - "internal/routing"
         - "internal/lane"
@@ -768,7 +774,10 @@ features:
         - "deliver"
         - "eval"
         - "feedback"
+        - "f0"
       envelope_kinds:
+        - "f0_gate_check"
+        - "f0_status"
         - "ladder"
         - "autopilot_schedule"
         - "autopilot_config"

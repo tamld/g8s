@@ -46,13 +46,30 @@ fi
 FAIL=0
 WARN=0
 
-for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md; do
+for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md "$GO_ROOT/spec/domains"/*/*.md; do
     [ -e "$spec" ] || continue
     status=$(grep -m1 -E '^(\* )?\*\*Status\*\*:' "$spec" || true)
     enforced=0
     case "$status" in
         *APPLIED*|*ACCEPTED*|*Applied*|*Accepted*) enforced=1 ;;
     esac
+    case "$spec" in
+        */spec/domains/*/*.md) enforced=1 ;;
+    esac
+
+    # Boundary 1 (#679): Verify domain_href bidirectional anchor lineage (E_BROKEN_SPEC_LINEAGE).
+    domain_href=$(grep -m1 -E '^[-*] \*\*domain_href\*\*:' "$spec" | sed -E 's/.*`([^`]+)`.*/\1/' || true)
+    if [ -n "$domain_href" ]; then
+        target_file="${domain_href%%#*}"
+        target_anchor="${domain_href#*#}"
+        if [ ! -f "$GO_ROOT/$target_file" ]; then
+            echo "::error::E_BROKEN_SPEC_LINEAGE: $spec references missing domain spec '$target_file'"
+            FAIL=$((FAIL + 1))
+        elif [ "$target_anchor" != "$domain_href" ] && ! grep -qF "{#$target_anchor}" "$GO_ROOT/$target_file"; then
+            echo "::error::E_BROKEN_SPEC_LINEAGE: $spec references missing anchor '#$target_anchor' in '$target_file'"
+            FAIL=$((FAIL + 1))
+        fi
+    fi
 
     changed=0
     if [ -n "$CHANGED_FILES" ] && printf '%s\n' "$CHANGED_FILES" | grep -qxF "$spec"; then
@@ -110,6 +127,8 @@ for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md; do
             elif command -v rg >/dev/null 2>&1; then
                 if rg -q -F "func ${name}(" -g '*.go' "$GO_ROOT" 2>/dev/null; then
                     pin_found=1
+                elif rg -q -E "(fn ${name}\\s*\\(|def ${name}\\s*\\(|(test|it|describe)\\s*\\(['\"]${name}['\"]|${name}\\s*\\(\\s*\\))" "$GO_ROOT" 2>/dev/null; then
+                    pin_found=1
                 elif [ -f "$GO_ROOT/$name" ] || [ -f "$GO_ROOT/tests/$name" ]; then
                     pin_found=1
                 elif [ -d "$GO_ROOT/tests" ] && rg --files -g "**/$name" -g "$name" "$GO_ROOT/tests" 2>/dev/null | grep -q .; then
@@ -117,6 +136,8 @@ for spec in "$SPEC_ROOT"/*.md "$SPEC_ROOT"/*/*.md; do
                 fi
             else
                 if grep -rqF "func ${name}(" "$GO_ROOT" --include='*.go' 2>/dev/null; then
+                    pin_found=1
+                elif grep -rqE "(fn ${name}[[:space:]]*\\(|def ${name}[[:space:]]*\\(|(test|it|describe)[[:space:]]*\\(['\"]${name}['\"]|${name}[[:space:]]*\\(\\))" "$GO_ROOT" 2>/dev/null; then
                     pin_found=1
                 elif [ -f "$GO_ROOT/$name" ] || [ -f "$GO_ROOT/tests/$name" ]; then
                     pin_found=1

@@ -39,10 +39,12 @@ func runSearch(args []string) {
 	noIgnoreShort := fs.Bool("u", false, "do not respect .gitignore or default ignore rules")
 	scopeRoot := fs.String("scope-root", "", "base directory for search and receipt scope evaluation")
 	receiptID := fs.String("receipt-id", "", "restrict search/files to paths allowed by WriteReceipt")
+	fs.StringVar(receiptID, "receipt", "", "alias for --receipt-id")
 	maxResults := fs.Int("max-results", 1000, "maximum matches or files to return")
 	var globs pathFlags
 	fs.Var(&globs, "g", "include or exclude files matching glob")
 	fs.Var(&globs, "glob", "include or exclude files matching glob")
+	fs.Var(&globs, "globs", "include or exclude files matching glob (alias for --glob)")
 
 	lineNumber := fs.Bool("n", true, "print 1-based line numbers (enabled by default)")
 	lineNumberLong := fs.Bool("line-number", true, "print 1-based line numbers (enabled by default)")
@@ -64,10 +66,14 @@ func runSearch(args []string) {
 		"--g":           true,
 		"-glob":         true,
 		"--glob":        true,
+		"-globs":        true,
+		"--globs":       true,
 		"-scope-root":   true,
 		"--scope-root":  true,
 		"-receipt-id":   true,
 		"--receipt-id":  true,
+		"-receipt":      true,
+		"--receipt":     true,
 		"-max-results":  true,
 		"--max-results": true,
 		"-actor":        true,

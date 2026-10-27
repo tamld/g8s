@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/cli"
 )
 
 // validateV2 applies the DELTA-41 ownership contract:
@@ -154,6 +156,26 @@ func validateV2(fm *FeatureMap, repoRoot string, opts ValidateOptions, report *V
 		for k := range fm.Hotspots {
 			if a, b, ok := ownedSets[i].OverlapsSet(hotspotSets[k]); ok {
 				report.Errors = append(report.Errors, fmt.Sprintf("owned_paths of %s %q overlap hotspot %s %q (exclude hotspot paths with '!')", fm.Features[i].ID, a, fm.Hotspots[k].ID, b))
+			}
+		}
+	}
+
+	// Bidirectional CLI surface parity, applied only to the g8s root feature map
+	// (identified by FEAT-PLATFORM-CLI-01 plus the root cmd/g8s/main.go) so that
+	// sibling repositories and synthetic fixtures declare their own CLI surface (#678).
+	if repoRoot != "" && featureIDs["FEAT-PLATFORM-CLI-01"] {
+		if _, err := os.Stat(filepath.Join(repoRoot, "cmd", "g8s", "main.go")); err == nil {
+			for key, owner := range ifaceOwner {
+				if key.kind == "cli" && !cli.IsRegisteredCommand(key.name) {
+					report.Errors = append(report.Errors, fmt.Sprintf("feature %s: interfaces.cli %q is not registered in internal/cli.CanonicalCommands()", owner, key.name))
+				}
+			}
+			if opts.Strict && len(fm.Features) >= 15 {
+				for _, cmd := range cli.CanonicalCommands() {
+					if _, ok := ifaceOwner[ifaceKey{"cli", cmd}]; !ok {
+						report.Errors = append(report.Errors, fmt.Sprintf("unbound CLI command %q in internal/cli.CanonicalCommands() is not claimed by any feature interfaces.cli", cmd))
+					}
+				}
 			}
 		}
 	}

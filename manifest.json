@@ -31,8 +31,29 @@
     "effort_classes": ".g8s/effort-classes.yml",
     "feature_map": ".g8s/feature-map.yml",
     "lane_bundles": ".g8s/lane-bundles.yml",
+    "provider_conformance": ".g8s/provider-conformance.yml",
     "trust_boundaries": ".g8s/trust-boundaries.yml",
     "verifier_classes": ".g8s/verifier-classes.yml"
+  },
+  "living_domains": [
+    "spec/domains/01-control-plane/spec.md",
+    "spec/domains/02-isolation-and-receipts/spec.md",
+    "spec/domains/03-providers-and-routing/spec.md",
+    "spec/domains/04-verification-and-gates/spec.md",
+    "spec/domains/05-stratum-federation/spec.md",
+    "spec/domains/06-knowledge-and-memory/spec.md",
+    "spec/domains/07-cli-mcp-and-daemon/spec.md",
+    "spec/domains/08-offer-and-spec-kit/spec.md"
+  ],
+  "cli_surface_contract": {
+    "registry": "internal/cli/registry.go",
+    "error_code_unbound_claim": "E_UNBOUND_CLI_CLAIM",
+    "canonical_flag_aliases": {
+      "task": ["--task", "--task-id"],
+      "paths": ["--paths", "--path", "--files"],
+      "receipt": ["--receipt", "--receipt-id"],
+      "glob": ["--glob", "--globs", "-g"]
+    }
   },
   "documentation_index": {
     "quickstart": "docs/quickstart.md",
@@ -493,6 +514,12 @@
       "id": "DELTA-43",
       "title": "Provider Conformance Ground-Truth Matrix & Role-Tier Gating",
       "path": "spec/openspec/43-provider-conformance-matrix-spec.md",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-45",
+      "title": "5-Axis F1/F2/Tool/Skill/Receipt Cross-Evaluation & Kaizen Engine",
+      "path": "spec/openspec/45-five-axis-kaizen-scorecard-spec.md",
       "status": "APPLIED"
     }
   ],

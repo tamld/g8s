@@ -135,6 +135,7 @@ Incoming Task:
 | **DELTA-41** | [`41-feature-map-v2-collision-domains-spec.md`](../spec/openspec/41-feature-map-v2-collision-domains-spec.md) | `internal/featuremap`, `cmd/g8s` | APPLIED |
 | **DELTA-42** | [`42-premise-challenge-and-sycophancy-gate-spec.md`](../spec/openspec/42-premise-challenge-and-sycophancy-gate-spec.md) | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | APPLIED |
 | **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
+| **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
 
 ---
 

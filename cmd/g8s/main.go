@@ -251,6 +251,10 @@ func main() {
 		runLifecycle(command, os.Args[2:])
 	case "claim":
 		runClaim(os.Args[2:])
+	case "f0":
+		runF0(os.Args[2:])
+	case "scorecard":
+		runScorecard(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -587,10 +591,14 @@ func runGet(args []string) {
 	_ = actor
 	_ = jsonMode
 	taskIDFlag := fs.String("task-id", "", "task ID to inspect")
+	taskAlias := fs.String("task", "", "alias for --task-id")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("get", "", *traceID, err.Error(), "", *jsonl)
 	}
 	taskID := *taskIDFlag
+	if taskID == "" {
+		taskID = *taskAlias
+	}
 	if taskID == "" && fs.NArg() > 0 {
 		taskID = fs.Arg(0)
 	}
@@ -1682,6 +1690,7 @@ func printUsage() {
 	fmt.Println("  lineage      Show ancestry tree for a task up to root (g8s lineage <task-id>)")
 	fmt.Println("  children     List direct child subtasks for a task (g8s children <parent-id>)")
 	fmt.Println("  receipt      Issue write delegation receipts (g8s receipt issue --path <glob>)")
+	fmt.Println("  receipt-export Recover or inspect durable write receipt for a task (g8s receipt-export --task <id>)")
 	fmt.Println("  doctor       Run diagnostic health and environment sanity checks (g8s doctor [--fix])")
 	fmt.Println("  init         Initialize g8s and configure IDE MCP integration (g8s init)")
 	fmt.Println("  update       Self-update from GitHub releases with SHA-256 verification (g8s update [--check] [--version vX.Y.Z])")
@@ -1724,9 +1733,16 @@ func printUsage() {
 	fmt.Println("  serve        Run daemon mode with HTTP API server (g8s serve [--address :8080])")
 	fmt.Println("  verify       Run verifier-class acceptance checks on a task (g8s verify --task <id>)")
 	fmt.Println("  feature      Declarative feature map validation and blast radius routing (g8s feature verify|inspect|list)")
+	fmt.Println("  lesson       Record and query operational lessons (g8s lesson record|list)")
+	fmt.Println("  feedback     Record supervisor feedback and escalation outcomes (g8s feedback ...)")
 	fmt.Println("  ladder       Quality-ladder failure classification and escalation (g8s ladder status|advance|gauges)")
 	fmt.Println("  fleet        Cross-repository git & release hygiene scanner (g8s fleet status [--dir <workspace>])")
 	fmt.Println("  charter      Orthogonal Stratum Federation charter lifecycle & O-Plane portfolio (g8s charter issue|verify|revoke|complete|list|portfolio)")
+	fmt.Println("  context-pack Build bounded pre-mutation context packets (g8s context-pack --paths <p1,p2>)")
+	fmt.Println("  qa-report    Generate mechanical QA verification reports (g8s qa-report --task <id>)")
+	fmt.Println("  claim        Verify documentation claims against executable anchors (g8s claim verify)")
+	fmt.Println("  f0           F0 supervisor commitment-point gate and status checks (g8s f0 gate check|status)")
+	fmt.Println("  scorecard    DELTA-45 5-Axis Cross-Evaluation & Kaizen Engine (g8s scorecard status|audit|kaizen)")
 	fmt.Println("  version      Show application version")
 	fmt.Println("  help         Show this message")
 	fmt.Println("\nPlanned (post-MVP): run (sync dispatch)")
@@ -1896,21 +1912,20 @@ func runWorker(args []string) {
 		} else {
 			fmt.Printf("%s %s\n", task.TaskID, task.State)
 		}
-		if *once {
-			// Check task result for failure (non-retryable)
-			// task.State is WORKER_COMPLETED; result JSON indicates success/failure
-			isFailure := false
-			if len(task.Result) > 0 {
-				var resultMap map[string]any
-				if json.Unmarshal(task.Result, &resultMap) == nil {
-					// Check for error envelope or ok=false
-					if kind, _ := resultMap["kind"].(string); kind == "error" {
-						isFailure = true
-					} else if ok, _ := resultMap["ok"].(bool); !ok {
-						isFailure = true
-					}
+		isFailure := false
+		if len(task.Result) > 0 {
+			var resultMap map[string]any
+			if json.Unmarshal(task.Result, &resultMap) == nil {
+				// Check for error envelope or ok=false
+				if kind, _ := resultMap["kind"].(string); kind == "error" {
+					isFailure = true
+				} else if ok, _ := resultMap["ok"].(bool); !ok {
+					isFailure = true
 				}
 			}
+		}
+		recordWorkerTaskTelemetry(store, task, isFailure)
+		if *once {
 			if isFailure {
 				os.Exit(1)
 			}

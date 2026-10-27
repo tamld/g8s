@@ -45,8 +45,10 @@ func runDeliver(args []string) {
 	dryRun := fs.Bool("dry-run", false, "perform validation and list files without copying")
 	pruneWorktree := fs.Bool("prune-worktree", false, "remove the isolated git worktree and wt/<task-id> branch after successful delivery")
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
+	taskAliasFlag := fs.String("task", "", "task ID to deliver (canonical alias for --task-id)")
 	worktreeFlag := fs.String("worktree", "", "explicit preserved worktree directory (#427 deliverable survival)")
 	receiptIDFlag := fs.String("receipt-id", "", "explicit receipt ID override for delivering preserved worktrees")
+	receiptAliasFlag := fs.String("receipt", "", "explicit receipt ID override (canonical alias for --receipt-id)")
 	expectedHeadOID := fs.String("expected-head-oid", "", "optional expected git HEAD SHA in target workspace (CAS STALE_HEAD guard; DELTA-34)")
 
 	// Allow flags to appear before or after positional task-id
@@ -56,7 +58,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--task" || arg == "-task" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--receipt" || arg == "-receipt" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -71,8 +73,14 @@ func runDeliver(args []string) {
 	}
 
 	taskID := *taskIDFlag
+	if taskID == "" {
+		taskID = *taskAliasFlag
+	}
 	if taskID == "" && fs.NArg() > 0 {
 		taskID = fs.Arg(0)
+	}
+	if *receiptIDFlag == "" && *receiptAliasFlag != "" {
+		*receiptIDFlag = *receiptAliasFlag
 	}
 	if taskID == "" {
 		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--worktree <dir>] [--prune-worktree] [--dry-run]", "Provide a task ID", *jsonl)
@@ -316,12 +324,19 @@ func runDeliver(args []string) {
 			"A valid write receipt is required to deliver workspace changes", *jsonl)
 	}
 
+	var filteredCandidates []string
 	var offending []string
 	for _, file := range candidates {
-		if !deliverPathMatchesScope(file, rc.AllowedPaths) {
-			offending = append(offending, file)
+		if deliverPathMatchesScope(file, rc.AllowedPaths) {
+			filteredCandidates = append(filteredCandidates, file)
+			continue
 		}
+		if isEphemeralCLIAgentArtifact(file) {
+			continue
+		}
+		offending = append(offending, file)
 	}
+	candidates = filteredCandidates
 	for _, file := range deletedCandidates {
 		if !deliverPathMatchesScope(file, rc.AllowedPaths) {
 			offending = append(offending, file)
@@ -578,6 +593,16 @@ func runDeliver(args []string) {
 	for _, rel := range skipped {
 		fmt.Printf("skipped: %s\n", rel)
 	}
+}
+
+func isEphemeralCLIAgentArtifact(relSlash string) bool {
+	p := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relSlash)), "./")
+	for _, prefix := range []string{".omo", ".opencode", ".commandcode", ".qwen"} {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func deliverPathMatchesScope(cleanFile string, allowed []string) bool {

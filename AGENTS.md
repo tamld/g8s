@@ -74,6 +74,9 @@ Do NOT randomly scan the entire repository or the `reference/` directory. Follow
    - Live model discovery: `./bin/g8s providers discover [--provider 9router] [--json]`.
    - Standardized `9router` SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and prefix wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`) in `.g8s/agent-models.yml`.
    - **Two-Layer Separation Rule**: Public repo mechanism (`openai`/`anthropic`/`9router`, standard combos/wildcards, `http://127.0.0.1:20128/v1`) vs. local untracked operator policy (`~/.config/g8s/providers.json` & `~/.agents/skills/`). Never commit homelab LAN IPs or private topology.
+8. **Local Operator Policy Layer (untracked, never published)**:
+   - Operators keep private coordinator playbooks, fleet notes, and knowledge-base pointers OUTSIDE this repository in `${G8S_LOCAL_POLICY_DIR:-~/.config/g8s/policy}/`. If `COORDINATOR.md` exists there, read it right after Step 2 of §1. It is additive to — never overriding — this file, [`spec/constitution.md`](spec/constitution.md), and [`hard-boundary.md`](skills/g8s-supervisor/references/hard-boundary.md).
+   - Never copy its contents (or any private knowledge-base content) into tracked files, issues, PRs, commits, or handoffs (Two-Layer Separation Rule, item 7). Its absence is normal: fall back to the public charter in [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md).
 
 ---
 

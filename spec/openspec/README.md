@@ -52,6 +52,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-41`](41-feature-map-v2-collision-domains-spec.md)** | Feature Map v2 — Collision Domains, Exclusive Ownership & Pre-Dispatch Collision Verdicts | `internal/featuremap`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-42`](42-premise-challenge-and-sycophancy-gate-spec.md)** | Premise Challenge & Anti-Sycophancy Evidence Gate | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-43`](43-provider-conformance-matrix-spec.md)** | Provider Conformance Ground-Truth Matrix & Role-Tier Gating | `internal/provider/conformance`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-45`](45-five-axis-kaizen-scorecard-spec.md)** | 5-Axis F1/F2/Tool/Skill/Receipt Cross-Evaluation & Kaizen Engine | `internal/routing`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 
 ---
 

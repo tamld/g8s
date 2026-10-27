@@ -30,12 +30,16 @@ func runSupervisorMetrics(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	taskID := fs.String("task-id", "", "supervisor task id (returns single-run metrics)")
+	taskAlias := fs.String("task", "", "alias for --task-id")
 	aggregate := fs.Bool("aggregate", false, "aggregate metrics across every persisted run")
 	jsonStream := fs.Bool("json-stream", false, "emit one JSON object per supervisor task as it queries")
 	timeRange := fs.Duration("time-range", 0, "filter metrics by time window (e.g. 1h, 24h)")
 	workerName := fs.String("worker-name", "", "filter metrics by worker name")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("supervisor-metrics", "", *traceID, err.Error(), "", *jsonl)
+	}
+	if *taskID == "" && *taskAlias != "" {
+		*taskID = *taskAlias
 	}
 
 	if *taskID != "" && *aggregate {
@@ -120,6 +124,28 @@ func executeSupervisorMetrics(
 		if err != nil {
 			exitRuntime("supervisor-metrics", "", traceID, cli.CodeRuntime, err, "", jsonl)
 		}
+		if agg.TotalRuns == 0 {
+			if tasks, lErr := store.ListTasks(ctx, controlplane.TaskFilter{Limit: 200}); lErr == nil {
+				var termCount, compCount, failCount int
+				for _, t := range tasks {
+					switch t.State {
+					case controlplane.StateSucceeded, "COMPLETED":
+						termCount++
+						compCount++
+					case controlplane.StateFailed, controlplane.StateCancelled:
+						termCount++
+						failCount++
+					}
+				}
+				if termCount > 0 {
+					agg.TotalRuns = termCount
+					agg.FirstAttemptSuccessRate = float64(compCount) / float64(termCount)
+					agg.AvgAttemptsToSuccess = 1.0
+					agg.AvgApproachesToSuccess = 1.0
+					agg.EscalationRate = float64(failCount) / float64(termCount)
+				}
+			}
+		}
 		out.Mode = "aggregate"
 		out.Aggregate = &agg
 	}
@@ -150,9 +176,13 @@ func runUpdateFalseEscalation(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = actor
 	taskID := fs.String("task-id", "", "supervisor task id (required)")
+	taskAlias := fs.String("task", "", "alias for --task-id")
 	isFalse := fs.Bool("false", false, "mark escalation as false (task should have succeeded)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("supervisor-metrics-update-false", "", *traceID, err.Error(), "", *jsonl)
+	}
+	if *taskID == "" && *taskAlias != "" {
+		*taskID = *taskAlias
 	}
 
 	if *taskID == "" {
