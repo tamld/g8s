@@ -279,3 +279,42 @@ providers:
       - id: reasoning-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+
+  cursor:
+    effort_style: named
+    field: effort
+    default_effort: high
+    mandatory: false
+    notes: "Cursor Agent CLI (cursor-agent) & Cloud Agent API (https://api.cursor.com/v0/models) authenticated via CURSOR_API_KEY (#683)"
+    models:
+      - id: composer-2.5
+        supported_efforts: [low, medium, high]
+        default_effort: high
+      - id: composer-2.5-fast
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+      - id: claude-opus-5-thinking-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: claude-sonnet-5-thinking-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: claude-fable-5-thinking-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: gpt-5.6-sol-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: gpt-5.6-luna-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: gemini-4-argon-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: gemini-3.7-flash-high
+        supported_efforts: [high]
+        default_effort: high
+      - id: cursor-grok-4.6-high
+        supported_efforts: [high]
+        default_effort: high
+

@@ -38,9 +38,9 @@ func initGitRepoForDiffFirewall(t *testing.T) string {
 }
 
 func TestWorktreeDiffFirewallScopeEnforcement(t *testing.T) {
-	t.Run("default CLI templates resolve for opencode, commandcode, qwen, codex", func(t *testing.T) {
+	t.Run("default CLI templates resolve for opencode, commandcode, qwen, codex, cursor", func(t *testing.T) {
 		resolver := NewProviderCommandResolver(ProviderResolverOptions{
-			PlatformDispatchNames: []string{"opencode", "commandcode", "qwen", "codex"},
+			PlatformDispatchNames: []string{"opencode", "commandcode", "qwen", "codex", "cursor"},
 		})
 
 		argv, err := resolver("scan repo", "opencode", "opencode/free", "30s")
@@ -69,6 +69,15 @@ func TestWorktreeDiffFirewallScopeEnforcement(t *testing.T) {
 		if !reflect.DeepEqual(argvQwen, wantQwen) {
 			t.Fatalf("got %v, want %v", argvQwen, wantQwen)
 		}
+
+		argvCursor, err := resolver("scan repo", "cursor", "composer-2.5", "30s")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantCursor := []string{"cursor-agent", "--print", "--trust", "--yolo", "--model", "composer-2.5", "scan repo"}
+		if !reflect.DeepEqual(argvCursor, wantCursor) {
+			t.Fatalf("got %v, want %v", argvCursor, wantCursor)
+		}
 	})
 
 	t.Run("in-scope mutation under workspace_write passes and ignores CLI runtime dirs", func(t *testing.T) {
@@ -76,7 +85,7 @@ func TestWorktreeDiffFirewallScopeEnforcement(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "src", "allowed.go"), []byte("package src\n// updated\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		for _, metaDir := range []string{".omo", ".opencode", ".commandcode", ".qwen"} {
+		for _, metaDir := range []string{".omo", ".opencode", ".commandcode", ".qwen", ".cursor"} {
 			if err := os.MkdirAll(filepath.Join(dir, metaDir), 0o755); err != nil {
 				t.Fatal(err)
 			}

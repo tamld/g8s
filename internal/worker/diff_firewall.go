@@ -21,6 +21,7 @@ func DefaultCLIProviderTemplates() map[string][]string {
 		"commandcode": {"commandcode", "--no-session", "--skip-onboarding", "--no-auto-update", "--yolo", "--model", "{model}", "-p", "{prompt}"},
 		"qwen":        {"qwen", "--yolo", "--model", "{model}", "-p", "{prompt}"},
 		"codex":       {"codex", "exec", "--model", "{model}", "{prompt}"},
+		"cursor":      {"cursor-agent", "--print", "--trust", "--yolo", "--model", "{model}", "{prompt}"},
 	}
 }
 
@@ -79,7 +80,8 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 			strings.HasPrefix(relSlash, ".opencode") ||
 			strings.HasPrefix(relSlash, ".omo") ||
 			strings.HasPrefix(relSlash, ".commandcode") ||
-			strings.HasPrefix(relSlash, ".qwen") {
+			strings.HasPrefix(relSlash, ".qwen") ||
+			strings.HasPrefix(relSlash, ".cursor") {
 			continue
 		}
 		if !seen[relSlash] {

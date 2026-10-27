@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +23,7 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 	codexBin := writeMockWorkerScript(t, tmpDir, "codex")
 
 	reg := NewRegistry()
-	for _, name := range []string{"opencode", "commandcode", "qwen", "codex"} {
+	for _, name := range []string{"opencode", "commandcode", "qwen", "codex", "cursor"} {
 		if _, err := reg.Get(name); err != nil {
 			t.Fatalf("expected provider %q registered in NewRegistry(), got %v", name, err)
 		}
@@ -164,6 +166,62 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 		rc, err := handle.Wait(context.Background())
 		if err != nil || rc.Status != "COMPLETED" {
 			t.Fatalf("Wait status = %q, err = %v", rc.Status, err)
+		}
+	})
+
+	t.Run("cursor adapter", func(t *testing.T) {
+		cursorBin := filepath.Join(tmpDir, "cursor-agent")
+		cursorScript := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'cursor-agent 2026.08.25'; exit 0; fi\nif [ \"$1\" = \"--list-models\" ]; then echo 'composer-2.5 - Composer 2.5'; echo 'gemini-4-argon-high - Gemini 4 Argon High'; exit 0; fi\necho 'CURSOR_OK'\nexit 0\n"
+		if err := os.WriteFile(cursorBin, []byte(cursorScript), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v0/models" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"models":["composer-2.5","claude-opus-5-thinking-high"]}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		p := NewCursorProvider().WithAPIBaseURL(srv.URL).WithHTTPClient(srv.Client())
+		if p.Binary() != "cursor-agent" {
+			t.Fatalf("Binary() = %q, want cursor-agent", p.Binary())
+		}
+		t.Setenv("CURSOR_BIN", cursorBin)
+		t.Setenv("CURSOR_API_KEY", "crsr_test_key")
+		if err := p.Available(context.Background()); err != nil {
+			t.Fatalf("Available failed: %v", err)
+		}
+		ver, err := p.Version(context.Background())
+		if err != nil || !strings.Contains(ver, "cursor-agent") {
+			t.Fatalf("Version = %q, err = %v", ver, err)
+		}
+		models, err := p.DiscoverModels(context.Background())
+		if err != nil || len(models) < 3 {
+			t.Fatalf("DiscoverModels = %v, err = %v", models, err)
+		}
+		handle, err := p.Spawn(context.Background(), Spec{
+			Model:       "composer-2.5",
+			Brief:       "verify cursor",
+			Permission:  "read_only",
+			WorktreeDir: tmpDir,
+		})
+		if err != nil {
+			t.Fatalf("Spawn failed: %v", err)
+		}
+		rc, err := handle.Wait(context.Background())
+		if err != nil || rc.Status != "COMPLETED" || !strings.Contains(rc.Stdout, "CURSOR_OK") {
+			t.Fatalf("Wait status = %q, stdout = %q, err = %v", rc.Status, rc.Stdout, err)
+		}
+
+		pMissing := NewCursorProvider().WithLookPath(func(string) (string, error) {
+			return "", os.ErrNotExist
+		})
+		t.Setenv("CURSOR_BIN", "")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
+			t.Fatal("expected error when cursor-agent binary is missing")
 		}
 	})
 }
