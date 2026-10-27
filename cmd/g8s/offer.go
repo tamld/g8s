@@ -16,7 +16,49 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 )
 
-const offerBundleVersion = "0.19.1"
+const offerBundleVersion = "0.20.0"
+
+func featureMapSeedForProfile(profile string) string {
+	return fmt.Sprintf(`schema_version: "2.0"
+inherits_spec_kit: "g8s/offer/profiles/%s@v0.21"
+
+hotspots:
+  - id: "HOT-DOCS-01"
+    paths:
+      - "README.md"
+      - "AGENTS.md"
+      - ".g8s/**"
+    policy: "serialize"
+    rationale: "Shared repository governance and top-level documentation"
+
+features:
+  - id: "FEAT-CORE-01"
+    title: "Core Repository Surface & Automation"
+    persona_story: "As a repository maintainer or agent, I need deterministic boundaries and verification checks so that mutations remain safe and auditable."
+    collision_domain: "CD-CORE"
+    srs_reqs:
+      - "FR-CORE-01"
+    owned_paths:
+      - "**"
+      - "!README.md"
+      - "!AGENTS.md"
+      - "!.g8s/**"
+    shared_paths:
+      - "README.md"
+      - "AGENTS.md"
+      - ".g8s/**"
+    code_paths:
+      - "**"
+    invariants:
+      - "All changes pass repository CI and g8s offer check gates"
+    visible_tests:
+      - "tools/ci_spec_code_sync.sh"
+    verifier_class: "ci-gates"
+    blast_radius:
+      depends_on: []
+      direct_consumers: []
+`, profile)
+}
 
 const knowledgeEffortClassesSeed = `# Effort Classes Configuration — Knowledge Profile (issue #550 / C2)
 # Maps task write-scope paths to reasoning effort defaults.
@@ -269,7 +311,12 @@ func runOfferInit(args []string) {
 			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
 			return
 		}
-		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml", ".g8s/verifier-classes.yml"}
+		fmSeed := featureMapSeedForProfile(*profile)
+		if werr := os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(fmSeed), 0o600); werr != nil {
+			exitRuntime("offer", "init", *traceID, cli.CodeIO, werr, "", *jsonl)
+			return
+		}
+		scaffold = []string{".g8s/trust-boundaries.yml", ".g8s/lane-bundles.yml", ".g8s/effort-classes.yml", ".g8s/verifier-classes.yml", ".g8s/feature-map.yml"}
 	}
 
 	targetGatesDir := filepath.Join(*dir, *gatesDir)

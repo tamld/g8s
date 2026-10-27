@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "2.0"
 inherits_spec_kit: "g8s/offer/profiles/utility@v0.21"
 # ==============================================================================
 # Feature Map Starter Template (.g8s/feature-map.yml)
@@ -16,8 +16,8 @@ inherits_spec_kit: "g8s/offer/profiles/utility@v0.21"
 #      while strictly holding out private / holdout test suites.
 #
 # RULES FOR SIBLING REPOSITORIES:
-#   - schema_version MUST be "1.0".
-#   - Every internal package/module MUST be covered by at least one feature's code_paths.
+#   - schema_version SHOULD be "2.0" (1.0 remains backwards-compatible).
+#   - Every internal package/module MUST be covered by at least one feature's owned_paths / code_paths.
 #   - The blast_radius dependency graph MUST be an acyclic directed graph (DAG).
 #   - depends_on lists prerequisite features this feature relies upon.
 #   - direct_consumers lists features that directly depend upon this feature.
@@ -26,6 +26,15 @@ inherits_spec_kit: "g8s/offer/profiles/utility@v0.21"
 #   - holdout_tests (optional) lists test suites withheld from worker prompt visibility.
 # ==============================================================================
 
+hotspots:
+  - id: "HOT-DOCS-01"
+    paths:
+      - "README.md"
+      - "AGENTS.md"
+      - ".g8s/**"
+    policy: "serialize"
+    rationale: "Shared repository governance and top-level documentation"
+
 features:
   # ----------------------------------------------------------------------------
   # Feature 1: Foundation / Core Subsystem
@@ -33,8 +42,12 @@ features:
   - id: "FEAT-CORE-01"
     title: "Core Domain Logic & Data Models"
     persona_story: "As a domain consumer, I need core state definitions and validation so that entity state remains consistent across mutations."
+    collision_domain: "CD-CORE"
     srs_reqs:
       - "FR-CORE-01"
+    owned_paths:
+      - "internal/core/**"
+      - "internal/models/**"
     code_paths:
       - "internal/core/**"
       - "internal/models/**"
