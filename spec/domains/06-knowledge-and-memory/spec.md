@@ -19,3 +19,18 @@ Operational lessons and Tri-Anchor knowledge records MUST persist in a pure-Go S
 - **GIVEN** the canonical CLI surface registry
 - **WHEN** `CanonicalCommands()` is inspected
 - **THEN** `vault`, `memory`, and `lesson` are registered
+
+---
+
+### R2 — Capability-Scoped F1/F2 Shared Skills & MCP Tool Hydration {#R2-capability-skill-hydration}
+
+<!-- inherited-from: DELTA-01, DELTA-19, DELTA-33 -->
+<!-- feature_id: FEAT-VAULT-MEMORY-01 -->
+
+Every F1 worker and F2 subagent execution MUST inherit deterministic capability-hydration environment variables (`G8S_ROLE`, `G8S_STRATUM`, `G8S_RECOMMENDED_SKILLS`, `G8S_MCP_TOOLS_ALLOWED`) strictly bounded by its `permission` profile (`read_only` $\to$ `S3-A` without `g8s_edit`; `workspace_write` $\to$ `S3-M` with `g8s_edit`).
+
+#### Scenario: Permission and role boundary enforcement on capability hydration
+<!-- tests: TestResolveCapabilityHydrationEnforcesPermissionAndRoleBoundaries -->
+- **GIVEN** `read_only` (`scout`) and `workspace_write` (`implementer`) worker dispatches
+- **WHEN** `ResolveCapabilityHydration` resolves the worker environment
+- **THEN** `read_only` resolves to `S3-A` and excludes `g8s_edit`, while `workspace_write` resolves to `S3-M` and includes `g8s_edit` alongside role-specific `G8S_RECOMMENDED_SKILLS`

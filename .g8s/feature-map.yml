@@ -203,6 +203,7 @@ features:
         - "children"
         - "state"
         - "migrate"
+        - "audit"
       mcp_tools:
         - "g8s_submit"
         - "g8s_get"
@@ -215,6 +216,7 @@ features:
         - "task_signal_timeout"
         - "state"
         - "resubmit"
+        - "audit_log"
       go_packages:
         - "internal/controlplane"
         - "internal/state"

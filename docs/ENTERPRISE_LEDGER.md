@@ -7,7 +7,7 @@ issue). The registry of quantitative claims lives in `docs/claims.yml`
 (verified by `tools/claims_check.sh`); this ledger is the enterprise-facing
 view over the same evidence.
 
-Last updated: 2026-10-04 (v0.14.0 release + Wave I pipeline live: verifier, merger, autonomy, retry, lessons, multi-project containment).
+Last updated: 2026-10-27 (v0.20.0 release + Orthogonal Stratum Federation, Spec-Kit 8 Living Domains, 5-Axis Kaizen Scorecard, Dual-Path Cursor & 9Router Consumer, and Enterprise Access-Audit Log).
 
 ## Zero-Trust Delegation
 
@@ -42,7 +42,7 @@ Last updated: 2026-10-04 (v0.14.0 release + Wave I pipeline live: verifier, merg
 | Unbuffered stdout/stderr streaming per attempt | PROVEN | `internal/worker` UnbufferedPipeStreamer | Feeds Evidence Lake export |
 | Evidence Lake export per attempt | PROVEN | `worker.ExportReceipt` + `G8S_EVIDENCE_DIR` | |
 | Harness self-audit probes registered in the eval suite | PROVEN | #451: 4 probes in `internal/harness/probe` DefaultSuite; RELEASE_SOP Gate 8 (D-02) wired | 4/4 probes passed in v0.14.0 release gate via `g8s eval run --category self-audit` |
-| Enterprise access-audit log | UNPROVEN | docs/designs/access-audit-design.md (#441) | Design only; no code |
+| Enterprise access-audit log | PROVEN | `internal/controlplane/access_audit.go` + `TestAccessAuditTransactionalAndRedacted` + `cmd/g8s/audit.go` (#441) | Transactional `access_audit` table in `g8s.db` + redacted detail + `g8s audit list` |
 | Downtime/availability measurement | UNPROVEN (by design) | docs/decisions/0027-availability-measurement.md | Single-node CP; revisit condition recorded |
 
 ## Autonomous Operations & Verification (v0.14.0)

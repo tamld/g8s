@@ -234,7 +234,7 @@
           "env_var": "G8S_STRATUM=O-Plane",
           "can_mutate_files": false,
           "can_dispatch_strata": [],
-          "cli_surface": ["g8s charter portfolio --json", "g8s fleet status --json", "g8s supervisor-metrics --json"],
+          "cli_surface": ["g8s charter portfolio --json", "g8s fleet status --json", "g8s supervisor-metrics --json", "g8s scorecard audit --json", "g8s audit list --json"],
           "description": "Zero-LLM-rewrite read-only SQLite WAL state & portfolio projector."
         }
       },

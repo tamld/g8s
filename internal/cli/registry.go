@@ -87,6 +87,7 @@ func CanonicalCommandContracts() []CommandContract {
 		{Name: "claim", Stratum: "S2", EnvelopeKinds: []string{"claim_check"}, Description: "Verify documentation claims against executable anchors (g8s claim verify)"},
 		{Name: "f0", Stratum: "S2", EnvelopeKinds: []string{"f0_gate_check", "f0_status"}, Description: "F0 supervisor commitment-point gate and status checks (g8s f0 gate check|status)"},
 		{Name: "scorecard", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"scorecard_5axis"}, Description: "DELTA-45 5-Axis Cross-Evaluation & Kaizen Engine (g8s scorecard status|audit|kaizen)"},
+		{Name: "audit", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"audit_log"}, Description: "Query transactional enterprise access-audit log (#441: g8s audit list [--actor] [--action])"},
 		{Name: "version", Stratum: "S0/S1/S2/S3", EnvelopeKinds: []string{"version"}, Description: "Show application version"},
 		{Name: "help", Stratum: "S0/S1/S2/S3", Description: "Show this message"},
 		{Name: "internal", Stratum: "S3-M", Description: "Internal supervisor process wrapper hook", Hidden: true},

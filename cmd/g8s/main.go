@@ -255,6 +255,8 @@ func main() {
 		runF0(os.Args[2:])
 	case "scorecard":
 		runScorecard(os.Args[2:])
+	case "audit":
+		runAudit(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:

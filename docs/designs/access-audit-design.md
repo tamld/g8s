@@ -1,6 +1,6 @@
 # Access-Audit Log — Design Note
 
-Issue #441. Status: **design only — no code in this slice**. This note
+Issue #441. Status: **implemented & proven in v0.20.0** (`internal/controlplane/access_audit.go`, `cmd/g8s/audit.go`, `TestAccessAuditTransactionalAndRedacted`). This note
 defines WHAT to log, WHERE, and RETENTION, so the implementation slice can
 be scoped without re-litigating the shape.
 

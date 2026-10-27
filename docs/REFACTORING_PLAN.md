@@ -167,8 +167,8 @@ All shipped, tagged, and verified on GitHub Releases:
 | v0.17.0 (2026-10-16) | Native Pure-Go Agent I/O (DELTA-23: search, read, edit, --select), F0/F1/F2 recursive containment (ADR-0032), Offer Bundle Wave 1–4 rollout (#442, #569), OpenSpec DELTA-01..23 & 50/50 bound claims |
 | v0.18.0 (2026-10-21) | F0 Verified Delegation & Symmetric Zero-Trust Control Plane ([ADR-0033](decisions/0033-f0-verified-delegation.md), Epic #620, #621–#630): append-only evidence ledger, signed operator mandates (T0–T4), commit/merge gates G0–G7, agent hooks, circuit breaker, lossless verify firewall |
 | v0.19.0 (2026-10-21) | Universal Config-Driven LLM Call Consumer & Multi-Model Gateway ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), DELTA-25): direct CLI invocation (g8s llm-call), queue bridge via g8s llm-call --worker-envelope, live model discovery g8s providers discover, standardized SWE combos (reasoning-free, reasoning-high, deep-coding, fast-agent, docs-retriever), 16-tool MCP server, single MIT license, and F0 Cognitive Purity |
-| v0.20.0 (Planned — Issue #639) | Test Suite Execution Optimization & Empirical PRI Lane Routing (>=90% first-attempt pass), Industry Security Standards Alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM), Cross-Platform Packaging Hardening & Internal Package Consolidation |
-| v0.21.0+ (Planned — Pre-1.0 Burn-In) | 90-day Multi-Repo Offer Retention (SCORECARD.md M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (v1.0.0 is gated on empirical burn-in evidence, not calendar dates) |
+| v0.20.0 (2026-10-27) | Orthogonal Stratum Federation (`S0..S3 + O-Plane`, `ADR-0035`), Spec-Kit 8 Living Domains (`#679`), 5-Axis Kaizen Scorecard (`#680`), Dual-Path Cursor & `9router` Integration (`#683`), Generative CLI Surface (`#677`), and Transactional Access-Audit Log (`#441`) |
+| v0.21.0+ (Planned — Pre-1.0 Burn-In) | 90-day Multi-Repo Offer Retention (SCORECARD.md M4 across 40 onboarded repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (v1.0.0 is gated on empirical burn-in evidence, not calendar dates) |
 
 ---
 
@@ -233,16 +233,17 @@ All shipped, tagged, and verified on GitHub Releases:
 
 ---
 
-### v0.20.0 — Test Suite Execution Optimization, PRI Lane Routing & Industry Security Alignment (Planned — Issue #639)
+### v0.20.0 — Orthogonal Stratum Federation, Spec-Kit 8 Living Domains, 5-Axis Kaizen Scorecard & Dual-Path Cursor Integration (Completed 2026-10-27)
+**Delivered**: 2026-10-27
 **Scope**:
-- Test suite execution optimization and empirical PRI lane routing (`>=90%` first-attempt pass).
-- Industry security standards alignment (OWASP Top 10 for LLM/Agentic Apps 2025, SLSA Build Provenance, CycloneDX/SPDX SBOM generation).
-- Cross-platform packaging hardening & internal package consolidation.
+- Orthogonal Stratum Federation (`S0..S3 + O-Plane`, `ADR-0035`, `DELTA-33`) with epoch-fenced SQLite charters (`g8s charter`) and cross-repository fleet hygiene (`g8s fleet status`, `DELTA-32`).
+- Spec-Kit 8 Living Domain Specifications (`spec/domains/01..08/spec.md`, `#679`), Generative CLI Surface Contract (`internal/cli/registry.go`, `#677`), and 5-Axis Cross-Evaluation & Kaizen Scorecard (`g8s scorecard`, `#680`).
+- Dual-Path Cursor & `9router` Integration (`CursorProvider`, `#683`), Capability-Scoped F1/F2 Skill & MCP Hydration (`internal/harness/hydration.go`), and Transactional Enterprise Access-Audit Log (`g8s audit`, `#441`).
 
 ---
 
 ### v0.21.0+ — Multi-Repo Offer Retention & Pre-1.0 Burn-In (Planned)
 **Scope**:
-- 90-day multi-repo offer retention (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions).
+- 90-day multi-repo offer retention (`SCORECARD.md` M4 across 40 onboarded repositories with 0 gate regressions).
 - Formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates).
 
