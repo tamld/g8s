@@ -22,7 +22,7 @@ jobs:
 
       - name: Reject force-push
         run: |
-          if git log --since="7 days ago" --pretty=format:"%H" | \
+          if git log origin/main..HEAD --pretty=format:"%H" | \
              xargs -I{} git show {} --name-only --pretty=format: | \
              sort -u | head -1000 > /tmp/recent.txt; then
             # Count files in recent commits
@@ -39,7 +39,7 @@ jobs:
           else
             RANGE="HEAD"
           fi
-          if git log --pretty=format:"%s" $RANGE | grep -E "Merge.*#[0-9]+"; then
+          if git log --pretty=format:"%s" --end-of-options "$RANGE" | grep -E "^Merge pull request #[0-9]+"; then
             echo "::error::Commit message contains self-merge"
             exit 1
           fi
