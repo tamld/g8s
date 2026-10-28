@@ -127,10 +127,10 @@ func ParseUnifiedDiffAddedLines(diffText string) map[string][]AddedLine {
 // Hard Invariants (secrets) and Advisory Signals (Vault SpatialAnchor.DeniedFragments
 // including dormant/Cold rules for Hypothesis H2, plus Tier-0 Go error swallowing).
 func EvaluateNetDelta(ctx context.Context, diffText string, allowedPaths []string, v *vault.Vault) (hardViolations []DiffAdvisory, advisories []DiffAdvisory) {
-	addedByFile := ParseUnifiedDiffAddedLines(diffText)
-	if len(addedByFile) == 0 {
+	if strings.TrimSpace(diffText) == "" {
 		return nil, nil
 	}
+	addedByFile := ParseUnifiedDiffAddedLines(diffText)
 
 	for file, lines := range addedByFile {
 		if len(allowedPaths) > 0 && !matchesAnyAllowedPath(file, allowedPaths) {
@@ -227,6 +227,23 @@ func EvaluateNetDelta(ctx context.Context, diffText string, allowedPaths []strin
 					Message:  "tautological test assertion provides zero verification signal",
 				})
 			}
+		}
+	}
+
+	// 6. Check Catch-Intent TestAssertionGuard across the full unified diff (#694)
+	assertReport := VerifyTestAssertionsNotWeakened(diffText)
+	if !assertReport.OK {
+		for _, finding := range assertReport.Findings {
+			if len(allowedPaths) > 0 && !matchesAnyAllowedPath(finding.File, allowedPaths) {
+				continue
+			}
+			advisories = append(advisories, DiffAdvisory{
+				RuleID:   finding.RuleID,
+				File:     finding.File,
+				Line:     1,
+				Severity: "advisory",
+				Message:  finding.Message,
+			})
 		}
 	}
 

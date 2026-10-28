@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tamld/g8s/internal/featuremap"
@@ -153,5 +154,57 @@ func TestCoordinatorIntakeAndMasteryScorecard(t *testing.T) {
 	}
 	if len(brief.RoutingPlan.SkillChain) == 0 || len(brief.RoutingPlan.NativeTools) == 0 {
 		t.Fatalf("expected populated SkillChain and NativeTools in RoutingPlan: %+v", brief.RoutingPlan)
+	}
+}
+
+func TestAnalyzeToolTrajectory_ParalysisOscillationAndOrderViolation(t *testing.T) {
+	// 1. Analysis Paralysis: 5 consecutive read/search calls
+	paralysisEvents := []ToolTrajectoryEvent{
+		{Tool: "g8s search", Target: "foo", Success: true},
+		{Tool: "g8s read", Target: "a.go", Success: true},
+		{Tool: "g8s read", Target: "b.go", Success: true},
+		{Tool: "g8s search", Target: "bar", Success: true},
+		{Tool: "g8s read", Target: "c.go", Success: true},
+	}
+	vPara := AnalyzeToolTrajectory(paralysisEvents, 5, 3)
+	if vPara.OK || vPara.Anomaly != AnomalyAnalysisParalysis {
+		t.Fatalf("expected ANALYSIS_PARALYSIS verdict, got %+v", vPara)
+	}
+	if !strings.Contains(vPara.JITBaton, "[jit:baton:PARALYSIS_BREAKER]") {
+		t.Fatalf("expected PARALYSIS_BREAKER baton, got %q", vPara.JITBaton)
+	}
+
+	// 2. Oscillation Loop: 3 consecutive failures on identical (tool, target)
+	oscEvents := []ToolTrajectoryEvent{
+		{Tool: "g8s edit", Target: "pkg/x.go", Success: false},
+		{Tool: "g8s edit", Target: "pkg/x.go", Success: false},
+		{Tool: "g8s edit", Target: "pkg/x.go", Success: false},
+	}
+	vOsc := AnalyzeToolTrajectory(oscEvents, 5, 3)
+	if vOsc.OK || vOsc.Anomaly != AnomalyOscillationLoop {
+		t.Fatalf("expected OSCILLATION_LOOP verdict, got %+v", vOsc)
+	}
+
+	// 3. Forbidden Order Transition: edit -> deliver without passing verify
+	orderEvents := []ToolTrajectoryEvent{
+		{Tool: "g8s read", Target: "pkg/x.go", Success: true},
+		{Tool: "g8s edit", Target: "pkg/x.go", Success: true},
+		{Tool: "g8s deliver", Target: "task-1", Success: true},
+	}
+	vOrd := AnalyzeToolTrajectory(orderEvents, 5, 3)
+	if vOrd.OK || vOrd.Anomaly != AnomalyForbiddenTransition {
+		t.Fatalf("expected FORBIDDEN_TRANSITION verdict, got %+v", vOrd)
+	}
+
+	// 4. Clean Trajectory: read -> edit -> verify (pass) -> deliver
+	cleanEvents := []ToolTrajectoryEvent{
+		{Tool: "g8s read", Target: "pkg/x.go", Success: true},
+		{Tool: "g8s edit", Target: "pkg/x.go", Success: true},
+		{Tool: "g8s verify", Target: "task-1", Success: true},
+		{Tool: "g8s deliver", Target: "task-1", Success: true},
+	}
+	vClean := AnalyzeToolTrajectory(cleanEvents, 5, 3)
+	if !vClean.OK || vClean.Anomaly != AnomalyNone {
+		t.Fatalf("expected clean trajectory to pass, got %+v", vClean)
 	}
 }

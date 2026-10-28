@@ -534,3 +534,143 @@ func matchesFeatureIntake(feat featuremap.FeatureNode, goal string, targetFiles 
 	sort.Strings(targetFiles)
 	return false
 }
+
+// ToolTrajectoryEvent represents a single tool invocation in an agent's session
+// trajectory (#697, ported from Aegis TrajectoryMonitor & AnalysisParalysisGuard).
+type ToolTrajectoryEvent struct {
+	Tool    string `json:"tool"`    // e.g. "read", "search", "edit", "verify", "deliver", "bash"
+	Target  string `json:"target"`  // file path or command signature
+	Success bool   `json:"success"` // whether the invocation succeeded
+}
+
+// TrajectoryAnomalyType classifies anomalous tool trajectory patterns (#697).
+type TrajectoryAnomalyType string
+
+const (
+	AnomalyNone                TrajectoryAnomalyType = "NONE"
+	AnomalyAnalysisParalysis   TrajectoryAnomalyType = "ANALYSIS_PARALYSIS"
+	AnomalyOscillationLoop     TrajectoryAnomalyType = "OSCILLATION_LOOP"
+	AnomalyForbiddenTransition TrajectoryAnomalyType = "FORBIDDEN_TRANSITION"
+)
+
+// TrajectoryVerdict summarizes the evaluation of an agent's tool trajectory (#697).
+type TrajectoryVerdict struct {
+	OK               bool                  `json:"ok"`
+	Anomaly          TrajectoryAnomalyType `json:"anomaly"`
+	ConsecutiveReads int                   `json:"consecutive_reads"`
+	RepeatedFailures int                   `json:"repeated_failures"`
+	Message          string                `json:"message,omitempty"`
+	JITBaton         string                `json:"jit_baton,omitempty"`
+}
+
+func isReadOnlyTrajectoryTool(tool string) bool {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "read", "g8s read", "search", "g8s search", "grep", "ls", "find", "list_tools":
+		return true
+	default:
+		return false
+	}
+}
+
+// AnalyzeToolTrajectory evaluates a sequence of ToolTrajectoryEvents for:
+//  1. Analysis Paralysis (consecutive read-only tool calls >= maxConsecutiveReads without action)
+//  2. Oscillation Loops (repeating the exact same failing tool+target >= maxRepeatedFailures times)
+//  3. Forbidden Order Transitions (calling 'deliver' or 'git commit' without a preceding successful 'verify')
+//
+// and emits a targeted JIT Baton circuit-breaker directive (#697).
+func AnalyzeToolTrajectory(events []ToolTrajectoryEvent, maxConsecutiveReads int, maxRepeatedFailures int) TrajectoryVerdict {
+	if maxConsecutiveReads <= 0 {
+		maxConsecutiveReads = 5
+	}
+	if maxRepeatedFailures <= 0 {
+		maxRepeatedFailures = 3
+	}
+
+	verdict := TrajectoryVerdict{
+		OK:      true,
+		Anomaly: AnomalyNone,
+	}
+	if len(events) == 0 {
+		return verdict
+	}
+
+	consecutiveReads := 0
+	repeatedFailures := 0
+	lastFailedSig := ""
+	hasPassedVerify := false
+	hasMutatedSinceVerify := false
+
+	for _, ev := range events {
+		toolLower := strings.ToLower(strings.TrimSpace(ev.Tool))
+		sig := toolLower + ":" + strings.TrimSpace(ev.Target)
+
+		// 1. Track read-only streak
+		if isReadOnlyTrajectoryTool(toolLower) {
+			consecutiveReads++
+		} else {
+			consecutiveReads = 0
+		}
+
+		// 2. Track repeated failure oscillation on identical (tool, target)
+		if !ev.Success {
+			if sig == lastFailedSig {
+				repeatedFailures++
+			} else {
+				lastFailedSig = sig
+				repeatedFailures = 1
+			}
+		} else {
+			if sig == lastFailedSig {
+				lastFailedSig = ""
+				repeatedFailures = 0
+			}
+		}
+
+		// 3. Track mutation -> verify -> deliver ordering
+		if strings.Contains(toolLower, "edit") || strings.Contains(toolLower, "write") {
+			hasMutatedSinceVerify = true
+			hasPassedVerify = false
+		}
+		if strings.Contains(toolLower, "verify") && ev.Success {
+			hasPassedVerify = true
+			hasMutatedSinceVerify = false
+		}
+		if (strings.Contains(toolLower, "deliver") || strings.Contains(toolLower, "commit")) && hasMutatedSinceVerify && !hasPassedVerify {
+			return TrajectoryVerdict{
+				OK:               false,
+				Anomaly:          AnomalyForbiddenTransition,
+				ConsecutiveReads: consecutiveReads,
+				RepeatedFailures: repeatedFailures,
+				Message:          fmt.Sprintf("attempted %q after mutation without a passing 'g8s verify' gate", ev.Tool),
+				JITBaton:         "[jit:baton:ORDER_VIOLATION] Forbidden transition: run './bin/g8s verify' and confirm OutcomePass before delivering or committing.",
+			}
+		}
+
+		if repeatedFailures >= maxRepeatedFailures {
+			return TrajectoryVerdict{
+				OK:               false,
+				Anomaly:          AnomalyOscillationLoop,
+				ConsecutiveReads: consecutiveReads,
+				RepeatedFailures: repeatedFailures,
+				Message:          fmt.Sprintf("oscillation loop detected: %q failed %d times consecutively", sig, repeatedFailures),
+				JITBaton:         fmt.Sprintf("[jit:baton:OSCILLATION_BREAKER] Stop repeating failing call %q (%d consecutive failures). Pivot strategy or dispatch './bin/g8s coordinator intake'.", sig, repeatedFailures),
+			}
+		}
+	}
+
+	verdict.ConsecutiveReads = consecutiveReads
+	verdict.RepeatedFailures = repeatedFailures
+
+	if consecutiveReads >= maxConsecutiveReads {
+		return TrajectoryVerdict{
+			OK:               false,
+			Anomaly:          AnomalyAnalysisParalysis,
+			ConsecutiveReads: consecutiveReads,
+			RepeatedFailures: repeatedFailures,
+			Message:          fmt.Sprintf("analysis paralysis detected: %d consecutive read/search calls without mutation or verification", consecutiveReads),
+			JITBaton:         fmt.Sprintf("[jit:baton:PARALYSIS_BREAKER] %d consecutive read-only calls detected. Formulate a bounded hypothesis now and execute './bin/g8s edit' or './bin/g8s submit'.", consecutiveReads),
+		}
+	}
+
+	return verdict
+}

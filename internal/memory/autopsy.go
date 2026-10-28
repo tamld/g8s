@@ -9,11 +9,30 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/vault"
 )
+
+// MaxCrashAutopsyDuration caps Sudden-Death crash reflection to <200ms so process
+// exit is never stalled (#695, ported from Aegis CrashReflectionBridge).
+const MaxCrashAutopsyDuration = 200 * time.Millisecond
+
+var crashAutopsyInFlight atomic.Bool
+
+// CrashContext captures Sudden-Death panic/signal/crash telemetry before normal
+// task finalization can run (#695).
+type CrashContext struct {
+	TaskID     string `json:"task_id"`
+	Command    string `json:"command"`
+	Source     string `json:"source"` // "panic" | "signal" | "unhandled_error"
+	ErrorMsg   string `json:"error_msg"`
+	StackTrace string `json:"stack_trace,omitempty"`
+	File       string `json:"file,omitempty"`
+}
 
 // AutopsyTrajectory captures a failure-to-fix learning trajectory (#689:
 // "Học -> Sai -> Sửa -> Rút kinh nghiệm") across attempts or lineage tasks.
@@ -224,4 +243,56 @@ func ExtractTrajectoryFromTask(ctx context.Context, store *controlplane.Store, t
 	}
 
 	return nil, false
+}
+
+// RecordCrashAutopsy closes the "Sudden Death Blindspot" (#695, ported from Aegis
+// CrashReflectionBridge): when a worker or command panics or terminates via fatal
+// signal before reaching normal finalize/verify, it extracts a sanitized crash
+// lesson within a strict <200ms budget and a non-recursive circuit breaker.
+func (a *LocalSQLiteMemoryAdapter) RecordCrashAutopsy(ctx context.Context, crash CrashContext) (*AutopsyReport, error) {
+	if !crashAutopsyInFlight.CompareAndSwap(false, true) {
+		return nil, fmt.Errorf("memory: crash autopsy circuit breaker open (re-entrant call blocked)")
+	}
+	defer crashAutopsyInFlight.Store(false)
+
+	boundedCtx, cancel := context.WithTimeout(ctx, MaxCrashAutopsyDuration)
+	defer cancel()
+
+	taskID := strings.TrimSpace(crash.TaskID)
+	if taskID == "" {
+		sum := sha256.Sum256([]byte(crash.Command + ":" + crash.ErrorMsg))
+		taskID = "crash-" + hex.EncodeToString(sum[:4])
+	}
+	source := strings.TrimSpace(crash.Source)
+	if source == "" {
+		source = "panic"
+	}
+	cmdName := strings.TrimSpace(crash.Command)
+	if cmdName == "" {
+		cmdName = "g8s"
+	}
+
+	diag := SanitizeAutopsyText(crash.ErrorMsg)
+	if stack := SanitizeAutopsyText(crash.StackTrace); stack != "" {
+		lines := strings.Split(stack, "\n")
+		if len(lines) > 6 {
+			lines = lines[:6]
+		}
+		diag = diag + " | stack: " + strings.Join(lines, " ; ")
+	}
+
+	traj := AutopsyTrajectory{
+		TaskID:            taskID,
+		SessionID:         "sudden-death-" + taskID,
+		FailedCheck:       "sudden_death_" + source + ":" + cmdName,
+		FailedExitCode:    2,
+		DiagnosticExcerpt: diag,
+		FixSummary:        fmt.Sprintf("Guard %s against %s (%s) with pre-flight nil/bounds/context checks before execution", cmdName, source, strings.TrimSpace(crash.File)),
+		File:              strings.TrimSpace(crash.File),
+		Preconditions: map[string]string{
+			"crash_source": source,
+			"command":      cmdName,
+		},
+	}
+	return a.RunExperientialAutopsy(boundedCtx, traj, true)
 }

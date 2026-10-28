@@ -225,3 +225,62 @@ func truncateTitle(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
+
+// LessonsBlockedRepeatReport summarizes the case-law ROI telemetry across active
+// and doctrine lessons (#695, ported from Aegis ROADMAP Item 19 `lessons_blocked_repeat`
+// and Synaptic Homeostasis pruning).
+type LessonsBlockedRepeatReport struct {
+	TotalActiveLessons   int      `json:"total_active_lessons"`
+	LessonsWithROIGtZero int      `json:"lessons_with_roi_gt_zero"`
+	TotalBlockedRepeats  int      `json:"total_blocked_repeats"`
+	ZeroROICandidates    []string `json:"zero_roi_candidates,omitempty"`
+}
+
+// ComputeLessonsBlockedRepeatROI calculates how many times recalled lessons prevented
+// repeat failures (`FirstPassSuccessCount` on recalled entries) and identifies stale
+// zero-ROI candidates (#695).
+func (a *LocalSQLiteMemoryAdapter) ComputeLessonsBlockedRepeatROI(ctx context.Context, minAppliedForStale int) (*LessonsBlockedRepeatReport, error) {
+	if minAppliedForStale <= 0 {
+		minAppliedForStale = 3
+	}
+	entries, err := a.ListEntries(ctx, MemoryFilter{Lifecycle: LifecycleActive})
+	if err != nil {
+		return nil, err
+	}
+	rep := &LessonsBlockedRepeatReport{
+		TotalActiveLessons: len(entries),
+	}
+	for _, e := range entries {
+		if e.FirstPassSuccessCount > 0 {
+			rep.LessonsWithROIGtZero++
+			rep.TotalBlockedRepeats += e.FirstPassSuccessCount
+		} else if e.AppliedCount >= minAppliedForStale && e.FirstPassSuccessCount == 0 {
+			rep.ZeroROICandidates = append(rep.ZeroROICandidates, e.ID)
+		}
+	}
+	return rep, nil
+}
+
+// PruneZeroROILessons implements Synaptic Homeostasis (#695): any active lesson
+// that has been recalled/applied >= minApplied times with 0 first-pass successes
+// (`lessons_blocked_repeat == 0`) is demoted to LifecycleArchived so write-only
+// or ineffective lessons never rot the context window.
+func (a *LocalSQLiteMemoryAdapter) PruneZeroROILessons(ctx context.Context, minApplied int) (int, error) {
+	if minApplied <= 0 {
+		minApplied = 3
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	now := float64(time.Now().UnixNano()) / 1e9
+	res, err := a.db.ExecContext(ctx, `
+		UPDATE memory_entries
+		SET lifecycle = ?, updated_at = ?
+		WHERE lifecycle = ? AND applied_count >= ? AND first_pass_success_count = 0`,
+		string(LifecycleArchived), now, string(LifecycleActive), minApplied)
+	if err != nil {
+		return 0, fmt.Errorf("memory: prune zero-ROI lessons: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}

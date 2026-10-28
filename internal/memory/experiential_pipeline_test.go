@@ -253,3 +253,87 @@ func TestRecordOutcome_SybilDuplicateSessionGuardAndCounterExampleDemotion(t *te
 			ReviewFlagNeedsDialecticalReview, check3)
 	}
 }
+
+func TestRecordCrashAutopsy_AndLessonsBlockedRepeatPruning(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	adapter, err := NewLocalSQLiteMemoryAdapter(AdapterOptions{
+		DBPath: filepath.Join(tmpDir, "memory.db"),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalSQLiteMemoryAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	// 1. Sudden-Death CrashAutopsyHook (<200ms) with secret scrubbing (#695)
+	crashRep, err := adapter.RecordCrashAutopsy(ctx, CrashContext{
+		TaskID:     "task-crash-77",
+		Command:    "worker",
+		Source:     "panic",
+		ErrorMsg:   "runtime error: nil pointer dereference with token=sk-live1234567890abcdef",
+		StackTrace: "internal/worker/worker.go:142\nmain.go:40",
+		File:       "internal/worker/worker.go",
+	})
+	if err != nil {
+		t.Fatalf("RecordCrashAutopsy: %v", err)
+	}
+	if strings.Contains(crashRep.SanitizedLesson, "sk-live1234567890abcdef") {
+		t.Fatalf("expected crash autopsy to scrub secret token, got %q", crashRep.SanitizedLesson)
+	}
+	if crashRep.ProposedEntry == nil || crashRep.ProposedEntry.ID == "" {
+		t.Fatalf("expected proposed crash entry")
+	}
+
+	// 2. Simulate 1 high-ROI lesson (FirstPassSuccessCount=2) and 1 zero-ROI lesson (AppliedCount=3, FirstPassSuccessCount=0)
+	zeroROI := &MemoryEntry{
+		ID:        "mem-zero-roi-stale",
+		Kind:      KindProcedure,
+		Scope:     ScopeGlobal,
+		SessionID: "sess-stale",
+		Payload:   "Stale lesson that never prevents failures",
+	}
+	if err := adapter.ProposeEntry(ctx, zeroROI); err != nil {
+		t.Fatalf("ProposeEntry zeroROI: %v", err)
+	}
+
+	// Crash entry succeeds on 2 distinct sessions -> ROI = 2
+	if _, err := adapter.RecordOutcome(ctx, []string{crashRep.ProposedEntry.ID}, "sess-fix-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.RecordOutcome(ctx, []string{crashRep.ProposedEntry.ID}, "sess-fix-2", true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Zero-ROI entry fails 3 times after recall -> AppliedCount=3, FirstPassSuccessCount=0
+	for i := 1; i <= 3; i++ {
+		if _, err := adapter.RecordOutcome(ctx, []string{zeroROI.ID}, "sess-fail", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roiRep, err := adapter.ComputeLessonsBlockedRepeatROI(ctx, 3)
+	if err != nil {
+		t.Fatalf("ComputeLessonsBlockedRepeatROI: %v", err)
+	}
+	if roiRep.LessonsWithROIGtZero != 1 || roiRep.TotalBlockedRepeats != 2 {
+		t.Fatalf("expected 1 lesson with ROI>0 and TotalBlockedRepeats=2, got %+v", roiRep)
+	}
+	if len(roiRep.ZeroROICandidates) != 1 || roiRep.ZeroROICandidates[0] != zeroROI.ID {
+		t.Fatalf("expected zeroROI in ZeroROICandidates, got %+v", roiRep.ZeroROICandidates)
+	}
+
+	pruned, err := adapter.PruneZeroROILessons(ctx, 3)
+	if err != nil {
+		t.Fatalf("PruneZeroROILessons: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 zero-ROI lesson pruned, got %d", pruned)
+	}
+	archivedCheck, err := adapter.GetEntry(ctx, zeroROI.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archivedCheck.Lifecycle != LifecycleArchived {
+		t.Fatalf("expected pruned lesson lifecycle=%s, got %s", LifecycleArchived, archivedCheck.Lifecycle)
+	}
+}
