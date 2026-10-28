@@ -13,6 +13,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxPacketChars is the hard packet budget (mirrors ADR-0023 G6).
@@ -148,37 +149,16 @@ func truncateRuneSafe(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	cut := s[:n]
-	for len(cut) > 0 {
-		r := []rune(cut[len(cut)-1:])
-		_ = r
-		// drop bytes until the tail is valid UTF-8
-		if validTail(cut) {
-			break
+	for i := n; i > 0 && i >= n-3; i-- {
+		if utf8.RuneStart(s[i-1]) {
+			_, size := utf8.DecodeRuneInString(s[i-1:])
+			if i-1+size <= n {
+				return s[:n]
+			}
+			return s[:i-1]
 		}
-		cut = cut[:len(cut)-1]
 	}
-	return cut
-}
-
-func validTail(s string) bool {
-	for i := 0; i < len(s); {
-		r := rune(s[i])
-		size := 1
-		switch {
-		case r >= 0xF0:
-			size = 4
-		case r >= 0xE0:
-			size = 3
-		case r >= 0xC0:
-			size = 2
-		}
-		if i+size > len(s) {
-			return false
-		}
-		i += size
-	}
-	return true
+	return s[:n]
 }
 
 // SortStrings is a small helper for source implementations that want
