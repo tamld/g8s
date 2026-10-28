@@ -222,6 +222,12 @@ func runRead(args []string) {
 	for _, l := range res.Lines {
 		fmt.Printf("%d: %s\n", l.Line, l.Text)
 	}
+	if len(res.JITWhisper) > 0 {
+		fmt.Println("---")
+		for _, w := range res.JITWhisper {
+			fmt.Println(w)
+		}
+	}
 }
 
 func runEdit(args []string) {

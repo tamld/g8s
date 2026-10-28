@@ -16,6 +16,7 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/verifier"
 )
@@ -829,5 +830,143 @@ func TestVerifyCLI_StandaloneFeatureHoldoutAndCanary(t *testing.T) {
 	}
 	if v.VetoReason != "" {
 		t.Errorf("expected empty VetoReason, got %q", v.VetoReason)
+	}
+}
+
+func TestVerifyCLI_UnderTheHoodOutcomeAndJITBaton(t *testing.T) {
+	dbPath, store := setupTestDB(t)
+	defer store.Close()
+
+	stateDir := filepath.Dir(dbPath)
+	t.Setenv("G8S_STATE_DIR", stateDir)
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	ctx := context.Background()
+	memAdapter, err := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
+		DBPath: filepath.Join(stateDir, "memory.db"),
+	})
+	if err != nil {
+		t.Fatalf("open memory.db: %v", err)
+	}
+	entry := &memory.MemoryEntry{
+		ID:        "mem-baton-01",
+		Kind:      memory.KindProcedure,
+		Scope:     memory.ScopeGlobal,
+		SessionID: "sess-prior",
+		Payload:   "When editing cmd/g8s/verify_test.go, always call fsops.SelectJSON(raw, dotExpr) instead of reinventing nested map[string]any parsers.",
+		Preconditions: map[string]string{
+			"file": "cmd/g8s/verify_test.go",
+		},
+	}
+	defer memAdapter.Close()
+	if err := memAdapter.ProposeEntry(ctx, entry); err != nil {
+		t.Fatalf("ProposeEntry: %v", err)
+	}
+
+	rawDB := openReceiptsDB(t, dbPath)
+	pathsJSON := `["plans/261002-factory/brief-H1-verifier-registry.md", "cmd/g8s/verify_test.go"]`
+	if _, err := rawDB.Exec(`
+		INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at)
+		VALUES ('rcpt-baton-1', 'brain', ?, 9999999999, 100)
+	`, pathsJSON); err != nil {
+		t.Fatalf("insert receipt: %v", err)
+	}
+
+	task, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey:  "k-baton-verify-piggyback",
+		Model:           "test-model",
+		Role:            "scout",
+		Permission:      "workspace_write",
+		AddDirs:         []string{"."},
+		SkipPermissions: true,
+		Payload:         json.RawMessage(`{"prompt":"verify piggyback","receipt_id":"rcpt-baton-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+
+	mockRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		return []byte("=== RUN   TestSample\n--- PASS: TestSample (0.01s)\nPASS\nok\tgithub.com/tamld/g8s/cmd/g8s\t0.02s\n"), nil, 0, nil
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &stdout, &stderr, dbPath, mockRunner)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+
+	var env cli.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to parse envelope: %v", err)
+	}
+	payloadBytes, _ := json.Marshal(env.Data)
+	var verdict verifier.Verdict
+	if err := json.Unmarshal(payloadBytes, &verdict); err != nil {
+		t.Fatalf("unmarshal verdict: %v", err)
+	}
+	if !strings.Contains(verdict.JITBaton, "[jit:baton:VERIFIED]") || !strings.Contains(verdict.JITBaton, "deliver "+task.TaskID) {
+		t.Fatalf("expected [jit:baton:VERIFIED] deliver next step in verdict.JITBaton, got %q", verdict.JITBaton)
+	}
+
+	// Verify that RecordOutcome ran automatically under the hood without manual 'g8s memory outcome'
+	memAdapter2, err := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
+		DBPath: filepath.Join(stateDir, "memory.db"),
+	})
+	if err != nil {
+		t.Fatalf("reopen memory.db: %v", err)
+	}
+	defer memAdapter2.Close()
+
+	updated, err := memAdapter2.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if updated.AppliedCount != 1 || updated.FirstPassSuccessCount != 1 {
+		t.Fatalf("expected under-the-hood verify piggyback to record AppliedCount=1 and FirstPassSuccessCount=1, got %+v", updated)
+	}
+
+	// 2. Worst-Case Sybil Check: Running verify 3 more times on the SAME task.TaskID
+	// must NOT inflate FirstPassSuccessCount or promote to READY_FOR_DOCTRINE.
+	for i := 0; i < 3; i++ {
+		var outBuf, errBuf bytes.Buffer
+		_ = runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &outBuf, &errBuf, dbPath, mockRunner)
+	}
+	afterReplay, err := memAdapter2.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry after replay: %v", err)
+	}
+	if afterReplay.FirstPassSuccessCount != 1 || afterReplay.ReviewFlag == memory.ReviewFlagReadyForDoctrine {
+		t.Fatalf("Sybil replay guard failed: expected FirstPassSuccessCount=1 and no READY_FOR_DOCTRINE, got %+v", afterReplay)
+	}
+
+	// 3. Worst-Case Impasse / Failure Check: When verify fails, verdict.JITBaton must
+	// emit [jit:baton:IMPASSE] and memory entry must be flagged NEEDS_DIALECTICAL_REVIEW.
+	failRunner := verifier.WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+		return []byte("=== RUN   TestSample\n--- FAIL: TestSample (0.01s)\nFAIL\n"), []byte("exit status 1"), 1, nil
+	})
+	var failOut, failErr bytes.Buffer
+	_ = runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &failOut, &failErr, dbPath, failRunner)
+	var failEnv cli.Envelope
+	if err := json.Unmarshal(failOut.Bytes(), &failEnv); err != nil {
+		t.Fatalf("parse fail envelope: %v", err)
+	}
+	failPayloadBytes, _ := json.Marshal(failEnv.Data)
+	var failVerdict verifier.Verdict
+	if err := json.Unmarshal(failPayloadBytes, &failVerdict); err != nil {
+		t.Fatalf("unmarshal fail verdict: %v", err)
+	}
+	if failVerdict.Outcome != verifier.OutcomeFail {
+		t.Fatalf("expected OutcomeFail on failing check, got %q", failVerdict.Outcome)
+	}
+	if !strings.Contains(failVerdict.JITBaton, "[jit:baton:IMPASSE]") || !strings.Contains(failVerdict.JITBaton, "resubmit "+task.TaskID) {
+		t.Fatalf("expected [jit:baton:IMPASSE] with resubmit hint on fail, got %q", failVerdict.JITBaton)
+	}
+	afterFail, err := memAdapter2.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry after fail: %v", err)
+	}
+	if afterFail.FailureAfterRecallCount != 1 || afterFail.ReviewFlag != memory.ReviewFlagNeedsDialecticalReview {
+		t.Fatalf("expected FailureAfterRecallCount=1 and ReviewFlag=%q after verify failure, got %+v",
+			memory.ReviewFlagNeedsDialecticalReview, afterFail)
 	}
 }

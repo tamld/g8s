@@ -72,11 +72,22 @@ func (a *LocalSQLiteMemoryAdapter) RecordOutcome(ctx context.Context, entryIDs [
 			return nil, err
 		}
 
-		e.AppliedCount++
-		e.LastUsedAt = now
-		e.UpdatedAt = now
-
 		if passedFirstTry {
+			// Idempotency & Sybil guard (#693): re-verifying the same task/session must
+			// not inflate FirstPassSuccessCount or prematurely promote to READY_FOR_DOCTRINE.
+			if sessionID != "" {
+				if containsString(e.CorroboratingSessions, sessionID) {
+					report.Updated = append(report.Updated, e)
+					continue
+				}
+				if sessionID == e.SessionID && e.FirstPassSuccessCount > len(e.CorroboratingSessions) {
+					report.Updated = append(report.Updated, e)
+					continue
+				}
+			}
+			e.AppliedCount++
+			e.LastUsedAt = now
+			e.UpdatedAt = now
 			e.FirstPassSuccessCount++
 			if sessionID != "" && sessionID != e.SessionID && !containsString(e.CorroboratingSessions, sessionID) {
 				e.CorroboratingSessions = append(e.CorroboratingSessions, sessionID)
@@ -88,6 +99,9 @@ func (a *LocalSQLiteMemoryAdapter) RecordOutcome(ctx context.Context, entryIDs [
 				e.ReviewFlag = ""
 			}
 		} else {
+			e.AppliedCount++
+			e.LastUsedAt = now
+			e.UpdatedAt = now
 			e.FailureAfterRecallCount++
 			e.Salience -= 2
 			if e.Salience < 0 {

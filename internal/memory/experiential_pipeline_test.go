@@ -179,3 +179,77 @@ func TestExponentialMasteryOutcomeFeedbackAndCompounding(t *testing.T) {
 		t.Fatalf("expected entryGood lifecycle to be doctrine after compounding, got %s", afterCompound.Lifecycle)
 	}
 }
+
+func TestRecordOutcome_SybilDuplicateSessionGuardAndCounterExampleDemotion(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	adapter, err := NewLocalSQLiteMemoryAdapter(AdapterOptions{
+		DBPath: filepath.Join(tmpDir, "memory.db"),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalSQLiteMemoryAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	entry := &MemoryEntry{
+		ID:        "mem-sybil-guard-01",
+		Kind:      KindProcedure,
+		Scope:     ScopeGlobal,
+		SessionID: "sess-origin",
+		Payload:   "Use lockfile.TryLock(path) instead of raw syscall.Flock",
+		Preconditions: map[string]string{
+			"file": "internal/lockfile/lockfile.go",
+		},
+	}
+	if err := adapter.ProposeEntry(ctx, entry); err != nil {
+		t.Fatalf("ProposeEntry: %v", err)
+	}
+
+	// 1. Worst Case (Sybil replay): Calling RecordOutcome 5 times with the SAME task/session ID
+	// must only record 1 application and 1 first-pass success, never promoting to READY_FOR_DOCTRINE.
+	for i := 0; i < 5; i++ {
+		if _, err := adapter.RecordOutcome(ctx, []string{entry.ID}, "task-same-99", true); err != nil {
+			t.Fatalf("RecordOutcome iter %d: %v", i, err)
+		}
+	}
+	check1, err := adapter.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if check1.AppliedCount != 1 || check1.FirstPassSuccessCount != 1 {
+		t.Fatalf("Sybil guard failed: expected AppliedCount=1 and FirstPassSuccessCount=1 after 5 duplicate calls from task-same-99, got %d / %d",
+			check1.AppliedCount, check1.FirstPassSuccessCount)
+	}
+	if check1.ReviewFlag == ReviewFlagReadyForDoctrine {
+		t.Fatalf("Sybil guard failed: single task re-verified 5 times must NEVER set READY_FOR_DOCTRINE")
+	}
+
+	// 2. Origin session replay must also be idempotent after 1 application
+	for i := 0; i < 4; i++ {
+		if _, err := adapter.RecordOutcome(ctx, []string{entry.ID}, "sess-origin", true); err != nil {
+			t.Fatalf("RecordOutcome origin iter %d: %v", i, err)
+		}
+	}
+	check2, err := adapter.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry check2: %v", err)
+	}
+	if check2.FirstPassSuccessCount != 2 || check2.ReviewFlag == ReviewFlagReadyForDoctrine {
+		t.Fatalf("expected FirstPassSuccessCount=2 and no READY_FOR_DOCTRINE after origin + 1 task, got count=%d flag=%q",
+			check2.FirstPassSuccessCount, check2.ReviewFlag)
+	}
+
+	// 3. Even if a task passed earlier, a subsequent counter-example failure (!passedFirstTry)
+	// must immediately demote ReviewFlag to NEEDS_DIALECTICAL_REVIEW.
+	if _, err := adapter.RecordOutcome(ctx, []string{entry.ID}, "task-same-99", false); err != nil {
+		t.Fatalf("RecordOutcome counter-example: %v", err)
+	}
+	check3, err := adapter.GetEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry check3: %v", err)
+	}
+	if check3.FailureAfterRecallCount != 1 || check3.ReviewFlag != ReviewFlagNeedsDialecticalReview {
+		t.Fatalf("expected counter-example failure to set FailureAfterRecallCount=1 and ReviewFlag=%q, got %+v",
+			ReviewFlagNeedsDialecticalReview, check3)
+	}
+}

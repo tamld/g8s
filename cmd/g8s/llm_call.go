@@ -300,6 +300,8 @@ func runLLMCall(args []string) {
 
 		parts := strings.Split(*contextFilesFlag, ",")
 		var contextBlocks strings.Builder
+		var jitWhispers []string
+		seenWhisper := make(map[string]bool)
 		for _, rawPath := range parts {
 			p := strings.TrimSpace(rawPath)
 			if p == "" {
@@ -320,10 +322,19 @@ func runLLMCall(args []string) {
 				exitRuntime("llm-call", "", *traceID, cli.CodeDenied, fmt.Errorf("read context file %q: %w", p, rErr), "Ensure context file is within scope and allowed paths", *jsonl)
 			}
 			_, _ = fmt.Fprintf(&contextBlocks, "--- FILE: %s (sha256: %s) ---\n%s\n", p, res.SHA256, res.Content)
+			for _, w := range res.JITWhisper {
+				if !seenWhisper[w] {
+					seenWhisper[w] = true
+					jitWhispers = append(jitWhispers, w)
+				}
+			}
 			contextFileList = append(contextFileList, p)
 		}
 		if contextBlocks.Len() > 0 {
 			prompt = contextBlocks.String() + prompt
+		}
+		if compacted := fsops.CompactJITWhispers(scope, contextFileList, jitWhispers); len(compacted) > 0 {
+			prompt = prompt + "\n\n--- JIT HARNESS BATON & CANONICAL TOOLBOX (END-OF-ROUND RECENCY ANCHOR) ---\n" + strings.Join(compacted, "\n") + "\n"
 		}
 	}
 

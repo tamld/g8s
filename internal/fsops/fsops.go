@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +22,7 @@ import (
 	"github.com/tamld/g8s/internal/charter"
 	"github.com/tamld/g8s/internal/contextpack"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/featuremap"
 	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -508,7 +512,7 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 		Truncated:  truncated,
 		Lines:      lines,
 		Content:    contentBuilder.String(),
-		JITWhisper: lookupJITWhisper(ctx, relSlash),
+		JITWhisper: lookupJITWhisperWithScope(ctx, canonScope, relSlash, "read"),
 	}, nil
 }
 
@@ -647,7 +651,7 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		Replacements: replacedCount,
 		OldSHA256:    oldHex,
 		NewSHA256:    newHex,
-		JITWhisper:   lookupJITWhisper(ctx, relSlash),
+		JITWhisper:   lookupJITWhisperWithScope(ctx, canonScope, relSlash, "edit"),
 	}, nil
 }
 
@@ -883,7 +887,7 @@ func ApplyBatchEdits(ctx context.Context, edits []EditOptions) ([]*EditResult, e
 			Replacements: replacedCount,
 			OldSHA256:    oldHex,
 			NewSHA256:    newHex,
-			JITWhisper:   lookupJITWhisper(ctx, relSlash),
+			JITWhisper:   lookupJITWhisperWithScope(ctx, sf.canonScope, relSlash, "edit"),
 		})
 	}
 
@@ -943,40 +947,404 @@ func ApplyBatchEdits(ctx context.Context, edits []EditOptions) ([]*EditResult, e
 	return results, nil
 }
 
-// lookupJITWhisper performs a non-blocking, fail-open spatial query against the
-// Knowledge Vault when G8S_VAULT_DB (or G8S_STATE_DIR/vault.db) exists on disk.
-// It never creates a new database file and never fails Read or Edit (#594).
-func lookupJITWhisper(ctx context.Context, relPath string) []string {
+var pkgSymbolCache sync.Map
+
+// MaxCompactedJITLines caps the end-of-round Recency Zone whisper budget when
+// hydrating multiple files in a single prompt (#693).
+const MaxCompactedJITLines = 6
+
+// lookupJITWhisperWithScope combines spatial Vault rules (#594) with FeatureMap
+// Canonical Toolbox surfacing, Hotspot policy alerts, and the wiki.py-style
+// End-of-Round JIT Baton (#693).
+func lookupJITWhisperWithScope(ctx context.Context, scopeRoot, relPath, op string) []string {
 	if os.Getenv("G8S_JIT_WHISPER") == "0" {
 		return nil
 	}
+	var out []string
 	maxRules := vault.ResolveMaxActiveRules()
-	if maxRules <= 0 {
-		return nil
-	}
-	vdbPath := strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
-	if vdbPath == "" {
-		if stateDir := strings.TrimSpace(os.Getenv("G8S_STATE_DIR")); stateDir != "" {
-			vdbPath = filepath.Join(stateDir, "vault.db")
+	if maxRules > 0 {
+		vdbPath := strings.TrimSpace(os.Getenv("G8S_VAULT_DB"))
+		if vdbPath == "" {
+			if stateDir := strings.TrimSpace(os.Getenv("G8S_STATE_DIR")); stateDir != "" {
+				vdbPath = filepath.Join(stateDir, "vault.db")
+			}
+		}
+		if vdbPath != "" {
+			if fi, err := os.Stat(vdbPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				if v, err := vault.NewVault(vdbPath, nil); err == nil {
+					defer v.Close()
+					if records, err := v.MatchSpatial(ctx, relPath, maxRules); err == nil && len(records) > 0 {
+						out = append(out, vault.FormatJITWhisper(records)...)
+					}
+				}
+			}
 		}
 	}
-	if vdbPath == "" {
-		return nil
-	}
-	if _, err := os.Stat(vdbPath); err != nil {
-		return nil
-	}
-	v, err := vault.NewVault(vdbPath, nil)
-	if err != nil {
-		return nil
-	}
-	defer v.Close()
 
-	records, err := v.MatchSpatial(ctx, relPath, maxRules)
-	if err != nil || len(records) == 0 {
+	if scopeRoot != "" && !strings.Contains(scopeRoot, "..") {
+		fmPath := filepath.Join(scopeRoot, ".g8s", "feature-map.yml")
+		if strings.HasPrefix(fmPath, scopeRoot) && !strings.Contains(fmPath, "..") {
+			if fi, err := os.Stat(fmPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				if fm, err := featuremap.Load(fmPath); err == nil && len(fm.Features) > 0 {
+					node, hotspot := resolveFeatureAndHotspotForPath(fm, relPath)
+					if hotspot != nil {
+						rationale := strings.TrimSpace(hotspot.Rationale)
+						if rationale == "" {
+							rationale = "shared repository hotspot"
+						}
+						out = append(out, fmt.Sprintf(
+							"[jit:hotspot:%s] policy=%s | path=%s | rationale=%s",
+							hotspot.ID, hotspot.Policy, relPath, rationale,
+						))
+					}
+					if node != nil {
+						out = append(out, buildCanonicalToolboxLine(scopeRoot, relPath, node))
+						if op == "edit" {
+							out = append(out, fmt.Sprintf(
+								"[jit:baton:MUTATED] Next step: ./bin/g8s verify --feature %s --json && ./bin/g8s feature audit",
+								node.ID,
+							))
+						} else {
+							out = append(out, fmt.Sprintf(
+								"[jit:baton:EXPLORING] Next step: Reuse canonical helpers above; apply via './bin/g8s edit %s --old ... --new ...' (micro-fix) OR './bin/g8s submit --role coder ...' (multi-file)",
+								relPath,
+							))
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func resolveFeatureAndHotspotForPath(fm *featuremap.FeatureMap, relPath string) (*featuremap.FeatureNode, *featuremap.Hotspot) {
+	if fm == nil || len(fm.Features) == 0 {
+		return nil, nil
+	}
+	cleanRel := filepath.ToSlash(filepath.Clean(relPath))
+	sa := fm.AnalyzeScope("", []string{cleanRel})
+	var matchedHotspot *featuremap.Hotspot
+	if len(sa.Hotspots) > 0 {
+		targetID := sa.Hotspots[0].ID
+		for i := range fm.Hotspots {
+			if fm.Hotspots[i].ID == targetID {
+				matchedHotspot = &fm.Hotspots[i]
+				break
+			}
+		}
+	}
+	if len(sa.Features) > 0 {
+		if f, ok := fm.GetFeature(sa.Features[0]); ok {
+			return f, matchedHotspot
+		}
+	}
+	if matchedHotspot != nil && matchedHotspot.Owner() != "" {
+		if f, ok := fm.GetFeature(matchedHotspot.Owner()); ok {
+			return f, matchedHotspot
+		}
+	}
+	// Check directory prefix match against declared GoPackages (e.g. brand-new file inside internal/vault/)
+	for i := range fm.Features {
+		f := &fm.Features[i]
+		if f.Interfaces != nil {
+			for _, pkg := range f.Interfaces.GoPackages {
+				cleanPkg := strings.Trim(filepath.ToSlash(filepath.Clean(pkg)), "/")
+				if cleanPkg != "" && (cleanRel == cleanPkg || strings.HasPrefix(cleanRel, cleanPkg+"/")) {
+					return f, matchedHotspot
+				}
+			}
+		}
+	}
+	// Fallback to CodePaths only when OwnedPaths is empty (v1 compatibility without bypassing v2 '!' negations)
+	for i := range fm.Features {
+		f := &fm.Features[i]
+		if len(f.OwnedPaths) == 0 {
+			if _, ok := featuremap.NewPathSet(f.CodePaths).OverlapsPattern(cleanRel); ok {
+				return f, matchedHotspot
+			}
+		}
+	}
+	for i := range fm.Features {
+		f := &fm.Features[i]
+		if _, ok := featuremap.NewPathSet(f.SharedPaths).OverlapsPattern(cleanRel); ok {
+			return f, matchedHotspot
+		}
+	}
+	return &fm.Features[0], matchedHotspot
+}
+
+var canonicalPackageSignatures = map[string][]string{
+	"internal/vault": {
+		"vault.TokenizeCodeSymbols(text)",
+		"vault.NewVault(dbPath,nil)",
+	},
+	"internal/memory": {
+		"memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{DBPath,Vault})->(*LocalSQLiteMemoryAdapter,err)",
+		"adapter.RecallHybridRRF(ctx,query,vec,activeCtx,limit,nowUnix)->([]RRFScoredEntry{Entry},err)",
+		"adapter.RecordOutcome(ctx,entryIDs,sessionID,passed)->(*OutcomeReport,err)",
+	},
+	"internal/sqliteutil": {
+		"sqliteutil.ApplyPragmas(db,role)",
+	},
+	"internal/receipt": {
+		"receipt.NewReceiptManager(dbPath,clock)",
+		"mgr.ValidateAndConsume(receiptID,taskID)",
+	},
+	"internal/featuremap": {
+		"featuremap.Load(path)",
+		"fm.AnalyzeScope(label,paths)",
+		"featuremap.Audit(fm,repoRoot,opts)",
+	},
+}
+
+func isNonGoPath(relPath string) bool {
+	base := filepath.Base(relPath)
+	if base == "Makefile" || base == "Dockerfile" {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(relPath))
+	if ext == "" || ext == ".go" {
+		return false
+	}
+	return true
+}
+
+func buildCanonicalToolboxLine(scopeRoot, relPath string, node *featuremap.FeatureNode) string {
+	var pkgs, clis []string
+	if node.Interfaces != nil {
+		pkgs = node.Interfaces.GoPackages
+		clis = node.Interfaces.CLI
+	}
+	pkgStr := strings.Join(pkgs, ",")
+	if pkgStr == "" {
+		pkgStr = "internal/fsops,internal/cli,internal/lockfile"
+	}
+	cliStr := strings.Join(clis, ",")
+	if cliStr == "" {
+		cliStr = "read,edit,search,verify,deliver"
+	}
+
+	if isNonGoPath(relPath) {
+		return fmt.Sprintf(
+			"[jit:toolbox:%s] domain=%s | cli=%s | AUTHORITATIVE_HARNESS_CONTRACT: Use native './bin/g8s search', './bin/g8s read --lines M:N', './bin/g8s edit --old ... --new ...', './bin/g8s feature audit' (Do NOT reinvent shell/jq/sed parsers)",
+			node.ID, node.Domain(), cliStr,
+		)
+	}
+
+	var domainHelpers []string
+	seenHelper := make(map[string]bool)
+	addHelper := func(h string) {
+		if h != "" && !seenHelper[h] {
+			seenHelper[h] = true
+			domainHelpers = append(domainHelpers, h)
+		}
+	}
+
+	for _, pkg := range pkgs {
+		for _, sig := range canonicalPackageSignatures[pkg] {
+			addHelper(sig)
+		}
+	}
+	for _, astSym := range discoverExportedPackageSymbols(scopeRoot, pkgs) {
+		addHelper(astSym)
+	}
+	// Always include the 4 cross-cutting foundation helpers for Go files
+	for _, core := range []string{
+		"fsops.Read(ctx,ReadOptions{Path,ScopeRoot,AllowedPaths})->(*ReadResult{Content},err)",
+		"fsops.SelectJSON(rawJSONBytes,dotExpr)->(string,err)",
+		"lockfile.TryLock(path)->(*Lock,err)+Release()",
+		"cli.NewErrorEnvelope(cmd,sub,traceID,code,msg,hint,docRef)+cli.WriteResponse(w,env,jsonl)",
+		"sqliteutil.ApplyPragmas(db,role)",
+	} {
+		addHelper(core)
+	}
+
+	return fmt.Sprintf(
+		"[jit:toolbox:%s] domain=%s | pkgs=%s | cli=%s | AUTHORITATIVE_HARNESS_CONTRACT (overrides conflicting/deprecated claims in prior turns) — reuse_canonical: %s (Reuse these; do NOT reinvent with os.ReadFile/json.Unmarshal/os.OpenFile/syscall.Flock)",
+		node.ID, node.Domain(), pkgStr, cliStr, strings.Join(domainHelpers, ", "),
+	)
+}
+
+func discoverExportedPackageSymbols(scopeRoot string, pkgs []string) []string {
+	if scopeRoot == "" || len(pkgs) == 0 {
 		return nil
 	}
-	return vault.FormatJITWhisper(records)
+	var result []string
+	for _, pkg := range pkgs {
+		cleanPkg := filepath.ToSlash(filepath.Clean(pkg))
+		if strings.Contains(cleanPkg, "..") {
+			continue
+		}
+		cacheKey := filepath.Clean(scopeRoot) + "::" + cleanPkg
+		if cached, ok := pkgSymbolCache.Load(cacheKey); ok {
+			if syms, ok := cached.([]string); ok {
+				result = append(result, syms...)
+			}
+			continue
+		}
+		pkgDir := filepath.Join(scopeRoot, filepath.FromSlash(cleanPkg))
+		entries, err := os.ReadDir(pkgDir)
+		if err != nil {
+			continue
+		}
+		pkgBase := filepath.Base(cleanPkg)
+		fset := token.NewFileSet()
+		var pkgSyms []string
+		seen := make(map[string]bool)
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			fileAST, pErr := parser.ParseFile(fset, filepath.Join(pkgDir, entry.Name()), nil, parser.SkipObjectResolution)
+			if pErr != nil {
+				continue
+			}
+			for _, decl := range fileAST.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Name == nil || !ast.IsExported(fn.Name.Name) {
+					continue
+				}
+				sym := pkgBase + "." + fn.Name.Name
+				if !seen[sym] {
+					seen[sym] = true
+					pkgSyms = append(pkgSyms, sym)
+				}
+			}
+		}
+		sort.Strings(pkgSyms)
+		if len(pkgSyms) > 4 {
+			pkgSyms = pkgSyms[:4]
+		}
+		pkgSymbolCache.Store(cacheKey, pkgSyms)
+		result = append(result, pkgSyms...)
+	}
+	return result
+}
+
+// CompactJITWhispers deduplicates and bounds end-of-round JIT whispers across
+// multi-file hydrations (to <= MaxCompactedJITLines), injects a [jit:collision:SERIALIZE]
+// alert when files span >1 collision domain or touch a serialize hotspot, and keeps
+// a single consolidated [jit:baton:...] at the very final line (#693).
+func CompactJITWhispers(scopeRoot string, relPaths []string, rawWhispers []string) []string {
+	if os.Getenv("G8S_JIT_WHISPER") == "0" {
+		return nil
+	}
+	var vaultLines, hotspotLines, toolboxLines, batonLines []string
+	seen := make(map[string]bool)
+	seenToolboxFeat := make(map[string]bool)
+	for _, raw := range rawWhispers {
+		line := strings.TrimSpace(raw)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		switch {
+		case strings.HasPrefix(line, "[jit:baton:"):
+			batonLines = append(batonLines, line)
+		case strings.HasPrefix(line, "[jit:toolbox:"):
+			endIdx := strings.Index(line, "]")
+			featKey := line
+			if endIdx > 0 {
+				featKey = line[:endIdx+1]
+			}
+			if !seenToolboxFeat[featKey] {
+				seenToolboxFeat[featKey] = true
+				toolboxLines = append(toolboxLines, line)
+			}
+		case strings.HasPrefix(line, "[jit:hotspot:"):
+			hotspotLines = append(hotspotLines, line)
+		default:
+			vaultLines = append(vaultLines, line)
+		}
+	}
+
+	var collisionLine string
+	if scopeRoot != "" && len(relPaths) > 1 && !strings.Contains(scopeRoot, "..") {
+		fmPath := filepath.Join(scopeRoot, ".g8s", "feature-map.yml")
+		if fi, err := os.Stat(fmPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			if fm, err := featuremap.Load(fmPath); err == nil && len(fm.Features) > 0 {
+				sa := fm.AnalyzeScope("context", relPaths)
+				hasSerializeHotspot := false
+				var hsIDs []string
+				for _, h := range sa.Hotspots {
+					hsIDs = append(hsIDs, h.ID+"("+h.Policy+")")
+					if h.Policy == featuremap.PolicySerialize {
+						hasSerializeHotspot = true
+					}
+				}
+				if len(sa.CollisionDomains) > 1 || hasSerializeHotspot {
+					collisionLine = fmt.Sprintf(
+						"[jit:collision:SERIALIZE] domains=%s | hotspots=%s | Multi-domain or serialize-hotspot scope detected; run './bin/g8s feature collisions' and serialize worker dispatches",
+						strings.Join(sa.CollisionDomains, ","),
+						strings.Join(hsIDs, ","),
+					)
+				}
+			}
+		}
+	}
+
+	finalBaton := ""
+	if len(batonLines) > 0 {
+		finalBaton = batonLines[len(batonLines)-1]
+		if len(relPaths) > 1 && strings.HasPrefix(finalBaton, "[jit:baton:EXPLORING]") {
+			finalBaton = fmt.Sprintf(
+				"[jit:baton:EXPLORING] Next step: Reuse canonical helpers above across %d files; dispatch via './bin/g8s submit --role coder ...' (or serialize per collision domain)",
+				len(relPaths),
+			)
+		}
+	}
+
+	budget := MaxCompactedJITLines
+	if finalBaton != "" {
+		budget--
+	}
+	if collisionLine != "" {
+		budget--
+	}
+
+	var out []string
+	// Prioritize toolbox lines first (up to 2), then vault rules, then hotspot lines
+	for _, l := range toolboxLines {
+		if len(out) >= budget || len(out) >= 2 {
+			break
+		}
+		out = append(out, l)
+	}
+	for _, l := range vaultLines {
+		if len(out) >= budget {
+			break
+		}
+		out = append(out, l)
+	}
+	for _, l := range hotspotLines {
+		if len(out) >= budget {
+			break
+		}
+		out = append(out, l)
+	}
+	for _, l := range toolboxLines {
+		if len(out) >= budget {
+			break
+		}
+		already := false
+		for _, existing := range out {
+			if existing == l {
+				already = true
+				break
+			}
+		}
+		if !already {
+			out = append(out, l)
+		}
+	}
+	if collisionLine != "" {
+		out = append(out, collisionLine)
+	}
+	if finalBaton != "" {
+		out = append(out, finalBaton)
+	}
+	return out
 }
 
 // SelectJSON evaluates a JSON dot-path selector against raw JSON bytes

@@ -136,3 +136,77 @@ func TestCLISearchAndReadScopeEscapeBlocked_Issue598(t *testing.T) {
 		t.Fatalf("expected non-zero exit code for search outside G8S_SCOPE_ROOT, got 0")
 	}
 }
+
+func TestCLIReadPrintsJITToolboxAndBatonAtEndOfRound(t *testing.T) {
+	t.Setenv("G8S_TIER", "")
+	t.Setenv("G8S_SCOPE_ROOT", "")
+	t.Setenv("G8S_RECEIPT_ID", "")
+	t.Setenv("G8S_PERMISSION", "")
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+
+	g8sDir := filepath.Join(tempDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fmYAML := `schema_version: "2.0"
+features:
+  - id: "FEAT-PLATFORM-CLI-01"
+    title: "CLI & Agent File I/O Surface"
+    persona_story: "As an agent, I need deterministic file I/O and CLI envelopes."
+    srs_reqs: ["FR-1"]
+    openspec_deltas: ["DELTA-23"]
+    code_paths: ["cmd/g8s/**", "internal/fsops/**"]
+    collision_domain: "cli-surface"
+    owned_paths: ["cmd/g8s/**", "internal/fsops/**"]
+    interfaces:
+      cli: ["read", "edit", "search", "select"]
+      go_packages: ["internal/fsops", "internal/cli", "internal/lockfile"]
+    invariants:
+      - "Reuse canonical fsops/lockfile/cli helpers instead of reinventing boilerplate"
+    visible_tests: ["internal/fsops/fsops_test.go"]
+    verifier_class: "test"
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(fmYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdDir := filepath.Join(tempDir, "cmd", "g8s")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(cmdDir, "app.go")
+	if err := os.WriteFile(target, []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readCmd := exec.Command(binPath, "read", "--scope-root", tempDir, target)
+	readCmd.Env = os.Environ()
+	out, err := readCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("g8s read failed: %v\nOutput: %s", err, string(out))
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "[jit:toolbox:FEAT-PLATFORM-CLI-01]") || !strings.Contains(outStr, "[jit:baton:EXPLORING]") {
+		t.Fatalf("expected text-mode g8s read to print JIT toolbox and baton at end of round, got:\n%s", outStr)
+	}
+
+	// Round 2: Follow baton to g8s edit -> verify [jit:baton:MUTATED]
+	editCmd := exec.Command(binPath, "edit",
+		"--scope-root", tempDir,
+		"--old", "func main() {}",
+		"--new", "func main() { _ = 42 }",
+		target,
+	)
+	editCmd.Env = os.Environ()
+	editOut, err := editCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("g8s edit failed: %v\nOutput: %s", err, string(editOut))
+	}
+	editStr := string(editOut)
+	if !strings.Contains(editStr, "[jit:baton:MUTATED]") || !strings.Contains(editStr, "verify --feature FEAT-PLATFORM-CLI-01") {
+		t.Fatalf("expected g8s edit to emit [jit:baton:MUTATED] next step, got:\n%s", editStr)
+	}
+}

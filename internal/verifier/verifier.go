@@ -207,6 +207,7 @@ type Verdict struct {
 	BlindReviewPacket  *BlindReviewPacket   `json:"blind_review_packet,omitempty"`
 	CanaryResult       *CanaryResult        `json:"canary_result,omitempty"`
 	VetoReason         string               `json:"veto_reason,omitempty"`
+	JITBaton           string               `json:"jit_baton,omitempty"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.

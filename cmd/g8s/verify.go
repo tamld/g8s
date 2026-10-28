@@ -349,7 +349,18 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		return 1
 	}
 	passedVerify := verdict.Outcome == verifier.OutcomePass && verdict.VetoReason == "" && (verdict.HoldoutChecksOK == nil || *verdict.HoldoutChecksOK)
-	recordVerifyTaskTelemetry(verifiedTask, passedVerify)
+	recordVerifyTaskTelemetry(verifiedTask, passedVerify, dbPathOverride, target.AllowedPaths)
+	if os.Getenv("G8S_JIT_WHISPER") != "0" {
+		if passedVerify {
+			if isStandaloneFeature {
+				verdict.JITBaton = "[jit:baton:VERIFIED] Next step: ./bin/g8s feature audit"
+			} else {
+				verdict.JITBaton = fmt.Sprintf("[jit:baton:VERIFIED] Next step: ./bin/g8s deliver %s --prune-worktree", taskID)
+			}
+		} else {
+			verdict.JITBaton = fmt.Sprintf("[jit:baton:IMPASSE] Verification failed; experiential autopsy recorded. Next step: ./bin/g8s resubmit %s --prompt \"...\"", taskID)
+		}
+	}
 
 	env := cli.NewEnvelope("verdict", "verify", taskID, verdict)
 	env.TraceID = *traceID

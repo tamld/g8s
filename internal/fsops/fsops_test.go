@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tamld/g8s/internal/vault"
@@ -640,6 +642,83 @@ func TestJITWhisperOnReadAndEdit(t *testing.T) {
 	}
 }
 
+func TestJITBatonAndCanonicalToolboxOnReadAndEdit(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	// Create a minimal .g8s/feature-map.yml in tempDir
+	g8sDir := filepath.Join(tempDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fmYAML := `schema_version: "2.0"
+features:
+  - id: "FEAT-PLATFORM-CLI-01"
+    title: "CLI & Agent File I/O Surface"
+    persona_story: "As an agent, I need deterministic file I/O and CLI envelopes."
+    srs_reqs: ["FR-1"]
+    openspec_deltas: ["DELTA-23"]
+    code_paths: ["cmd/g8s/**", "internal/fsops/**"]
+    collision_domain: "cli-surface"
+    owned_paths: ["cmd/g8s/**", "internal/fsops/**"]
+    interfaces:
+      cli: ["read", "edit", "search", "select"]
+      go_packages: ["internal/fsops", "internal/cli", "internal/lockfile"]
+    invariants:
+      - "Reuse canonical fsops/lockfile/cli helpers instead of reinventing boilerplate"
+    visible_tests: ["internal/fsops/fsops_test.go"]
+    verifier_class: "test"
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(fmYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdDir := filepath.Join(tempDir, "cmd", "g8s")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetFile := filepath.Join(cmdDir, "sample.go")
+	if err := os.WriteFile(targetFile, []byte("package main\nfunc sample() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readRes, err := Read(ctx, ReadOptions{
+		Path:      targetFile,
+		ScopeRoot: tempDir,
+	})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	joinedRead := strings.Join(readRes.JITWhisper, "\n")
+	if !strings.Contains(joinedRead, "[jit:toolbox:FEAT-PLATFORM-CLI-01]") {
+		t.Fatalf("expected [jit:toolbox:FEAT-PLATFORM-CLI-01] in Read JITWhisper, got: %v", readRes.JITWhisper)
+	}
+	if !strings.Contains(joinedRead, "fsops.SelectJSON") || !strings.Contains(joinedRead, "lockfile.TryLock") || !strings.Contains(joinedRead, "cli.NewErrorEnvelope") {
+		t.Fatalf("expected canonical reusable helpers (fsops.SelectJSON, lockfile.TryLock, cli.NewErrorEnvelope) in Read JITWhisper, got: %v", readRes.JITWhisper)
+	}
+	if !strings.Contains(joinedRead, "[jit:baton:EXPLORING]") || !strings.Contains(joinedRead, "Next step:") {
+		t.Fatalf("expected [jit:baton:EXPLORING] Next step in Read JITWhisper, got: %v", readRes.JITWhisper)
+	}
+
+	editRes, err := Edit(ctx, EditOptions{
+		Path:      targetFile,
+		ScopeRoot: tempDir,
+		OldString: "func sample() {}",
+		NewString: "func sample() { _ = 1 }",
+	})
+	if err != nil {
+		t.Fatalf("Edit failed: %v", err)
+	}
+	joinedEdit := strings.Join(editRes.JITWhisper, "\n")
+	if !strings.Contains(joinedEdit, "[jit:toolbox:FEAT-PLATFORM-CLI-01]") {
+		t.Fatalf("expected [jit:toolbox:FEAT-PLATFORM-CLI-01] in Edit JITWhisper, got: %v", editRes.JITWhisper)
+	}
+	if !strings.Contains(joinedEdit, "[jit:baton:MUTATED]") || !strings.Contains(joinedEdit, "verify --feature FEAT-PLATFORM-CLI-01") {
+		t.Fatalf("expected [jit:baton:MUTATED] verify next step in Edit JITWhisper, got: %v", editRes.JITWhisper)
+	}
+}
+
 func TestDelegatedScopeContainment_Issue598(t *testing.T) {
 	t.Run("ResolveDelegationContext_CannotWidenScopeRoot", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -952,4 +1031,407 @@ func TestFSOPSEnforcesS1MutationFirewall(t *testing.T) {
 	if _, err := VerifyWriteScope(target, tempDir, []string{"**"}); err != nil {
 		t.Fatalf("expected VerifyWriteScope to allow stratum S2, got %v", err)
 	}
+}
+
+func TestJITMatrix_PathNegationMidGlobAndHotspots(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	g8sDir := filepath.Join(tempDir, ".g8s")
+	if err := os.MkdirAll(g8sDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	featureMapYAML := `schema_version: "2.0"
+hotspots:
+  - id: "HOT-CLI-MAIN"
+    policy: "serialize"
+    rationale: "Single top-level command switch."
+    paths:
+      - "cmd/g8s/main.go"
+  - id: "HOT-AGENTS-FULL"
+    policy: "append-only"
+    rationale: "OpenSpec registry table."
+    paths:
+      - "docs/AGENTS_FULL.md"
+features:
+  - id: "FEAT-PLATFORM-CLI-01"
+    title: "Platform CLI"
+    persona_story: "CLI"
+    srs_reqs: ["FR-1"]
+    code_paths: ["cmd/g8s/**"]
+    owned_paths:
+      - "cmd/g8s/**"
+      - "!cmd/g8s/f0_scorecard*.go"
+      - "!cmd/g8s/receipt_export*.go"
+      - "!cmd/g8s/main.go"
+    collision_domain: "cli-surface"
+    interfaces:
+      cli: ["version"]
+      go_packages: ["internal/cli"]
+    invariants: ["deterministic CLI"]
+    visible_tests: ["cmd/g8s/main_test.go"]
+    verifier_class: "test"
+  - id: "FEAT-F0-GATE-01"
+    title: "F0 Gate & Scorecard"
+    persona_story: "Scorecard"
+    srs_reqs: ["FR-2"]
+    code_paths: ["cmd/g8s/f0_scorecard.go"]
+    owned_paths: ["cmd/g8s/f0_scorecard*.go"]
+    collision_domain: "f0-governance"
+    interfaces:
+      cli: ["f0", "scorecard"]
+      go_packages: ["internal/routing"]
+    invariants: ["5-axis scorecard"]
+    visible_tests: ["cmd/g8s/f0_scorecard_test.go"]
+    verifier_class: "test"
+  - id: "FEAT-RECEIPT-01"
+    title: "Write Receipts"
+    persona_story: "Receipts"
+    srs_reqs: ["FR-3"]
+    code_paths: ["internal/receipt/**"]
+    owned_paths: ["internal/receipt/**", "cmd/g8s/receipt_export*.go"]
+    collision_domain: "receipt-trust"
+    interfaces:
+      cli: ["receipt", "receipt-export"]
+      go_packages: ["internal/receipt"]
+    invariants: ["single-use"]
+    visible_tests: ["internal/receipt/receipt_test.go"]
+    verifier_class: "test"
+`
+	if err := os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(featureMapYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := map[string]string{
+		"cmd/g8s/f0_scorecard.go":        "package main\n",
+		"cmd/g8s/receipt_export_test.go": "package main\n",
+		"cmd/g8s/main.go":                "package main\n",
+		"docs/AGENTS_FULL.md":            "# Docs\n",
+	}
+	for rel, content := range files {
+		full := filepath.Join(tempDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. Negation check: cmd/g8s/f0_scorecard.go is excluded from FEAT-PLATFORM-CLI-01 and owned by FEAT-F0-GATE-01
+	resScorecard, err := Read(ctx, ReadOptions{Path: filepath.Join(tempDir, "cmd/g8s/f0_scorecard.go"), ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read f0_scorecard.go: %v", err)
+	}
+	joinedScorecard := strings.Join(resScorecard.JITWhisper, "\n")
+	if !strings.Contains(joinedScorecard, "[jit:toolbox:FEAT-F0-GATE-01]") || strings.Contains(joinedScorecard, "FEAT-PLATFORM-CLI-01") {
+		t.Fatalf("expected negation to route f0_scorecard.go to FEAT-F0-GATE-01 (not FEAT-PLATFORM-CLI-01), got:\n%s", joinedScorecard)
+	}
+
+	// 2. Mid-path glob check: cmd/g8s/receipt_export_test.go -> FEAT-RECEIPT-01
+	resReceipt, err := Read(ctx, ReadOptions{Path: filepath.Join(tempDir, "cmd/g8s/receipt_export_test.go"), ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read receipt_export_test.go: %v", err)
+	}
+	joinedReceipt := strings.Join(resReceipt.JITWhisper, "\n")
+	if !strings.Contains(joinedReceipt, "[jit:toolbox:FEAT-RECEIPT-01]") || !strings.Contains(joinedReceipt, "receipt.NewReceiptManager") {
+		t.Fatalf("expected FEAT-RECEIPT-01 toolbox with receipt.NewReceiptManager, got:\n%s", joinedReceipt)
+	}
+
+	// 3. Hotspot check: cmd/g8s/main.go -> [jit:hotspot:HOT-CLI-MAIN] policy=serialize
+	resMain, err := Read(ctx, ReadOptions{Path: filepath.Join(tempDir, "cmd/g8s/main.go"), ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read main.go: %v", err)
+	}
+	joinedMain := strings.Join(resMain.JITWhisper, "\n")
+	if !strings.Contains(joinedMain, "[jit:hotspot:HOT-CLI-MAIN] policy=serialize") {
+		t.Fatalf("expected [jit:hotspot:HOT-CLI-MAIN] policy=serialize, got:\n%s", joinedMain)
+	}
+
+	// 4. Append-only doc hotspot + non-Go file check: docs/AGENTS_FULL.md
+	resDoc, err := Read(ctx, ReadOptions{Path: filepath.Join(tempDir, "docs/AGENTS_FULL.md"), ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read AGENTS_FULL.md: %v", err)
+	}
+	joinedDoc := strings.Join(resDoc.JITWhisper, "\n")
+	if !strings.Contains(joinedDoc, "[jit:hotspot:HOT-AGENTS-FULL] policy=append-only") {
+		t.Fatalf("expected [jit:hotspot:HOT-AGENTS-FULL] policy=append-only, got:\n%s", joinedDoc)
+	}
+	if strings.Contains(joinedDoc, "fsops.Read(ctx") {
+		t.Fatalf("non-Go markdown file must not emit Go function signatures, got:\n%s", joinedDoc)
+	}
+}
+
+func TestJITMatrix_DynamicASTSymbolsAndNonGoFiles(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".g8s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	featureMapYAML := `schema_version: "2.0"
+features:
+  - id: "FEAT-VAULT-MEMORY-01"
+    title: "Vault & Memory"
+    persona_story: "Memory"
+    srs_reqs: ["FR-1"]
+    code_paths: ["internal/vault/**", "internal/custompkg/**", "tools/**"]
+    owned_paths: ["internal/vault/**", "internal/custompkg/**", "tools/**"]
+    collision_domain: "vault-memory"
+    interfaces:
+      cli: ["vault", "memory"]
+      go_packages: ["internal/vault", "internal/custompkg"]
+    invariants: ["FTS5"]
+    visible_tests: ["internal/vault/store_test.go"]
+    verifier_class: "test"
+`
+	if err := os.WriteFile(filepath.Join(tempDir, ".g8s", "feature-map.yml"), []byte(featureMapYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	customPkgDir := filepath.Join(tempDir, "internal", "custompkg")
+	if err := os.MkdirAll(customPkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	customGo := `package custompkg
+
+func CanonicalBuilder(name string) string { return name }
+func VerifyCustomInvariant() bool { return true }
+func unexportedHelper() {}
+`
+	if err := os.WriteFile(filepath.Join(customPkgDir, "builder.go"), []byte(customGo), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resGo, err := Read(ctx, ReadOptions{Path: filepath.Join(tempDir, "internal/custompkg/builder.go"), ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read builder.go: %v", err)
+	}
+	joinedGo := strings.Join(resGo.JITWhisper, "\n")
+	if !strings.Contains(joinedGo, "custompkg.CanonicalBuilder") || !strings.Contains(joinedGo, "custompkg.VerifyCustomInvariant") {
+		t.Fatalf("expected AST-discovered exported symbols custompkg.CanonicalBuilder & VerifyCustomInvariant, got:\n%s", joinedGo)
+	}
+	if strings.Contains(joinedGo, "unexportedHelper") {
+		t.Fatalf("unexported symbols must never be surfaced in JIT toolbox:\n%s", joinedGo)
+	}
+	if !strings.Contains(joinedGo, "vault.TokenizeCodeSymbols(text)") {
+		t.Fatalf("expected domain signature vault.TokenizeCodeSymbols(text), got:\n%s", joinedGo)
+	}
+
+	// Non-Go shell script should get CLI toolbox, not Go function signatures
+	shPath := filepath.Join(tempDir, "tools", "check.sh")
+	if err := os.MkdirAll(filepath.Dir(shPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shPath, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resSh, err := Read(ctx, ReadOptions{Path: shPath, ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read check.sh: %v", err)
+	}
+	joinedSh := strings.Join(resSh.JITWhisper, "\n")
+	if strings.Contains(joinedSh, "fsops.Read(ctx") {
+		t.Fatalf("expected shell script to omit Go function calls, got:\n%s", joinedSh)
+	}
+	if !strings.Contains(joinedSh, "./bin/g8s search") {
+		t.Fatalf("expected shell script to surface native ./bin/g8s CLI tools, got:\n%s", joinedSh)
+	}
+}
+
+func TestJITMatrix_MultiFileCompactionAndCrossDomainCollision(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".g8s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	featureMapYAML := `schema_version: "2.0"
+hotspots:
+  - id: "HOT-CLI-MAIN"
+    policy: "serialize"
+    rationale: "Single top-level command switch."
+    paths: ["cmd/g8s/main.go"]
+features:
+  - id: "FEAT-FSOPS-01"
+    title: "FSOPS"
+    persona_story: "IO"
+    srs_reqs: ["FR-1"]
+    code_paths: ["internal/fsops/**"]
+    owned_paths: ["internal/fsops/**"]
+    collision_domain: "agent-io"
+    interfaces:
+      cli: ["read", "edit"]
+      go_packages: ["internal/fsops"]
+    invariants: ["scope"]
+    visible_tests: ["internal/fsops/fsops_test.go"]
+    verifier_class: "test"
+  - id: "FEAT-RECEIPT-01"
+    title: "Receipts"
+    persona_story: "Receipts"
+    srs_reqs: ["FR-2"]
+    code_paths: ["internal/receipt/**"]
+    owned_paths: ["internal/receipt/**"]
+    collision_domain: "receipt-trust"
+    interfaces:
+      cli: ["receipt"]
+      go_packages: ["internal/receipt"]
+    invariants: ["single-use"]
+    visible_tests: ["internal/receipt/receipt_test.go"]
+    verifier_class: "test"
+`
+	if err := os.WriteFile(filepath.Join(tempDir, ".g8s", "feature-map.yml"), []byte(featureMapYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var relPaths []string
+	var rawWhispers []string
+	// Hydrate 20 files across 2 collision domains + 1 serialize hotspot
+	for i := 0; i < 10; i++ {
+		rel := fmt.Sprintf("internal/fsops/file_%d.go", i)
+		full := filepath.Join(tempDir, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		_ = os.WriteFile(full, []byte("package fsops\n"), 0o644)
+		res, err := Read(ctx, ReadOptions{Path: full, ScopeRoot: tempDir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		relPaths = append(relPaths, rel)
+		rawWhispers = append(rawWhispers, res.JITWhisper...)
+	}
+	for i := 0; i < 10; i++ {
+		rel := fmt.Sprintf("internal/receipt/rcpt_%d.go", i)
+		full := filepath.Join(tempDir, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		_ = os.WriteFile(full, []byte("package receipt\n"), 0o644)
+		res, err := Read(ctx, ReadOptions{Path: full, ScopeRoot: tempDir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		relPaths = append(relPaths, rel)
+		rawWhispers = append(rawWhispers, res.JITWhisper...)
+	}
+	mainRel := "cmd/g8s/main.go"
+	mainFull := filepath.Join(tempDir, filepath.FromSlash(mainRel))
+	_ = os.MkdirAll(filepath.Dir(mainFull), 0o755)
+	_ = os.WriteFile(mainFull, []byte("package main\n"), 0o644)
+	resMain, err := Read(ctx, ReadOptions{Path: mainFull, ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relPaths = append(relPaths, mainRel)
+	rawWhispers = append(rawWhispers, resMain.JITWhisper...)
+
+	compacted := CompactJITWhispers(tempDir, relPaths, rawWhispers)
+	if len(compacted) > MaxCompactedJITLines {
+		t.Fatalf("expected CompactJITWhispers to cap output at <= %d lines across 21 hydrated files, got %d:\n%s",
+			MaxCompactedJITLines, len(compacted), strings.Join(compacted, "\n"))
+	}
+	joined := strings.Join(compacted, "\n")
+	if !strings.Contains(joined, "[jit:collision:SERIALIZE] domains=agent-io,receipt-trust") {
+		t.Fatalf("expected [jit:collision:SERIALIZE] alert for multi-domain hydration, got:\n%s", joined)
+	}
+	lastLine := compacted[len(compacted)-1]
+	if !strings.HasPrefix(lastLine, "[jit:baton:EXPLORING]") || !strings.Contains(lastLine, "21 files") {
+		t.Fatalf("expected final line to be consolidated [jit:baton:EXPLORING] across 21 files, got: %q", lastLine)
+	}
+}
+
+func TestJITMatrix_WorstCaseCorruptedYAMLAndCorruptedVaultDB(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	// 1. Write malformed YAML in .g8s/feature-map.yml
+	g8sDir := filepath.Join(tempDir, ".g8s")
+	_ = os.MkdirAll(g8sDir, 0o755)
+	_ = os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(":::corrupted_yaml[[["), 0o644)
+
+	// 2. Write corrupted non-SQLite garbage to G8S_VAULT_DB
+	corruptDB := filepath.Join(tempDir, "corrupt_vault.db")
+	_ = os.WriteFile(corruptDB, []byte("NOT_A_VALID_SQLITE_HEADER_1234567890"), 0o644)
+	t.Setenv("G8S_VAULT_DB", corruptDB)
+
+	target := filepath.Join(tempDir, "pkg", "safe.go")
+	_ = os.MkdirAll(filepath.Dir(target), 0o755)
+	_ = os.WriteFile(target, []byte("package pkg\nvar X = 1\n"), 0o644)
+
+	// Read and Edit must succeed deterministically (fail-open on whisper enrichment)
+	rRes, err := Read(ctx, ReadOptions{Path: target, ScopeRoot: tempDir})
+	if err != nil {
+		t.Fatalf("Read failed under corrupted feature-map.yml and vault.db: %v", err)
+	}
+	if !strings.Contains(rRes.Content, "var X = 1") {
+		t.Fatalf("unexpected content: %q", rRes.Content)
+	}
+
+	eRes, err := Edit(ctx, EditOptions{
+		Path:      target,
+		ScopeRoot: tempDir,
+		OldString: "var X = 1",
+		NewString: "var X = 2",
+	})
+	if err != nil || eRes.Replacements != 1 {
+		t.Fatalf("Edit failed under corrupted feature-map.yml and vault.db: %v", err)
+	}
+}
+
+func TestJITMatrix_ConcurrencyRaceStress(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
+	g8sDir := filepath.Join(tempDir, ".g8s")
+	_ = os.MkdirAll(g8sDir, 0o755)
+	featureMapYAML := `schema_version: "2.0"
+features:
+  - id: "FEAT-FSOPS-01"
+    title: "FSOPS"
+    persona_story: "IO"
+    srs_reqs: ["FR-1"]
+    code_paths: ["internal/fsops/**"]
+    owned_paths: ["internal/fsops/**"]
+    collision_domain: "agent-io"
+    interfaces:
+      cli: ["read", "edit"]
+      go_packages: ["internal/fsops"]
+    invariants: ["scope"]
+    visible_tests: ["internal/fsops/fsops_test.go"]
+    verifier_class: "test"
+`
+	_ = os.WriteFile(filepath.Join(g8sDir, "feature-map.yml"), []byte(featureMapYAML), 0o644)
+
+	const workers = 24
+	for i := 0; i < workers; i++ {
+		p := filepath.Join(tempDir, "internal", "fsops", fmt.Sprintf("worker_%d.go", i))
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte(fmt.Sprintf("package fsops\nfunc Exported%d() int { return %d }\n", i, i)), 0o644)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		idx := i
+		go func() {
+			defer wg.Done()
+			rel := fmt.Sprintf("internal/fsops/worker_%d.go", idx)
+			full := filepath.Join(tempDir, filepath.FromSlash(rel))
+			for iter := 0; iter < 5; iter++ {
+				rRes, err := Read(ctx, ReadOptions{Path: full, ScopeRoot: tempDir})
+				if err != nil {
+					t.Errorf("worker %d Read iter %d: %v", idx, iter, err)
+					return
+				}
+				if len(rRes.JITWhisper) == 0 {
+					t.Errorf("worker %d iter %d expected non-empty JITWhisper", idx, iter)
+					return
+				}
+				_ = CompactJITWhispers(tempDir, []string{rel}, rRes.JITWhisper)
+			}
+		}()
+	}
+	wg.Wait()
 }

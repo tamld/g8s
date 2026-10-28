@@ -118,7 +118,7 @@ func recordWorkerTaskTelemetry(store *controlplane.Store, task *controlplane.Tas
 // recordVerifyTaskTelemetry records mechanical verification outcomes into the
 // unified model quality scorecard (#678, DELTA-45) and triggers the automatic
 // Experiential Autopsy Loop (#689) when a task passes after a prior failure.
-func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool) {
+func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool, dbPathOverride string, resolvedPaths []string) {
 	if task == nil {
 		return
 	}
@@ -132,29 +132,112 @@ func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool) {
 		RecordedAt:     time.Now().UTC().Format(time.RFC3339),
 	})
 
-	if passed {
-		if dbPath, err := databasePath(); err == nil {
-			ctx := context.Background()
+	dbPath := strings.TrimSpace(dbPathOverride)
+	if dbPath == "" {
+		if resolved, err := databasePath(); err == nil {
+			dbPath = resolved
+		}
+	}
+	if dbPath != "" {
+		ctx := context.Background()
+		baseDir := filepath.Dir(dbPath)
+		v, _ := vault.NewVault(filepath.Join(baseDir, "vault.db"), nil)
+		if v != nil {
+			defer v.Close()
+		}
+		if adapter, aErr := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
+			DBPath: filepath.Join(baseDir, "memory.db"),
+			Vault:  v,
+		}); aErr == nil {
+			defer adapter.Close()
+			gate := reflex.NewReflexGate()
+			adapter.SetGateSensor(func(nakedPayload string) (string, error) {
+				return gate.EvaluateMemoryEntry(ctx, nakedPayload)
+			})
+
+			// 1. Automatically record outcome for operational memory entries matching task scope
+			var queryTerms []string
+			for _, p := range resolvedPaths {
+				cleanP := strings.TrimSuffix(strings.TrimSuffix(p, "/**"), "/*")
+				if cleanP != "" {
+					queryTerms = append(queryTerms, cleanP)
+				}
+			}
+			if len(task.Request) > 0 {
+				var reqPayload struct {
+					Prompt       string   `json:"prompt"`
+					AllowedPaths []string `json:"allowed_paths"`
+				}
+				if json.Unmarshal(task.Request, &reqPayload) == nil {
+					for _, p := range reqPayload.AllowedPaths {
+						cleanP := strings.TrimSuffix(strings.TrimSuffix(p, "/**"), "/*")
+						if cleanP != "" {
+							queryTerms = append(queryTerms, cleanP)
+						}
+					}
+					if len(queryTerms) == 0 && strings.TrimSpace(reqPayload.Prompt) != "" {
+						queryTerms = append(queryTerms, strings.TrimSpace(reqPayload.Prompt))
+					}
+				}
+			}
+			if len(queryTerms) > 0 {
+				seenEntryIDs := make(map[string]bool)
+				var entryIDs []string
+				for _, term := range queryTerms {
+					activeCtx := map[string]string{
+						"file":    term,
+						"package": filepath.Dir(term),
+					}
+					if recalled, rErr := adapter.RecallHybridRRF(ctx, term, nil, activeCtx, 5, 0); rErr == nil {
+						for _, item := range recalled {
+							if item.Entry != nil && item.Entry.ID != "" && !seenEntryIDs[item.Entry.ID] {
+								seenEntryIDs[item.Entry.ID] = true
+								entryIDs = append(entryIDs, item.Entry.ID)
+							}
+						}
+					}
+				}
+				if len(entryIDs) > 0 {
+					_, _ = adapter.RecordOutcome(ctx, entryIDs, task.TaskID, passed)
+				}
+			}
+
+			// 2. Automatically run experiential autopsy and compound ready rules
 			if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
 				defer store.Close()
 				if traj, ok := memory.ExtractTrajectoryFromTask(ctx, store, task); ok && traj != nil {
-					baseDir := filepath.Dir(dbPath)
-					v, _ := vault.NewVault(filepath.Join(baseDir, "vault.db"), nil)
-					if v != nil {
-						defer v.Close()
-					}
-					if adapter, aErr := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
-						DBPath: filepath.Join(baseDir, "memory.db"),
-						Vault:  v,
-					}); aErr == nil {
-						defer adapter.Close()
-						gate := reflex.NewReflexGate()
-						adapter.SetGateSensor(func(nakedPayload string) (string, error) {
-							return gate.EvaluateMemoryEntry(ctx, nakedPayload)
-						})
-						_, _ = adapter.RunExperientialAutopsy(ctx, *traj, true)
+					_, _ = adapter.RunExperientialAutopsy(ctx, *traj, passed)
+				}
+			}
+			if passed {
+				var defFile, defTestFile string
+				for _, term := range queryTerms {
+					if strings.HasSuffix(term, "_test.go") {
+						if defTestFile == "" {
+							defTestFile = term
+						}
+						if defFile == "" {
+							defFile = strings.TrimSuffix(term, "_test.go") + ".go"
+						}
+					} else if strings.HasSuffix(term, ".go") {
+						if defFile == "" {
+							defFile = term
+						}
+						if defTestFile == "" {
+							defTestFile = strings.TrimSuffix(term, ".go") + "_test.go"
+						}
 					}
 				}
+				if defFile == "" && len(queryTerms) > 0 {
+					defFile = queryTerms[0]
+				}
+				if defTestFile == "" && defFile != "" {
+					defTestFile = defFile
+				}
+				_, _ = adapter.CompoundReadyEntries(ctx, memory.CompoundOptions{
+					DefaultFile:     defFile,
+					DefaultTestFile: defTestFile,
+				})
 			}
 		}
 	}
