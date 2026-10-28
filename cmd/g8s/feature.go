@@ -20,7 +20,7 @@ type FeatureInspectOutput struct {
 
 func runFeature(args []string) {
 	if len(args) == 0 {
-		exitUsage("feature", "", "", "usage: g8s feature <verify|inspect|list|collisions> [options]", "Supported subcommands: verify, inspect, list, collisions", false)
+		exitUsage("feature", "", "", "usage: g8s feature <verify|audit|inspect|list|collisions> [options]", "Supported subcommands: verify, audit, inspect, list, collisions", false)
 	}
 
 	subcmd := args[0]
@@ -29,6 +29,8 @@ func runFeature(args []string) {
 	switch subcmd {
 	case "verify":
 		runFeatureVerify(subargs)
+	case "audit":
+		runFeatureAudit(subargs)
 	case "inspect":
 		runFeatureInspect(subargs)
 	case "list":
@@ -38,13 +40,14 @@ func runFeature(args []string) {
 	case "help", "-h", "--help":
 		printFeatureUsage()
 	default:
-		exitUsage("feature", subcmd, "", fmt.Sprintf("unknown feature subcommand %q", subcmd), "Supported subcommands: verify, inspect, list, collisions", false)
+		exitUsage("feature", subcmd, "", fmt.Sprintf("unknown feature subcommand %q", subcmd), "Supported subcommands: verify, audit, inspect, list, collisions", false)
 	}
 }
 
 func printFeatureUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  g8s feature verify [--file .g8s/feature-map.yml] [--repo .] [--strict] [--json]")
+	fmt.Println("  g8s feature audit [--file .g8s/feature-map.yml] [--repo .] [--feature <id>] [--live] [--json]")
 	fmt.Println("  g8s feature inspect <feature-id> [--file .g8s/feature-map.yml] [--json]")
 	fmt.Println("  g8s feature list [--file .g8s/feature-map.yml] [--json]")
 	fmt.Println("  g8s feature collisions --paths <glob,...> [--file .g8s/feature-map.yml] [--json]")
@@ -53,7 +56,7 @@ func printFeatureUsage() {
 
 // featureValueFlags lists flags (without dashes) that consume the following argument.
 var featureValueFlags = map[string]bool{
-	"file": true, "repo": true, "id": true,
+	"file": true, "repo": true, "id": true, "feature": true,
 	"paths": true, "task-a": true, "task-b": true, "label-a": true, "label-b": true,
 }
 
@@ -136,6 +139,60 @@ func runFeatureVerify(args []string) {
 		fmt.Fprintf(os.Stderr, "  - unverified invariant: %s\n", u)
 	}
 	os.Exit(1)
+}
+
+func runFeatureAudit(args []string) {
+	fs := flag.NewFlagSet("feature-audit", flag.ContinueOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	fileFlag := fs.String("file", featuremap.DefaultFeatureMapPath, "Path to feature map YAML")
+	repoFlag := fs.String("repo", ".", "Path to repository root")
+	featureFlag := fs.String("feature", "", "Optional single feature ID to audit")
+	fs.StringVar(featureFlag, "id", "", "Alias for --feature")
+	liveFlag := fs.Bool("live", false, "Execute visible_tests via go test to verify live runtime behavior")
+
+	args = normalizeFlags(args)
+	if err := fs.Parse(args); err != nil {
+		exitUsage("feature", "audit", *traceID, err.Error(), "usage: g8s feature audit [--file <path>] [--repo <dir>] [--feature <id>] [--live] [--json]", *jsonl)
+	}
+	if *featureFlag == "" && fs.NArg() > 0 {
+		*featureFlag = fs.Arg(0)
+	}
+
+	fm, err := featuremap.Load(*fileFlag)
+	if err != nil {
+		exitRuntime("feature", "audit", *traceID, cli.CodeIO, err, "Verify --file points to a valid .g8s/feature-map.yml", *jsonl)
+	}
+
+	report, err := featuremap.Audit(fm, *repoFlag, featuremap.AuditOptions{
+		FeatureID: strings.TrimSpace(*featureFlag),
+		Live:      *liveFlag,
+	})
+	if err != nil {
+		exitRuntime("feature", "audit", *traceID, cli.CodeNotFound, err, "Run 'g8s feature list' to view valid feature IDs", *jsonl)
+	}
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("feature_audit", "feature", "audit", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		if !report.Valid {
+			os.Exit(1)
+		}
+		return
+	}
+
+	for _, r := range report.Results {
+		fmt.Printf("%-26s %-18s paths=%d tests=%d interfaces=%d\n",
+			r.ID, r.Status, r.CodePathsChecked, r.TestSymbolsChecked, r.InterfacesChecked)
+		for _, f := range r.Findings {
+			fmt.Printf("  - %s\n", f)
+		}
+	}
+	fmt.Printf("\nAudit Summary: total=%d verified_live=%d static_only=%d drifted=%d broken=%d\n",
+		report.TotalFeatures, report.VerifiedLiveCount, report.StaticOnlyCount, report.DriftedContractCount, report.BrokenRuntimeCount)
+	if !report.Valid {
+		os.Exit(1)
+	}
 }
 
 func runFeatureInspect(args []string) {

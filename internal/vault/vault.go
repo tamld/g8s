@@ -789,17 +789,29 @@ func BuildPreExecutionGrounding(ctx context.Context, v *Vault, scopeRoot string,
 		}
 		if maxNotes > 0 {
 			repoID := InferRepoID(scopeRoot)
-			applied := "APPLIED"
-			filter := VaultFilter{
-				Status:        &applied,
-				Limit:         maxNotes,
-				IncludeShared: true,
+			var combined []DistillationRecord
+			seen := make(map[string]bool)
+			for _, status := range []string{"DOCTRINE", "APPLIED"} {
+				st := status
+				filter := VaultFilter{
+					Status:        &st,
+					Limit:         maxNotes,
+					IncludeShared: true,
+				}
+				if repoID != "" {
+					filter.RepoID = &repoID
+				}
+				if recs, err := v.List(ctx, filter); err == nil {
+					for _, r := range recs {
+						if !seen[r.ID] && len(combined) < maxNotes {
+							seen[r.ID] = true
+							combined = append(combined, r)
+						}
+					}
+				}
 			}
-			if repoID != "" {
-				filter.RepoID = &repoID
-			}
-			if recs, err := v.List(ctx, filter); err == nil && len(recs) > 0 {
-				lines = append(lines, FormatJITWhisper(recs)...)
+			if len(combined) > 0 {
+				lines = append(lines, FormatJITWhisper(combined)...)
 			}
 		}
 	}
@@ -830,6 +842,26 @@ func FormatJITWhisper(records []DistillationRecord) []string {
 		whispers = append(whispers, line)
 	}
 	return whispers
+}
+
+// ReawakenRecord transitions a DORMANT, COLD, or DEPRECATED Vault rule back to
+// APPLIED when the Net-Delta Diff Guard detects a fresh violation of its
+// SpatialAnchor.DeniedFragments (#685, Hypothesis H2).
+func (v *Vault) ReawakenRecord(ctx context.Context, id string) error {
+	rec, err := v.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rec.Status == "APPLIED" || rec.Status == "DOCTRINE" {
+		return nil
+	}
+	rec.Status = "APPLIED"
+	rawBytes, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	_, err = v.db.ExecContext(ctx, `UPDATE vault_records SET status = 'APPLIED', raw_json = ? WHERE id = ?`, string(rawBytes), id)
+	return err
 }
 
 // VerifyAnchors checks every non-deprecated Vault record against the live workspace

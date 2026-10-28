@@ -179,6 +179,9 @@ func EvaluateNetDelta(ctx context.Context, diffText string, allowedPaths []strin
 						msg := fmt.Sprintf("matched denied fragment %q from rule %s (%s)", frag, rec.ID, rec.Title)
 						if isCold {
 							msg += " [dormant rule re-awakened]"
+							if v != nil {
+								_ = v.ReawakenRecord(ctx, rec.ID)
+							}
 						}
 						advisories = append(advisories, DiffAdvisory{
 							RuleID:            rec.ID,

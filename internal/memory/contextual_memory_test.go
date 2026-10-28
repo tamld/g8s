@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -144,5 +146,86 @@ func TestSelfContainedPromoteToVaultAndCitationRotDetection(t *testing.T) {
 	rotRec, err := adapter.vault.Get(ctx, "KNOW-WIN-PIPE-01")
 	if err != nil || rotRec.Status != "STALE_ANCHOR" {
 		t.Fatalf("expected status STALE_ANCHOR, got %+v err=%v", rotRec, err)
+	}
+}
+
+func TestRecallHybridRRFAndDoctrineGrounding(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	vdb := filepath.Join(repoDir, "vault.db")
+	v, err := vault.NewVault(vdb, time.Now)
+	if err != nil {
+		t.Fatalf("NewVault: %v", err)
+	}
+	defer v.Close()
+
+	adapter, err := NewLocalSQLiteMemoryAdapter(AdapterOptions{
+		DBPath: filepath.Join(repoDir, "memory.db"),
+		Vault:  v,
+	})
+	if err != nil {
+		t.Fatalf("NewLocalSQLiteMemoryAdapter: %v", err)
+	}
+	defer adapter.Close()
+	adapter.SetGateSensor(func(naked string) (string, error) { return "clean", nil })
+
+	// Propose 3 entries with different lexical, vector, and salience profiles
+	entries := []*MemoryEntry{
+		{
+			ID: "mem-rrf-1", Kind: KindDecision, Scope: ScopeSession, SessionID: "s1",
+			PromotedBy: "rcpt-1", Payload: "sqlite wal busy timeout tuning for high concurrency",
+			Preconditions: map[string]string{"db": "sqlite"},
+		},
+		{
+			ID: "mem-rrf-2", Kind: KindDecision, Scope: ScopeSession, SessionID: "s1",
+			PromotedBy: "rcpt-2", Payload: "sqlite connection pool max open conns",
+			Preconditions: map[string]string{"db": "sqlite"},
+		},
+		{
+			ID: "mem-rrf-mismatch", Kind: KindDecision, Scope: ScopeSession, SessionID: "s1",
+			PromotedBy: "rcpt-3", Payload: "sqlite wal busy timeout tuning for postgres",
+			Preconditions: map[string]string{"db": "postgres"},
+		},
+	}
+	for _, e := range entries {
+		if err := adapter.ProposeEntry(ctx, e); err != nil {
+			t.Fatalf("ProposeEntry(%s): %v", e.ID, err)
+		}
+	}
+	// Bump salience on mem-rrf-1 from out-of-sample session s2 and store vectors
+	_ = adapter.RecordReuse(ctx, "mem-rrf-1", "s2")
+	_ = adapter.RecordReuse(ctx, "mem-rrf-1", "s3")
+	_ = adapter.StoreVector(ctx, "mem-rrf-1", []float32{0.9, 0.1, 0.0}, nil)
+	_ = adapter.StoreVector(ctx, "mem-rrf-2", []float32{0.2, 0.8, 0.0}, nil)
+
+	ranked, err := adapter.RecallHybridRRF(ctx, "sqlite wal busy timeout", []float32{0.95, 0.05, 0.0}, map[string]string{"db": "sqlite"}, 5, 0)
+	if err != nil {
+		t.Fatalf("RecallHybridRRF error: %v", err)
+	}
+	if len(ranked) != 2 {
+		t.Fatalf("expected 2 precondition-matched entries from RecallHybridRRF, got %d", len(ranked))
+	}
+	if ranked[0].Entry.ID != "mem-rrf-1" || ranked[0].RRFScore <= ranked[1].RRFScore {
+		t.Fatalf("expected mem-rrf-1 ranked #1 by RRF fusion, got %+v", ranked)
+	}
+
+	// Verify BuildPreExecutionGrounding includes DOCTRINE records (#685)
+	_, err = v.Store(ctx, vault.DistillationRecord{
+		ID:        "KNOW-DOCTRINE-685",
+		Title:     "Doctrine Invariant For Grounding",
+		Milestone: "v0.22.0",
+		Status:    "DOCTRINE",
+		ScopeTier: "global",
+		Causality: vault.CausalityAnchor{
+			Problem:  "DOCTRINE rules were skipped by BuildPreExecutionGrounding",
+			TradeOff: "Include both APPLIED and DOCTRINE in grounding query",
+		},
+	})
+	if err != nil {
+		t.Fatalf("v.Store DOCTRINE: %v", err)
+	}
+	grounding := vault.BuildPreExecutionGrounding(ctx, v, repoDir, 5)
+	if !strings.Contains(grounding, "KNOW-DOCTRINE-685") {
+		t.Fatalf("expected BuildPreExecutionGrounding to include DOCTRINE record KNOW-DOCTRINE-685 (#685), got %q", grounding)
 	}
 }

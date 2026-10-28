@@ -315,7 +315,7 @@ func VerifyScope(filePath, scopeRoot string, allowedPaths []string) (string, err
 
 	if len(allowedPaths) > 0 {
 		if !search.MatchesAllowedPaths(relSlash, allowedPaths) || !search.MatchesAllowedPaths(canonRelSlash, allowedPaths) {
-			return "", fmt.Errorf("path %q (relative %q) is outside receipt allowed_paths", filePath, relSlash)
+			return "", fmt.Errorf("path %q (relative %q) is outside receipt allowed_paths=%v (scope_root=%q)", filePath, relSlash, allowedPaths, scopeRoot)
 		}
 	}
 	return canonRelSlash, nil
@@ -581,10 +581,11 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 
 	count := strings.Count(normContent, normOld)
 	if count == 0 {
-		return nil, fmt.Errorf("old_string not found in file")
+		return nil, formatOldStringNotFoundError(opts.Path, normContent, normOld, oldHex)
 	}
 	if count > 1 && !opts.ReplaceAll {
-		return nil, fmt.Errorf("old_string found %d times; set --all to replace all occurrences", count)
+		matchLines := findMatchLineNumbers(normContent, normOld)
+		return nil, fmt.Errorf("old_string found %d times at lines %s; set --all to replace all occurrences or include surrounding lines", count, formatIntSlice(matchLines))
 	}
 
 	var replaced string
@@ -648,6 +649,109 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 		NewSHA256:    newHex,
 		JITWhisper:   lookupJITWhisper(ctx, relSlash),
 	}, nil
+}
+
+func findMatchLineNumbers(content, sub string) []int {
+	if sub == "" {
+		return nil
+	}
+	var lines []int
+	offset := 0
+	for {
+		idx := strings.Index(content[offset:], sub)
+		if idx < 0 {
+			break
+		}
+		absIdx := offset + idx
+		lineNum := strings.Count(content[:absIdx], "\n") + 1
+		lines = append(lines, lineNum)
+		offset = absIdx + len(sub)
+		if offset >= len(content) {
+			break
+		}
+	}
+	return lines
+}
+
+func formatIntSlice(nums []int) string {
+	var parts []string
+	for _, n := range nums {
+		parts = append(parts, fmt.Sprintf("%d", n))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatOldStringNotFoundError(path, content, needle, shaHex string) error {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		totalLines = len(lines) - 1
+	}
+	nearLine, nearPreview := findNearestMatchLine(lines, needle)
+	if nearLine > 0 {
+		startHint := nearLine - 3
+		if startHint < 1 {
+			startHint = 1
+		}
+		endHint := nearLine + 5
+		return fmt.Errorf("old_string not found in file %s (total_lines=%d sha256=%s; nearest match at line %d: %q; run 'g8s read %s --lines %d:%d' to inspect exact content)",
+			path, totalLines, shaHex, nearLine, nearPreview, path, startHint, endHint)
+	}
+	return fmt.Errorf("old_string not found in file %s (total_lines=%d sha256=%s)", path, totalLines, shaHex)
+}
+
+func findNearestMatchLine(fileLines []string, needle string) (int, string) {
+	needleFirst := ""
+	for _, nl := range strings.Split(needle, "\n") {
+		if trimmed := strings.TrimSpace(nl); trimmed != "" {
+			needleFirst = trimmed
+			break
+		}
+	}
+	if needleFirst == "" {
+		return 0, ""
+	}
+	bestLine := 0
+	bestScore := 0
+	bestText := ""
+	needleLower := strings.ToLower(needleFirst)
+	needleTrigrams := extractTrigrams(needleLower)
+
+	for i, rawLine := range fileLines {
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == "" {
+			continue
+		}
+		lineLower := strings.ToLower(trimmed)
+		score := 0
+		for tri := range needleTrigrams {
+			if strings.Contains(lineLower, tri) {
+				score++
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+			bestLine = i + 1
+			bestText = trimmed
+		}
+	}
+	if len(bestText) > 80 {
+		bestText = bestText[:80] + "..."
+	}
+	return bestLine, bestText
+}
+
+func extractTrigrams(s string) map[string]bool {
+	out := make(map[string]bool)
+	runes := []rune(s)
+	if len(runes) < 3 {
+		out[s] = true
+		return out
+	}
+	for i := 0; i <= len(runes)-3; i++ {
+		out[string(runes[i:i+3])] = true
+	}
+	return out
 }
 
 // ApplyBatchEdits validates and applies a slice of EditOptions atomically.
@@ -748,10 +852,11 @@ func ApplyBatchEdits(ctx context.Context, edits []EditOptions) ([]*EditResult, e
 
 		count := strings.Count(normContent, normOld)
 		if count == 0 {
-			return nil, fmt.Errorf("batch edit[%d] (%s): old_string not found in file", idx, opts.Path)
+			return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, formatOldStringNotFoundError(opts.Path, normContent, normOld, oldHex))
 		}
 		if count > 1 && !opts.ReplaceAll {
-			return nil, fmt.Errorf("batch edit[%d] (%s): old_string found %d times; set --all to replace all occurrences", idx, opts.Path, count)
+			matchLines := findMatchLineNumbers(normContent, normOld)
+			return nil, fmt.Errorf("batch edit[%d] (%s): old_string found %d times at lines %s; set --all to replace all occurrences or include surrounding lines", idx, opts.Path, count, formatIntSlice(matchLines))
 		}
 
 		var replaced string

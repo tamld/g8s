@@ -781,8 +781,8 @@ g8s receipt-export --task <task-id> --json
 
 ---
 
-### 35. `g8s feature` — Declarative Feature Map & Blast Radius DAG (`DELTA-23`, `#649`, `#665`)
-Validates `.g8s/feature-map.yml` (schema 1.0, cycle detection, bidirectional `depends_on` $\leftrightarrow$ `direct_consumers` edge symmetry, zero-orphan `internal/` package coverage) and computes transitive blast radius and allowed write scopes.
+### 35. `g8s feature` — Declarative Feature Map, Blast Radius DAG & Live Conformance Audit (`DELTA-23`, `#649`, `#665`, `#686`)
+Validates `.g8s/feature-map.yml` (schema 2.0, cycle detection, bidirectional `depends_on` $\leftrightarrow$ `direct_consumers` edge symmetry, zero-orphan `internal/` package coverage), computes transitive blast radius and allowed write scopes, and runs 2-layer AST + live test conformance audits (`STATIC_ONLY`, `VERIFIED_LIVE`, `DRIFTED_CONTRACT`, `BROKEN_RUNTIME`).
 
 ```sh
 # Validate feature map against repository structure
@@ -791,6 +791,10 @@ g8s feature verify --file .g8s/feature-map.yml --repo . --json
 # List all feature nodes or inspect transitive blast radius & derived allowed_paths
 g8s feature list --json
 g8s feature inspect FEAT-FSOPS-01 --json
+
+# Run 2-layer AST contract & live behavioral test audit across feature nodes (#686)
+g8s feature audit --json
+g8s feature audit --feature FEAT-FEATUREMAP-01 --live --json
 ```
 
 ---

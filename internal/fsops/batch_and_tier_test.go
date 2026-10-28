@@ -185,3 +185,40 @@ func TestContextPackIncludesVerifiedVaultWhispers(t *testing.T) {
 		t.Fatalf("expected only KNOW-VALID-01 in KnowledgeWhispers, got %+v", packRes.KnowledgeWhispers)
 	}
 }
+
+func TestEditDiagnosticsLineNumbersAndNearestMatch(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "sample.go")
+	content := "package sample\nfunc alpha() { return }\nfunc beta() { return }\nfunc alpha() { return }\n"
+	if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
+		t.Fatalf("write sample.go: %v", err)
+	}
+
+	// 1. Multi-match error must report exact 1-indexed line numbers [2, 4] (#687)
+	_, err := Edit(context.Background(), EditOptions{
+		Path:      f,
+		ScopeRoot: dir,
+		OldString: "func alpha() { return }",
+		NewString: "func alphaUpdated() { return }",
+	})
+	if err == nil || !strings.Contains(err.Error(), "lines [2, 4]") {
+		t.Fatalf("expected multi-match error to report 'lines [2, 4]' (#687), got: %v", err)
+	}
+
+	// 2. Not-found error must report total_lines, sha256, and nearest match line (#687)
+	_, err = Edit(context.Background(), EditOptions{
+		Path:      f,
+		ScopeRoot: dir,
+		OldString: "func betaTypo() { return }",
+		NewString: "func betaFixed() { return }",
+	})
+	if err == nil || !strings.Contains(err.Error(), "nearest match at line 3") || !strings.Contains(err.Error(), "sha256=") {
+		t.Fatalf("expected not-found error to include nearest match at line 3 and sha256 (#687), got: %v", err)
+	}
+
+	// 3. VerifyScope outside allowed_paths must include scope_root and allowed_paths (#687)
+	_, err = VerifyScope(f, dir, []string{"internal/other/**"})
+	if err == nil || !strings.Contains(err.Error(), "allowed_paths=[internal/other/**]") {
+		t.Fatalf("expected VerifyScope error to list allowed_paths (#687), got: %v", err)
+	}
+}

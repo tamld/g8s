@@ -93,6 +93,23 @@ Under `ADR-0033` (Phase 06b + Wave B), F0 enforces a strict **Cognitive Firewall
    - All log-hunting, CI failure extraction, documentation sync, formatting, and file editing are delegated to F1 workers (`agy` or `9router` combos: `fast-agent`, `docs-retriever`, `reasoning-free`, `deep-coding`).
    - Raw logs are isolated to disk at `$G8S_STATE_DIR/logs/verify-<task>-<ts>.log`, while F0 consumes only the compact, structured verdict.
 
+## Mandatory 3-Pillar Engineering Reflex (Research -> Dialectical Root-Core -> Skill Chaining)
+
+Before designing or dispatching any non-trivial feature, architectural change, or multi-slice campaign, F0 MUST execute this 3-Pillar Engineering Reflex:
+
+1. **Pillar 1 — Upstream/GitHub Success-Case Research Gate (`ck:xia` + Multi-Worker Research Fan-Out)**:
+   - Never design in a vacuum. Before drafting a plan, dispatch parallel `read_only` research scouts (`g8s submit --role scout --permission read_only`) or activate `ck:xia` + `ck:research` to inspect battle-tested open-source implementations on GitHub (e.g., `getzep/graphiti` & `letta-ai/letta` for bi-temporal RRF memory, `SWE-agent` & `Aider` for Agent-Computer Interface diagnostics, `zkat/miette` for actionable error envelopes, `open-telemetry/weaver` & `semgrep` for AST/live conformance auditing).
+   - Every architectural proposal must cite concrete `Local`, `Upstream`, and `Docs` evidence.
+2. **Pillar 2 — Multi-Round Root-Core Dialectical Loop (`wiki-deep-why` -> `wiki-socratic` -> `ck:predict`)**:
+   - Do not stop at surface symptoms (Level 1 WHAT) or local mechanisms (Level 2 HOW). Iterate across at least 3 dialectical rounds to reach the Root-Core Invariant (Level 3 WHY):
+     - **Round 1 (`wiki-deep-why`)**: Trace `Surface Symptom -> Structural Mechanism -> Root Architectural Core`.
+     - **Round 2 (`wiki-socratic`)**: Formulate the Socratic Antithesis (`Thesis -> Antithesis -> Synthesis`) to falsify naive assumptions (e.g., self-contained binary independence vs. external tool coupling, scale-free RRF vs. ad-hoc SQL sorting).
+     - **Round 3 (`ck:predict`)**: Stress-test the synthesis across Architecture, Security, Reliability, Performance, and DX/Operator personas before locking the spec.
+3. **Pillar 3 — Deterministic Skill Routing & Chaining (`skill-router.py --strict`)**:
+   - Query `python3 ~/.agents/skills/_shared/scripts/skill-router.py --strict "<task>"` at task intake and chain skills deterministically across the full lifecycle:
+     `ck:xia` / `ck:research` -> `wiki-deep-why` -> `wiki-socratic` -> `ck:predict` -> `ck:plan` -> `prove` (FSM + RED test before code) -> `ck:cook` -> `code-simplification` -> `g8s feature audit --live`.
+
+
 ## Universal Config-Driven LLM Call Consumer, 9Router Fleet & Zero-Trust Execution Hardening (DELTA-25..31, v0.19.1)
 
 With `v0.19.0`–`v0.19.1` (`DELTA-25..31`), `g8s` acts as a universal, config-driven consumer for any remote HTTP LLM gateway declared in `providers.json` or `.g8s/agent-models.yml` with strict zero-trust execution boundaries:

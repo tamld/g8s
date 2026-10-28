@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -592,6 +593,116 @@ func matchPreconditions(required, active map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// RRFScoredEntry wraps a recalled MemoryEntry with its Reciprocal Rank Fusion
+// score (#684, #685) across lexical BM25/keyword match, cosine vector similarity,
+// and out-of-sample salience.
+type RRFScoredEntry struct {
+	Entry        *MemoryEntry `json:"entry"`
+	RRFScore     float64      `json:"rrf_score"`
+	LexicalRank  int          `json:"lexical_rank,omitempty"`
+	VectorRank   int          `json:"vector_rank,omitempty"`
+	SalienceRank int          `json:"salience_rank"`
+}
+
+// RecallHybridRRF filters active/distilled/doctrine entries by activeContext
+// Preconditions and ranks surviving entries via Reciprocal Rank Fusion (k=60):
+//
+//	score(d) = sum_{m in {lexical, vector, salience}} 1 / (60 + rank_m(d))
+func (a *LocalSQLiteMemoryAdapter) RecallHybridRRF(ctx context.Context, query string, queryVector []float32, activeContext map[string]string, limit int, nowUnix float64) ([]RRFScoredEntry, error) {
+	candidates, err := a.RecallContextualEntries(ctx, activeContext, nowUnix)
+	if err != nil || len(candidates) == 0 {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	const rrfK = 60.0
+	byID := make(map[string]*RRFScoredEntry, len(candidates))
+	ordered := make([]*RRFScoredEntry, 0, len(candidates))
+
+	// 1. Salience + recency rank (candidates from RecallContextualEntries are already ordered by salience DESC, updated_at DESC)
+	for i, c := range candidates {
+		rank := i + 1
+		item := &RRFScoredEntry{
+			Entry:        c,
+			SalienceRank: rank,
+			RRFScore:     1.0 / (rrfK + float64(rank)),
+		}
+		byID[c.ID] = item
+		ordered = append(ordered, item)
+	}
+
+	// 2. Lexical keyword/token overlap rank
+	qTokens := vault.TokenizeCodeSymbols(query)
+	if len(qTokens) > 0 {
+		type lexCand struct {
+			id    string
+			score int
+		}
+		var lexMatches []lexCand
+		lowerQuery := strings.ToLower(strings.TrimSpace(query))
+		for _, c := range candidates {
+			lowerPayload := strings.ToLower(c.Payload)
+			s := 0
+			if lowerQuery != "" && strings.Contains(lowerPayload, lowerQuery) {
+				s += 5
+			}
+			for _, tok := range qTokens {
+				if strings.Contains(lowerPayload, tok) {
+					s += 2
+				}
+			}
+			if s > 0 {
+				lexMatches = append(lexMatches, lexCand{id: c.ID, score: s})
+			}
+		}
+		sort.SliceStable(lexMatches, func(i, j int) bool {
+			return lexMatches[i].score > lexMatches[j].score
+		})
+		for i, m := range lexMatches {
+			if item, ok := byID[m.id]; ok {
+				rank := i + 1
+				item.LexicalRank = rank
+				item.RRFScore += 1.0 / (rrfK + float64(rank))
+			}
+		}
+	}
+
+	// 3. Vector cosine similarity rank
+	if len(queryVector) > 0 {
+		if vecMatches, err := a.SearchVector(ctx, queryVector, len(candidates)*2, 0.0); err == nil {
+			rank := 0
+			for _, vm := range vecMatches {
+				if item, ok := byID[vm.RecordID]; ok {
+					rank++
+					item.VectorRank = rank
+					item.RRFScore += 1.0 / (rrfK + float64(rank))
+				}
+			}
+		}
+	}
+
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].RRFScore != ordered[j].RRFScore {
+			return ordered[i].RRFScore > ordered[j].RRFScore
+		}
+		if ordered[i].Entry.Salience != ordered[j].Entry.Salience {
+			return ordered[i].Entry.Salience > ordered[j].Entry.Salience
+		}
+		return ordered[i].Entry.UpdatedAt > ordered[j].Entry.UpdatedAt
+	})
+
+	if len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+	res := make([]RRFScoredEntry, len(ordered))
+	for i, item := range ordered {
+		res[i] = *item
+	}
+	return res, nil
 }
 
 // PromoteToVault promotes a contextual MemoryEntry into a Tri-Anchor Knowledge

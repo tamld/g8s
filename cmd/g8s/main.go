@@ -54,10 +54,14 @@ func exitRuntime(cmd, sub, traceID, code string, err error, hint string, jsonl b
 		code = cli.CodeRuntime
 	}
 	msg := ""
+	cause := ""
 	if err != nil {
 		msg = err.Error()
+		if unwrapped := errors.Unwrap(err); unwrapped != nil {
+			cause = unwrapped.Error()
+		}
 	}
-	env := cli.NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, "")
+	env := cli.NewErrorEnvelope(cmd, sub, traceID, code, msg, hint, cause)
 	_ = cli.WriteResponse(os.Stderr, env, jsonl)
 	os.Exit(1)
 }

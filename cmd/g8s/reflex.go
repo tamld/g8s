@@ -16,6 +16,7 @@ import (
 	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 // runReflex exposes the System-1 reflex gate (Jev / TypeSafe AI) as a
@@ -104,6 +105,7 @@ func runReflexVerify(args []string) {
 	shapeFlag := fs.String("shape", "analysis", "expected output shape (analysis, patch, test_report)")
 	exitCodeFlag := fs.Int("exit-code", 0, "worker process exit code")
 	durationFlag := fs.Int("duration-sec", 1, "worker execution duration in seconds")
+	noEnrich := fs.Bool("no-enrich", false, "skip Context Broker enrichment (#684)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("reflex", "verify", *traceID, err.Error(), "", *jsonl)
 	}
@@ -118,6 +120,9 @@ func runReflexVerify(args []string) {
 		ExpectedShape: *shapeFlag,
 		ExitCode:      *exitCodeFlag,
 		DurationSec:   *durationFlag,
+	}
+	if !*noEnrich {
+		req.ContextPacket = assembleContextPacket(nil, *excerptFlag)
 	}
 	sig, err := gate.EmitOutputQualitySignal(ctx, req)
 	if err != nil {
@@ -141,35 +146,72 @@ func runReflexVerify(args []string) {
 // independently failing — a broken source degrades the packet, never the
 // triage.
 func attachContextPacket(req *reflex.TriageRequest) {
+	req.ContextPacket = assembleContextPacket(req.FilesModified, req.DiffSummary)
+}
+
+func assembleContextPacket(filesModified []string, query string) *g8scontext.ContextPacket {
 	broker := g8scontext.NewBroker(g8scontext.Sources{
-		VaultNotes:     vaultNotesSource(),
+		VaultNotes:     vaultNotesSource(filesModified, query),
 		RecentOutcomes: telemetryOutcomesSource(),
 		SomPhase:       somPhaseSource(),
 	}, func(event, detail string) {
 		fmt.Fprintf(os.Stderr, "[warn] context broker: %s: %s\n", event, detail)
 	})
-	req.ContextPacket = broker.Assemble(context.Background())
+	return broker.Assemble(context.Background())
 }
 
-func vaultNotesSource() func(ctx context.Context) ([]string, error) {
+func vaultNotesSource(filesModified []string, query string) func(ctx context.Context) ([]string, error) {
 	return func(ctx context.Context) ([]string, error) {
 		dbPath, err := databasePath()
 		if err != nil {
 			return nil, err
 		}
+		baseDir := filepath.Dir(dbPath)
+		var notes []string
+
+		// 1. Spatial & Doctrine Knowledge Vault notes (#684)
+		if v, vErr := vault.NewVault(filepath.Join(baseDir, "vault.db"), nil); vErr == nil {
+			defer v.Close()
+			seenRec := make(map[string]bool)
+			var matchedRecs []vault.DistillationRecord
+			for _, f := range filesModified {
+				if recs, mErr := v.MatchSpatial(ctx, f, 5); mErr == nil {
+					for _, r := range recs {
+						if !seenRec[r.ID] {
+							seenRec[r.ID] = true
+							matchedRecs = append(matchedRecs, r)
+						}
+					}
+				}
+			}
+			for _, st := range []string{"DOCTRINE", "APPLIED"} {
+				status := st
+				if recs, lErr := v.List(ctx, vault.VaultFilter{Status: &status, Limit: 5, IncludeShared: true}); lErr == nil {
+					for _, r := range recs {
+						if !seenRec[r.ID] && len(matchedRecs) < 5 {
+							seenRec[r.ID] = true
+							matchedRecs = append(matchedRecs, r)
+						}
+					}
+				}
+			}
+			notes = append(notes, vault.FormatJITWhisper(matchedRecs)...)
+		}
+
+		// 2. Contextual RRF Memory entries (#684)
 		adapter, err := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
-			DBPath: filepath.Join(filepath.Dir(dbPath), "memory.db"),
+			DBPath: filepath.Join(baseDir, "memory.db"),
 		})
 		if err != nil {
-			return nil, err
+			return notes, nil
 		}
 		defer adapter.Close()
-		entries, err := adapter.ListEntries(ctx, memory.MemoryFilter{Lifecycle: memory.LifecycleActive})
+		scored, err := adapter.RecallHybridRRF(ctx, query, nil, nil, 5, 0)
 		if err != nil {
-			return nil, err
+			return notes, nil
 		}
-		var notes []string
-		for _, e := range entries { // ranked newest-first by ListEntries; top-5 by broker fit
+		for _, item := range scored {
+			e := item.Entry
 			notes = append(notes, fmt.Sprintf("[%s|%s] %s", e.Kind, e.Trust, e.Payload))
 		}
 		return notes, nil

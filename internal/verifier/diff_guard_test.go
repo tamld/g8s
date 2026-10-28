@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -189,5 +190,52 @@ func TestEvaluateNetDeltaTheaterPlaceholdersAndTrivialAsserts(t *testing.T) {
 	}
 	if theaterCount != 2 || trivialCount != 2 {
 		t.Fatalf("expected 2 TIER0-THEATER-PLACEHOLDER and 2 TIER0-TRIVIAL-ASSERT, got theater=%d trivial=%d (%+v)", theaterCount, trivialCount, advs)
+	}
+}
+
+func TestEvaluateNetDeltaReawakensDormantRuleInVault(t *testing.T) {
+	ctx := context.Background()
+	v, err := vault.NewVault(":memory:", time.Now)
+	if err != nil {
+		t.Fatalf("NewVault: %v", err)
+	}
+	defer v.Close()
+
+	_, err = v.Store(ctx, vault.DistillationRecord{
+		ID:        "RULE-DORMANT-685",
+		Title:     "Forbid raw time.Sleep in worker loop",
+		Milestone: "v0.22.0",
+		Status:    "DORMANT",
+		Causality: vault.CausalityAnchor{
+			Problem:  "Polling sleep wastes CPU",
+			TradeOff: "Use context timer",
+		},
+		SpatialCoordinates: vault.SpatialAnchor{
+			Package:         "internal/worker",
+			File:            "internal/worker/worker.go",
+			DeniedFragments: []string{"time.Sleep("},
+		},
+	})
+	if err != nil {
+		t.Fatalf("v.Store: %v", err)
+	}
+
+	diff := `--- a/internal/worker/worker.go
++++ b/internal/worker/worker.go
+@@ -10,0 +11,1 @@
++	time.Sleep(5 * time.Second)
+`
+	_, advs := EvaluateNetDelta(ctx, diff, []string{"internal/worker/**"}, v)
+	if len(advs) != 1 || !advs[0].DormantReawakened {
+		t.Fatalf("expected 1 dormant re-awakened advisory, got %+v", advs)
+	}
+
+	// Verify the Vault record itself transitioned from DORMANT -> APPLIED (#685 Hypothesis H2)
+	rec, err := v.Get(ctx, "RULE-DORMANT-685")
+	if err != nil {
+		t.Fatalf("v.Get: %v", err)
+	}
+	if rec.Status != "APPLIED" {
+		t.Fatalf("expected DORMANT rule to be re-awakened to APPLIED in Vault DB (#685), got status=%q", rec.Status)
 	}
 }

@@ -79,9 +79,14 @@ func openMemoryAdapter() *memory.LocalSQLiteMemoryAdapter {
 		}
 		exitRuntime("memory", "", "", cli.CodeRuntime, err, "", false)
 	}
-	// #411b: the promotion gate carries a real Jev sensor — promotion is
-	// Brain-side only, and the gate must not be a pass-through.
-	adapter.SetGateSensor(memorySensorAdapter(reflex.NewReflexGate().TriageMutation))
+	// #411b / #685: the promotion gate carries a dedicated Jev memory sensor
+	// that evaluates payloads both online and in deterministic offline fallback.
+	gate := reflex.NewReflexGate()
+	adapter.SetGateSensor(func(nakedPayload string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return gate.EvaluateMemoryEntry(ctx, nakedPayload)
+	})
 	return adapter
 }
 
@@ -277,6 +282,8 @@ func runMemoryRecall(args []string) {
 	fs := flag.NewFlagSet("memory recall", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	ctxStr := fs.String("context", "", "comma-separated key=value active operational context")
+	queryStr := fs.String("query", "", "optional lexical query for RRF hybrid ranking (#684)")
+	limitFlag := fs.Int("limit", 10, "maximum entries to return")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("memory", "recall", *traceID, err.Error(), "", *jsonl)
 	}
@@ -287,6 +294,26 @@ func runMemoryRecall(args []string) {
 	}
 	activeCtx := parseContextKeyValuePairs(*ctxStr)
 	now := float64(time.Now().UnixNano()) / 1e9
+	if strings.TrimSpace(*queryStr) != "" {
+		scored, err := adapter.RecallHybridRRF(context.Background(), *queryStr, nil, activeCtx, *limitFlag, now)
+		if err != nil {
+			exitRuntime("memory", "recall", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		entries := make([]*memory.MemoryEntry, len(scored))
+		for i, s := range scored {
+			entries[i] = s.Entry
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("memory_recall", "memory", "recall", map[string]any{"entries": entries, "ranked": scored, "count": len(entries)})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			return
+		}
+		for _, s := range scored {
+			fmt.Printf("%s\trrf=%.4f\t%s\t%s\n", s.Entry.ID, s.RRFScore, s.Entry.Kind, s.Entry.Payload)
+		}
+		return
+	}
 	entries, err := adapter.RecallContextualEntries(context.Background(), activeCtx, now)
 	if err != nil {
 		exitRuntime("memory", "recall", *traceID, cli.CodeRuntime, err, "", *jsonl)

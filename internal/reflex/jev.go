@@ -287,14 +287,18 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 
 	// Payload strictly asks for empirical risk and breach probability,
 	// NEVER asking the sensor to decide supervisor actions.
+	state := map[string]any{
+		"task_id":        req.TaskID,
+		"files_modified": req.FilesModified,
+		"diff_summary":   req.DiffSummary,
+		"allowed_paths":  req.AllowedPaths,
+	}
+	if req.ContextPacket != nil {
+		state["context_packet"] = req.ContextPacket
+	}
 	payload := map[string]any{
 		"model": g.model,
-		"state": map[string]any{
-			"task_id":        req.TaskID,
-			"files_modified": req.FilesModified,
-			"diff_summary":   req.DiffSummary,
-			"allowed_paths":  req.AllowedPaths,
-		},
+		"state": state,
 		"questions": map[string]any{
 			"risk_tier": map[string]any{
 				"type":         "score",
@@ -683,4 +687,68 @@ func globstarMatch(fileSegs, patSegs []string) bool {
 		return false
 	}
 	return globstarMatch(fileSegs[1:], patSegs[1:])
+}
+
+// EvaluateMemoryEntry evaluates a candidate memory payload for the ADR-0023
+// Memory Promotion Gate (#685). Unlike file-mutation TriageMutation (which requires
+// non-empty FilesModified/AllowedPaths), EvaluateMemoryEntry inspects text payloads
+// for hardcoded secrets, private keys, and prompt-injection patterns both online
+// via Jev and deterministically when offline.
+func (g *ReflexGate) EvaluateMemoryEntry(ctx context.Context, nakedPayload string) (string, error) {
+	trimmed := strings.TrimSpace(nakedPayload)
+	if trimmed == "" {
+		return "blocked", nil
+	}
+	if isPoisonedMemoryPayload(trimmed) {
+		return "blocked", nil
+	}
+
+	activeKey := g.currentKey()
+	if activeKey == "" {
+		return "clean", nil
+	}
+
+	sig, err := g.EmitSignal(ctx, TriageRequest{
+		TaskID:        "memory-promotion-gate",
+		FilesModified: []string{"docs/memory-note.md"},
+		AllowedPaths:  []string{"docs/*"},
+		DiffSummary:   trimmed,
+	})
+	if err != nil {
+		return "clean", nil
+	}
+	if sig.BreachProb >= 0.50 || sig.RiskScore >= 4.0 {
+		return "blocked", nil
+	}
+	return "clean", nil
+}
+
+func isPoisonedMemoryPayload(s string) bool {
+	lower := strings.ToLower(s)
+	injectionMarkers := []string{
+		"ignore previous instructions",
+		"ignore all previous instructions",
+		"disregard all prior",
+		"system override",
+		"grant root write receipt",
+		"/etc/passwd",
+		"/etc/shadow",
+		"-----begin rsa private key-----",
+		"-----begin openssh private key-----",
+		"-----begin private key-----",
+	}
+	for _, marker := range injectionMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, token := range strings.Fields(s) {
+		tok := strings.Trim(token, `"'.,;()[]{}`)
+		if (strings.HasPrefix(tok, "sk-") && len(tok) >= 20) ||
+			(strings.HasPrefix(tok, "ghp_") && len(tok) >= 24) ||
+			(strings.HasPrefix(tok, "AKIA") && len(tok) >= 16) {
+			return true
+		}
+	}
+	return false
 }
