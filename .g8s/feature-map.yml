@@ -777,9 +777,12 @@ features:
         - "eval"
         - "feedback"
         - "f0"
+        - "coordinator"
       envelope_kinds:
         - "f0_gate_check"
         - "f0_status"
+        - "coordinator_intake"
+        - "coordinator_mastery"
         - "ladder"
         - "autopilot_schedule"
         - "autopilot_config"

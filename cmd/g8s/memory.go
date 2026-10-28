@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/vault"
@@ -23,7 +24,7 @@ import (
 
 func runMemory(args []string) {
 	if len(args) == 0 {
-		exitUsage("memory", "", "", "usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import> [flags]", "Use 'g8s memory --help' for subcommand usage", false)
+		exitUsage("memory", "", "", "usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]", "Use 'g8s memory --help' for subcommand usage", false)
 	}
 	sub := args[0]
 	switch sub {
@@ -45,8 +46,14 @@ func runMemory(args []string) {
 		runMemoryExport(args[1:])
 	case "import":
 		runMemoryImport(args[1:])
+	case "autopsy":
+		runMemoryAutopsy(args[1:])
+	case "outcome":
+		runMemoryOutcome(args[1:])
+	case "compound":
+		runMemoryCompound(args[1:])
 	case "--help", "-h", "help":
-		fmt.Println("Usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import> [flags]")
+		fmt.Println("Usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  list                     List memory entries with lifecycle/trust labels")
 		fmt.Println("  revoke --session <id>    Bulk-revoke every entry promoted by a session (payload-hash tombstones, monotone)")
@@ -57,8 +64,11 @@ func runMemory(args []string) {
 		fmt.Println("  verify-anchors           Verify Knowledge Vault file/symbol/test anchors against the workspace (Citation Rot check)")
 		fmt.Println("  export                   Export portable Knowledge Vault records to JSONL (e.g. .g8s/knowledge-vault.jsonl)")
 		fmt.Println("  import                   Import portable Knowledge Vault records from JSONL")
+		fmt.Println("  autopsy                  Extract and propose an Experiential Autopsy lesson from a failure-to-fix trajectory (#689)")
+		fmt.Println("  outcome                  Record application outcome feedback (corroboration or counter-example) for recalled memories (#690)")
+		fmt.Println("  compound                 Auto-promote corroborated READY_FOR_DOCTRINE entries into the Knowledge Vault (#690)")
 	default:
-		exitUsage("memory", sub, "", fmt.Sprintf("unknown memory subcommand %q (valid: list, revoke, propose, supersede, recall, promote, verify-anchors, export, import)", sub), "", false)
+		exitUsage("memory", sub, "", fmt.Sprintf("unknown memory subcommand %q (valid: list, revoke, propose, supersede, recall, promote, verify-anchors, export, import, autopsy, outcome, compound)", sub), "", false)
 	}
 }
 
@@ -463,4 +473,164 @@ func runMemoryImport(args []string) {
 		return
 	}
 	fmt.Printf("imported %d knowledge records from %s\n", n, *filePath)
+}
+
+func runMemoryAutopsy(args []string) {
+	fs := flag.NewFlagSet("memory autopsy", flag.ExitOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	taskFlag := fs.String("task", "", "task ID to extract failure-to-fix trajectory from")
+	fs.StringVar(taskFlag, "task-id", "", "alias for --task")
+	prevTaskFlag := fs.String("previous-task", "", "optional previous failed task ID")
+	sessionFlag := fs.String("session", "", "optional session ID")
+	failedCheck := fs.String("failed-check", "", "failed check identifier (e.g. go_test, diff_guard)")
+	failedExit := fs.Int("failed-exit-code", 1, "non-zero exit code from the failed attempt")
+	diagnostic := fs.String("diagnostic", "", "diagnostic excerpt from the failed attempt")
+	fixSummary := fs.String("fix-summary", "", "summary of the fix that resolved the failure")
+	pkgName := fs.String("package", "", "spatial anchor package name")
+	filePath := fs.String("file", "", "spatial anchor source file path")
+	symbol := fs.String("symbol", "", "spatial anchor symbol name")
+	testFile := fs.String("test-file", "", "forensic anchor test file path")
+	testCase := fs.String("test-case", "", "forensic anchor test function name")
+	preconds := fs.String("preconditions", "", "comma-separated key=value contextual preconditions")
+	autoPropose := fs.Bool("auto-propose", true, "automatically propose the extracted lesson into memory.db through the DLP/Jev gate")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("memory", "autopsy", *traceID, err.Error(), "", *jsonl)
+	}
+	taskID := strings.TrimSpace(*taskFlag)
+	if taskID == "" && fs.NArg() > 0 {
+		taskID = strings.TrimSpace(fs.Arg(0))
+	}
+	if taskID == "" {
+		exitUsage("memory", "autopsy", *traceID, "--task <id> is required", "usage: g8s memory autopsy --task <id> [--diagnostic ...] [--fix-summary ...] [--auto-propose]", *jsonl)
+	}
+
+	traj := memory.AutopsyTrajectory{
+		TaskID:            taskID,
+		PreviousTaskID:    strings.TrimSpace(*prevTaskFlag),
+		SessionID:         strings.TrimSpace(*sessionFlag),
+		FailedCheck:       strings.TrimSpace(*failedCheck),
+		FailedExitCode:    *failedExit,
+		DiagnosticExcerpt: *diagnostic,
+		FixSummary:        *fixSummary,
+		Package:           strings.TrimSpace(*pkgName),
+		File:              strings.TrimSpace(*filePath),
+		Symbol:            strings.TrimSpace(*symbol),
+		TestFile:          strings.TrimSpace(*testFile),
+		TestCase:          strings.TrimSpace(*testCase),
+		Preconditions:     parseContextKeyValuePairs(*preconds),
+	}
+
+	// If diagnostic/fix not explicitly supplied, attempt extraction from controlplane store
+	if strings.TrimSpace(traj.DiagnosticExcerpt) == "" && strings.TrimSpace(traj.FixSummary) == "" {
+		if dbPath, err := databasePath(); err == nil {
+			if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
+				defer store.Close()
+				if t, tErr := store.GetTask(context.Background(), taskID); tErr == nil && t != nil {
+					if extracted, ok := memory.ExtractTrajectoryFromTask(context.Background(), store, t); ok {
+						if traj.PreviousTaskID == "" {
+							traj.PreviousTaskID = extracted.PreviousTaskID
+						}
+						if traj.FailedCheck == "" {
+							traj.FailedCheck = extracted.FailedCheck
+						}
+						traj.DiagnosticExcerpt = extracted.DiagnosticExcerpt
+						traj.FixSummary = extracted.FixSummary
+						if traj.File == "" {
+							traj.File = extracted.File
+						}
+					}
+				}
+			}
+		}
+	}
+
+	adapter := openMemoryAdapter()
+	defer adapter.Close()
+	if adapter.Vault() != nil {
+		defer adapter.Vault().Close()
+	}
+
+	report, err := adapter.RunExperientialAutopsy(context.Background(), traj, *autoPropose)
+	if err != nil {
+		exitRuntime("memory", "autopsy", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("memory_autopsy", "memory", "autopsy", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("autopsy %s: %s (auto_proposed=%v)\n", report.ProposedEntry.ID, report.SanitizedLesson, report.AutoProposed)
+}
+
+func runMemoryOutcome(args []string) {
+	fs := flag.NewFlagSet("memory outcome", flag.ExitOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	idsFlag := fs.String("ids", "", "comma-separated memory entry IDs to record outcome for (required)")
+	sessionFlag := fs.String("session", "f0", "session ID applying the memory")
+	passedFlag := fs.Bool("passed", true, "true if task passed verification on the first attempt; false on counter-example failure")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("memory", "outcome", *traceID, err.Error(), "", *jsonl)
+	}
+	var ids []string
+	for _, p := range strings.Split(*idsFlag, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			ids = append(ids, p)
+		}
+	}
+	if len(ids) == 0 {
+		exitUsage("memory", "outcome", *traceID, "--ids <id1,id2> is required", "usage: g8s memory outcome --ids <id1,id2> --session <id> [--passed=true|false]", *jsonl)
+	}
+	adapter := openMemoryAdapter()
+	defer adapter.Close()
+	if adapter.Vault() != nil {
+		defer adapter.Vault().Close()
+	}
+	report, err := adapter.RecordOutcome(context.Background(), ids, *sessionFlag, *passedFlag)
+	if err != nil {
+		exitRuntime("memory", "outcome", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("memory_outcome", "memory", "outcome", report)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("recorded outcome (passed=%v) for %d entries\n", *passedFlag, len(report.Updated))
+}
+
+func runMemoryCompound(args []string) {
+	fs := flag.NewFlagSet("memory compound", flag.ExitOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	pkgName := fs.String("package", "", "fallback spatial anchor package name")
+	filePath := fs.String("file", "", "fallback spatial anchor source file path")
+	symbol := fs.String("symbol", "", "fallback spatial anchor symbol name")
+	testFile := fs.String("test-file", "", "fallback forensic anchor test file path")
+	testCase := fs.String("test-case", "", "fallback forensic anchor test function name")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("memory", "compound", *traceID, err.Error(), "", *jsonl)
+	}
+	adapter := openMemoryAdapter()
+	defer adapter.Close()
+	if adapter.Vault() != nil {
+		defer adapter.Vault().Close()
+	}
+	promoted, err := adapter.CompoundReadyEntries(context.Background(), memory.CompoundOptions{
+		DefaultPackage:  *pkgName,
+		DefaultFile:     *filePath,
+		DefaultSymbol:   *symbol,
+		DefaultTestFile: *testFile,
+		DefaultTestCase: *testCase,
+	})
+	if err != nil {
+		exitRuntime("memory", "compound", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("memory_compound", "memory", "compound", map[string]any{"promoted": promoted, "count": len(promoted)})
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("compounded %d READY_FOR_DOCTRINE entries into Knowledge Vault\n", len(promoted))
 }

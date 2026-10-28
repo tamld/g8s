@@ -154,6 +154,11 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 		preconditions TEXT NOT NULL DEFAULT '{}',
 		superseded_by TEXT NOT NULL DEFAULT '',
 		valid_until REAL NOT NULL DEFAULT 0,
+		applied_count INTEGER NOT NULL DEFAULT 0,
+		first_pass_success_count INTEGER NOT NULL DEFAULT 0,
+		failure_after_recall_count INTEGER NOT NULL DEFAULT 0,
+		corroborating_sessions TEXT NOT NULL DEFAULT '[]',
+		review_flag TEXT NOT NULL DEFAULT '',
 		created_at REAL NOT NULL,
 		updated_at REAL NOT NULL
 	);
@@ -175,6 +180,11 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN preconditions TEXT NOT NULL DEFAULT '{}'`)
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`)
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN valid_until REAL NOT NULL DEFAULT 0`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN applied_count INTEGER NOT NULL DEFAULT 0`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN first_pass_success_count INTEGER NOT NULL DEFAULT 0`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN failure_after_recall_count INTEGER NOT NULL DEFAULT 0`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN corroborating_sessions TEXT NOT NULL DEFAULT '[]'`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN review_flag TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 

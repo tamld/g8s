@@ -257,6 +257,8 @@ func main() {
 		runClaim(os.Args[2:])
 	case "f0":
 		runF0(os.Args[2:])
+	case "coordinator":
+		runCoordinator(os.Args[2:])
 	case "scorecard":
 		runScorecard(os.Args[2:])
 	case "audit":

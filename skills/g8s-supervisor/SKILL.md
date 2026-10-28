@@ -108,6 +108,9 @@ Before designing or dispatching any non-trivial feature, architectural change, o
 3. **Pillar 3 — Deterministic Skill Routing & Chaining (`skill-router.py --strict`)**:
    - Query `python3 ~/.agents/skills/_shared/scripts/skill-router.py --strict "<task>"` at task intake and chain skills deterministically across the full lifecycle:
      `ck:xia` / `ck:research` -> `wiki-deep-why` -> `wiki-socratic` -> `ck:predict` -> `ck:plan` -> `prove` (FSM + RED test before code) -> `ck:cook` -> `code-simplification` -> `g8s feature audit --live`.
+4. **Experiential Mastery Closed Loop (`g8s coordinator intake|mastery` & `g8s memory autopsy|outcome|compound`)**:
+   - Run `./bin/g8s coordinator intake --goal "<objective>" [--files "<paths>"] --json` (`#688`) to mechanically synthesize feature orientation, upstream research gate, 3-round Root-Core probes, and tool/skill/worker routing.
+   - Harvest failure-to-fix lessons via `./bin/g8s memory autopsy --task <id> --auto-propose --json` (`#689`), record corroborations/counter-examples via `./bin/g8s memory outcome --ids <id> --session <sid> --passed=true|false` (`#690`), compound corroborated entries into `DOCTRINE` via `./bin/g8s memory compound`, and audit domain mastery via `./bin/g8s coordinator mastery --json`.
 
 
 ## Universal Config-Driven LLM Call Consumer, 9Router Fleet & Zero-Trust Execution Hardening (DELTA-25..31, v0.19.1)

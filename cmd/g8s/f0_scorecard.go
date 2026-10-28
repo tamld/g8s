@@ -15,9 +15,12 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/routing"
+	"github.com/tamld/g8s/internal/vault"
 )
 
 func extractTaskProviderAndModel(task *controlplane.Task) (string, string) {
@@ -113,7 +116,8 @@ func recordWorkerTaskTelemetry(store *controlplane.Store, task *controlplane.Tas
 }
 
 // recordVerifyTaskTelemetry records mechanical verification outcomes into the
-// unified model quality scorecard (#678, DELTA-45).
+// unified model quality scorecard (#678, DELTA-45) and triggers the automatic
+// Experiential Autopsy Loop (#689) when a task passes after a prior failure.
 func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool) {
 	if task == nil {
 		return
@@ -127,6 +131,33 @@ func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool) {
 		VerifyPassed:   passed,
 		RecordedAt:     time.Now().UTC().Format(time.RFC3339),
 	})
+
+	if passed {
+		if dbPath, err := databasePath(); err == nil {
+			ctx := context.Background()
+			if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
+				defer store.Close()
+				if traj, ok := memory.ExtractTrajectoryFromTask(ctx, store, task); ok && traj != nil {
+					baseDir := filepath.Dir(dbPath)
+					v, _ := vault.NewVault(filepath.Join(baseDir, "vault.db"), nil)
+					if v != nil {
+						defer v.Close()
+					}
+					if adapter, aErr := memory.NewLocalSQLiteMemoryAdapter(memory.AdapterOptions{
+						DBPath: filepath.Join(baseDir, "memory.db"),
+						Vault:  v,
+					}); aErr == nil {
+						defer adapter.Close()
+						gate := reflex.NewReflexGate()
+						adapter.SetGateSensor(func(nakedPayload string) (string, error) {
+							return gate.EvaluateMemoryEntry(ctx, nakedPayload)
+						})
+						_, _ = adapter.RunExperientialAutopsy(ctx, *traj, true)
+					}
+				}
+			}
+		}
+	}
 }
 
 // recordDeliverTaskTelemetry records worktree delivery & WriteReceipt tightness

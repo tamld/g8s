@@ -834,6 +834,30 @@ g8s charter portfolio --json
 
 ---
 
+### 38. `g8s coordinator` & `g8s memory autopsy|outcome|compound` — Coordinator Experiential Mastery Pipeline (`#688`, `#689`, `#690`)
+Drives the closed-loop Coordinator expertise lifecycle (`Intake -> Autopsy -> Outcome Feedback -> Compounding -> Domain Mastery Scorecard`):
+- `g8s coordinator intake`: Synthesizes feature orientation, upstream research gate, 3-round Root-Core dialectical questions (`wiki-deep-why -> wiki-socratic -> ck:predict`), and deterministic skill/tool/worker routing.
+- `g8s memory autopsy`: Extracts sanitized failure-to-fix lessons (`Học -> Sai -> Sửa -> Rút kinh nghiệm`) with `Causality`, `Spatial`, and `Forensic` anchors.
+- `g8s memory outcome` & `g8s memory compound`: Tracks first-pass verification corroborations vs. counter-example failures (`Ứng dụng -> Giỏi hơn -> Trở thành chuyên gia`) and promotes `READY_FOR_DOCTRINE` memories into `vault.db`.
+- `g8s coordinator mastery`: Computes per-domain mastery tiers (`NOVICE`, `PRACTITIONER`, `EXPERT`, `MASTER`) across `.g8s/feature-map.yml`.
+
+```sh
+# 1. Cognitive Intake & 3-Round Dialectical Deconstruction (#688)
+g8s coordinator intake --goal "Add experiential autopsy loop" --files "internal/memory/autopsy.go" --json
+
+# 2. Extract & Propose Experiential Autopsy on Failure-to-Fix (#689)
+g8s memory autopsy --task <task-id> --failed-check "go_test" --diagnostic "..." --fix-summary "..." --file "internal/memory/autopsy.go" --auto-propose --json
+
+# 3. Record Outcome Feedback & Compound Corroborated Entries (#690)
+g8s memory outcome --ids <entry-id> --session <sess-id> --passed=true --json
+g8s memory compound --file "internal/memory/autopsy.go" --test-file "internal/memory/experiential_pipeline_test.go" --json
+
+# 4. Inspect Per-Domain Mastery Scorecard (#690)
+g8s coordinator mastery --json
+```
+
+---
+
 ## Standalone 1-Liner Installation
 
 Install or upgrade `g8s` directly via curl:

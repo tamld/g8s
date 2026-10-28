@@ -63,25 +63,30 @@ const (
 	ScopeGlobal  MemoryScope = "global"
 )
 
-// MemoryEntry is one lifecycle-tracked memory item (MemoryEntry v1 + Contextual Envelope).
+// MemoryEntry is one lifecycle-tracked memory item (MemoryEntry v1 + Contextual Envelope + Mastery Counters).
 type MemoryEntry struct {
-	ID            string            `json:"id"`
-	Kind          MemoryKind        `json:"kind"`
-	Lifecycle     MemoryLifecycle   `json:"lifecycle"`
-	Trust         MemoryTrust       `json:"trust"`
-	Salience      int               `json:"salience"`
-	LastUsedAt    float64           `json:"last_used_at"`
-	Scope         MemoryScope       `json:"scope"`
-	SessionID     string            `json:"session_id"`
-	TaskID        string            `json:"task_id"`
-	PromotedBy    string            `json:"promoted_by"`
-	Payload       string            `json:"payload"`
-	PayloadHash   string            `json:"payload_hash"`
-	Preconditions map[string]string `json:"preconditions,omitempty"`
-	SupersededBy  string            `json:"superseded_by,omitempty"`
-	ValidUntil    float64           `json:"valid_until,omitempty"`
-	CreatedAt     float64           `json:"created_at"`
-	UpdatedAt     float64           `json:"updated_at"`
+	ID                      string            `json:"id"`
+	Kind                    MemoryKind        `json:"kind"`
+	Lifecycle               MemoryLifecycle   `json:"lifecycle"`
+	Trust                   MemoryTrust       `json:"trust"`
+	Salience                int               `json:"salience"`
+	LastUsedAt              float64           `json:"last_used_at"`
+	Scope                   MemoryScope       `json:"scope"`
+	SessionID               string            `json:"session_id"`
+	TaskID                  string            `json:"task_id"`
+	PromotedBy              string            `json:"promoted_by"`
+	Payload                 string            `json:"payload"`
+	PayloadHash             string            `json:"payload_hash"`
+	Preconditions           map[string]string `json:"preconditions,omitempty"`
+	SupersededBy            string            `json:"superseded_by,omitempty"`
+	ValidUntil              float64           `json:"valid_until,omitempty"`
+	AppliedCount            int               `json:"applied_count,omitempty"`
+	FirstPassSuccessCount   int               `json:"first_pass_success_count,omitempty"`
+	FailureAfterRecallCount int               `json:"failure_after_recall_count,omitempty"`
+	CorroboratingSessions   []string          `json:"corroborating_sessions,omitempty"`
+	ReviewFlag              string            `json:"review_flag,omitempty"`
+	CreatedAt               float64           `json:"created_at"`
+	UpdatedAt               float64           `json:"updated_at"`
 }
 
 // GateSensor scores the NAKED payload (trust labels stripped — G3). The
@@ -492,16 +497,18 @@ func (a *LocalSQLiteMemoryAdapter) ListEntries(ctx context.Context, filter Memor
 	return out, rows.Err()
 }
 
-const entryColumns = `id, kind, lifecycle, trust, salience, last_used_at, scope, session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, created_at, updated_at`
+const entryColumns = `id, kind, lifecycle, trust, salience, last_used_at, scope, session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, applied_count, first_pass_success_count, failure_after_recall_count, corroborating_sessions, review_flag, created_at, updated_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanEntry(row rowScanner) (*MemoryEntry, error) {
 	e := &MemoryEntry{}
-	var kind, lifecycle, trust, scope, precondJSON string
+	var kind, lifecycle, trust, scope, precondJSON, sessionsJSON string
 	err := row.Scan(&e.ID, &kind, &lifecycle, &trust, &e.Salience, &e.LastUsedAt, &scope,
 		&e.SessionID, &e.TaskID, &e.PromotedBy, &e.Payload, &e.PayloadHash,
-		&precondJSON, &e.SupersededBy, &e.ValidUntil, &e.CreatedAt, &e.UpdatedAt)
+		&precondJSON, &e.SupersededBy, &e.ValidUntil,
+		&e.AppliedCount, &e.FirstPassSuccessCount, &e.FailureAfterRecallCount, &sessionsJSON, &e.ReviewFlag,
+		&e.CreatedAt, &e.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrUnknownEntry
 	}
@@ -514,6 +521,9 @@ func scanEntry(row rowScanner) (*MemoryEntry, error) {
 	e.Scope = MemoryScope(scope)
 	if precondJSON != "" && precondJSON != "{}" {
 		_ = json.Unmarshal([]byte(precondJSON), &e.Preconditions)
+	}
+	if sessionsJSON != "" && sessionsJSON != "[]" {
+		_ = json.Unmarshal([]byte(sessionsJSON), &e.CorroboratingSessions)
 	}
 	return e, nil
 }
