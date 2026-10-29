@@ -126,9 +126,9 @@ During `campaign-20261024`, F0 (`agy` / `codex` handoff) orchestrated live `Jev`
 | `#655` | `DELTA-30` (`30-server-non-loopback-bind-auth.md`) | Refuses non-loopback HTTP binds (`0.0.0.0`, `::`, LAN IPs) unless `G8S_API_TOKEN` is set; strips trailing slashes | `TestResolveServerRuntimeConfigRequiresTokenOnNonLoopback` (`PR #647` / `7e41030`) | **PASS** |
 | `#648` | `DELTA-31` (`31-mechanical-dod-check-binding.md`) | `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any criterion `MET` | `TestEvaluateDoDMatrixRequiresMechanicalEvidence`, `TestVerifyDoDFailsOnProseReportedDoDWithoutChecks` (`b39847f`) | **PASS** |
 
-## aegis v0.1.0 & v0.2.0 Sovereign Graduation & Bidirectional Synchronization (2026-10-28, Issues #694–#697)
+## aegis v0.1.0, v0.2.0 & v0.3.0 Sovereign Graduation & Bidirectional Synchronization (2026-10-28..29, Issues #694–#697)
 
-Following deep archaeological distillation of `tamld/aegis` (`8,058` files slimmed to `120` tracked files, zero external runtime dependencies), 4 core mechanisms were ported into `tamld/g8s` (`3d4c5b9`) and `tamld/aegis` graduated through `v0.1.0` (`daf92e070`) and `v0.2.0` (`18d7339f1`):
+Following deep archaeological distillation of `tamld/aegis` (`8,058` files slimmed to `125` tracked files, zero external runtime dependencies), 4 core mechanisms were ported into `tamld/g8s` (`3d4c5b9`) and `tamld/aegis` graduated through `v0.1.0` (`daf92e070`), `v0.2.0` (`18d7339f1`), and `v0.3.0` (`2824007d0`):
 
 | Synchronization Direction | Issue / Delta | Capability / Contract | Verification Evidence | Verdict |
 | :--- | :--- | :--- | :--- | :---: |
@@ -137,6 +137,7 @@ Following deep archaeological distillation of `tamld/aegis` (`8,058` files slimm
 | `aegis -> g8s` | `#696` (`DELTA-48`) | Sybil-resistant `CaseLaw ROI` (`lessons_blocked_repeat`) & zero-ROI synaptic pruning | `internal/vault/caselaw_roi_test.go` (`3d4c5b9`) | **PASS** |
 | `aegis -> g8s` | `#697` (`DELTA-49`) | Proportional 4-Stop `EXPRESS` Lane (`INIT -> EXECUTING -> VERIFYING -> DONE`) | `internal/orchestrator/express_lane_test.go` (`3d4c5b9`) | **PASS** |
 | `g8s <-> aegis` | `DELTA-01..09` (`v0.2.0`) | SpecKit (`spec/domains/01..07`) + OpenSpec (`DELTA-01..09`), native `node:sqlite` WAL persistence, Time-Travel Fork/Rewind, Side-by-Side Diff Inspector | `g8s feature verify --strict` (`valid: true, 120 tracked, 0 orphans`) & `g8s feature audit --live` (`7/7 VERIFIED_LIVE`) | **PASS** |
+| `g8s <-> aegis` | `DELTA-10..12` (`v0.3.0`) | SpecKit (`spec/domains/08`) + OpenSpec (`DELTA-10..12`, `CAP-16..18`), Federated `g8s` S1/S2/S3-A Receipt Bridge (`ingestG8sVerifyReceipt`), 3-Channel Zero-Dep LLM Consumer & `S3-A` Double-Blind Adjudicator (`buildBlindReviewPacket`, `runBlindAdjudication`), Public CI Gates 7–8 (`tsc --noEmit`, `git diff --exit-code dist/`, OS Matrix) | `g8s feature verify --strict` (`valid: true, 125 tracked, 0 orphans`), `g8s feature audit --live` (`8/8 VERIFIED_LIVE`), `npm test` (`18/18 PASS`) | **PASS** |
 
 
 
