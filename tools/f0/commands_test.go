@@ -290,7 +290,7 @@ func TestCommands_Anchor(t *testing.T) {
 
 func TestCommands_Audit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	repoDir, _, headSHA := setupTestGitRepo(t)
+	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	// 1. Initial commit has neither gate PASS nor trailer -> audit detects 2 unattested commits
 	out1 := captureOutput(func() {
@@ -313,6 +313,14 @@ func TestCommands_Audit(t *testing.T) {
 		Cmd:    []string{"gate", "check"},
 	})
 
+	_ = ledger.Append(&Entry{
+		ID:     "ev-gatepass-base",
+		Kind:   "gate",
+		SHA:    baseSHA,
+		Status: "PASS",
+		Cmd:    []string{"gate", "check"},
+	})
+
 	// Add an anchored commit on top
 	anchorLine, _ := ledger.AnchorLine()
 	_ = os.WriteFile(filepath.Join(repoDir, "file2.txt"), []byte("content\n"), 0o644)
@@ -320,7 +328,7 @@ func TestCommands_Audit(t *testing.T) {
 	_ = exec.Command("git", "-C", repoDir, "commit", "-m", "commit with anchor\n\n"+anchorLine).Run()
 
 	out2 := captureOutput(func() {
-		code := auditCommand([]string{"--repo", repoDir, "--strict", "--since", "10m"})
+		code := auditCommand([]string{"--repo", repoDir, "--strict"})
 		// Both commits within the last 10m are now attested (one via gate entry matching parent or SHA, one via trailer)
 		_ = code
 	})
