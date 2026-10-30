@@ -216,33 +216,13 @@ type DispatchVerdict struct {
 // CheckDispatch evaluates whether dispatch to provider should be refused.
 // Only required-probe FAIL verdicts refuse; UNVERIFIED never blocks.
 func (m *Matrix) CheckDispatch(providerName string) DispatchVerdict {
-	return m.CheckDispatchWithReceipt(providerName, false)
-}
-
-// CheckDispatchWithReceipt evaluates whether dispatch to provider should be refused,
-// accounting for whether the task is bound to a WriteReceipt. When hasReceipt is true
-// and a CLI agent's P6 (file_edit_lands) probe passed, an adversarial P5 (worktree_confinement)
-// failure is mitigated by the isolated worktree + post-run VerifyWorktreeDiffScope receipt boundary.
-func (m *Matrix) CheckDispatchWithReceipt(providerName string, hasReceipt bool) DispatchVerdict {
 	v := DispatchVerdict{Provider: providerName}
 	rep, ok := m.Find(providerName)
 	if !ok {
 		return v
 	}
 	v.Known = true
-	failed := rep.FailedRequired()
-	if hasReceipt && rep.Class == ClassCLIAgent {
-		if p6, okP6 := rep.Probe(ProbeP6); okP6 && p6.Status == StatusPass {
-			var filtered []ProbeID
-			for _, id := range failed {
-				if id != ProbeP5 {
-					filtered = append(filtered, id)
-				}
-			}
-			failed = filtered
-		}
-	}
-	v.FailedRequired = failed
+	v.FailedRequired = rep.FailedRequired()
 	if len(v.FailedRequired) > 0 {
 		v.Refuse = true
 		ids := make([]string, len(v.FailedRequired))
@@ -258,12 +238,6 @@ func (m *Matrix) CheckDispatchWithReceipt(providerName string, hasReceipt bool) 
 // CheckDispatchFromDir loads the matrix found upward from dir (if any) and
 // evaluates the dispatch gate. A missing matrix yields a non-refusing verdict.
 func CheckDispatchFromDir(dir, providerName string) (DispatchVerdict, error) {
-	return CheckDispatchFromDirWithReceipt(dir, providerName, false)
-}
-
-// CheckDispatchFromDirWithReceipt loads the matrix found upward from dir (if any)
-// and evaluates the dispatch gate with WriteReceipt mitigation.
-func CheckDispatchFromDirWithReceipt(dir, providerName string, hasReceipt bool) (DispatchVerdict, error) {
 	path, ok := FindMatrixFile(dir)
 	if !ok || strings.TrimSpace(providerName) == "" {
 		return DispatchVerdict{Provider: providerName}, nil
@@ -272,5 +246,5 @@ func CheckDispatchFromDirWithReceipt(dir, providerName string, hasReceipt bool) 
 	if err != nil {
 		return DispatchVerdict{Provider: providerName}, err
 	}
-	return m.CheckDispatchWithReceipt(providerName, hasReceipt), nil
+	return m.CheckDispatch(providerName), nil
 }
