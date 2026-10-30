@@ -328,7 +328,7 @@ func TestCommands_Audit(t *testing.T) {
 	_ = exec.Command("git", "-C", repoDir, "commit", "-m", "commit with anchor\n\n"+anchorLine).Run()
 
 	out2 := captureOutput(func() {
-		code := auditCommand([]string{"--repo", repoDir, "--strict"})
+		code := auditCommand([]string{"--repo", repoDir, "--strict", "--since", "10m"})
 		// Both commits within the last 10m are now attested (one via gate entry matching parent or SHA, one via trailer)
 		_ = code
 	})
