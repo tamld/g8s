@@ -39,7 +39,7 @@ func TestComputeScorecardAndDynamicQuarantine(t *testing.T) {
 			VerifyChecked:  true,
 			VerifyPassed:   false,
 			DurationMs:     12000,
-			ErrorReason:    "upstream 502 bad gateway",
+			ErrorReason:    "upstream 502 bad gateway from http://192.168.10.25:20128/v1/chat/completions",
 		}); err != nil {
 			t.Fatalf("RecordModelOutcome broken-combo: %v", err)
 		}
@@ -93,6 +93,9 @@ func TestComputeScorecardAndDynamicQuarantine(t *testing.T) {
 	}
 	if byModel["broken-combo"].Recommendation != "DEMOTE_OR_FALLBACK" {
 		t.Errorf("broken-combo recommendation = %s, want DEMOTE_OR_FALLBACK", byModel["broken-combo"].Recommendation)
+	}
+	if byModel["broken-combo"].LastError != "upstream 502 bad gateway from http://<redacted-lan-ip>:20128/v1/chat/completions" {
+		t.Errorf("broken-combo LastError = %q, want RFC1918 IP redacted", byModel["broken-combo"].LastError)
 	}
 
 	if byModel["degraded-combo"].HealthStatus != ModelHealthDegraded {

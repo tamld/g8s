@@ -156,6 +156,10 @@ func TestVerifyCLI_ReadOnlyTaskUnregistered(t *testing.T) {
 		t.Fatalf("submit task: %v", err)
 	}
 
+	stateDir := filepath.Dir(dbPath)
+	t.Setenv("G8S_STATE_DIR", stateDir)
+	t.Setenv("G8S_JIT_WHISPER", "1")
+
 	var stdout, stderr bytes.Buffer
 	code := runVerifyWithIO([]string{"--task", task.TaskID, "--json"}, &stdout, &stderr, dbPath)
 	if code != 0 {
@@ -184,6 +188,12 @@ func TestVerifyCLI_ReadOnlyTaskUnregistered(t *testing.T) {
 	}
 	if v.Outcome != verifier.OutcomeUnregistered {
 		t.Errorf("verdict.Outcome = %q, want unregistered", v.Outcome)
+	}
+	if !strings.Contains(v.JITBaton, "[jit:baton:UNREGISTERED]") {
+		t.Errorf("verdict.JITBaton = %q, want [jit:baton:UNREGISTERED]", v.JITBaton)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "model_quality_events.jsonl")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no model_quality_events.jsonl written for unregistered read_only task, got statErr=%v", statErr)
 	}
 }
 

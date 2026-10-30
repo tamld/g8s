@@ -343,12 +343,25 @@ func TestLLMCallApplyFiles(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
+	var receivedUserPrompt string
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-free"}]}`))
 		case "/v1/chat/completions":
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			for _, m := range reqBody.Messages {
+				if m.Role == "user" {
+					receivedUserPrompt = m.Content
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			respContent := "Here is the deliverable:\n```file:gen/result.txt\nline 1\nline 2\n```\nDone."
 			payload := map[string]any{
@@ -390,6 +403,10 @@ func TestLLMCallApplyFiles(t *testing.T) {
 	expected := "line 1\nline 2\n"
 	if string(content) != expected {
 		t.Errorf("got file content %q, want %q", string(content), expected)
+	}
+
+	if !strings.Contains(receivedUserPrompt, "```file:relative/path/to/file") {
+		t.Errorf("expected apply-files format contract in user prompt, got %q", receivedUserPrompt)
 	}
 }
 

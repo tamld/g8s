@@ -144,6 +144,8 @@ func openOptionalVaultForGrounding() *vault.Vault {
 	return v
 }
 
+const applyFilesFormatContract = "\n\n--- FILE OUTPUT CONTRACT ---\nWhen creating or modifying files, you MUST emit the complete file contents inside a fenced block starting with ```file:relative/path/to/file and ending with ```. Do not emit JSON tool calls (such as read_file/write_file) or partial diffs.\n"
+
 func extractFileBlocks(text string) []fileBlock {
 	var blocks []fileBlock
 	lines := strings.Split(text, "\n")
@@ -557,6 +559,11 @@ func runLLMCall(args []string) {
 			activeReceiptID = receiptID
 			activeReceiptMgr = rcMgr
 		}
+	}
+
+	if applyFilesEnabled && !strings.Contains(prompt, "```file:") && !strings.Contains(spec.SystemPrompt, "```file:") {
+		prompt += applyFilesFormatContract
+		spec.Brief = prompt
 	}
 
 	// #661: Pre-Execution Grounding Hydration (toolchain versions + repo-scoped Vault whispers)
