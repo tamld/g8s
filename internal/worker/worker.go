@@ -93,19 +93,31 @@ func agyStreamErrorTail(stdoutText string) bool {
 // parseAGYResult scans the captured stdout for AGY JSONL result format.
 // Returns the last AGY result found, or nil if none.
 func parseAGYResult(stdoutText string) *agyResult {
-	lines := strings.Split(stdoutText, "\n")
-	var lastResult *agyResult
-	for _, line := range lines {
+	remText := stdoutText
+	for len(remText) > 0 {
+		var line string
+		idx := strings.LastIndexByte(remText, '\n')
+		if idx >= 0 {
+			line = remText[idx+1:]
+			remText = remText[:idx]
+		} else {
+			line = remText
+			remText = ""
+		}
+
 		line = strings.TrimSpace(line)
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
+		if !strings.Contains(line, `"status"`) {
+			continue
+		}
 		var ar agyResult
 		if json.Unmarshal([]byte(line), &ar) == nil && ar.Result.Status != "" {
-			lastResult = &ar
+			return &ar
 		}
 	}
-	return lastResult
+	return nil
 }
 
 // extractAGYUsage scans captured stdout for token usage reported by AGY in
@@ -114,12 +126,27 @@ func parseAGYResult(stdoutText string) *agyResult {
 // timeout) without a terminal result event, per-step step_update usage records
 // are summed so partial runs report accurate cumulative token consumption.
 func extractAGYUsage(stdoutText string) *agyUsage {
-	lines := strings.Split(stdoutText, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+	remText := stdoutText
+	for len(remText) > 0 {
+		var line string
+		idx := strings.LastIndexByte(remText, '\n')
+		if idx >= 0 {
+			line = remText[idx+1:]
+			remText = remText[:idx]
+		} else {
+			line = remText
+			remText = ""
+		}
+
+		line = strings.TrimSpace(line)
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
+
+		if !strings.Contains(line, `"usage"`) {
+			continue
+		}
+
 		var ar agyResult
 		if json.Unmarshal([]byte(line), &ar) == nil && ar.Result.Usage != nil {
 			return ar.Result.Usage
@@ -134,11 +161,27 @@ func extractAGYUsage(stdoutText string) *agyUsage {
 
 	var sum agyUsage
 	foundStepUsage := false
-	for _, rawLine := range lines {
-		line := strings.TrimSpace(rawLine)
+	remText = stdoutText
+	for len(remText) > 0 {
+		var line string
+		idx := strings.IndexByte(remText, '\n')
+		if idx >= 0 {
+			line = remText[:idx]
+			remText = remText[idx+1:]
+		} else {
+			line = remText
+			remText = ""
+		}
+
+		line = strings.TrimSpace(line)
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
+
+		if !strings.Contains(line, `"step_update"`) {
+			continue
+		}
+
 		var probe struct {
 			Step *struct {
 				Usage *agyUsage `json:"usage"`
@@ -154,6 +197,7 @@ func extractAGYUsage(stdoutText string) *agyUsage {
 			foundStepUsage = true
 		}
 	}
+
 	if foundStepUsage {
 		return &sum
 	}
