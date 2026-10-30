@@ -145,7 +145,18 @@ func TestStoreRunnerAndDispatchGate(t *testing.T) {
 			newResult(ClassCLIAgent, ProbeP0, "static", StatusFail, "version failed", nil),
 		},
 	}
-	m.Providers = append(m.Providers, failRep)
+	// Provider with P5 fail but P6 pass to test CheckDispatchFromDirWithReceipt mitigation
+	mitigatedRep := ProviderReport{
+		Name:       "p5-fail-cli",
+		Class:      ClassCLIAgent,
+		Mode:       "static",
+		LivePolicy: "free",
+		Probes: []ProbeResult{
+			newResult(ClassCLIAgent, ProbeP5, "static", StatusFail, "worktree escape detected", nil),
+			newResult(ClassCLIAgent, ProbeP6, "static", StatusPass, "edit lands", nil),
+		},
+	}
+	m.Providers = append(m.Providers, failRep, mitigatedRep)
 
 	merged, err := WriteMatrix(matrixPath, m)
 	if err != nil {
@@ -171,5 +182,13 @@ func TestStoreRunnerAndDispatchGate(t *testing.T) {
 	vUnv, err := CheckDispatchFromDir(subDir, "ollama")
 	if err != nil || vUnv.Refuse {
 		t.Fatalf("expected UNVERIFIED ollama not to refuse dispatch, got %+v (err=%v)", vUnv, err)
+	}
+	vMitigatedNoReceipt, err := CheckDispatchFromDirWithReceipt(subDir, "p5-fail-cli", false)
+	if err != nil || !vMitigatedNoReceipt.Refuse || len(vMitigatedNoReceipt.FailedRequired) != 1 || vMitigatedNoReceipt.FailedRequired[0] != ProbeP5 {
+		t.Fatalf("expected p5-fail-cli without receipt to refuse dispatch with P5 fail, got %+v (err=%v)", vMitigatedNoReceipt, err)
+	}
+	vMitigatedWithReceipt, err := CheckDispatchFromDirWithReceipt(subDir, "p5-fail-cli", true)
+	if err != nil || vMitigatedWithReceipt.Refuse || len(vMitigatedWithReceipt.FailedRequired) != 0 {
+		t.Fatalf("expected p5-fail-cli with receipt to mitigate P5 and allow dispatch, got %+v (err=%v)", vMitigatedWithReceipt, err)
 	}
 }
