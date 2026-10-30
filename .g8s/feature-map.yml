@@ -887,6 +887,7 @@ features:
     collision_domain: "mcp-daemon"
     owned_paths:
       - "internal/mcp/**"
+      - "!internal/mcp/mesh*.go"
       - "internal/server/**"
       - "internal/service/**"
       - "cmd/g8s/serve*.go"
@@ -1033,6 +1034,7 @@ features:
       - "!cmd/g8s/cleanup*.go"
       - "!cmd/g8s/fleet*.go"
       - "!cmd/g8s/feature*.go"
+      - "!cmd/g8s/coordinator_mesh*.go"
       - "internal/cli/**"
       - "internal/initwiz/**"
       - "internal/completion/**"
@@ -1154,4 +1156,43 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-PLATFORM-CLI-01"
+      direct_consumers: []
+
+  - id: "FEAT-COORDINATOR-MESH-01"
+    title: "Equal-Peer Coordinator Ledger & Scoped Task Claims"
+    persona_story: "As an equal-peer F0 coordinator, I need an explicit-directory SQLite WAL mesh ledger for node incarnations, quota observations, typed inbox messages, and scoped task claims so that multiple coordinators interoperate without shared worker queues or automatic takeover."
+    srs_reqs:
+      - "FR-9"
+      - "FR-7"
+    openspec_deltas:
+      - "DELTA-46"
+    code_paths:
+      - "internal/mesh/**"
+      - "cmd/g8s/coordinator_mesh.go"
+      - "internal/mcp/mesh.go"
+    collision_domain: "peer-coordination"
+    owned_paths:
+      - "internal/mesh/**"
+      - "cmd/g8s/coordinator_mesh*.go"
+      - "internal/mcp/mesh*.go"
+    shared_paths:
+      - "cmd/g8s/main.go"
+      - "docs/user-guide/cli-reference.md"
+    interfaces:
+      mcp_tools:
+        - "g8s_coordinator_mesh"
+      envelope_kinds:
+        - "coordinator_mesh"
+      go_packages:
+        - "internal/mesh"
+    invariants:
+      - "Explicit-directory SQLite WAL ledger with atomic immediate claim and revisioned artifact acceptance (DELTA-46)"
+      - "Equal-peer F0 access control rejecting F1/F2 worker mutation and stale incarnations"
+    visible_tests:
+      - "internal/mesh/claims_test.go"
+      - "internal/mesh/messages_test.go"
+      - "internal/mcp/mesh_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
       direct_consumers: []

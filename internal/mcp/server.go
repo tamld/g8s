@@ -171,6 +171,7 @@ func (s *Server) RegisterTools() error {
 		"g8s_skills_list":      s.skillsListTool,
 		"g8s_skills_read":      s.skillsReadTool,
 		"g8s_context_pack":     s.contextPackTool,
+		"g8s_coordinator_mesh": s.coordinatorMeshTool,
 	}
 	s.list = []toolDescriptor{
 		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
@@ -195,6 +196,7 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"tier":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
 		{Name: "g8s_skills_read", Description: "Read a verified skill (SKILL.md) by name or skill://g8s/ URI with optional expected_digest TOCTOU check (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"expected_digest":{"type":"string"},"bank_dir":{"type":"string"}},"required":["name"]}`)},
 		{Name: "g8s_context_pack", Description: "Pure-Go 4-tier AST elision (FULL/SKEL/SIGS/TREE), Personalized PageRank + BM25F, and Multiple-Choice Knapsack context compressor (DELTA-36).", InputSchema: json.RawMessage(`{"type":"object","properties":{"root_dir":{"type":"string"},"root":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"allowed_paths":{"type":"array","items":{"type":"string"}},"focus_query":{"type":"string"},"focus":{"type":"string"},"budget_tokens":{"type":"integer"},"budget":{"type":"integer"}}}`)},
+		{Name: "g8s_coordinator_mesh", Description: "Execute coordinator mesh operations (register, quota-publish, send, inbox, ack, claim, release, accept, snapshot, wait) against a SQLite mesh ledger.", InputSchema: json.RawMessage(`{"type":"object","properties":{"mesh_dir":{"type":"string","minLength":1},"operation":{"type":"string","enum":["register","quota-publish","send","inbox","ack","claim","release","accept","snapshot","wait"]},"input":{"type":"object"}},"required":["mesh_dir","operation","input"],"additionalProperties":false}`)},
 	}
 	return nil
 }

@@ -521,6 +521,12 @@
       "title": "5-Axis F1/F2/Tool/Skill/Receipt Cross-Evaluation & Kaizen Engine",
       "path": "spec/openspec/45-five-axis-kaizen-scorecard-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-46",
+      "title": "Peer Coordinator Ledger",
+      "path": "spec/openspec/46-peer-coordinator-ledger-spec.md",
+      "status": "PROPOSED"
     }
   ],
   "milestones": {

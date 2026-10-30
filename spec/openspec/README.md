@@ -53,6 +53,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-42`](42-premise-challenge-and-sycophancy-gate-spec.md)** | Premise Challenge & Anti-Sycophancy Evidence Gate | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-43`](43-provider-conformance-matrix-spec.md)** | Provider Conformance Ground-Truth Matrix & Role-Tier Gating | `internal/provider/conformance`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-45`](45-five-axis-kaizen-scorecard-spec.md)** | 5-Axis F1/F2/Tool/Skill/Receipt Cross-Evaluation & Kaizen Engine | `internal/routing`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-46`](46-peer-coordinator-ledger-spec.md)** | Peer Coordinator Ledger | `internal/mesh`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `PROPOSED` |
 
 ---
 

@@ -214,6 +214,7 @@ g8s mcp
 | `g8s_skills_list` | List digest-pinned skills (`skill://g8s/<tier>/<name>`) filtered by F0/F1/F2 tier (`DELTA-34`). |
 | `g8s_skills_read` | Read a verified `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check (`DELTA-34`). |
 | `g8s_context_pack` | Pure-Go 4-tier AST elision, PageRank + BM25F, and Knapsack context compressor (`DELTA-36`). |
+| `g8s_coordinator_mesh` | Execute explicit-directory peer coordinator SQLite WAL ledger operations (`DELTA-46`). |
 
 ### Agent Skills & Supervisor Charter
 
@@ -322,6 +323,7 @@ g8s/
 │   ├── lockfile/ — provides non-blocking exclusive advisory file locks used to arbitrate concurrent supervisor sessions over one checkout (#393)
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over stdio using newline-delimited JSON-RPC 2.0 (DELTA-04)
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
+│   ├── mesh/ — (no package doc — add one)
 │   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (agy CLI wrapper) and internal/controlplane (SQLite WAL task store)
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
 │   ├── premise/ — implements the DELTA-42 Premise Challenge & Sycophancy Gate: it decomposes an operator request or supervisor brief into atomic claims and classifies each claim into an evidence tier
