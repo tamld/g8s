@@ -18,6 +18,8 @@ hotspots:
     rationale: "Single top-level command switch and help text; every new subcommand adds a registration line here."
     paths:
       - "cmd/g8s/main.go"
+      - "cmd/g8s/main_tasks_receipt.go"
+      - "cmd/g8s/main_ops_worker.go"
 
   - id: "HOT-MANIFEST"
     policy: "serialize"
@@ -1019,6 +1021,8 @@ features:
     owned_paths:
       - "cmd/g8s/**"
       - "!cmd/g8s/main.go"
+      - "!cmd/g8s/main_tasks_receipt.go"
+      - "!cmd/g8s/main_ops_worker.go"
       - "!cmd/g8s/receipt_export*.go"
       - "!cmd/g8s/charter*.go"
       - "!cmd/g8s/search*.go"

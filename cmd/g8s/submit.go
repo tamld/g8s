@@ -410,7 +410,7 @@ func runSubmit(args []string) {
 	}
 
 	// DELTA-43: consult provider conformance ground truth (warn; refuse only when enforced).
-	if warning, refuse := conformanceGate(effectiveProvider, *enforceConformance, *receiptID != ""); warning != "" {
+	if warning, refuse := conformanceGate(effectiveProvider, *enforceConformance); warning != "" {
 		if refuse {
 			exitRuntime("submit", "conformance", *traceID, cli.CodeDenied, errors.New(warning), "Re-run 'g8s providers conformance --live' or choose another provider", *jsonl)
 		}

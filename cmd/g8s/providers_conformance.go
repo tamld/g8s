@@ -142,13 +142,12 @@ func gitToplevel() string {
 // It returns a warning message when the provider FAILed required probes and
 // refuse=true only when enforcement is enabled (--enforce-conformance or
 // G8S_ENFORCE_CONFORMANCE=1). A missing or unreadable matrix never refuses.
-func conformanceGate(providerName string, enforce bool, hasReceipt ...bool) (warning string, refuse bool) {
+func conformanceGate(providerName string, enforce bool) (warning string, refuse bool) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return "", false
 	}
-	receiptBound := len(hasReceipt) > 0 && hasReceipt[0]
-	v, err := conformance.CheckDispatchFromDirWithReceipt(wd, providerName, receiptBound)
+	v, err := conformance.CheckDispatchFromDir(wd, providerName)
 	if err != nil {
 		return "conformance matrix unreadable (gate skipped): " + err.Error(), false
 	}
