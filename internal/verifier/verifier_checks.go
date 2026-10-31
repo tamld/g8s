@@ -7,14 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-
 	"fmt"
 	"os"
-
 	"path/filepath"
-
 	"sort"
-
 	"strings"
 	"time"
 

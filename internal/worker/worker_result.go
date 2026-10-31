@@ -2,13 +2,10 @@ package worker
 
 import (
 	"context"
-
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	"os"
-
 	"strings"
 
 	"github.com/tamld/g8s/internal/controlplane"

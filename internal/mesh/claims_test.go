@@ -10,8 +10,10 @@ import (
 	"time"
 )
 
-const claimDummySHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-const claimDummySHA2 = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+const (
+	claimDummySHA  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	claimDummySHA2 = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+)
 
 func claimTestSetupNode(t *testing.T, s *Store, node, inc string) {
 	t.Helper()

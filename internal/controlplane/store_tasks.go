@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	"os"
-
 	"strings"
 	"sync"
 	"time"
