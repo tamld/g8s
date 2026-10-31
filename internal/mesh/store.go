@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -40,16 +41,12 @@ func Open(dir string) (*Store, error) {
 	}
 	dbPath := filepath.Join(dir, "ledger.db")
 
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(dbPath)}
-	q := u.Query()
-	q.Set("_txlock", "immediate")
-	q.Add("_pragma", "busy_timeout(5000)")
-	q.Add("_pragma", "foreign_keys(ON)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "synchronous(FULL)")
-	u.RawQuery = q.Encode()
+	dsn := fmt.Sprintf(
+		"file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
+		sqlitePathEscape(dbPath),
+	)
 
-	db, err := sql.Open("sqlite", u.String())
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}
@@ -144,4 +141,18 @@ func (s *Store) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func sqlitePathEscapeFor(goos, path string) string {
+	if goos != "windows" {
+		return url.PathEscape(path)
+	}
+	p := strings.ReplaceAll(path, "%", "%25")
+	p = strings.ReplaceAll(p, "?", "%3F")
+	p = strings.ReplaceAll(p, "#", "%23")
+	return p
+}
+
+func sqlitePathEscape(path string) string {
+	return sqlitePathEscapeFor(runtime.GOOS, path)
 }
