@@ -280,10 +280,16 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 	}
 	if outPath != "" {
 		if dir := filepath.Dir(outPath); dir != "" {
-			_ = os.MkdirAll(dir, 0o755)
+			if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil && err == nil {
+				err = fmt.Errorf("agy mkdir %s: %w", dir, mkErr)
+			}
 		}
-		if data, err := json.MarshalIndent(receipt, "", "  "); err == nil {
-			_ = os.WriteFile(outPath, data, 0o600)
+		if data, errJSON := json.MarshalIndent(receipt, "", "  "); errJSON == nil {
+			if writeErr := os.WriteFile(outPath, data, 0o600); writeErr != nil && err == nil {
+				err = fmt.Errorf("agy write receipt %s: %w", outPath, writeErr)
+			}
+		} else if err == nil {
+			err = fmt.Errorf("agy marshal receipt: %w", errJSON)
 		}
 	}
 
