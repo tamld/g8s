@@ -36,7 +36,7 @@ func Open(dir string) (*Store, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("directory path must not be empty")
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create dir: %w", err)
 	}
 	dbPath := filepath.Join(dir, "ledger.db")
@@ -56,7 +56,7 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	if err := os.Chmod(dbPath, 0600); err != nil {
+	if err := os.Chmod(dbPath, 0o600); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("chmod ledger db: %w", err)
 	}

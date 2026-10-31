@@ -7,14 +7,12 @@ package worker
 
 import (
 	"context"
-
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-
 	"sort"
 	"strings"
 	"sync"
