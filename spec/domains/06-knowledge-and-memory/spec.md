@@ -49,3 +49,16 @@ Peer coordinators MUST synchronize accepted task knowledge via monotonic `contex
 - **GIVEN** registered peer coordinator nodes on a shared SQLite WAL ledger
 - **WHEN** peers exchange `send`/`inbox`/`ack` messages, publish self-quota observations, and `accept` claimed task artifacts
 - **THEN** duplicate message IDs with identical payloads are deduplicated, only the recipient can ACK, accepted artifacts atomically advance `context_revision`, and state survives store reopen
+
+### R4 — Reach Layer Read-Only Platform Evidence Acquisition {#R4-reach-evidence-acquisition}
+
+<!-- inherited-from: DELTA-47 -->
+<!-- feature_id: FEAT-REACH-01 -->
+
+The platform MUST provide a read-only data-acquisition layer (`internal/reach`, ADR-0037) with an in-code channel→action→backend registry, ordered fallback dispatch classifying transient failures as fallback and bad requests as terminal, provenance-labeled responses, and a single agent-facing CLI (`g8s reach`) emitting the versioned envelope. Credentials must never enter g8s state, receipts, logs, or ContextPacket, and no operation may mutate any upstream platform.
+
+#### Scenario: Reach registry ordering, fallback-vs-terminal classification, and envelope parity
+<!-- tests: TestLookupDeclaredOrder, TestLookupUnknownChannelAction, TestChainFallbackOnTransient, TestChainStopsOnTerminal, TestChainRecorderPerAttempt, TestReachReadJSONEnvelope -->
+- **GIVEN** the in-code reach registry with injected fake backends
+- **WHEN** lookups and chained fetches execute against known/unknown channels with transient, terminal, and reordered backends
+- **THEN** declared order holds, transient failures advance the chain, terminal failures stop it, attempts are recorded with rank/class, and the CLI envelope carries provenance and the attempt trail

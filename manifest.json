@@ -527,6 +527,12 @@
       "title": "Peer Coordinator Ledger",
       "path": "spec/openspec/46-peer-coordinator-ledger-spec.md",
       "status": "PROPOSED"
+    },
+    {
+      "id": "DELTA-47",
+      "title": "Reach Layer — Read-Only Platform Data Acquisition",
+      "path": "spec/openspec/47-reach-layer-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

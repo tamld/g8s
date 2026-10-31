@@ -137,6 +137,7 @@ Incoming Task:
 | **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
 | **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
 | **DELTA-46** | [`46-peer-coordinator-ledger-spec.md`](../spec/openspec/46-peer-coordinator-ledger-spec.md) | `internal/mesh`, `internal/mcp`, `cmd/g8s` | APPLIED |
+| **DELTA-47** | [`47-reach-layer-spec.md`](../spec/openspec/47-reach-layer-spec.md) | `internal/reach`, `cmd/g8s` | APPLIED |
 
 ---
 

@@ -1028,6 +1028,7 @@ features:
       - "!cmd/g8s/charter*.go"
       - "!cmd/g8s/search*.go"
       - "!cmd/g8s/llm_call*.go"
+      - "!cmd/g8s/reach*.go"
       - "!cmd/g8s/context_pack*.go"
       - "!cmd/g8s/providers_conformance*.go"
       - "!cmd/g8s/qa_report*.go"
@@ -1198,6 +1199,41 @@ features:
       - "internal/mesh/messages_test.go"
       - "internal/mcp/mesh_test.go"
       - "internal/mesh/drills_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers: []
+  - id: "FEAT-REACH-01"
+    title: "Reach Layer — Read-Only Platform Data Acquisition"
+    persona_story: "As an agent or coordinator, I need a read-only platform data-acquisition layer with an in-code channel registry, ordered fallback chains, and fallback-vs-terminal error classification so that research fetches survive upstream API churn and return provenance-labeled machine-fetched evidence (ADR-0037)."
+    srs_reqs:
+      - "FR-11"
+    openspec_deltas:
+      - "DELTA-47"
+    code_paths:
+      - "internal/reach/**"
+      - "cmd/g8s/reach*.go"
+      - "internal/cli/registry.go"
+      - "cmd/g8s/main.go"
+    collision_domain: "reach-evidence"
+    owned_paths:
+      - "internal/reach/**"
+      - "cmd/g8s/reach*.go"
+    shared_paths:
+      - "cmd/g8s/main.go"
+    interfaces:
+      envelope_kinds:
+        - "reach"
+      go_packages:
+        - "internal/reach"
+    invariants:
+      - "Read-only absolute: no operation may mutate any upstream platform regardless of channel capability (ADR-0037)"
+      - "Credentials/sessions stay OUTSIDE g8s state — never in receipts, ledger, logs, or ContextPacket (two-layer separation)"
+      - "No Python port — pattern only; backends wrap external CLIs or stdlib HTTP; no GUI automation in the steady-state loop"
+    visible_tests:
+      - "internal/reach/registry_test.go"
+      - "internal/reach/chain_test.go"
+      - "cmd/g8s/reach_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on: []
