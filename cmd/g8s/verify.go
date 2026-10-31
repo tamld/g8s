@@ -348,8 +348,11 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeInvalid, err, "", *jsonl)
 		return 1
 	}
+	isUnregisteredClean := !verdict.Registered && verdict.Outcome == verifier.OutcomeUnregistered && verdict.VetoReason == "" && (verdict.HoldoutChecksOK == nil || *verdict.HoldoutChecksOK)
 	passedVerify := verdict.Outcome == verifier.OutcomePass && verdict.VetoReason == "" && (verdict.HoldoutChecksOK == nil || *verdict.HoldoutChecksOK)
-	recordVerifyTaskTelemetry(verifiedTask, passedVerify, dbPathOverride, target.AllowedPaths)
+	if !isUnregisteredClean {
+		recordVerifyTaskTelemetry(verifiedTask, passedVerify, dbPathOverride, target.AllowedPaths)
+	}
 	if os.Getenv("G8S_JIT_WHISPER") != "0" {
 		if passedVerify {
 			if isStandaloneFeature {
@@ -357,6 +360,8 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 			} else {
 				verdict.JITBaton = fmt.Sprintf("[jit:baton:VERIFIED] Next step: ./bin/g8s deliver %s --prune-worktree", taskID)
 			}
+		} else if isUnregisteredClean {
+			verdict.JITBaton = fmt.Sprintf("[jit:baton:UNREGISTERED] No verifier class matched task %s (read_only or unscoped); pass --feature <id> for mechanical verification.", taskID)
 		} else {
 			verdict.JITBaton = fmt.Sprintf("[jit:baton:IMPASSE] Verification failed; experiential autopsy recorded. Next step: ./bin/g8s resubmit %s --prompt \"...\"", taskID)
 		}

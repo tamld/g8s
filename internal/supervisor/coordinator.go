@@ -391,7 +391,7 @@ func RunCoordinatorIntake(ctx context.Context, req CoordinatorIntakeRequest) (*C
 	}
 
 	// Step 4: Deterministic Routing Plan
-	primaryWorker := "9router/cu/composer-2.5 (fallback: 9router/deep-coding)"
+	primaryWorker := "9router/deep-coding (fallback: 9router/fast-agent)"
 	blindAdj := ""
 	verifiers := []string{"test", "diff-guard"}
 	switch routedLane {

@@ -7,7 +7,7 @@ issue). The registry of quantitative claims lives in `docs/claims.yml`
 (verified by `tools/claims_check.sh`); this ledger is the enterprise-facing
 view over the same evidence.
 
-Last updated: 2026-10-27 (v0.20.0 release + Orthogonal Stratum Federation, Spec-Kit 8 Living Domains, 5-Axis Kaizen Scorecard, Dual-Path Cursor & 9Router Consumer, and Enterprise Access-Audit Log).
+Last updated: 2026-10-30 (v0.21.0 release + Orthogonal Stratum Federation, Spec-Kit 8 Living Domains, 5-Axis Kaizen Scorecard, Dual-Path Cursor & 9Router Consumer, and Enterprise Access-Audit Log).
 
 ## Zero-Trust Delegation
 

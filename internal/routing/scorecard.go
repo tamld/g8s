@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -122,6 +123,16 @@ func ScorecardPath(stateDir string) string {
 	return filepath.Join(stateDir, "model_quality_events.jsonl")
 }
 
+var rfc1918IPv4Pattern = regexp.MustCompile(`\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b`)
+
+// SanitizeScorecardError redacts RFC1918 private LAN IPv4 addresses from scorecard error strings.
+func SanitizeScorecardError(s string) string {
+	if s == "" {
+		return ""
+	}
+	return rfc1918IPv4Pattern.ReplaceAllString(s, "<redacted-lan-ip>")
+}
+
 // RecordModelOutcome appends one model execution observation to the rolling quality ledger.
 func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	rec.Provider = strings.TrimSpace(rec.Provider)
@@ -132,6 +143,7 @@ func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	if rec.RecordedAt == "" {
 		rec.RecordedAt = time.Now().UTC().Format(time.RFC3339)
 	}
+	rec.ErrorReason = SanitizeScorecardError(rec.ErrorReason)
 	if len(rec.ErrorReason) > 240 {
 		rec.ErrorReason = rec.ErrorReason[:240]
 	}
@@ -247,7 +259,7 @@ func evaluateModelWindow(providerName, modelName string, records []ModelOutcomeR
 		if r.Success {
 			successCount++
 		} else if r.ErrorReason != "" {
-			lastErr = r.ErrorReason
+			lastErr = SanitizeScorecardError(r.ErrorReason)
 		}
 		if failed {
 			diag := r.FailureDiagnosis

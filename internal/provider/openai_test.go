@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -698,5 +699,39 @@ func TestPoolRegistry_probeHTTP_V1Fallback(t *testing.T) {
 	status = reg.probeHTTP(context.Background(), srvFail.URL+"/v1")
 	if status != StatusDegraded {
 		t.Errorf("expected StatusDegraded when all return 500, got %s", status)
+	}
+}
+
+func TestOpenAIProvider_CursorAgentServiceHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" || r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Cursor AgentService requested an unsupported IDE tool: diff_view"}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider("9router", srv.URL, "")
+	spec := Spec{
+		Model: "cu/composer-2.5",
+		Brief: "Test Cursor AgentService Hint",
+	}
+
+	handle, err := p.Spawn(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Spawn unexpected error: %v", err)
+	}
+
+	receipt, err := handle.Wait(context.Background())
+	if err == nil {
+		t.Fatal("expected error on HTTP 400, got nil")
+	}
+	if receipt.Status != "FAILED" {
+		t.Fatalf("expected status FAILED, got %s", receipt.Status)
+	}
+	if !strings.Contains(err.Error(), "use --provider cursor or a non-cu/* model") {
+		t.Fatalf("expected remediation hint in error, got: %s", err.Error())
 	}
 }
