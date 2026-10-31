@@ -27,13 +27,17 @@ func TestSendIdempotentEcho(t *testing.T) {
 	}
 
 	res1 := msgMustExec(t, s, "send", sendIn)
-	var out1 struct{ Seq int64 `json:"seq"` }
+	var out1 struct {
+		Seq int64 `json:"seq"`
+	}
 	if err := json.Unmarshal(res1, &out1); err != nil || out1.Seq <= 0 {
 		t.Fatalf("first send: err=%v seq=%d", err, out1.Seq)
 	}
 
 	res2 := msgMustExec(t, s, "send", sendIn)
-	var out2 struct{ Seq int64 `json:"seq"` }
+	var out2 struct {
+		Seq int64 `json:"seq"`
+	}
 	if err := json.Unmarshal(res2, &out2); err != nil || out2.Seq != out1.Seq {
 		t.Fatalf("expected same seq %d, got %d", out1.Seq, out2.Seq)
 	}
@@ -143,7 +147,7 @@ func TestClaimRaceSingleWinner(t *testing.T) {
 			defer wg.Done()
 			_, err := claimTestExec(s, "claim", map[string]any{
 				"node_id": fmt.Sprintf("node-%d", i), "incarnation": fmt.Sprintf("inc-%d", i),
-				"task_id": fmt.Sprintf("task-%d", i),
+				"task_id":  fmt.Sprintf("task-%d", i),
 				"resource": "race-resource", "paths": []string{paths},
 				"context_revision": 0, "lease_seconds": 60,
 			})
@@ -188,8 +192,8 @@ func TestWaitLongPollWake(t *testing.T) {
 	}
 
 	type waitResult struct {
-		resp msgWaitResp
-		err  error
+		resp    msgWaitResp
+		err     error
 		elapsed time.Duration
 	}
 	ch := make(chan waitResult, 1)

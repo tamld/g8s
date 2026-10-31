@@ -47,7 +47,9 @@ func TestMeshMessageRoundTripAndDedup(t *testing.T) {
 		"node_id": "sender_1", "incarnation": "inc_s1", "message_id": "msg_1",
 		"to_node": "rec_1", "to_incarnation": "inc_r1", "kind": "task", "payload": p1,
 	})
-	var out1 struct{ Seq int64 `json:"seq"` }
+	var out1 struct {
+		Seq int64 `json:"seq"`
+	}
 	if err := json.Unmarshal(res1, &out1); err != nil || out1.Seq <= 0 {
 		t.Fatalf("send err: %v, seq: %d", err, out1.Seq)
 	}
@@ -57,7 +59,9 @@ func TestMeshMessageRoundTripAndDedup(t *testing.T) {
 		"node_id": "sender_1", "incarnation": "inc_s1", "message_id": "msg_1",
 		"to_node": "rec_1", "to_incarnation": "inc_r1", "kind": "task", "payload": json.RawMessage(`{ "b":  "val", "a":  1 }`),
 	})
-	var outEq struct{ Seq int64 `json:"seq"` }
+	var outEq struct {
+		Seq int64 `json:"seq"`
+	}
 	if err := json.Unmarshal(resEq, &outEq); err != nil || outEq.Seq != out1.Seq {
 		t.Fatalf("expected dedup seq %d, got %d", out1.Seq, outEq.Seq)
 	}
@@ -80,7 +84,9 @@ func TestMeshMessageRoundTripAndDedup(t *testing.T) {
 	}
 
 	// inbox gets message
-	var ib struct{ Messages []Message `json:"messages"` }
+	var ib struct {
+		Messages []Message `json:"messages"`
+	}
 	if err := json.Unmarshal(msgMustExec(t, s, "inbox", map[string]any{"node_id": "rec_1", "incarnation": "inc_r1"}), &ib); err != nil || len(ib.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %+v", ib)
 	}
@@ -100,7 +106,9 @@ func TestMeshMessageRoundTripAndDedup(t *testing.T) {
 	}
 
 	// send after ack returns same sequence
-	var outAck struct{ Seq int64 `json:"seq"` }
+	var outAck struct {
+		Seq int64 `json:"seq"`
+	}
 	if err := json.Unmarshal(msgMustExec(t, s, "send", map[string]any{
 		"node_id": "sender_1", "incarnation": "inc_s1", "message_id": "msg_1",
 		"to_node": "rec_1", "to_incarnation": "inc_r1", "kind": "task", "payload": p1,
@@ -169,7 +177,9 @@ func TestMeshInboxDurableReopen(t *testing.T) {
 	}
 	defer s2.Close()
 
-	var ib struct{ Messages []Message `json:"messages"` }
+	var ib struct {
+		Messages []Message `json:"messages"`
+	}
 	if err := json.Unmarshal(msgMustExec(t, s2, "inbox", map[string]any{"node_id": "r", "incarnation": "r1"}), &ib); err != nil || len(ib.Messages) != 1 || ib.Messages[0].MessageID != "m1" {
 		t.Fatalf("inbox reopen failed: %+v", ib)
 	}
