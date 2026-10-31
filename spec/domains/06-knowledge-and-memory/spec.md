@@ -2,7 +2,7 @@
 
 - **Domain ID**: `06-knowledge-and-memory`
 - **Collision Domain**: `knowledge-memory`
-- **Feature IDs**: `FEAT-VAULT-MEMORY-01`
+- **Feature IDs**: `FEAT-VAULT-MEMORY-01`, `FEAT-COORDINATOR-MESH-01`
 - **Constitutional Laws**: Law 2 (Deterministic State), Law 6 (Evidence over Verdicts)
 
 ---
@@ -34,3 +34,18 @@ Every F1 worker and F2 subagent execution MUST inherit deterministic capability-
 - **GIVEN** `read_only` (`scout`) and `workspace_write` (`implementer`) worker dispatches
 - **WHEN** `ResolveCapabilityHydration` resolves the worker environment
 - **THEN** `read_only` resolves to `S3-A` and excludes `g8s_edit`, while `workspace_write` resolves to `S3-M` and includes `g8s_edit` alongside role-specific `G8S_RECOMMENDED_SKILLS`
+
+---
+
+### R3 — Revision-Bound Peer Inbox & Accepted Artifact Synchronization {#R3-revision-bound-mesh-synchronization}
+
+<!-- inherited-from: DELTA-46 -->
+<!-- feature_id: FEAT-COORDINATOR-MESH-01 -->
+
+Peer coordinators MUST synchronize accepted task knowledge via monotonic `context_revision` counters, SHA-256 artifact digests, durable recipient-bound inbox messages, and idempotent deduplication (`PROPOSED DELTA-46`).
+
+#### Scenario: Durable peer inbox deduplication, quota provenance, and revision-bound acceptance
+<!-- tests: TestMeshAcceptRevisionAndIdempotence, TestMeshMessageRoundTripAndDedup, TestMeshQuotaOwnershipAndValidation, TestMeshInboxDurableReopen, TestMeshWaitCancellation -->
+- **GIVEN** registered peer coordinator nodes on a shared SQLite WAL ledger
+- **WHEN** peers exchange `send`/`inbox`/`ack` messages, publish self-quota observations, and `accept` claimed task artifacts
+- **THEN** duplicate message IDs with identical payloads are deduplicated, only the recipient can ACK, accepted artifacts atomically advance `context_revision`, and state survives store reopen

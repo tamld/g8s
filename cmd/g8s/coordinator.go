@@ -15,8 +15,21 @@ import (
 )
 
 func runCoordinator(args []string) {
+	if tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER"))); tier == "F1" || tier == "F2" {
+		sub := ""
+		jsonl := false
+		for _, arg := range args {
+			if !strings.HasPrefix(arg, "-") && sub == "" {
+				sub = arg
+			}
+			if arg == "--jsonl" {
+				jsonl = true
+			}
+		}
+		exitRuntime("coordinator", sub, "", cli.CodeDenied, fmt.Errorf("coordinator protocol is F0-only: worker tier %s is forbidden", tier), "Coordinator operations require F0 tier authority", jsonl)
+	}
 	if len(args) == 0 {
-		exitUsage("coordinator", "", "", "usage: g8s coordinator <intake|mastery> [flags]", "Try: g8s coordinator intake --goal \"...\" --json", false)
+		exitUsage("coordinator", "", "", "usage: g8s coordinator <intake|mastery|mesh> [flags]", "Try: g8s coordinator intake --goal \"...\" --json", false)
 	}
 	sub := args[0]
 	switch sub {
@@ -24,13 +37,16 @@ func runCoordinator(args []string) {
 		runCoordinatorIntake(args[1:])
 	case "mastery":
 		runCoordinatorMastery(args[1:])
+	case "mesh":
+		runCoordinatorMesh(args[1:])
 	case "-h", "--help", "help":
-		fmt.Println("Usage: g8s coordinator <intake|mastery> [flags]")
+		fmt.Println("Usage: g8s coordinator <intake|mastery|mesh> [flags]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  intake     Execute the 3-Pillar Coordinator Cognitive Intake, Root-Core Deconstruction & Routing pipeline (#688)")
 		fmt.Println("  mastery    Compute per-domain Experiential Mastery Scorecard across .g8s/feature-map.yml (#690)")
+		fmt.Println("  mesh       Execute multi-node mesh coordination operations (#691)")
 	default:
-		exitUsage("coordinator", sub, "", fmt.Sprintf("unknown coordinator subcommand %q (valid: intake, mastery)", sub), "", false)
+		exitUsage("coordinator", sub, "", fmt.Sprintf("unknown coordinator subcommand %q (valid: intake, mastery, mesh)", sub), "", false)
 	}
 }
 

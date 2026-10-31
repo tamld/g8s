@@ -136,6 +136,7 @@ Incoming Task:
 | **DELTA-42** | [`42-premise-challenge-and-sycophancy-gate-spec.md`](../spec/openspec/42-premise-challenge-and-sycophancy-gate-spec.md) | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | APPLIED |
 | **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
 | **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
+| **DELTA-46** | [`46-peer-coordinator-ledger-spec.md`](../spec/openspec/46-peer-coordinator-ledger-spec.md) | `internal/mesh`, `internal/mcp`, `cmd/g8s` | APPLIED |
 
 ---
 
@@ -173,6 +174,9 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
    - **Axis Y (Hierarchical Control Strata)**: `S0 Principal` (Human) $\to$ `S1 FederationCoordinator` (Multi-Repo Charter Issuer) $\to$ `S2 DomainGovernor` (Single-Repo Sovereign Supervisor) $\to$ `S3-M BoundedMutator` / `S3-A BlindAdjudicator`, plus `O-Plane TelemetryProjector` (`g8s charter portfolio --json`).
    - **Strict Adjacency & Mutation Firewall**: `S1`, `S3-A`, and `O-Plane` are kernel-blocked from direct file mutation (`E_S1_DIRECT_MUTATION_FORBIDDEN`) and `S1` is blocked from calling `g8s submit` directly (`E_STRATUM_ADJACENCY_VIOLATION`).
    - **Verified `9router` Routing Priority**: Prefer `deep-coding` (complex coding), `reasoning-high` (Socratic/architectural analysis), `docs-retriever` (fast scouting), and `cl/anthropic/claude-sonnet-4.6` / `cl/openai/gpt-4.1-mini` / `cl/google/gemini-2.5-flash` (disjoint-family `S3-A` blind adjudication).
+8. **Equal-Peer Coordinator Ledger & RT-MESH v1 Protocol (`DELTA-46`)**:
+   - Explicit-directory SQLite WAL peer ledger accessed identically via CLI (`./bin/g8s coordinator mesh --mesh-dir <dir> --op <register|quota-publish|send|inbox|ack|claim|release|accept|snapshot|wait> [--input <file|->]`) and MCP (`g8s_coordinator_mesh`).
+   - Enforces equal-peer F0 access control, self-owned `observed|unknown` quota windows (percents summing to 100), `message_id` idempotent echo vs. digest-collision rejection, recipient-only ACK, `context_revision`-fenced single-winner CAS path claims, and bounded long-poll `wait` wake loops.
 
 ---
 

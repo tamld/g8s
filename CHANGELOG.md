@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Coordinator Cognitive Intake, JIT Baton-Passing & Aegis Verification Guards (`#684`–`#697`)**:
+  - Added `g8s coordinator <intake|mastery>`, `g8s memory distill`, AST tier reading (`g8s read --tier skel|sig|full`), atomic batch editing (`g8s edit --batch`), and `g8s fleet gc`.
+  - Added JIT Baton-Passing & Canonical Toolbox footers (`[jit:toolbox:*]` / `[jit:baton:*]`), RRF Hybrid Recall, Jev L3 Memory Promotion Gate, and H2 Semantic Rule Re-Awakening.
+  - Ported Aegis `PlanDiffVerifier`, `TestAssertionGuard`, Sudden-Death `CrashAutopsy`, ROI Pruning, and `TrajectoryMonitor`.
+
+### Fixed
+
+- **Worktree `--add-dir` Confinement & Dogfooding Hardening**:
+  - Rewrote `req.AddDirs` in `worker.Supervisor.RunOnce` to point to the isolated worktree (`wt`) before building `childArgv` so CLI workers (`agy`) never mutate the primary checkout directly.
+  - Skipped false `[jit:baton:IMPASSE]` and model scorecard failure recording when `g8s verify` evaluates `unregistered` (`read_only` / `supplied_text`) tasks.
+  - Redacted RFC1918 private LAN IPv4 addresses (`<lan-ip>`) in `internal/routing/scorecard.go`, auto-injected the `file:` fence contract in `g8s llm-call --apply-files`, and added an actionable remediation hint for `9router` `cu/*` HTTP 400 `AgentService` errors.
+  - Split `internal/worker/worker.go`, `internal/verifier/verifier.go`, `internal/controlplane/store.go`, and `cmd/g8s/main.go` into cohesive domain files all strictly under 800–950 LOC.
+
 ## [0.21.0] - 2026-10-27
 
 ### Added

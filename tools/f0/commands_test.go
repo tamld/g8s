@@ -290,7 +290,7 @@ func TestCommands_Anchor(t *testing.T) {
 
 func TestCommands_Audit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	repoDir, _, headSHA := setupTestGitRepo(t)
+	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	// 1. Initial commit has neither gate PASS nor trailer -> audit detects 2 unattested commits
 	out1 := captureOutput(func() {
@@ -303,12 +303,21 @@ func TestCommands_Audit(t *testing.T) {
 		t.Errorf("expected un-attested commits found, got: %s", out1)
 	}
 
-	// 2. Record gate PASS entry for headSHA
+	// 2. Record gate PASS entries for base and head commits. The audit
+	// requires per-commit evidence (no ancestor inference): without a gate
+	// entry for baseSHA the root commit is correctly reported un-attested.
 	ledger, _ := OpenRepoLedger(repoDir)
 	_ = ledger.Append(&Entry{
 		ID:     "ev-gatepass",
 		Kind:   "gate",
 		SHA:    headSHA,
+		Status: "PASS",
+		Cmd:    []string{"gate", "check"},
+	})
+	_ = ledger.Append(&Entry{
+		ID:     "ev-gatepass-base",
+		Kind:   "gate",
+		SHA:    baseSHA,
 		Status: "PASS",
 		Cmd:    []string{"gate", "check"},
 	})

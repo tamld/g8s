@@ -404,7 +404,11 @@ func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, er
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		fullErr := fmt.Sprintf("%s returned status %d: %s", p.name, resp.StatusCode, string(respBody))
+		bodyStr := string(respBody)
+		fullErr := fmt.Sprintf("%s returned status %d: %s", p.name, resp.StatusCode, bodyStr)
+		if strings.Contains(bodyStr, "AgentService requested an unsupported IDE tool") || (resp.StatusCode == http.StatusBadRequest && strings.HasPrefix(strings.ToLower(strings.TrimSpace(spec.Model)), "cu/")) {
+			fullErr += " (hint: 9router cu/* proxies Cursor IDE AgentService which requires native IDE tool calls; use --provider cursor or a non-cu/* model such as 9router/deep-coding or 9router/fast-agent)"
+		}
 		return newImmediateHandleWithMetadata(p.name, "FAILED", "", fullErr, 1, start, "", 0, 0, 0), nil
 	}
 

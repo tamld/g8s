@@ -213,6 +213,7 @@ g8s mcp
 | `g8s_skills_list` | Liệt kê danh mục skill gắn mã băm (`skill://g8s/<tier>/<name>`) theo tầng F0/F1/F2 (`DELTA-34`). |
 | `g8s_skills_read` | Đọc `SKILL.md` có kiểm tra chống giả mạo TOCTOU qua `expected_digest` SHA-256 (`DELTA-34`). |
 | `g8s_context_pack` | Nén ngữ cảnh AST 4 tầng thuần Go, PageRank + BM25F và Knapsack (`DELTA-36`). |
+| `g8s_coordinator_mesh` | Thực thi các thao tác sổ cái SQLite WAL liên peer coordinator với thư mục tường minh (`DELTA-46`). |
 
 ### Agent Skills & Hiến chương Giám sát
 

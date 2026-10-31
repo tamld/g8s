@@ -196,6 +196,7 @@ func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
 		"g8s_search", "g8s_read", "g8s_edit", "g8s_select", "g8s_llm_call",
 		"g8s_charter_issue", "g8s_charter_verify", "g8s_portfolio_status",
 		"g8s_skills_list", "g8s_skills_read", "g8s_context_pack",
+		"g8s_coordinator_mesh",
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools, want %d", len(result.Tools), len(want))

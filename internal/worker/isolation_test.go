@@ -183,3 +183,32 @@ func TestWorkspaceWriteFailedAttemptReleasesWorktreeWithKeepFalse(t *testing.T) 
 		t.Fatalf("expected ok=false on silent [API Error:], got %v", resultMap["ok"])
 	}
 }
+
+func TestWorkspaceWriteAttemptRewritesAddDirsToWorktree(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "wt-task-adddir")
+	primaryDir := filepath.Join(t.TempDir(), "primary-checkout")
+	iso := &fakeWorktreeIsolator{dir: dir}
+	env := newIsolationEnv(t, iso)
+	submitTask(t, env, "iso-adddir-1", 1, map[string]any{
+		"permission": "workspace_write",
+		"add_dirs":   []string{primaryDir},
+	})
+	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-iso-adddir", LeaseSeconds: 60}); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	env.runner.mu.Lock()
+	argv := append([]string(nil), env.runner.spawned[0].Argv...)
+	env.runner.mu.Unlock()
+	foundWorktreeAddDir := false
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == "--add-dir" && argv[i+1] == dir {
+			foundWorktreeAddDir = true
+		}
+		if argv[i] == "--add-dir" && argv[i+1] == primaryDir {
+			t.Fatalf("expected primary checkout %q NOT to be passed via --add-dir in isolated workspace_write attempt, got argv=%v", primaryDir, argv)
+		}
+	}
+	if !foundWorktreeAddDir {
+		t.Fatalf("expected --add-dir %q in child argv, got %v", dir, argv)
+	}
+}
