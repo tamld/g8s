@@ -8,6 +8,18 @@ description = "Verified false positives (audit 2026-09-30, issue #441 release ch
 paths = [
   '''internal/worker/worker_test\.go''',
   '''\.opencode/''',
+  # Full-history triage 2026-11-01 (first main scan after the #707 wire):
+  # 25 findings, all false-positive fixtures, zero real secrets. Citations:
+  '''internal/reflex/jev\.go''',                        # injection-marker list holds lowercase PEM markers Jev must DETECT (secret-exfiltration classifier), not credentials
+  '''internal/reflex/jev_test\.go''',                   # mask-redaction fixture value (ts_secret_live_...)
+  '''internal/contextpack/contextpack_test\.go''',      # fake sk-proj/ghp/RSA-PEM sanitize fixtures must exist to prove redaction works
+  '''tools/f0/parsers_test\.go''',                      # api_key/token redaction fixtures
+  '''internal/dispatch/dispatch_test\.go''',            # sk-live / ghp_SECRET_TOKEN ZeroLeakage fixtures, deliberately fake constants
+  '''internal/verifier/diff_guard_test\.go''',          # hard-secret diff fixture guarding the diff firewall
+  '''internal/memory/experiential_pipeline_test\.go''', # error-redaction fixture (sk-live string inside ErrorMsg)
+  '''cmd/g8s/redtest_submit_ladder_test\.go''',         # generic-api-key matches are --idempotency-key variable names (r4-dim*), no credential values
+  '''plans/261014-fix-sanitizer-590/''',                # historical sanitizer-campaign prose quoting fixture values; files deleted from HEAD
+  '''plans/261003-release/brief-FIXC-sanitizer\.md''',  # same class: historical brief prose
 ]
 # worker_test.go 1385/1397: sanitizer redaction fixtures — the literal fake
 # values (hunter2secret, tok-abcdef123456, supersecret99) MUST exist in the
