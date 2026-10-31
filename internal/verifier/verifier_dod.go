@@ -2,17 +2,13 @@ package verifier
 
 import (
 	"bufio"
-
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-
 	"fmt"
 	"os"
-
 	"path/filepath"
 	"regexp"
-
 	"strings"
 )
 

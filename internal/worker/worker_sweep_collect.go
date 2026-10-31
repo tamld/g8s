@@ -3,15 +3,12 @@ package worker
 import (
 	"bytes"
 	"context"
-
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	"os"
 	"os/exec"
 	"path/filepath"
-
 	"runtime"
 	"sort"
 	"strconv"

@@ -3,13 +3,10 @@ package controlplane
 import (
 	"context"
 	"database/sql"
-
 	"errors"
 	"fmt"
-
 	"os"
 	"path/filepath"
-
 	"sync"
 	"time"
 

@@ -4,17 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-
 	"fmt"
 	"os"
-
 	"path"
 	"path/filepath"
-
 	"sort"
 	"strconv"
 	"strings"
-
 	"unicode"
 
 	"github.com/tamld/g8s/internal/telemetry"
