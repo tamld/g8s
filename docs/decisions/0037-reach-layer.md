@@ -1,8 +1,8 @@
 # ADR-0037: Reach Layer — Platform Data Acquisition for Research & Context
 
-**Status**: PROPOSED (draft for peer co-sign — agy)
+**Status**: ACCEPTED (co-signed by agy via mesh ledger seq 52, 2026-10-31; amendments A1-A3 folded below)
 **Date**: 2026-10-31
-**Deciders**: S0 (ratified direction), zcode (author), agy (co-sign pending)
+**Deciders**: S0 (ratified direction), zcode (author), agy (co-sign, ledger seq 52)
 **Tracking**: [#704](https://github.com/tamld/g8s/issues/704), release gate on v0.22.0
 
 ## Context
@@ -33,6 +33,9 @@ verified the mechanism (553 cited lines, 2026-10-31).
      **automatic reorder** (demote broken, promote next) — deliberately NOT
      the model scorecard (different identity: tool_rank, not model; different
      failure classes: scrape/auth/breakage, not verify/stagnation).
+     (Amendment A1: implemented by S2 as `health_ledger.go` + `owned_paths.go`;
+     `chain.go` in S1 depends only on the `Orderer`/`Recorder` interfaces —
+     nil-safe — so S1 and S2 compile and test independently.)
 2. **CLI surface (the only thing agents see)**: `g8s reach read <url>` and
    `g8s reach <channel> <action>` returning a versioned JSON envelope.
 3. **Context Broker**: new 4th budgeted section `WorldSnippets` (fresh
@@ -87,3 +90,32 @@ channels expand by observed demand (ROI guard — no speculative scraping).
   validated design; YAML invites unreviewed runtime behavior changes.
 - Port the Python implementation — rejected: pattern only; the value is the
   chain discipline, not the code.
+
+## Amendments (co-sign, mesh ledger seq 52 — 2026-10-31)
+
+All three ratified as non-blocking contracts; folded into the slices:
+
+- **A1 — S1/S2 interface boundary**: `chain.go` (S1) calls an optional
+  `Orderer`/`Recorder` interface (or nil-safe `HealthLedger` methods):
+  `Order(channel, action string, declared []string) []string` and
+  `Record(channel, action, backend string, rank int, code, fingerprint string)`.
+  S2 provides the concrete health ledger as `internal/reach/health_ledger.go`
+  (+ `health_ledger_test.go`) and the owned-paths ledger as
+  `internal/reach/owned_paths.go` (+ test) with `RegisterOwnedPath` /
+  `DeleteOwnedPath` refusing symlinks via `os.Lstat`. S1 and S2 compile and
+  test independently; `internal/reach/health.go` / `health_test.go` are NOT
+  part of either slice (claim-overlap resolution, ledger seq 52).
+- **A2 — WorldSnippets budget**: `ContextPacket` gains
+  `WorldSnippets []string` (`json:"world_snippets,omitempty"`); `Sources`
+  gains `WorldSnippets func(ctx context.Context) ([]string, error)` —
+  fail-open, emitting a `broker_failure` ("reach: ...") on error. Each
+  snippet is clamped rune-safely to 512 chars; `maxPerSource = 5` gives a
+  2560-char section ceiling; the global 4096-char drop order sheds ephemeral
+  items before curated rules: `RecentOutcomes → WorldSnippets → VaultNotes →
+  SomPhase`.
+- **A3 — vault promotion isolation**: S3 implements reach-to-vault promotion
+  in `internal/vault/reach_promote.go` (`PromoteReachArtifact`), enforcing a
+  non-empty machine artifact SHA-256 (`ForensicVerification.ReceiptHash`),
+  scrubbing credential/cookie patterns, and defaulting promoted records to
+  `Status='PROPOSED'` so unreviewed external scrapes cannot reach
+  APPLIED/DOCTRINE rules before the L3 gate.
