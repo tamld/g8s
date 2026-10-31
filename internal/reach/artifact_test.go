@@ -87,10 +87,12 @@ func TestParseReachCiteMarker_FindsAndRejectsMalformedJSON(t *testing.T) {
 
 func TestDigestBodyDeterministic(t *testing.T) {
 	body := "reach-test-body"
-	if DigestBody(body) != DigestBody(body) {
+	first := DigestBody(body)
+	second := DigestBody(body)
+	if first != second {
 		t.Fatal("DigestBody must be deterministic")
 	}
-	if len(DigestBody(body)) != 64 {
-		t.Fatalf("digest length = %d", len(DigestBody(body)))
+	if len(first) != 64 {
+		t.Fatalf("digest length = %d", len(first))
 	}
 }
