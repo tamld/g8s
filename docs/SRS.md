@@ -62,7 +62,8 @@
 * **FR-11 (Reach Layer — Read-Only Platform Data Acquisition, `DELTA-47`, ADR-0037)**:
   * In-code channel→action→backend registry (no YAML) with stable declared ordering and terminal errors for unknown channel/action.
   * Ordered fallback dispatch: transient failures (network, timeout, 429, 5xx) classify fallback and advance to the next backend; bad requests classify terminal and stop; optional nil-safe `Orderer`/`Recorder` seams for the S2 health ledger (ADR-0037 Amendment A1).
-  * `g8s reach read <url>` / `g8s reach <channel> read --url <url>` as the only agent-facing surface, emitting the standard versioned JSON envelope with backend provenance and a per-attempt trail.
+  * `g8s reach read <url>` / `g8s reach <channel> read --url <url>` as the only agent-facing surface, emitting the standard versioned JSON envelope with backend provenance, url, fetched_at, body_sha256 (via `reach.DigestBody`), and a per-attempt trail.
+  * Brief `reach-cite:` markers on lanes F/R/S MUST carry the same machine-artifact fields; citations without a valid parsed artifact are rejected by the deterministic DoR floor (`reach_citation_valid`), while briefs with no markers retain legacy upstream prose passthrough.
   * Read-only absolute invariant: no upstream mutation of any kind; credentials stay OUTSIDE g8s state (receipts, ledger, logs, ContextPacket); no Python port; no GUI automation in the steady-state loop.
 
 ## 2. Non-Functional Requirements (NFR)

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/tamld/g8s/internal/reach"
 )
 
 func TestFloorGoalPresent(t *testing.T) {
@@ -138,6 +141,67 @@ Spec Contract: DELTA-35, SRS REQ-FUNC-01, AC-01, FSM state transition READY -> R
 	validPayloadS := validPayloadF + "\nSecurity Advisory: CWE-22 path traversal & trust-boundary check (no-known-cve)."
 	if res := CheckDoRFloorForLane("security fix", validPayloadS, baseDoD, "workspace_write", "S"); !res.OK {
 		t.Fatalf("valid Lane S brief with CWE & trust-boundary evidence must pass: %+v", res.Checks)
+	}
+}
+
+func laneFValidBriefBase() string {
+	return `touch internal/worker/worker.go receipt_id=rcp-1
+Research: Local: internal/worker/worker.go, Upstream: stdlib context cancellation.
+Socratic Debate: Hypothesis H1 uses channel close; Counterexample / Falsification: concurrent writers panic, so Alternative Rejected in favor of sync.Once.
+Spec Contract: DELTA-35, SRS REQ-FUNC-01, AC-01, FSM state transition READY -> RUNNING.`
+}
+
+func reachCiteMarker(a reach.Artifact) string {
+	return `reach-cite:{"url":"` + a.URL + `","channel":"` + a.Channel + `","action":"` + a.Action + `","backend":"` + a.Backend + `","body_sha256":"` + a.BodySHA256 + `","fetched_at":"` + a.FetchedAt + `"}`
+}
+
+func TestDoRFloor_ReachCiteInvalidArtifactFails(t *testing.T) {
+	baseDoD := "go test ./internal/worker/..."
+	payload := laneFValidBriefBase() + "\n" + `reach-cite:{"url":"","channel":"web","action":"read","backend":"web-https-get","body_sha256":"","fetched_at":"2026-10-31T00:00:00Z"}`
+	res := CheckDoRFloorForLane("implement worker gate", payload, baseDoD, "workspace_write", "F")
+	if res.OK {
+		t.Fatal("brief with invalid reach-cite artifact must fail floor")
+	}
+	var citeCheck *FloorCheck
+	for i := range res.Checks {
+		if res.Checks[i].Name == "reach_citation_valid" {
+			citeCheck = &res.Checks[i]
+			break
+		}
+	}
+	if citeCheck == nil || citeCheck.Pass {
+		t.Fatalf("expected reach_citation_valid failure, checks=%+v", res.Checks)
+	}
+}
+
+func TestDoRFloor_NonReachCitationPassthrough(t *testing.T) {
+	baseDoD := "go test ./internal/worker/..."
+	res := CheckDoRFloorForLane("implement worker gate", laneFValidBriefBase(), baseDoD, "workspace_write", "F")
+	if !res.OK {
+		t.Fatalf("unmarked Upstream research prose must pass reach_citation_valid passthrough: %+v", res.Checks)
+	}
+	for _, c := range res.Checks {
+		if c.Name == "reach_citation_valid" && !c.Pass {
+			t.Fatalf("reach_citation_valid must pass with zero markers: %+v", c)
+		}
+	}
+}
+
+func TestDoRFloor_ReachCiteValidArtifactPasses(t *testing.T) {
+	baseDoD := "go test ./internal/worker/..."
+	now := time.Now().UTC()
+	a := reach.Artifact{
+		URL:        "https://example.com/evidence",
+		Channel:    "web",
+		Action:     "read",
+		Backend:    "web-https-get",
+		BodySHA256: reach.DigestBody("evidence-body"),
+		FetchedAt:  now.Format(time.RFC3339),
+	}
+	payload := laneFValidBriefBase() + "\n" + reachCiteMarker(a)
+	res := CheckDoRFloorForLane("implement worker gate", payload, baseDoD, "workspace_write", "F")
+	if !res.OK {
+		t.Fatalf("valid reach-cite artifact must pass floor: %+v", res.Checks)
 	}
 }
 

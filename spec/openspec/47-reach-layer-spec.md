@@ -36,8 +36,13 @@ stdlib HTTP — no Python port, no GUI automation (ADR-0037 invariants).
   attempt with rank, backend, class, and error fingerprint.
 - CLI: `g8s reach read <url>` and `g8s reach <channel> read --url <url>`
   emit the versioned envelope (`"kind": "reach"`) with channel, action,
-  backend, provenance, body, and the per-attempt trail, honoring the common
-  `--json`/`--jsonl` flags.
+  backend, provenance, body, url, fetched_at, body_sha256, and the per-attempt
+  trail, honoring the common `--json`/`--jsonl` flags.
+- Brief citations: prose MAY embed `reach-cite:` followed by a JSON object
+  (inline or brace-balanced across lines) carrying the same machine-artifact
+  fields as the CLI envelope (`url`, `channel`, `action`, `backend`,
+  `body_sha256`, `fetched_at` RFC3339 UTC). Markers without a valid artifact
+  are rejected by the deterministic DoR floor on lanes F/R/S.
 
 ## Invariants (ADR-0037, non-negotiable)
 
@@ -60,4 +65,10 @@ stdlib HTTP — no Python port, no GUI automation (ADR-0037 invariants).
 <!-- tests: TestReachReadJSONEnvelope, TestReachUsageMissingURL -->
 - **GIVEN** the `g8s reach` command registered on the canonical CLI surface
 - **WHEN** `reach read` runs against a stubbed backend (and with a missing URL)
-- **THEN** the versioned envelope carries channel, action, backend, provenance, body, and the attempt trail, and missing-URL usage exits with a terminal error
+- **THEN** the versioned envelope carries channel, action, backend, provenance, body, url, fetched_at, body_sha256 (digest from `reach.DigestBody`), and the attempt trail, and missing-URL usage exits with a terminal error
+
+#### Scenario: Reach citation machine-artifact validation and brief floor binding (S4)
+<!-- tests: TestValidateReachCitation_RejectsWithoutArtifact, TestValidateReachCitation_AcceptsFullArtifact, TestValidateReachCitation_RejectsStaleArtifact, TestValidateReachCitation_RejectsMalformedDigest, TestParseReachCiteMarker_FindsAndRejectsMalformedJSON, TestDoRFloor_ReachCiteInvalidArtifactFails, TestDoRFloor_NonReachCitationPassthrough, TestDoRFloor_ReachCiteValidArtifactPasses -->
+- **GIVEN** brief prose on lanes F/R/S that may embed zero or more `reach-cite:` markers whose JSON grammar is `reach-cite:` optionally followed by whitespace then a `{` … `}` object with keys `url`, `channel`, `action`, `backend`, `body_sha256`, `fetched_at`
+- **WHEN** `reach.ValidateReachCitation` runs against parsed artifacts (absolute http(s) url, non-blank channel/backend, `action` exactly `read`, 64-char lowercase hex `body_sha256`, RFC3339 `fetched_at` not older than `MaxCitationAge`) and `CheckDoRFloorForLane` evaluates `reach_citation_valid` over the combined brief text
+- **THEN** malformed marker JSON yields parse errors without panic, any validation error fails `reach_citation_valid` with the error in `Detail`, zero markers passes through without tightening upstream prose regexes, and a fully valid marker passes alongside the existing DELTA-35 checks

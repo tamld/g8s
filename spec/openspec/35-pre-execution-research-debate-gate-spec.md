@@ -25,6 +25,7 @@
   1. `research_world_state_present`: cites world-state / upstream / local / CVE / CWE research (`Local:`, `Upstream:`, `Docs:`, `CVE-YYYY-NNNN`, `CWE-NNN`, etc.), with `Lane S` additionally requiring explicit security/CVE/CWE/STRIDE/OWASP/trust-boundary evidence.
   2. `socratic_debate_present`: documents both a hypothesis/thesis (`Hypothesis`, `H1`, `H2`, `Thesis`) and an adversarial falsification/counterexample (`Counterexample`, `Antithesis`, `Falsification`, `Alternative Rejected`, `Trade-off`, `Red-Team`).
   3. `spec_contract_present`: cites formal specification anchors (`PRD`, `SRS`, `AC-*`, `REQ-*`, `US-*`, `FSM`, `ADR-*`, or `DELTA-*`).
+  4. `reach_citation_valid`: when the combined brief contains one or more `reach-cite:` JSON markers (grammar: `reach-cite:` + optional whitespace + brace-balanced JSON object with keys `url`, `channel`, `action`, `backend`, `body_sha256`, `fetched_at`), every marker MUST parse and pass `reach.ValidateReachCitation` (machine-fetched artifact with absolute http(s) URL, non-blank `channel`/`backend`, `action`=`read`, 64-char lowercase hex digest, RFC3339 timestamp within `reach.MaxCitationAge`); ANY parse or validation error fails closed with the reason in `Detail`; zero markers MUST pass (passthrough for legacy upstream prose).
 - `cmd/g8s/brief_issue.go` MUST expose `--lane <0|D|R|F|S>` (with fallback to `G8S_GATE_LANE`).
 
 ### R2 — Canonical 10-Role Harness Taxonomy (`internal/harness/roles.go`, `manifest.json`)
@@ -42,7 +43,13 @@
 <!-- tests: TestFloorPreExecutionResearchDebateGateByLane -->
 - **GIVEN** a brief draft evaluated under lanes `0`, `D`, `F`, `R`, and `S`
 - **WHEN** `CheckDoRFloorForLane` runs against a minimal brief versus a brief containing World-State/CVE citations, Socratic hypothesis+falsification debate, and PRD/SRS/AC/FSM/DELTA references
-- **THEN** lanes `0` and `D` pass without heavy gate ceremony, while lanes `F`, `R`, and `S` fail closed when any of `research_world_state_present`, `socratic_debate_present`, or `spec_contract_present` is missing and pass when all required evidence is present.
+- **THEN** lanes `0` and `D` pass without heavy gate ceremony, while lanes `F`, `R`, and `S` fail closed when any of `research_world_state_present`, `socratic_debate_present`, `spec_contract_present`, or `reach_citation_valid` is missing or invalid and pass when all required evidence is present.
+
+#### Scenario: Reach-sourced citations require machine-fetched artifacts on lanes F/R/S
+<!-- tests: TestDoRFloor_ReachCiteInvalidArtifactFails, TestDoRFloor_NonReachCitationPassthrough, TestDoRFloor_ReachCiteValidArtifactPasses -->
+- **GIVEN** a Lane F brief that satisfies the DELTA-35 research, Socratic, and spec checks
+- **WHEN** the payload embeds an invalid `reach-cite:` marker versus no marker versus a marker whose fields match a successful `g8s reach read` envelope digest
+- **THEN** `reach_citation_valid` fails closed on invalid artifacts, passes with zero markers (upstream prose unchanged), and passes when every marker validates
 
 #### Scenario: Ten Canonical Role Profiles and Recommended Skill Metadata
 <!-- tests: TestRolesAndPermissions, TestListRolesReturnsAllRegisteredProfiles -->
