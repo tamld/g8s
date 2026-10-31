@@ -682,6 +682,7 @@ features:
       - "EvaluateDoDMatrix rejects unverified worker self-report claims"
     visible_tests:
       - "internal/verifier/verifier_test.go"
+      - "internal/brief/floor_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
@@ -1233,6 +1234,7 @@ features:
     visible_tests:
       - "internal/reach/registry_test.go"
       - "internal/reach/chain_test.go"
+      - "internal/reach/artifact_test.go"
       - "cmd/g8s/reach_test.go"
     verifier_class: "test"
     blast_radius:

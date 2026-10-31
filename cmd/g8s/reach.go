@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/reach"
@@ -18,6 +19,9 @@ type reachPayload struct {
 	Backend    string          `json:"backend"`
 	Provenance string          `json:"provenance"`
 	Body       string          `json:"body"`
+	URL        string          `json:"url"`
+	FetchedAt  string          `json:"fetched_at"`
+	BodySHA256 string          `json:"body_sha256"`
 	Attempts   []reach.Attempt `json:"attempts"`
 }
 
@@ -70,12 +74,16 @@ func runReachCommand(channel reach.Channel, action reach.Action, args []string) 
 		exitRuntime("reach", string(action), *traceID, cli.CodeRuntime, err, "Verify URL, channel, and upstream tool availability (gh for github)", *jsonl)
 	}
 
+	fetchedAt := time.Now().UTC().Format(time.RFC3339)
 	data := reachPayload{
 		Channel:    string(channel),
 		Action:     string(action),
 		Backend:    resp.Provenance,
 		Provenance: resp.Provenance,
 		Body:       resp.Body,
+		URL:        req.URL,
+		FetchedAt:  fetchedAt,
+		BodySHA256: reach.DigestBody(resp.Body),
 		Attempts:   attempts,
 	}
 

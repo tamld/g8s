@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"testing"
+	"time"
+
+	"github.com/tamld/g8s/internal/reach"
 )
 
 func TestReachReadJSONEnvelope(t *testing.T) {
@@ -42,6 +45,18 @@ func TestReachReadJSONEnvelope(t *testing.T) {
 	}
 	if env.Data.Backend != "web-https-get" || len(env.Data.Attempts) != 1 || env.Data.Attempts[0].Class != "ok" {
 		t.Fatalf("attempts/backend: %+v", env.Data)
+	}
+	if env.Data.URL != srv.URL {
+		t.Fatalf("url = %q", env.Data.URL)
+	}
+	if env.Data.BodySHA256 != reach.DigestBody("reach-test-body") {
+		t.Fatalf("body_sha256 = %q, want %q", env.Data.BodySHA256, reach.DigestBody("reach-test-body"))
+	}
+	if env.Data.FetchedAt == "" {
+		t.Fatal("fetched_at must be set")
+	}
+	if _, err := time.Parse(time.RFC3339, env.Data.FetchedAt); err != nil {
+		t.Fatalf("fetched_at not RFC3339: %v", err)
 	}
 }
 

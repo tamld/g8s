@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/tamld/g8s/internal/reach"
 )
 
 // FloorCheck is one mechanical DoR check result.
@@ -106,6 +109,7 @@ func CheckDoRFloorForLane(title, payload, dod, permission, lane string) FloorRes
 				Pass:   specContractPattern.MatchString(combined),
 				Detail: "lanes F/R/S require formal spec contract reference (PRD, SRS, AC-*, FSM, ADR-*, or DELTA-*)",
 			},
+			checkReachCitationValid(combined),
 		)
 	}
 
@@ -117,4 +121,26 @@ func CheckDoRFloorForLane(title, payload, dod, permission, lane string) FloorRes
 // FloorFailureError renders the failed checks as one actionable error.
 func FloorFailureError(r FloorResult) error {
 	return fmt.Errorf("brief DoR floor failed: %s", strings.Join(r.failures(), "; "))
+}
+
+func checkReachCitationValid(combined string) FloorCheck {
+	const checkName = "reach_citation_valid"
+	artifacts, parseErrs := reach.ParseReachCiteMarker(combined)
+	if len(parseErrs) > 0 {
+		return FloorCheck{Name: checkName, Pass: false, Detail: parseErrs[0].Error()}
+	}
+	if len(artifacts) == 0 {
+		return FloorCheck{Name: checkName, Pass: true}
+	}
+	now := time.Now().UTC()
+	for i, a := range artifacts {
+		if err := reach.ValidateReachCitation(a, now, reach.MaxCitationAge); err != nil {
+			return FloorCheck{
+				Name:   checkName,
+				Pass:   false,
+				Detail: fmt.Sprintf("reach-cite marker %d: %v", i+1, err),
+			}
+		}
+	}
+	return FloorCheck{Name: checkName, Pass: true}
 }
