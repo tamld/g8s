@@ -1,4 +1,7 @@
-# Nightly full-battery CI — catches test drift when PR lanes skip docs-only paths (ADR-0031).
+# Nightly CI (ADR-0031): scheduled when PR lanes may skip docs-only paths.
+# Runs: gofmt, gofumpt, go vet, golangci-lint, go test ./... (CGO=0),
+# go test -race ./internal/... (CGO=1), bounded Fuzz* targets (-fuzztime 10s each).
+# Crash-survival / golden-loop live elsewhere; no Windows/macOS matrix (cost discipline).
 
 name: Nightly Full Battery
 
@@ -69,3 +72,19 @@ jobs:
 
       - name: Test plain build (Zero-CGO)
         run: CGO_ENABLED=0 go test ./... -count=1
+
+      - name: Test race detector
+        run: go test -race -count=1 ./internal/...
+        env:
+          CGO_ENABLED: '1'
+
+      - name: Bounded fuzzing (external-input parsers)
+        shell: bash
+        run: |
+          go test -run '^$' -fuzz FuzzConfigLoad -fuzztime 10s ./internal/config/
+          go test -run '^$' -fuzz FuzzReceiptEnvelope -fuzztime 10s ./internal/receipt/
+          go test -run '^$' -fuzz FuzzWorkerResultParse -fuzztime 10s ./internal/worker/
+          go test -run '^$' -fuzz FuzzSanitizeOutput -fuzztime 10s ./internal/dispatch/
+          go test -run '^$' -fuzz FuzzVerifyScope -fuzztime 10s ./internal/fsops/
+          go test -run '^$' -fuzz FuzzReadAndEdit -fuzztime 10s ./internal/fsops/
+          go test -run '^$' -fuzz FuzzSelectPath -fuzztime 10s ./internal/cli/
