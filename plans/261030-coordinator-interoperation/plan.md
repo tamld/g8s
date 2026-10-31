@@ -1,7 +1,7 @@
 ---
 title: "Coordinator interoperation with three-dimensional capability awareness"
 description: "Connect existing coordinator sessions without human message relaying, while retaining g8s worker containment and evidence-based acceptance."
-status: in-progress
+status: completed
 priority: P1
 branch: codex/coordinator-mesh-experiment
 tags: [feature, backend, experimental]
@@ -23,9 +23,10 @@ The baseline is `f3ced6add2f48951fe669031d826fe9b5570d5c8`. Work happens on this
 | Phase | Name | Status |
 |---|---|---|
 | 0 | [Native peer connection and one-round debate](./phase-00-peer-bootstrap.md) | Completed |
-| 1 | [Protocol contract and negative controls](./phase-01-protocol-contract.md) | Ready under D2 |
-| 2 | [Coordinator core, adapters and CLI integration](./phase-02-implementation.md) | Pending phase 1 |
-| 3 | [Native inbox and recovery drill](./phase-03-native-drill.md) | Pending phase 2 |
+| 1 | [Protocol contract and negative controls](./phase-01-protocol-contract.md) | Completed |
+| 2 | [Coordinator core, adapters and CLI integration](./phase-02-implementation.md) | Completed |
+| 3 | [Native inbox and recovery drill](./phase-03-native-drill.md) | Completed |
+| 4 | [RT-MESH v1 real-time protocol and R1–R4 drills](./realtime-protocol.md) | Completed |
 
 ## Dependencies and prior work
 
@@ -45,6 +46,8 @@ The existing stratum-federation and v0.20 worker campaigns supply reusable mecha
 - [x] Run a bootstrap connected exchange without human message relaying.
 - [x] Separate demonstrated capabilities from remaining implementation work.
 - [x] Run the artifact review and final zero-change check on the primary checkout.
+- [x] Ratify RT-MESH v1 (`realtime-protocol.md`) and pass R1–R4 live interop drills plus `internal/mesh/drills_test.go` regression suite.
+- [x] Complete K5 programmatic quota self-observation (`status=observed` across 3 Antigravity windows) and parallel slice convergence.
 
 ## Acceptance boundaries
 
@@ -52,6 +55,10 @@ Delivery, attention, turn start, response and supervisor acceptance are separate
 
 ## Verification route
 
-Planning artifacts: source-bound peer review, recorded decision dispositions, local-link validation and `git diff --check` including inspection of untracked additions. Worker evidence: task-bound get/receipt records plus packet-specific oracles, never exit status alone. Implementation: meaningful negative controls, appropriate Go tests and declaration/CLI/spec gates before integration. Experimental source code is not represented as implemented by this planning artifact.
+Planning artifacts: source-bound peer review, recorded decision dispositions, local-link validation and `git diff --check` including inspection of untracked additions. Worker evidence: task-bound get/receipt records plus packet-specific oracles, never exit status alone. Implementation: meaningful negative controls, appropriate Go tests and declaration/CLI/spec gates before integration.
 
-Execution handoff: the next packet is phase 1 under the [D2 peer and budget contract](./peer-budget-contract.md). Codex is preparing that packet, not holding permanent integration authority. No new debate round is required. Runtime workers still need the packet-specific write receipt, correct deliverable root and verification evidence before source changes are accepted. D1 peer ACKs prove historical scope acceptance; D2 peer consumption and a native CLI/MCP exchange remain to be demonstrated.
+## Finalized Phase 3 & 4 Convergence Summary (2026-10-31)
+
+- **Core Implementation (`internal/mesh/*`, `cmd/g8s/coordinator_mesh.go`, `internal/mcp/mesh.go`, `DELTA-46`)**: SQLite WAL peer ledger with 10 deterministic operations (`register`, `quota-publish`, `send`, `inbox`, `ack`, `claim`, `release`, `accept`, `snapshot`, `wait`), CLI/MCP parity (`g8s coordinator mesh` and `g8s_coordinator_mesh`), and 16 passing unit/regression tests (`claims_test.go`, `messages_test.go`, `drills_test.go`, `internal/mcp/mesh_test.go`).
+- **RT-MESH v1 Real-Time Protocol (`realtime-protocol.md`)**: Ratified across peers with verified R1 long-poll wake latency (`107ms`), R2 4-claimer single-winner CAS race + `context_revision` fence, R3 `message_id` idempotent echo vs. digest-collision rejection, and R4 cross-platform live round-trip (`25s`).
+- **Three-Platform Ledger Convergence (`seq1..seq34`) & K5 Programmatic Quota Self-Check**: Codex, AGY, and ZCode coordinated handoffs, claims, and artifact acceptances through the shared SQLite ledger; AGY verified programmatic self-observation of all three quota windows (`gemini_weekly`, `gemini_five_hour`, `claude_gpt_weekly`) via `orca account list --json` (`antigravity-cli`) and `orca terminal read`.

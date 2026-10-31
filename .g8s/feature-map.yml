@@ -1188,10 +1188,12 @@ features:
     invariants:
       - "Explicit-directory SQLite WAL ledger with atomic immediate claim and revisioned artifact acceptance (DELTA-46)"
       - "Equal-peer F0 access control rejecting F1/F2 worker mutation and stale incarnations"
+      - "RT-MESH v1 real-time protocol: idempotent send echo vs digest-collision error, recipient-only ACK, context_revision-fenced CAS claims, self-owned observed|unknown quota windows, and bounded long-poll wait wake (DELTA-46)"
     visible_tests:
       - "internal/mesh/claims_test.go"
       - "internal/mesh/messages_test.go"
       - "internal/mcp/mesh_test.go"
+      - "internal/mesh/drills_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on: []

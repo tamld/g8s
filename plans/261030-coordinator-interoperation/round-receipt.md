@@ -52,3 +52,49 @@ These prove bounded supplied-text request/response through the peers' g8s runtim
 ## Planning closeout
 
 Reviewed the seven new planning files, validated their local links and inspected untracked text for whitespace and private path/address leakage; no findings in that bounded check. Ownership sets are disjoint and both ACK digests match D1. Git diff whitespace checks passed and the primary checkout remained clean at the bound HEAD. No Go implementation or native inbox/recovery test is claimed. Phase 1 is the next execution packet under Codex ownership; the peers await that contract rather than requesting operator relays.
+
+---
+
+# Finalization Round R-FIN-01 (2026-10-31) — RT-MESH v1 negotiation & parallel execution
+
+Author: zcode (`zcode-native-20261030-cu`). Peers: agy (source-integration owner), codex (parked, ledger-only). Ledger revision 5 → 6.
+
+## Protocol events (this round)
+
+- RT-MESH v1: proposed (seq 26) → agy co-sign with amendments A1/A2 (seq 27, **25s round-trip**) → applied → ratified broadcast (seq 28/29; codex 3rd co-sign queued).
+- Knowledge exchange K1-K5 (seq 30/31 → answered seq 34): command-surface standardization (`--prompt-file`/`--input` always, `--timeout 180s`, per-node `G8S_STATE_DIR`, workspace_write env on both submit+worker); 5 dispatch lessons (L1 exact-line briefs cut runtime >180s→25-40s; L2 worktree `--add-dir` isolation fix `cebc16b`; L3 verify impasse fix `56ed8f7`; L4 `--apply-files` fence contract; L5 macOS TCC boundary); 2 charter gaps found (no mesh ops docs — fixing in agy A-slice; `receipt issue` doc bug: real flag is repeatable `--path`/`--allow`, JSON field `.data.receipt_id` — deferred to debt phase).
+- **K4 vigil breakthrough**: Antigravity background-task runtime wakes agy natively when `wait` exits — zero polling, zero nudge; mirrors ZCode's harness background-task wake. Both platforms converged on the same primitive: dumb process holds the vigil, model turn starts only on wake.
+- **K5 quota self-check: PASS_OBSERVED_PROGRAMMATICALLY** — P-A pty self-read (2000 lines of own TUI, no pixels/credentials) + P-B live `orca account list` (non-stale). 3 windows published status=observed: gemini_weekly 98% (resets 2026-11-07T02:16:57Z), gemini_five_hour 98% (10:17:29Z), claude_gpt_weekly 0% (2026-11-02T10:07:27Z). Evidence: `agy-k5-quota-publish.json` sha `4d4a2286…`.
+
+## Parallel split (accepted, seq 32 → seq 34)
+
+| Slice | Owner | Paths (claimed on ledger) | Status |
+|---|---|---|---|
+| z2-regression-tests-001 | zcode | internal/mesh/drills_test.go | **DONE** — 5 tests green (`ok 0.693s`, vet clean), accepted on ledger |
+| W-round-receipt | zcode | this file (R-FIN-01 section) | **DONE** (this record) |
+| agy-slice-A-finalization-001 | agy | plan.md, .g8s/feature-map.yml, docs/AGENTS_FULL.md | in flight (agy turn running) |
+| task-agy-mcp-toollist-and-cli-input-fix-01 | agy (self-directed) | cmd/g8s/coordinator_mesh.go, internal/mcp/server_test.go | in flight |
+| task-agy-mesh-review-simplify-01 | agy (self-directed) | internal/mesh/{claims,messages,store}.go, spec/46 | in flight |
+
+Shared-forbidden without new claim: cmd/g8s non-coordinator files, spec/, README.md.
+
+## Routing evidence (worker transport, 2026-10-31)
+
+- 9router credential drift: `if/glm-4.6` (iflow) → 404 no active credentials; `kr/claude-sonnet-4.5` (kiro) → 404 same. Scorecard auto-quarantined if/glm-4.6 (composite 34, DEMOTE_OR_FALLBACK).
+- Fallback that delivered: `cursor composer-2.5` native CLI (Surface A) implemented + self-verified the 6.6KB drills_test.go task.
+- Lesson: availability is observed per-dispatch; evidence packets age within a day.
+
+## Attention-adapter lessons (new, proposed as RT-MESH v1.1 A5)
+
+1. "Send accepted" ≠ "turn started": a TUI modal (quota display) silently swallowed two terminal-injected nudges. Diagnosis = `orca terminal read --screen` of the peer; correction = modal's advertised close action (esc); then re-nudge.
+2. Platform-native background wake (K4) supersedes external nudges wherever the platform has it; nudges remain the fallback for idle sessions without an armed vigil.
+
+## Merge package (negotiated, pending gates)
+
+One PR to main: `feat(mesh): coordinator interop ledger + RT-MESH v1` — internal/mesh (+drills_test.go), cmd/g8s/coordinator*, internal/mcp/mesh*, spec/openspec/46, plans docs, .g8s/feature-map.yml (FEAT-COORDINATOR-MESH-01), docs/AGENTS_FULL.md mesh section.
+Gates: full `CGO_ENABLED=0 go test ./...`, doc-contract check, cross-verification (agy verifies zcode artifacts; zcode spot-verifies agy docs), S0 authorization (directed 2026-10-31).
+Merge intel (agy): local main @ `d14845b` (8 tech-debt commits ahead of f3ced6a); one additive `.g8s/feature-map.yml` overlap, resolves cleanly.
+
+## Deferred to Phase D (tech debt)
+
+AM1 mesh `busy_timeout(5000)` → 30000 after measured burst (store.go:46) · AM2 inbox retention/rotation · A1 cumulative ack by seq · A2 flow-window enforcement · A3 retry budget/peer · A4 ping/pong advisory keepalive · A5 screen-state gate · fence-at-mutation enforcement point · `receipt issue` doc bug in vendored SKILL.md · evidence-packet refresh cadence.
