@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-
 	"flag"
 	"fmt"
-
 	"os"
 	"path/filepath"
 	"strings"
