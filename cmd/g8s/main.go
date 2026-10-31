@@ -130,6 +130,8 @@ func main() {
 		runSearch(os.Args[2:])
 	case "read":
 		runRead(os.Args[2:])
+	case "reach":
+		runReach(os.Args[2:])
 	case "edit":
 		runEdit(os.Args[2:])
 	case "select":

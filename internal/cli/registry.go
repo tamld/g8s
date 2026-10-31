@@ -21,7 +21,7 @@ type CommandContract struct {
 }
 
 // CanonicalCommandContracts returns the authoritative Generative Surface Contract v2
-// for all 66 top-level g8s CLI commands (#677).
+// for all 67 top-level g8s CLI commands (#677).
 func CanonicalCommandContracts() []CommandContract {
 	return []CommandContract{
 		{Name: "submit", Stratum: "S2", EnvelopeKinds: []string{"task"}, Description: "Queue an asynchronous durable task with harness safety checks"},
@@ -65,6 +65,7 @@ func CanonicalCommandContracts() []CommandContract {
 		{Name: "reflex", Stratum: "S2", EnvelopeKinds: []string{"reflex_verdict"}, Description: "Run the System-1 reflex gate on a planned mutation (g8s reflex triage --summary ...)"},
 		{Name: "search", Stratum: "S2/S3", EnvelopeKinds: []string{"search"}, Description: "High-performance safe code search bounded by delegation context (g8s search <pattern>)"},
 		{Name: "read", Stratum: "S2/S3", EnvelopeKinds: []string{"read"}, Description: "Safe bounded file read with line slicing and DLP (g8s read <path>)"},
+		{Name: "reach", Stratum: "S1/S2/S3", EnvelopeKinds: []string{"reach"}, Description: "Read-only platform data acquisition with ordered fallback (g8s reach read <url> | g8s reach <channel> read --url <url>)"},
 		{Name: "edit", Stratum: "S3-M", EnvelopeKinds: []string{"edit"}, Description: "Atomic single/all string replacement with SHA-256 verification (g8s edit <path>)"},
 		{Name: "select", Stratum: "S2/S3", Description: "Extract values from JSON using dot/index path selector (g8s select <expr>)"},
 		{Name: "watch", Stratum: "S2", EnvelopeKinds: []string{"watch_verdict"}, Description: "Block until a watched condition is terminal (g8s watch --pr N / --task ID)"},

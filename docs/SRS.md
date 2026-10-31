@@ -59,6 +59,11 @@
   * Live model discovery via `g8s providers discover [--provider <name>] [--json]` querying `/v1/models`.
   * Catalog registration of standardized 9router SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) in `.g8s/agent-models.yml`.
   * Two-Layer Separation Rule: Public repo files declare generic protocol mechanisms and standard combos only; private LAN endpoints or custom homelab combos reside strictly in untracked local configurations (`~/.config/g8s/providers.json`).
+* **FR-11 (Reach Layer — Read-Only Platform Data Acquisition, `DELTA-47`, ADR-0037)**:
+  * In-code channel→action→backend registry (no YAML) with stable declared ordering and terminal errors for unknown channel/action.
+  * Ordered fallback dispatch: transient failures (network, timeout, 429, 5xx) classify fallback and advance to the next backend; bad requests classify terminal and stop; optional nil-safe `Orderer`/`Recorder` seams for the S2 health ledger (ADR-0037 Amendment A1).
+  * `g8s reach read <url>` / `g8s reach <channel> read --url <url>` as the only agent-facing surface, emitting the standard versioned JSON envelope with backend provenance and a per-attempt trail.
+  * Read-only absolute invariant: no upstream mutation of any kind; credentials stay OUTSIDE g8s state (receipts, ledger, logs, ContextPacket); no Python port; no GUI automation in the steady-state loop.
 
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.
