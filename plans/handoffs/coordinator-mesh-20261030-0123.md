@@ -21,7 +21,7 @@ The native g8s mesh core, CLI, and MCP adapter exist in the isolated experiment 
 ## Current state
 
 Observed checkout: `/private/tmp/g8s-mesh-20261030/worktree`, branch `codex/coordinator-mesh-experiment`, HEAD `f3ced6add2f48951fe669031d826fe9b5570d5c8`.
-Primary checkout `/Users/tamld/Documents/github/g8s` is clean at the same HEAD. All experiment edits are intentional and uncommitted.
+Primary checkout `~/Documents/github/g8s` is clean at the same HEAD. All experiment edits are intentional and uncommitted.
 
 Modified tracked files: `cmd/g8s/coordinator.go`, `internal/cli/registry.go`, `internal/mcp/server.go`.
 New files: `cmd/g8s/coordinator_mesh.go`, `internal/mcp/mesh.go`, `internal/mcp/mesh_test.go`, `internal/mesh/{types,store,messages,messages_test,claims,claims_test}.go`, `spec/openspec/46-peer-coordinator-ledger-spec.md`, `plans/261030-coordinator-interoperation/`, this continuation contract.
