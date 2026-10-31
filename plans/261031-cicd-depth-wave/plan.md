@@ -62,5 +62,3 @@ blocks: []
 - [ ] Each red-test names its OWASP class and asserts deny-by-default behavior
 - [ ] No production code changes beyond `.github/workflows/` (tests-only wave)
 - [ ] #699 comment updated with per-item closure
-XEOF
-echo "plan written"
