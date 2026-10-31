@@ -143,7 +143,9 @@ func TestMeshLeaseExpiry(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	s.now = func() time.Time { return now }
 
-	claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "resource": "r1", "paths": []string{"pkg/c"}, "context_revision": 0, "lease_seconds": 10})
+	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "resource": "r1", "paths": []string{"pkg/c"}, "context_revision": 0, "lease_seconds": 10}); err != nil {
+		t.Fatal(err)
+	}
 	now = now.Add(15 * time.Second)
 
 	if _, err := claimTestExec(s, "accept", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "context_revision": 0, "artifact_ref": "r", "artifact_sha256": claimDummySHA}); err == nil {
@@ -169,7 +171,9 @@ func TestMeshClaimRejectsTraversalAndChangedReplay(t *testing.T) {
 			t.Fatalf("expected error on %v", bp)
 		}
 	}
-	claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "to", "resource": "r1", "paths": []string{"pkg/ok"}, "context_revision": 0})
+	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "to", "resource": "r1", "paths": []string{"pkg/ok"}, "context_revision": 0}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "to", "resource": "r1", "paths": []string{"pkg/diff"}, "context_revision": 0}); err == nil {
 		t.Fatal("expected error on changed replay")
 	}
@@ -193,12 +197,16 @@ func TestMeshAllPeersSameRights(t *testing.T) {
 	}
 
 	for _, p := range []string{"p1", "p2"} {
-		claimTestExec(s, "claim", map[string]any{"node_id": p, "incarnation": "i1", "task_id": "t-" + p, "resource": "r1", "paths": []string{"sh/sc"}, "context_revision": 0})
+		if _, err := claimTestExec(s, "claim", map[string]any{"node_id": p, "incarnation": "i1", "task_id": "t-" + p, "resource": "r1", "paths": []string{"sh/sc"}, "context_revision": 0}); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := claimTestExec(s, "release", map[string]any{"node_id": p, "incarnation": "i1", "task_id": "t-" + p}); err != nil {
 			t.Fatalf("%s release failed: %v", p, err)
 		}
 	}
-	claimTestExec(s, "claim", map[string]any{"node_id": "p3", "incarnation": "i1", "task_id": "t-p3", "resource": "r1", "paths": []string{"sh/sc"}, "context_revision": 0})
+	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "p3", "incarnation": "i1", "task_id": "t-p3", "resource": "r1", "paths": []string{"sh/sc"}, "context_revision": 0}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := claimTestExec(s, "accept", map[string]any{"node_id": "p3", "incarnation": "i1", "task_id": "t-p3", "context_revision": 0, "artifact_ref": "p3-art", "artifact_sha256": claimDummySHA2}); err != nil {
 		t.Fatalf("p3 accept failed: %v", err)
 	}
