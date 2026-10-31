@@ -44,6 +44,16 @@ jobs:
             exit 1
           fi
 
+      - name: Check formatting (gofumpt - pre-push parity)
+        shell: bash
+        run: |
+          unformatted=$(gofumpt -l . | grep -v '^reference/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofumpt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
 
