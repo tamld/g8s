@@ -10,6 +10,8 @@ blocks: []
 created: 2026-10-30
 ---
 
+**Session type**: T2 (execution)
+
 # Coordinator interoperation experiment
 
 ## Outcome and authority
