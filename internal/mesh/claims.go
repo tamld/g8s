@@ -234,7 +234,8 @@ func claimAcceptHandler(ctx context.Context, s *Store, input json.RawMessage) (a
 	}
 	for i := 0; i < 64; i++ {
 		c := req.ArtifactSHA256[i]
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !isHex {
 			return nil, errors.New("artifact_sha256 must be hex")
 		}
 	}

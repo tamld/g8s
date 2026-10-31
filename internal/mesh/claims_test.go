@@ -97,7 +97,9 @@ func TestMeshAcceptRevisionAndIdempotence(t *testing.T) {
 	defer s.Close()
 	claimTestSetupNode(t, s, "n1", "i1")
 
-	claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "resource": "r1", "paths": []string{"pkg/a"}, "context_revision": 0})
+	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "resource": "r1", "paths": []string{"pkg/a"}, "context_revision": 0}); err != nil {
+		t.Fatal(err)
+	}
 	res1, err := claimTestExec(s, "accept", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "context_revision": 0, "artifact_ref": "ref-1", "artifact_sha256": claimDummySHA})
 	if err != nil {
 		t.Fatal(err)
@@ -108,8 +110,12 @@ func TestMeshAcceptRevisionAndIdempotence(t *testing.T) {
 		t.Fatalf("want rev 1, got %d", a1.Revision)
 	}
 
-	claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t2", "resource": "r1", "paths": []string{"pkg/b"}, "context_revision": 1})
-	claimTestExec(s, "accept", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t2", "context_revision": 1, "artifact_ref": "ref-2", "artifact_sha256": claimDummySHA})
+	if _, err := claimTestExec(s, "claim", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t2", "resource": "r1", "paths": []string{"pkg/b"}, "context_revision": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claimTestExec(s, "accept", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t2", "context_revision": 1, "artifact_ref": "ref-2", "artifact_sha256": claimDummySHA}); err != nil {
+		t.Fatal(err)
+	}
 
 	resRetry, err := claimTestExec(s, "accept", map[string]any{"node_id": "n1", "incarnation": "i1", "task_id": "t1", "context_revision": 0, "artifact_ref": "ref-1", "artifact_sha256": claimDummySHA})
 	if err != nil {
