@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-01
+
 ### Added
 
 - **Multi-Coordinator Native Interop Ledger & RT-MESH v1 (`DELTA-46`, `#699`, `#700`, `#702`)**:

@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	Version     = "0.21.0"
+	Version     = "0.22.0"
 	Commit      = "unknown" // -ldflags "-X main.Commit=$(git rev-parse HEAD)"
 	BuildTime   = "unknown" // -ldflags "-X main.BuildTime=$(date -u)"
 	BuildSource = "unknown" // -ldflags "-X main.BuildSource=release|local-dev"
