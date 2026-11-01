@@ -32,3 +32,9 @@ The routing and telemetry subsystem MUST expose `g8s scorecard [status|audit|kai
 - **GIVEN** an initialized `G8S_STATE_DIR`
 - **WHEN** `g8s scorecard status --json` is executed
 - **THEN** it returns a `scorecard_5axis` envelope containing all 5 axes and `kaizen_recommendations`
+
+#### Scenario: Worker attempt completion and verifier gate-outcome ledger feed D-09 sense
+<!-- tests: TestWorkerRunOnceRecordsModelOutcome, TestRecordModelOutcomeDeduplicatesLegacyCLIWrapper, TestRecordGateOutcomesAndFlakeSummary -->
+- **GIVEN** a worker task executed via `Supervisor.RunOnce` and a verification run evaluated via `Verifier.Verify`
+- **WHEN** the attempt finishes and verification checks complete
+- **THEN** `model_quality_events.jsonl` records one `ModelOutcomeRecord` per attempt (without duplicate CLI wrapper rows) and `gate_outcome_events.jsonl` records per-check outcomes and flake transitions

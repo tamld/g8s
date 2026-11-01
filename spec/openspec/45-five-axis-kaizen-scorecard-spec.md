@@ -29,3 +29,9 @@ Evaluating worker models in isolation masks systemic friction caused by over-bro
 - **GIVEN** an active `G8S_STATE_DIR`
 - **WHEN** `g8s scorecard status --json` and `g8s f0 gate check --json` are executed
 - **THEN** `scorecard_5axis` returns all 5 evaluation axes with `kaizen_recommendations` and `f0_gate_check` returns `verdict: "PASS"`
+
+#### Scenario: Worker attempt completion and verifier gate-outcome ledger feed D-09 sense
+<!-- tests: TestWorkerRunOnceRecordsModelOutcome, TestRecordModelOutcomeDeduplicatesLegacyCLIWrapper, TestRecordGateOutcomesAndFlakeSummary -->
+- **GIVEN** a worker task executed via `Supervisor.RunOnce` and a verification run evaluated via `Verifier.Verify`
+- **WHEN** the attempt finishes and verification checks complete
+- **THEN** `model_quality_events.jsonl` records one `ModelOutcomeRecord` per attempt (without duplicate CLI wrapper rows) and `gate_outcome_events.jsonl` records per-check outcomes and flake transitions
