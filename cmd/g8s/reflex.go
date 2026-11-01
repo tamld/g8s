@@ -153,6 +153,7 @@ func assembleContextPacket(filesModified []string, query string) *g8scontext.Con
 	broker := g8scontext.NewBroker(g8scontext.Sources{
 		VaultNotes:     vaultNotesSource(filesModified, query),
 		RecentOutcomes: telemetryOutcomesSource(),
+		WorldSnippets:  g8scontext.WorldSnippetsFromFile,
 		SomPhase:       somPhaseSource(),
 	}, func(event, detail string) {
 		fmt.Fprintf(os.Stderr, "[warn] context broker: %s: %s\n", event, detail)
