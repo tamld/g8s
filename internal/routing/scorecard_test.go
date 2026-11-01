@@ -1,9 +1,11 @@
 package routing
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/tamld/g8s/internal/config"
@@ -190,5 +192,79 @@ func TestClassifyFailureDiagnosisAndRateLimitBackoff(t *testing.T) {
 	}
 	if scores[0].LastFailureDiagnosis != FailureRateLimit || scores[0].FailureBreakdown[FailureRateLimit] != 3 {
 		t.Fatalf("expected FailureRateLimit breakdown=3, got %+v", scores[0])
+	}
+}
+
+func TestRecordModelOutcomeDeduplicatesLegacyCLIWrapper(t *testing.T) {
+	tmpDir := t.TempDir()
+	ledgerPath := filepath.Join(tmpDir, "model_quality_events.jsonl")
+	t.Setenv("G8S_MODEL_SCORECARD_PATH", ledgerPath)
+
+	if err := RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+		TaskID:         "task-001",
+		Provider:       "cursor",
+		ModelRequested: "composer-2.5",
+		Success:        true,
+		DurationMs:     1200,
+	}); err != nil {
+		t.Fatalf("authoritative worker record: %v", err)
+	}
+	countLines := func() int {
+		data, err := os.ReadFile(ledgerPath)
+		if err != nil {
+			t.Fatalf("read ledger: %v", err)
+		}
+		n := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				n++
+			}
+		}
+		return n
+	}
+	if countLines() != 1 {
+		t.Fatalf("after authoritative record: got %d lines, want 1", countLines())
+	}
+	if err := RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+		Provider:       "cursor",
+		ModelRequested: "composer-2.5",
+		Success:        true,
+	}); err != nil {
+		t.Fatalf("legacy wrapper record: %v", err)
+	}
+	if countLines() != 1 {
+		t.Fatalf("after legacy wrapper: got %d lines, want 1", countLines())
+	}
+	data, _ := os.ReadFile(ledgerPath)
+	var kept ModelOutcomeRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.Split(string(data), "\n")[0])), &kept); err != nil {
+		t.Fatalf("unmarshal kept row: %v", err)
+	}
+	if kept.TaskID != "task-001" || kept.DurationMs != 1200 {
+		t.Fatalf("dedup corrupted authoritative row: %+v", kept)
+	}
+	if err := RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+		TaskID:         "task-002",
+		Provider:       "cursor",
+		ModelRequested: "composer-2.5",
+		Success:        true,
+		DurationMs:     500,
+	}); err != nil {
+		t.Fatalf("second task record: %v", err)
+	}
+	if countLines() != 2 {
+		t.Fatalf("after task-002: got %d lines, want 2", countLines())
+	}
+	if err := RecordModelOutcome(tmpDir, ModelOutcomeRecord{
+		Provider:       "cursor",
+		ModelRequested: "composer-2.5",
+		Success:        true,
+		VerifyChecked:  true,
+		VerifyPassed:   true,
+	}); err != nil {
+		t.Fatalf("verify record: %v", err)
+	}
+	if countLines() != 3 {
+		t.Fatalf("after verify record: got %d lines, want 3", countLines())
 	}
 }

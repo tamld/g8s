@@ -23,6 +23,7 @@ import (
 
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/reflex"
+	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/telemetry"
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -299,6 +300,35 @@ func (s *Supervisor) sweepCandidatePIDs(
 	return killed, examined
 }
 
+func (s *Supervisor) scorecardStateDir() string {
+	if strings.TrimSpace(os.Getenv("G8S_MODEL_SCORECARD_PATH")) != "" {
+		return ""
+	}
+	if s != nil && strings.TrimSpace(s.runRoot) != "" && filepath.Base(s.runRoot) == "runs" {
+		return filepath.Dir(s.runRoot)
+	}
+	return pathutil.DefaultStateDir()
+}
+
+func (s *Supervisor) recordAttemptModelOutcome(taskID string, req taskRequest, success bool, durationSec float64, totalTokens int, errReason string) {
+	prov := firstNonEmpty(strings.TrimSpace(req.Provider), "default")
+	mod := firstNonEmpty(strings.TrimSpace(req.Model), prov)
+	durMs := int64(durationSec * 1000)
+	if durMs < 0 {
+		durMs = 0
+	}
+	_ = routing.RecordModelOutcome(s.scorecardStateDir(), routing.ModelOutcomeRecord{
+		TaskID:         taskID,
+		Provider:       prov,
+		ModelRequested: mod,
+		Success:        success,
+		DurationMs:     durMs,
+		TotalTokens:    totalTokens,
+		ErrorReason:    errReason,
+		RecordedAt:     s.clock().UTC().Format(time.RFC3339),
+	})
+}
+
 // collect terminates any surviving child, applies the terminal branch, and
 // guarantees output capture files are removed and evidence exported.
 func (s *Supervisor) collect(
@@ -370,6 +400,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish cancelled attempt: %w", ferr)
 		}
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "cancelled by orchestrator")
 	case reason == "timeout":
 		env := outcomeEnvelope(false, "timeout", stdoutText, stderrText)
 		env["duration"] = durationSec
@@ -393,6 +424,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish timed-out attempt: %w", ferr)
 		}
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "execution deadline exceeded")
 	case reason == "invalid_timeout":
 		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(outcomeEnvelope(false, "invalid_result", stdoutText, stderrText)),
@@ -403,6 +435,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "task requested an invalid execution timeout")
 	default:
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResult(rawResult, stdoutText, code)
@@ -710,6 +743,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish attempt: %w", ferr)
 		}
+		s.recordAttemptModelOutcome(taskID, req, success, durationSec, inTokens+outTokens, finishErr)
 	}
 	return s.snapshot(ctx, taskID, runDir, promptPath)
 }

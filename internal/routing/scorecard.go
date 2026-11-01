@@ -75,6 +75,7 @@ func ClassifyFailureDiagnosis(errReason string, stagnated bool, verifyFailed boo
 
 // ModelOutcomeRecord represents one observed execution outcome for a (provider, model) pair.
 type ModelOutcomeRecord struct {
+	TaskID           string      `json:"task_id,omitempty"`
 	Provider         string      `json:"provider"`
 	ModelRequested   string      `json:"model_requested"`
 	ModelResolved    string      `json:"model_resolved,omitempty"`
@@ -133,6 +134,38 @@ func SanitizeScorecardError(s string) string {
 	return rfc1918IPv4Pattern.ReplaceAllString(s, "<redacted-lan-ip>")
 }
 
+func isDuplicateLegacyWorkerRecord(path string, rec ModelOutcomeRecord) bool {
+	if rec.TaskID != "" || rec.VerifyChecked || rec.DurationMs != 0 || rec.TotalTokens != 0 {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	var lastLine string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lastLine = line
+		}
+	}
+	if lastLine == "" {
+		return false
+	}
+	var last ModelOutcomeRecord
+	if err := json.Unmarshal([]byte(lastLine), &last); err != nil {
+		return false
+	}
+	return last.TaskID != "" && !last.VerifyChecked &&
+		last.Provider == rec.Provider &&
+		last.ModelRequested == rec.ModelRequested &&
+		last.Success == rec.Success
+}
+
 // RecordModelOutcome appends one model execution observation to the rolling quality ledger.
 func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	rec.Provider = strings.TrimSpace(rec.Provider)
@@ -152,6 +185,9 @@ func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	}
 
 	p := ScorecardPath(stateDir)
+	if isDuplicateLegacyWorkerRecord(p, rec) {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}

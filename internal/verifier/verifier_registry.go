@@ -19,9 +19,16 @@ import (
 // Status indicates the enforcement mode of a verifier class.
 
 func (v *Verifier) emitTelemetry(taskID string, verdict Verdict) {
+	gateOverride := strings.TrimSpace(os.Getenv("G8S_GATE_OUTCOME_PATH")) != ""
+	if gateOverride {
+		_ = RecordGateOutcomes("", taskID, verdict)
+	}
 	if v.telemetrySink != nil {
 		v.telemetrySink(taskID, verdict)
 		return
+	}
+	if !gateOverride {
+		_ = RecordGateOutcomes("", taskID, verdict)
 	}
 
 	cfg := telemetry.DefaultTelemetryConfig()

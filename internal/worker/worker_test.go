@@ -18,6 +18,7 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/reflex"
+	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -281,6 +282,61 @@ func TestRunOnceHappyPathSucceedsAndCleansUp(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(attemptDir, "worker.stdout")); !os.IsNotExist(err) {
 		t.Fatal("worker.stdout must never be persisted")
+	}
+}
+
+func TestWorkerRunOnceRecordsModelOutcome(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	tmpDir := filepath.Dir(env.runDir)
+	ledgerPath := filepath.Join(tmpDir, "model_quality_events.jsonl")
+	t.Setenv("G8S_MODEL_SCORECARD_PATH", "")
+	t.Setenv("G8S_STATE_DIR", "")
+
+	countLines := func() int {
+		data, err := os.ReadFile(ledgerPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return 0
+			}
+			t.Fatalf("read ledger: %v", err)
+		}
+		n := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				n++
+			}
+		}
+		return n
+	}
+	if countLines() != 0 {
+		t.Fatalf("pre-run ledger lines = %d, want 0", countLines())
+	}
+
+	task := submitTask(t, env, "scorecard-1", 3, nil)
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-score", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if countLines() != 1 {
+		t.Fatalf("post-run ledger lines = %d, want 1", countLines())
+	}
+	data, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	var rec routing.ModelOutcomeRecord
+	line := strings.TrimSpace(strings.Split(string(data), "\n")[0])
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		t.Fatalf("unmarshal outcome: %v", err)
+	}
+	if rec.TaskID != task.TaskID || rec.TaskID != final.TaskID {
+		t.Fatalf("TaskID = %q, want %q", rec.TaskID, task.TaskID)
+	}
+	if !rec.Success {
+		t.Fatalf("expected success outcome, got %+v", rec)
+	}
+	if strings.TrimSpace(rec.Provider) == "" || strings.TrimSpace(rec.ModelRequested) == "" || strings.TrimSpace(rec.RecordedAt) == "" {
+		t.Fatalf("missing provider/model/timestamp: %+v", rec)
 	}
 }
 
