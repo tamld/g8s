@@ -10,6 +10,7 @@ head: c926f0e (S2 squash — verify latest)
 
 # HANDOFF: zcode → agy (Argon) — S3 to Release v0.22.0 + D-09 program
 
+- **Session type**: T2 (execution) — handing off to agy Argon (T2 execution continuity) or a fresh zcode T2 session
 - **Why handoff**: zcode session quota exhausted mid-campaign. Everything below is
   running or queued; the incoming session (agy Argon, or a fresh zcode) continues.
 - **State dir for all artifacts**: `$G8S_STATE_DIR = ~/.local/state/g8s-sess-s4-20261101`
