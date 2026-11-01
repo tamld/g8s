@@ -22,11 +22,15 @@ const maxPacketChars = 4096
 // maxPerSource bounds how many notes one source may contribute.
 const maxPerSource = 5
 
+// maxSnippetChars clamps each world snippet rune-safely (ADR-0037 A2).
+const maxSnippetChars = 512
+
 // ContextPacket is the bounded situational context attached to a
 // TriageRequest (v2).
 type ContextPacket struct {
 	VaultNotes     []string `json:"vault_notes,omitempty"`
 	RecentOutcomes []string `json:"recent_outcomes,omitempty"`
+	WorldSnippets  []string `json:"world_snippets,omitempty"`
 	SomPhase       string   `json:"som_phase,omitempty"`
 	Truncated      bool     `json:"truncated,omitempty"`
 }
@@ -43,6 +47,9 @@ func (p *ContextPacket) Bytes() int {
 	for _, s := range p.RecentOutcomes {
 		n += len(s)
 	}
+	for _, s := range p.WorldSnippets {
+		n += len(s)
+	}
 	n += len(p.SomPhase)
 	return n
 }
@@ -52,6 +59,7 @@ func (p *ContextPacket) Bytes() int {
 type Sources struct {
 	VaultNotes     func(ctx context.Context) ([]string, error)
 	RecentOutcomes func(ctx context.Context) ([]string, error)
+	WorldSnippets  func(ctx context.Context) ([]string, error)
 	SomPhase       func(ctx context.Context) (string, error)
 }
 
@@ -99,6 +107,17 @@ func (b *Broker) Assemble(ctx context.Context) *ContextPacket {
 			p.Truncated = p.Truncated || cut
 		}
 	}
+	if b.sources.WorldSnippets != nil {
+		items, err := b.sources.WorldSnippets(ctx)
+		if err != nil {
+			b.fail("reach: " + err.Error())
+		} else {
+			clamped := clampSnippets(items)
+			var cut bool
+			p.WorldSnippets, cut = fit(clamped)
+			p.Truncated = p.Truncated || cut
+		}
+	}
 	if b.sources.SomPhase != nil {
 		phase, err := b.sources.SomPhase(ctx)
 		if err != nil {
@@ -108,13 +127,16 @@ func (b *Broker) Assemble(ctx context.Context) *ContextPacket {
 		}
 	}
 
-	// Hard budget: drop lowest-priority sections first (outcomes → notes),
-	// then truncate the remainder rune-safely.
+	// Hard budget: drop lowest-priority sections first (ADR-0037 A2:
+	// RecentOutcomes → WorldSnippets → VaultNotes → SomPhase), then truncate
+	// the remainder rune-safely.
 	for p.Bytes() > maxPacketChars {
 		p.Truncated = true
 		switch {
 		case len(p.RecentOutcomes) > 0:
 			p.RecentOutcomes = p.RecentOutcomes[:len(p.RecentOutcomes)-1]
+		case len(p.WorldSnippets) > 0:
+			p.WorldSnippets = p.WorldSnippets[:len(p.WorldSnippets)-1]
 		case len(p.VaultNotes) > 1:
 			p.VaultNotes = p.VaultNotes[:len(p.VaultNotes)-1]
 		default:
@@ -131,6 +153,21 @@ func (b *Broker) Assemble(ctx context.Context) *ContextPacket {
 		}
 	}
 	return p
+}
+
+func clampSnippets(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, len(items))
+	for i, s := range items {
+		if len(s) > maxSnippetChars {
+			out[i] = truncateRuneSafe(s, maxSnippetChars)
+		} else {
+			out[i] = s
+		}
+	}
+	return out
 }
 
 // fit keeps the top-N items and reports whether content was cut.

@@ -84,3 +84,15 @@ stdlib HTTP — no Python port, no GUI automation (ADR-0037 invariants).
 - **GIVEN** the reach owned-paths ledger (override via `G8S_REACH_OWNED_PATHS_PATH`) tracking absolute cleaned paths
 - **WHEN** operators register paths and invoke registered deletion
 - **THEN** only registered paths are removed from disk, unregistered deletion fails closed, and symlink targets are refused via `os.Lstat` without touching WriteReceipt scope
+
+#### Scenario: Context Broker WorldSnippets file source and 4096 budget (S3, ADR-0037 A2)
+<!-- tests: TestAssembleWorldSnippetClamp512RuneSafe, TestAssembleBudgetDropsWorldSnippetsBeforeVaultNotes, TestAssembleBudgetDropsOutcomesBeforeNotes, TestAssembleWorldSnippetsFailOpenEmitsBrokerFailure, TestContextPacketBytesIncludesWorldSnippets, TestWorldSnippetsFromFile_FailOpenOnMissingEnvOrFile, TestWorldSnippetsFromFile_ParsesJSONArrayAndCaps5 -->
+- **GIVEN** `G8S_WORLD_SNIPPETS_PATH` pointing at a JSON array-of-strings file (or unset / missing file)
+- **WHEN** the Context Broker assembles a packet with wired `WorldSnippetsFromFile` and sources exceed the 4096-char budget
+- **THEN** each snippet is rune-clamped to 512 chars, at most five snippets are kept per source, missing env or file yields healthy-empty without error, malformed JSON fails open with a `broker_failure` (`reach: ...`), `Bytes()` counts world snippets, and budget drops follow `RecentOutcomes → WorldSnippets → VaultNotes → SomPhase`
+
+#### Scenario: Reach artifact vault promotion defaults to PROPOSED (S3, ADR-0037 A3)
+<!-- tests: TestPromoteReachArtifact_DefaultStatusProposed, TestPromoteReachArtifact_RejectsEmptyReceiptHash, TestPromoteReachArtifact_ScrubsCredentialPatterns, TestPromoteReachArtifact_IdempotentOnSameBodySHA256 -->
+- **GIVEN** a vault Store and a reach distillation with non-empty `ForensicVerification.ReceiptHash` and summary body text
+- **WHEN** `PromoteReachArtifact` scrubs credential patterns (`ghp_`, `sk-`, `AKIA`, PEM private-key headers) and upserts
+- **THEN** persisted records use `Status=PROPOSED` (never the Store `APPLIED` default), empty receipt hash is rejected, scrubbed summaries replace secrets with `[REDACTED]`, and id `reach:<body_sha256>` makes re-promotion idempotent

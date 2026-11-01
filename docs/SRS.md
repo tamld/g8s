@@ -67,6 +67,8 @@
   * S2 health ledger (`reach_backend_health.json`, override `G8S_REACH_HEALTH_PATH`): records keyed `channel::action::backend`, fallback demotion cooldown 300s, restart-survival via atomic JSON snapshot, wired `Orderer`/`Recorder` on `g8s reach`.
   * S2 owned-paths ledger (`reach_owned_paths.json`, override `G8S_REACH_OWNED_PATHS_PATH`): register absolute cleaned paths; delete only registered paths; refuse symlink deletion via `os.Lstat` (reach cleanup boundary only — not WriteReceipt scope).
   * Read-only absolute invariant: no upstream mutation of any kind; credentials stay OUTSIDE g8s state (receipts, ledger, logs, ContextPacket); no Python port; no GUI automation in the steady-state loop.
+  * Context Broker `WorldSnippets` (`world_snippets` JSON): file-backed via `G8S_WORLD_SNIPPETS_PATH` (JSON array of strings, fail-open on missing env/file), per-snippet 512-char rune clamp, max five per source, 4096-char drop order `RecentOutcomes → WorldSnippets → VaultNotes → SomPhase` (ADR-0037 A2).
+  * Reach-to-vault promotion (`PromoteReachArtifact`): requires non-empty forensic receipt hash, scrubs credential patterns to `[REDACTED]`, defaults `Status=PROPOSED`, idempotent id `reach:<body_sha256>` (ADR-0037 A3).
 
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.

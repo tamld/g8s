@@ -8,25 +8,28 @@ package context
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
 
-func testSources(vault []string, vErr error, outcomes []string, oErr error, phase string, pErr error) Sources {
+func testSources(vault []string, vErr error, outcomes []string, oErr error, world []string, wErr error, phase string, pErr error) Sources {
 	return Sources{
 		VaultNotes: func(ctx context.Context) ([]string, error) { return vault, vErr },
 		RecentOutcomes: func(ctx context.Context) ([]string, error) {
 			return outcomes, oErr
 		},
-		SomPhase: func(ctx context.Context) (string, error) { return phase, pErr },
+		WorldSnippets: func(ctx context.Context) ([]string, error) { return world, wErr },
+		SomPhase:      func(ctx context.Context) (string, error) { return phase, pErr },
 	}
 }
 
 // Degraded paths: empty / broken sources produce a minimal packet, never an
 // error — the broker's contract is fail-open per source.
 func TestAssembleEmptyAndBrokenSources(t *testing.T) {
-	b := NewBroker(testSources(nil, nil, nil, nil, "", nil), nil)
+	b := NewBroker(testSources(nil, nil, nil, nil, nil, nil, "", nil), nil)
 	p := b.Assemble(context.Background())
 	if p.Bytes() != 0 || len(p.VaultNotes) != 0 || len(p.RecentOutcomes) != 0 || p.SomPhase != "" {
 		t.Fatalf("all-empty sources must yield a minimal packet, got %+v", p)
@@ -34,7 +37,7 @@ func TestAssembleEmptyAndBrokenSources(t *testing.T) {
 
 	var events []string
 	sink := func(event, detail string) { events = append(events, event) }
-	b = NewBroker(testSources(nil, errors.New("vault db locked"), nil, nil, "L2", nil), sink)
+	b = NewBroker(testSources(nil, errors.New("vault db locked"), nil, nil, nil, nil, "L2", nil), sink)
 	p = b.Assemble(context.Background())
 	if len(p.VaultNotes) != 0 {
 		t.Fatalf("broken vault source must be skipped, got %+v", p.VaultNotes)
@@ -64,7 +67,7 @@ func TestAssembleBudgetCap(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		outcomes = append(outcomes, strings.Repeat("o", 300))
 	}
-	b := NewBroker(testSources(vault, nil, outcomes, nil, "L1", nil), nil)
+	b := NewBroker(testSources(vault, nil, outcomes, nil, nil, nil, "L1", nil), nil)
 	p := b.Assemble(context.Background())
 	if p.Bytes() > 4096 {
 		t.Fatalf("packet = %d chars, want <= 4096", p.Bytes())
@@ -99,17 +102,24 @@ func TestSortStringsDeterministic(t *testing.T) {
 }
 
 func TestAssembleBudgetDropsOutcomesBeforeNotes(t *testing.T) {
-	notes := []string{strings.Repeat("n", 500), strings.Repeat("n", 500)}
-	outcomes := make([]string, 20)
-	for i := range outcomes {
-		outcomes[i] = strings.Repeat("o", 500)
+	notes := []string{strings.Repeat("n", 850), strings.Repeat("n", 850)}
+	world := make([]string, 5)
+	for i := range world {
+		world[i] = strings.Repeat("w", 512)
 	}
-	b := NewBroker(testSources(notes, nil, outcomes, nil, "", nil), nil)
+	outcomes := make([]string, 10)
+	for i := range outcomes {
+		outcomes[i] = strings.Repeat("o", 700)
+	}
+	b := NewBroker(testSources(notes, nil, outcomes, nil, world, nil, strings.Repeat("s", 100), nil), nil)
 	p := b.Assemble(context.Background())
 	if len(p.VaultNotes) != 2 {
-		t.Fatalf("notes must survive outcome dropping, got %d", len(p.VaultNotes))
+		t.Fatalf("notes must survive lower-priority dropping, got %d", len(p.VaultNotes))
 	}
-	if len(p.RecentOutcomes) >= 20 {
+	if len(p.WorldSnippets) >= len(world) {
+		t.Fatalf("world snippets must drop after outcomes, got %d", len(p.WorldSnippets))
+	}
+	if len(p.RecentOutcomes) >= maxPerSource {
 		t.Fatalf("outcomes must be dropped first under budget, got %d", len(p.RecentOutcomes))
 	}
 	if p.Bytes() > 4096 {
@@ -121,7 +131,7 @@ func TestAssembleBudgetDropsOutcomesBeforeNotes(t *testing.T) {
 }
 
 func TestAssembleHugeSomPhaseClamped(t *testing.T) {
-	b := NewBroker(testSources(nil, nil, nil, nil, strings.Repeat("p", 5000), nil), nil)
+	b := NewBroker(testSources(nil, nil, nil, nil, nil, nil, strings.Repeat("p", 5000), nil), nil)
 	p := b.Assemble(context.Background())
 	if p.Bytes() > maxPacketChars {
 		t.Fatalf("huge SomPhase blew the budget: %d", p.Bytes())
@@ -136,5 +146,113 @@ func TestFitBoundaryAtFive(t *testing.T) {
 	kept, cut := fit(items)
 	if cut || len(kept) != 5 {
 		t.Fatalf("exactly-5 must not be flagged cut, got cut=%v len=%d", cut, len(kept))
+	}
+}
+
+func TestAssembleWorldSnippetClamp512RuneSafe(t *testing.T) {
+	long := strings.Repeat("đ", 600)
+	b := NewBroker(testSources(nil, nil, nil, nil, []string{long}, nil, "", nil), nil)
+	p := b.Assemble(context.Background())
+	if len(p.WorldSnippets) != 1 {
+		t.Fatalf("want one snippet, got %d", len(p.WorldSnippets))
+	}
+	if len(p.WorldSnippets[0]) > maxSnippetChars {
+		t.Fatalf("snippet len %d exceeds %d", len(p.WorldSnippets[0]), maxSnippetChars)
+	}
+	if !utf8.ValidString(p.WorldSnippets[0]) {
+		t.Fatal("clamp produced invalid UTF-8")
+	}
+}
+
+func TestAssembleBudgetDropsWorldSnippetsBeforeVaultNotes(t *testing.T) {
+	notes := []string{strings.Repeat("n", 900), strings.Repeat("n", 900)}
+	world := make([]string, 5)
+	for i := range world {
+		world[i] = strings.Repeat("w", 512)
+	}
+	outcomes := []string{strings.Repeat("o", 400)}
+	b := NewBroker(testSources(notes, nil, outcomes, nil, world, nil, "", nil), nil)
+	p := b.Assemble(context.Background())
+	if len(p.WorldSnippets) >= len(world) {
+		t.Fatalf("world snippets should be dropped before vault notes, got %d", len(p.WorldSnippets))
+	}
+	if len(p.VaultNotes) != 2 {
+		t.Fatalf("vault notes should survive world dropping, got %d", len(p.VaultNotes))
+	}
+	if p.Bytes() > 4096 {
+		t.Fatalf("packet over budget: %d", p.Bytes())
+	}
+}
+
+func TestAssembleWorldSnippetsFailOpenEmitsBrokerFailure(t *testing.T) {
+	var events []string
+	sink := func(event, detail string) { events = append(events, event+":"+detail) }
+	b := NewBroker(testSources(nil, nil, nil, nil, nil, errors.New("bad json"), "", nil), sink)
+	p := b.Assemble(context.Background())
+	if len(p.WorldSnippets) != 0 {
+		t.Fatalf("broken world source must be skipped, got %+v", p.WorldSnippets)
+	}
+	found := false
+	for _, e := range events {
+		if strings.Contains(e, "broker_failure:reach:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected broker_failure for reach source, got %v", events)
+	}
+}
+
+func TestContextPacketBytesIncludesWorldSnippets(t *testing.T) {
+	p := &ContextPacket{
+		VaultNotes:     []string{"v"},
+		RecentOutcomes: []string{"o"},
+		WorldSnippets:  []string{"w1", "w2"},
+		SomPhase:       "L1",
+	}
+	want := len("v") + len("o") + len("w1") + len("w2") + len("L1")
+	if got := p.Bytes(); got != want {
+		t.Fatalf("Bytes() = %d, want %d", got, want)
+	}
+}
+
+func TestWorldSnippetsFromFile_FailOpenOnMissingEnvOrFile(t *testing.T) {
+	t.Setenv("G8S_WORLD_SNIPPETS_PATH", "")
+	got, err := WorldSnippetsFromFile(context.Background())
+	if err != nil {
+		t.Fatalf("missing env should be healthy-empty: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want empty slice, got %v", got)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("G8S_WORLD_SNIPPETS_PATH", filepath.Join(dir, "missing.json"))
+	got, err = WorldSnippetsFromFile(context.Background())
+	if err != nil {
+		t.Fatalf("missing file should be healthy-empty: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want empty slice, got %v", got)
+	}
+}
+
+func TestWorldSnippetsFromFile_ParsesJSONArrayAndCaps5(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snippets.json")
+	raw := `["a","b","c","d","e","f","g"]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("G8S_WORLD_SNIPPETS_PATH", path)
+	got, err := WorldSnippetsFromFile(context.Background())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != maxPerSource {
+		t.Fatalf("len = %d, want cap %d", len(got), maxPerSource)
+	}
+	if got[0] != "a" || got[4] != "e" {
+		t.Fatalf("unexpected cap order: %v", got)
 	}
 }

@@ -861,6 +861,8 @@ features:
       - "Multi-project repo_id / scope_tier partitioning and Pre-Turn-1 toolchain + Vault grounding hydration (#661)"
     visible_tests:
       - "internal/vault/vault_test.go"
+      - "internal/vault/reach_promote_test.go"
+      - "internal/context/broker_test.go"
       - "internal/memory/adapter_test.go"
     verifier_class: "test"
     blast_radius:

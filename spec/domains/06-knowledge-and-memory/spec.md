@@ -62,3 +62,9 @@ The platform MUST provide a read-only data-acquisition layer (`internal/reach`, 
 - **GIVEN** the in-code reach registry with injected fake backends
 - **WHEN** lookups and chained fetches execute against known/unknown channels with transient, terminal, and reordered backends
 - **THEN** declared order holds, transient failures advance the chain, terminal failures stop it, attempts are recorded with rank/class, and the CLI envelope carries provenance and the attempt trail
+
+#### Scenario: Context Broker WorldSnippets and reach vault promotion (S3)
+<!-- tests: TestAssembleWorldSnippetClamp512RuneSafe, TestAssembleBudgetDropsWorldSnippetsBeforeVaultNotes, TestAssembleBudgetDropsOutcomesBeforeNotes, TestWorldSnippetsFromFile_FailOpenOnMissingEnvOrFile, TestPromoteReachArtifact_DefaultStatusProposed, TestPromoteReachArtifact_ScrubsCredentialPatterns -->
+- **GIVEN** file-backed world snippets (`G8S_WORLD_SNIPPETS_PATH` JSON array) and reach artifact promotion into the knowledge vault
+- **WHEN** the broker assembles bounded context and `PromoteReachArtifact` stores scrubbed reach summaries
+- **THEN** world snippets are clamped and budget-ordered before vault notes, sources fail open without nil packets, and promoted reach records remain `PROPOSED` with credential scrubbing and idempotent `reach:` ids
