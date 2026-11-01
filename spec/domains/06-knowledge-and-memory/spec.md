@@ -58,7 +58,7 @@ Peer coordinators MUST synchronize accepted task knowledge via monotonic `contex
 The platform MUST provide a read-only data-acquisition layer (`internal/reach`, ADR-0037) with an in-code channel→action→backend registry, ordered fallback dispatch classifying transient failures as fallback and bad requests as terminal, provenance-labeled responses, and a single agent-facing CLI (`g8s reach`) emitting the versioned envelope. Credentials must never enter g8s state, receipts, logs, or ContextPacket, and no operation may mutate any upstream platform.
 
 #### Scenario: Reach registry ordering, fallback-vs-terminal classification, and envelope parity
-<!-- tests: TestLookupDeclaredOrder, TestLookupUnknownChannelAction, TestChainFallbackOnTransient, TestChainStopsOnTerminal, TestChainRecorderPerAttempt, TestReachReadJSONEnvelope -->
+<!-- tests: TestLookupDeclaredOrder, TestLookupUnknownChannelAction, TestChainFallbackOnTransient, TestChainStopsOnTerminal, TestChainRecorderPerAttempt, TestReachReadJSONEnvelope, TestHealthLedgerLoadSaveRoundTrip, TestHealthLedgerDemoteOnFallbackCooldown, TestOwnedPathsRegisterDeleteSuccess, TestOwnedPathsRejectSymlink, TestReachReadUsesHealthLedger -->
 - **GIVEN** the in-code reach registry with injected fake backends
 - **WHEN** lookups and chained fetches execute against known/unknown channels with transient, terminal, and reordered backends
 - **THEN** declared order holds, transient failures advance the chain, terminal failures stop it, attempts are recorded with rank/class, and the CLI envelope carries provenance and the attempt trail

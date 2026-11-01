@@ -68,7 +68,16 @@ func runReachCommand(channel reach.Channel, action reach.Action, args []string) 
 	}
 
 	req := reach.Request{URL: targetURL}
-	chain := reach.Chain{}
+	ledger := reach.NewHealthLedger()
+	if err := ledger.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] reach: health ledger load failed (%v); continuing with empty ledger\n", err)
+	}
+	defer func() {
+		if err := ledger.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] reach: health ledger save failed: %v\n", err)
+		}
+	}()
+	chain := reach.Chain{Orderer: ledger, Recorder: ledger}
 	resp, attempts, err := chain.Execute(context.Background(), channel, action, req)
 	if err != nil {
 		exitRuntime("reach", string(action), *traceID, cli.CodeRuntime, err, "Verify URL, channel, and upstream tool availability (gh for github)", *jsonl)
