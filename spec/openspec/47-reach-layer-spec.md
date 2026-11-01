@@ -72,3 +72,15 @@ stdlib HTTP — no Python port, no GUI automation (ADR-0037 invariants).
 - **GIVEN** brief prose on lanes F/R/S that may embed zero or more `reach-cite:` markers whose JSON grammar is `reach-cite:` optionally followed by whitespace then a `{` … `}` object with keys `url`, `channel`, `action`, `backend`, `body_sha256`, `fetched_at`
 - **WHEN** `reach.ValidateReachCitation` runs against parsed artifacts (absolute http(s) url, non-blank channel/backend, `action` exactly `read`, 64-char lowercase hex `body_sha256`, RFC3339 `fetched_at` not older than `MaxCitationAge`) and `CheckDoRFloorForLane` evaluates `reach_citation_valid` over the combined brief text
 - **THEN** malformed marker JSON yields parse errors without panic, any validation error fails `reach_citation_valid` with the error in `Detail`, zero markers passes through without tightening upstream prose regexes, and a fully valid marker passes alongside the existing DELTA-35 checks
+
+#### Scenario: Reach S2 health ledger persistence and backend reorder (ADR-0037 A1)
+<!-- tests: TestHealthLedgerLoadSaveRoundTrip, TestHealthLedgerRecorderUpdatesLedger, TestHealthLedgerDemoteOnFallbackCooldown, TestHealthLedgerCooldownExpiresRestoresOrder, TestHealthLedgerOrdererStableAmongHealthy, TestReachReadUsesHealthLedger -->
+- **GIVEN** a persistent health ledger keyed `channel::action::backend` with atomic JSON snapshot under operator state (override via `G8S_REACH_HEALTH_PATH`)
+- **WHEN** fallback outcomes are recorded, the CLI runs with a wired ledger, cooldown windows elapse, and ok/terminal outcomes are recorded
+- **THEN** reload survives restart, fallback sets a 300s demotion tail in `Order`, expired cooldown restores declared order among healthy backends, ok clears cooldown, terminal never sets a new cooldown, and the CLI envelope shape is unchanged
+
+#### Scenario: Reach S2 owned-paths deletion ledger (ADR-0037 A1)
+<!-- tests: TestOwnedPathsRegisterDeleteSuccess, TestOwnedPathsDeleteUnregisteredFails, TestOwnedPathsRejectSymlink -->
+- **GIVEN** the reach owned-paths ledger (override via `G8S_REACH_OWNED_PATHS_PATH`) tracking absolute cleaned paths
+- **WHEN** operators register paths and invoke registered deletion
+- **THEN** only registered paths are removed from disk, unregistered deletion fails closed, and symlink targets are refused via `os.Lstat` without touching WriteReceipt scope

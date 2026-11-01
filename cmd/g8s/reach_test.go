@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,6 +59,47 @@ func TestReachReadJSONEnvelope(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, env.Data.FetchedAt); err != nil {
 		t.Fatalf("fetched_at not RFC3339: %v", err)
+	}
+}
+
+func TestReachReadUsesHealthLedger(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ledger-body"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	healthPath := filepath.Join(dir, "reach_backend_health.json")
+	t.Setenv("G8S_REACH_HEALTH_PATH", healthPath)
+
+	binPath := buildG8sBinary(t)
+	cmd := execCommand(t, binPath, "reach", "read", srv.URL, "--json")
+	cmd.Env = append(os.Environ(), "G8S_REACH_HEALTH_PATH="+healthPath)
+	out := cmdCombinedOutput(t, cmd)
+
+	var env struct {
+		V    int          `json:"v"`
+		Kind string       `json:"kind"`
+		Cmd  string       `json:"cmd"`
+		Data reachPayload `json:"data"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		t.Fatalf("unmarshal: %v\nout=%s", err, string(out))
+	}
+	if env.V != 1 || env.Kind != "reach" || env.Cmd != "reach" {
+		t.Fatalf("headers: %+v", env)
+	}
+	if env.Data.Body != "ledger-body" {
+		t.Fatalf("body = %q", env.Data.Body)
+	}
+	if env.Data.URL != srv.URL || env.Data.BodySHA256 != reach.DigestBody("ledger-body") {
+		t.Fatalf("url/digest: %+v", env.Data)
+	}
+	if env.Data.FetchedAt == "" {
+		t.Fatal("fetched_at must be set")
+	}
+	if _, err := os.Stat(healthPath); err != nil {
+		t.Fatalf("health ledger not persisted: %v", err)
 	}
 }
 

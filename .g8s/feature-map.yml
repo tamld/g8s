@@ -1235,6 +1235,8 @@ features:
       - "internal/reach/registry_test.go"
       - "internal/reach/chain_test.go"
       - "internal/reach/artifact_test.go"
+      - "internal/reach/health_ledger_test.go"
+      - "internal/reach/owned_paths_test.go"
       - "cmd/g8s/reach_test.go"
     verifier_class: "test"
     blast_radius:
