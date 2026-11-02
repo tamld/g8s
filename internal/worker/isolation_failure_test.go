@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -95,6 +97,23 @@ func TestIsolationFailureNilIsolator(t *testing.T) {
 	}
 	if resultMap["status"] != "isolation_unavailable" {
 		t.Fatalf("expected status=isolation_unavailable, got %v", resultMap["status"])
+	}
+	if got.LastError == nil {
+		t.Fatal("expected non-nil LastError on task")
+	}
+	cwd, _ := os.Getwd()
+	if cwd == "" {
+		cwd = "."
+	}
+	expectedErr := fmt.Sprintf("worktree isolation unavailable: worker cwd %s is not a git repository — launch the worker from a repo checkout", cwd)
+	if *got.LastError != expectedErr {
+		t.Errorf("last_error = %q, want %q", *got.LastError, expectedErr)
+	}
+	if !strings.Contains(*got.LastError, "launch the worker from a repo checkout") {
+		t.Errorf("last_error missing actionable hint: %q", *got.LastError)
+	}
+	if errMsg, ok := resultMap["error"].(string); !ok || errMsg != expectedErr {
+		t.Errorf("result[error] = %v, want %q", resultMap["error"], expectedErr)
 	}
 }
 
