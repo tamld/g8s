@@ -546,7 +546,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			errWriter.Close()
 			outFile.Close()
 			errFile.Close()
-			errMsg := "worktree isolation unavailable: isolator is nil"
+			cwd, _ := os.Getwd()
+			if cwd == "" {
+				cwd = "."
+			}
+			errMsg := fmt.Sprintf("worktree isolation unavailable: worker cwd %s is not a git repository — launch the worker from a repo checkout", cwd)
 			fmt.Fprintf(os.Stderr, "[warn] worker: %s for %s\n", errMsg, task.TaskID)
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
