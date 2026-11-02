@@ -414,7 +414,13 @@ func runSubmit(args []string) {
 		*timeout = eff
 	}
 
-	// Cross-validate dispatch clocks: timeout < receipt.ttl (#723)
+	// Clocks cross-check (timeout < receipt.ttl, #723):
+	// Enforced here at the post-effort-resolution gate because when --timeout is omitted,
+	// the effective timeout is derived from the resolved effort class via defaultTimeoutForEffort
+	// (e.g. 90s for medium, 240s for high) which only becomes known after provider/model/effort
+	// resolution, while receipt TTL is determined at receipt verification. Both explicit --timeout
+	// and effort-derived default timeouts are strictly validated against receipt TTL here before
+	// proceeding to task database persistence or worker dispatch.
 	var clocks *controlplane.TaskClocks
 	if receiptBound {
 		if err := cli.ValidateClocks(timeoutDuration, receiptTTL); err != nil {

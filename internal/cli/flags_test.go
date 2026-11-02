@@ -2,6 +2,8 @@ package cli
 
 import (
 	"flag"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +127,24 @@ func TestParseTimeoutDuration(t *testing.T) {
 			input:      "-5s",
 			wantErr:    true,
 			errContain: "must be positive",
+		},
+		{
+			name:       "huge bare integer exceeding max duration fails (9223372037)",
+			input:      "9223372037",
+			wantErr:    true,
+			errContain: "exceeds maximum representable",
+		},
+		{
+			name:       "huge bare integer math.MaxInt64 fails",
+			input:      strconv.FormatInt(math.MaxInt64, 10),
+			wantErr:    true,
+			errContain: "exceeds maximum representable",
+		},
+		{
+			name:       "huge bare integer 10000000000 fails without wrapping negative",
+			input:      "10000000000",
+			wantErr:    true,
+			errContain: "exceeds maximum representable",
 		},
 	}
 	for _, tc := range tests {

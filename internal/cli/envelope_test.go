@@ -200,6 +200,30 @@ func TestValidateClocks(t *testing.T) {
 			receiptTTL: 600 * time.Second,
 			wantErr:    true,
 		},
+		{
+			name:       "zero timeout is rejected",
+			timeout:    0,
+			receiptTTL: 600 * time.Second,
+			wantErr:    true,
+		},
+		{
+			name:       "negative timeout is rejected",
+			timeout:    -10 * time.Second,
+			receiptTTL: 600 * time.Second,
+			wantErr:    true,
+		},
+		{
+			name:       "zero receipt TTL is rejected",
+			timeout:    300 * time.Second,
+			receiptTTL: 0,
+			wantErr:    true,
+		},
+		{
+			name:       "negative receipt TTL is rejected",
+			timeout:    300 * time.Second,
+			receiptTTL: -600 * time.Second,
+			wantErr:    true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

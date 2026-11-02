@@ -438,4 +438,50 @@ func TestSubmitClocks_CrossValidation(t *testing.T) {
 			t.Errorf("request.clocks.receipt_ttl_s = %v, want 600", reqClocks["receipt_ttl_s"])
 		}
 	})
+
+	t.Run("omitted timeout with effort-derived default exceeding receipt TTL is rejected", func(t *testing.T) {
+		rcShort := createTestReceipt(t, rcDBPath, 60*time.Second, []string{"*"})
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "clocks-omitted-timeout-high-exceeds-ttl",
+			"--prompt", "Task prompt",
+			"--permission", "workspace_write",
+			"--receipt-id", rcShort.ReceiptID,
+			"--effort", "high",
+		)
+		if code == 0 {
+			t.Fatal("expected submit to fail when omitted timeout effort-derived default > receipt TTL")
+		}
+		if env.Error == nil || env.Error.Code != "E_USAGE" {
+			t.Errorf("expected E_USAGE error, got: %+v (raw: %s)", env.Error, raw)
+		}
+		if !strings.Contains(raw, "240s") {
+			t.Errorf("expected error to name derived timeout 240s, got: %s", raw)
+		}
+		if !strings.Contains(raw, "1m0s") && !strings.Contains(raw, "60s") {
+			t.Errorf("expected error to name receipt TTL (1m0s or 60s), got: %s", raw)
+		}
+	})
+
+	t.Run("omitted timeout with medium effort default exceeding receipt TTL is rejected", func(t *testing.T) {
+		rcShort := createTestReceipt(t, rcDBPath, 60*time.Second, []string{"*"})
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "clocks-omitted-timeout-medium-exceeds-ttl",
+			"--prompt", "Task prompt",
+			"--permission", "workspace_write",
+			"--receipt-id", rcShort.ReceiptID,
+			"--effort", "medium",
+		)
+		if code == 0 {
+			t.Fatal("expected submit to fail when omitted timeout effort-derived default > receipt TTL")
+		}
+		if env.Error == nil || env.Error.Code != "E_USAGE" {
+			t.Errorf("expected E_USAGE error, got: %+v (raw: %s)", env.Error, raw)
+		}
+		if !strings.Contains(raw, "90s") {
+			t.Errorf("expected error to name derived timeout 90s, got: %s", raw)
+		}
+		if !strings.Contains(raw, "1m0s") && !strings.Contains(raw, "60s") {
+			t.Errorf("expected error to name receipt TTL (1m0s or 60s), got: %s", raw)
+		}
+	})
 }

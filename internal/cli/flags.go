@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,10 @@ func ParseTimeoutDuration(raw string) (time.Duration, string, error) {
 	if n, intErr := strconv.ParseInt(trimmed, 10, 64); intErr == nil {
 		if n <= 0 {
 			return 0, "", fmt.Errorf("invalid timeout %q: duration must be positive (e.g. '900s', '15m')", raw)
+		}
+		const maxBareSeconds = math.MaxInt64 / int64(time.Second)
+		if n > maxBareSeconds {
+			return 0, "", fmt.Errorf("invalid timeout %q: duration exceeds maximum representable seconds (max %ds)", raw, maxBareSeconds)
 		}
 		d := time.Duration(n) * time.Second
 		return d, fmt.Sprintf("%ds", n), nil

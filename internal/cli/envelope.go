@@ -252,8 +252,14 @@ func NewClocks(timeout, receiptTTL time.Duration) *Clocks {
 	}
 }
 
-// ValidateClocks verifies that the task timeout is strictly less than the write receipt TTL (#723).
+// ValidateClocks verifies that the task timeout is strictly positive and strictly less than the write receipt TTL (#723).
 func ValidateClocks(timeout, receiptTTL time.Duration) error {
+	if timeout <= 0 {
+		return fmt.Errorf("timeout (%s) must be positive", timeout)
+	}
+	if receiptTTL <= 0 {
+		return fmt.Errorf("receipt TTL (%s) must be positive", receiptTTL)
+	}
 	if timeout >= receiptTTL {
 		return fmt.Errorf("timeout (%s) must be strictly less than receipt TTL (%s)", timeout, receiptTTL)
 	}
