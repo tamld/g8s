@@ -237,3 +237,25 @@ func WriteErrorL(w io.Writer, code, msg, hint string, jsonl bool) error {
 	}
 	return WriteResponse(w, env, jsonl)
 }
+
+// Clocks exposes execution budget clocks (timeout_s, receipt_ttl_s) (#723).
+type Clocks struct {
+	TimeoutSeconds    float64 `json:"timeout_s"`
+	ReceiptTTLSeconds float64 `json:"receipt_ttl_s"`
+}
+
+// NewClocks constructs a Clocks instance from timeout and receipt TTL durations (#723).
+func NewClocks(timeout, receiptTTL time.Duration) *Clocks {
+	return &Clocks{
+		TimeoutSeconds:    timeout.Seconds(),
+		ReceiptTTLSeconds: receiptTTL.Seconds(),
+	}
+}
+
+// ValidateClocks verifies that the task timeout is strictly less than the write receipt TTL (#723).
+func ValidateClocks(timeout, receiptTTL time.Duration) error {
+	if timeout >= receiptTTL {
+		return fmt.Errorf("timeout (%s) must be strictly less than receipt TTL (%s)", timeout, receiptTTL)
+	}
+	return nil
+}

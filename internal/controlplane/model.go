@@ -225,6 +225,18 @@ type Task struct {
 	// Deduplicated is a transient response flag (never persisted): true when
 	// SubmitTask recognized the idempotency key and returned the existing task.
 	Deduplicated bool `json:"deduplicated,omitempty"`
+
+	// Clocks exposes execution budget clocks (timeout_s, receipt_ttl_s) (#723)
+	Clocks *TaskClocks `json:"clocks,omitempty"`
+
+	// Warnings contains non-fatal advisory messages attached to the task (#722)
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// TaskClocks exposes execution budget clocks (timeout_s, receipt_ttl_s) (#723).
+type TaskClocks struct {
+	TimeoutSeconds    float64 `json:"timeout_s"`
+	ReceiptTTLSeconds float64 `json:"receipt_ttl_s"`
 }
 
 // Export status values for per-destination export outcome.

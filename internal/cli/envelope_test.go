@@ -174,3 +174,77 @@ func TestWriteJSONAndWriteJSONL(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateClocks(t *testing.T) {
+	tests := []struct {
+		name       string
+		timeout    time.Duration
+		receiptTTL time.Duration
+		wantErr    bool
+	}{
+		{
+			name:       "timeout strictly less than receipt TTL",
+			timeout:    300 * time.Second,
+			receiptTTL: 600 * time.Second,
+			wantErr:    false,
+		},
+		{
+			name:       "timeout equal to receipt TTL is rejected",
+			timeout:    600 * time.Second,
+			receiptTTL: 600 * time.Second,
+			wantErr:    true,
+		},
+		{
+			name:       "timeout greater than receipt TTL is rejected",
+			timeout:    900 * time.Second,
+			receiptTTL: 600 * time.Second,
+			wantErr:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateClocks(tc.timeout, tc.receiptTTL)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateClocks(%v, %v) error = %v, wantErr %v", tc.timeout, tc.receiptTTL, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestEnvelopeWithClocksAndWarnings(t *testing.T) {
+	clocks := NewClocks(300*time.Second, 600*time.Second)
+	data := map[string]any{
+		"task_id":  "t-123",
+		"clocks":   clocks,
+		"warnings": []string{"warning 1"},
+	}
+	env := NewEnvelope("task", "submit", "", data)
+
+	var buf bytes.Buffer
+	if err := WriteJSON(&buf, env); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+
+	var decoded Envelope
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dataMap, ok := decoded.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be map, got %T", decoded.Data)
+	}
+	clocksMap, ok := dataMap["clocks"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected clocks map in data, got %T", dataMap["clocks"])
+	}
+	if clocksMap["timeout_s"] != float64(300) {
+		t.Errorf("timeout_s = %v, want 300", clocksMap["timeout_s"])
+	}
+	if clocksMap["receipt_ttl_s"] != float64(600) {
+		t.Errorf("receipt_ttl_s = %v, want 600", clocksMap["receipt_ttl_s"])
+	}
+	warningsList, ok := dataMap["warnings"].([]any)
+	if !ok || len(warningsList) != 1 || warningsList[0] != "warning 1" {
+		t.Errorf("warnings = %v, want ['warning 1']", dataMap["warnings"])
+	}
+}

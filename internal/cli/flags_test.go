@@ -2,7 +2,9 @@ package cli
 
 import (
 	"flag"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestAddCommonFlags(t *testing.T) {
@@ -48,5 +50,104 @@ func TestAddCommonFlagsWithDefaults(t *testing.T) {
 	}
 	if *jsonMode {
 		t.Errorf("jsonMode default should be false when configured false")
+	}
+}
+
+func TestParseTimeoutDuration(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantDur    time.Duration
+		wantEff    string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:    "bare positive integer treated as seconds",
+			input:   "900",
+			wantDur: 900 * time.Second,
+			wantEff: "900s",
+			wantErr: false,
+		},
+		{
+			name:    "standard seconds duration",
+			input:   "900s",
+			wantDur: 900 * time.Second,
+			wantEff: "900s",
+			wantErr: false,
+		},
+		{
+			name:    "standard minutes duration",
+			input:   "15m",
+			wantDur: 15 * time.Minute,
+			wantEff: "15m",
+			wantErr: false,
+		},
+		{
+			name:    "compound duration",
+			input:   "1h30m",
+			wantDur: 90 * time.Minute,
+			wantEff: "1h30m",
+			wantErr: false,
+		},
+		{
+			name:       "invalid string banana fails with hint",
+			input:      "banana",
+			wantErr:    true,
+			errContain: "must be a valid duration (e.g. '900s', '15m'",
+		},
+		{
+			name:       "empty string fails",
+			input:      "",
+			wantErr:    true,
+			errContain: "cannot be empty",
+		},
+		{
+			name:       "zero bare integer fails",
+			input:      "0",
+			wantErr:    true,
+			errContain: "must be positive",
+		},
+		{
+			name:       "zero duration fails",
+			input:      "0s",
+			wantErr:    true,
+			errContain: "must be positive",
+		},
+		{
+			name:       "negative bare integer fails",
+			input:      "-10",
+			wantErr:    true,
+			errContain: "must be positive",
+		},
+		{
+			name:       "negative duration fails",
+			input:      "-5s",
+			wantErr:    true,
+			errContain: "must be positive",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dur, eff, err := ParseTimeoutDuration(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ParseTimeoutDuration(%q) expected error, got nil", tc.input)
+				}
+				if tc.errContain != "" && !strings.Contains(err.Error(), tc.errContain) {
+					t.Errorf("error %q should contain %q", err.Error(), tc.errContain)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseTimeoutDuration(%q) unexpected error: %v", tc.input, err)
+			}
+			if dur != tc.wantDur {
+				t.Errorf("dur = %v, want %v", dur, tc.wantDur)
+			}
+			if eff != tc.wantEff {
+				t.Errorf("eff = %q, want %q", eff, tc.wantEff)
+			}
+		})
 	}
 }
