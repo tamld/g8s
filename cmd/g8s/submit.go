@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -43,7 +45,7 @@ func runSubmit(args []string) {
 	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner, researcher, implementer, sec-auditor, analyst)")
 	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text)")
 	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
-	timeout := fs.String("timeout", "30s", "execution window for the worker")
+	timeout := fs.String("timeout", "30s", "execution window for the worker (e.g. 900s, 15m; bare integer is treated as seconds)")
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
 	parentTaskID := fs.String("parent-task-id", "", "parent task ID for subtask lineage tracking")
 	skipPermissions := fs.Bool("skip-permissions", false, "bypass permission checks if permitted by profile")
@@ -105,6 +107,16 @@ func runSubmit(args []string) {
 			timeoutPassed = true
 		}
 	})
+
+	var timeoutDuration time.Duration
+	if timeoutPassed {
+		d, eff, err := cli.ParseTimeoutDuration(*timeout)
+		if err != nil {
+			exitUsage("submit", "timeout", *traceID, err.Error(), "Specify a positive duration such as '900s' or '15m' (bare integer is treated as seconds)", *jsonl)
+		}
+		timeoutDuration = d
+		*timeout = eff
+	}
 
 	if toolPolicyPassed {
 		trimmed := strings.ToLower(strings.TrimSpace(*toolPolicy))
@@ -214,6 +226,24 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("scope jail: %w", err), "Add --scope-root for legitimate directories outside the working directory", *jsonl)
 	}
 
+	var warnings []string
+	if *permission == "workspace_write" {
+		seenRoots := make(map[string]bool)
+		for _, root := range scopeRoots {
+			absRoot, err := filepath.Abs(root)
+			if err != nil {
+				absRoot = root
+			}
+			if seenRoots[absRoot] {
+				continue
+			}
+			seenRoots[absRoot] = true
+			if !isInsideGitWorkTree(absRoot) {
+				warnings = append(warnings, fmt.Sprintf("scope root %s is not a git repository: worker worktree isolation requires a git repository", absRoot))
+			}
+		}
+	}
+
 	effectiveModel := *model
 	if effectiveModel == "" {
 		effectiveModel = "gemini-3.8-flash-high"
@@ -253,15 +283,30 @@ func runSubmit(args []string) {
 	}
 	// #567: When no explicit --add-dir was passed, fall back to receipt allowed_paths
 	// for workspace_write tasks so repo-root dispatches with bounded receipts resolve class.
-	if len(classPaths) == 0 && *receiptID != "" {
-		if rcDBPath, rdbErr := receiptDatabasePath(); rdbErr == nil {
-			if rm, rmErr := receipt.NewReceiptManager(rcDBPath, nil); rmErr == nil {
-				if rc, vErr := rm.VerifyReceipt(*receiptID); vErr == nil && rc != nil {
-					for _, ap := range rc.AllowedPaths {
-						classPaths = append(classPaths, filepath.ToSlash(filepath.Clean(ap)))
-					}
-				}
-				rm.Close()
+	var (
+		receiptTTL   time.Duration
+		receiptBound bool
+	)
+	if *receiptID != "" {
+		rcDBPath, rdbErr := receiptDatabasePath()
+		if rdbErr != nil {
+			exitRuntime("submit", "receipt-id", *traceID, cli.CodeIO, rdbErr, "Failed to resolve receipt database path", *jsonl)
+		}
+		rm, rmErr := receipt.NewReceiptManager(rcDBPath, nil)
+		if rmErr != nil {
+			exitRuntime("submit", "receipt-id", *traceID, cli.CodeRuntime, rmErr, "Failed to open receipt database", *jsonl)
+		}
+		defer rm.Close()
+		rc, vErr := rm.VerifyReceipt(*receiptID)
+		if vErr != nil {
+			exitUsage("submit", "receipt-id", *traceID, fmt.Sprintf("invalid --receipt-id %q: %v", *receiptID, vErr), "Verify receipt is active and not expired", *jsonl)
+		}
+		receiptBound = true
+		receiptTTL = rc.ExpiresAt.Sub(rc.CreatedAt)
+
+		if len(classPaths) == 0 {
+			for _, ap := range rc.AllowedPaths {
+				classPaths = append(classPaths, filepath.ToSlash(filepath.Clean(ap)))
 			}
 		}
 	}
@@ -360,6 +405,33 @@ func runSubmit(args []string) {
 		effTimeout := defaultTimeoutForEffort(effortRes.Applied)
 		if effTimeout != "" {
 			*timeout = effTimeout
+		}
+		d, eff, err := cli.ParseTimeoutDuration(*timeout)
+		if err != nil {
+			exitUsage("submit", "timeout", *traceID, err.Error(), "Specify a positive duration such as '900s' or '15m'", *jsonl)
+		}
+		timeoutDuration = d
+		*timeout = eff
+	}
+
+	// Clocks cross-check (timeout < receipt.ttl, #723):
+	// Enforced here at the post-effort-resolution gate because when --timeout is omitted,
+	// the effective timeout is derived from the resolved effort class via defaultTimeoutForEffort
+	// (e.g. 90s for medium, 240s for high) which only becomes known after provider/model/effort
+	// resolution, while receipt TTL is determined at receipt verification. Both explicit --timeout
+	// and effort-derived default timeouts are strictly validated against receipt TTL here before
+	// proceeding to task database persistence or worker dispatch.
+	var clocks *controlplane.TaskClocks
+	if receiptBound {
+		if err := cli.ValidateClocks(timeoutDuration, receiptTTL); err != nil {
+			exitUsage("submit", "timeout", *traceID,
+				fmt.Sprintf("invalid --timeout %s: timeout must be strictly less than receipt TTL %s (%s >= %s)", *timeout, receiptTTL, timeoutDuration, receiptTTL),
+				fmt.Sprintf("Specify a --timeout shorter than receipt TTL of %s", receiptTTL),
+				*jsonl)
+		}
+		clocks = &controlplane.TaskClocks{
+			TimeoutSeconds:    timeoutDuration.Seconds(),
+			ReceiptTTLSeconds: receiptTTL.Seconds(),
 		}
 	}
 
@@ -481,6 +553,9 @@ func runSubmit(args []string) {
 	if effortRes.BudgetTokens > 0 {
 		payloadMap["effort_budget_tokens"] = effortRes.BudgetTokens
 	}
+	if clocks != nil {
+		payloadMap["clocks"] = clocks
+	}
 	if premiseResult != nil {
 		payloadMap["premise_check"] = premisePayload(premiseResult, *overrideReason)
 	}
@@ -546,6 +621,13 @@ func runSubmit(args []string) {
 		if logErr := recordPremiseOverride(context.Background(), store, task.TaskID, *actor, premiseResult, *overrideReason); logErr != nil {
 			exitRuntime("submit", "premise-check", *traceID, cli.CodeRuntime, logErr, "Premise override could not be recorded in the event log", *jsonl)
 		}
+	}
+
+	if len(warnings) > 0 {
+		task.Warnings = warnings
+	}
+	if clocks != nil {
+		task.Clocks = clocks
 	}
 
 	env := cli.NewEnvelope("task", "submit", "", task)
@@ -685,4 +767,15 @@ func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (
 		return false, false
 	}
 	return false, false
+}
+
+// isInsideGitWorkTree checks whether dir is inside a git work tree (#722).
+func isInsideGitWorkTree(dir string) bool {
+	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
 }
