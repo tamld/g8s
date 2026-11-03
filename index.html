@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>g8s — Zero-Trust Process Harness for AI Coding Agents</title>
+  <meta name="description" content="Single-binary zero-trust process execution harness for AI coding agents. Contain workers into private Git worktrees with path-scoped write receipts.">
+  <meta property="og:title" content="g8s — Zero-Trust Process Harness for AI Coding Agents">
+  <meta property="og:description" content="Contain and orchestrate your AI coding agents with zero ambient shell authority. Pure-Go static binary with Zero-CGO.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://github.com/tamld/g8s">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="g8s — Zero-Trust Process Harness for AI Coding Agents">
+  <meta name="twitter:description" content="Contain and orchestrate your AI coding agents with zero ambient shell authority.">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="stylesheet" href="assets/site/styles.css" integrity="sha384-xBqCBxYrHHn2+abNsQGt7dgd3bGgTd7Btmqv64fo4OABMtPPVYI4nyst1aCn3/LE" crossorigin="anonymous">
+  <script src="assets/site/main.js" integrity="sha384-5v40f9sGJ/yRmeG7fzQtDxjGSHB/Hfl2V6Qf0jOoTvLtqokh3ZmTvtr1cMSlyjto" crossorigin="anonymous" defer></script>
+</head>
+<body>
+
+  <!-- 1. NAVIGATION -->
+  <header class="site-nav">
+    <div class="container nav-container">
+      <div class="nav-left">
+        <a href="#overview" class="brand-link" aria-label="g8s home">
+          <span class="badge-dot" aria-hidden="true"></span>
+          <span>g8s</span>
+        </a>
+        <a href="https://github.com/tamld/g8s/releases/tag/v0.22.0" class="version-pill" target="_blank" rel="noopener noreferrer">v0.22.0</a>
+      </div>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#overview">Overview</a>
+        <a href="#problem">Problem</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#docs">Docs</a>
+        <a href="#proof">Proof</a>
+      </nav>
+
+      <div class="nav-right">
+        <a href="https://github.com/tamld/g8s" class="github-link" target="_blank" rel="noopener noreferrer">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <a href="#quickstart" class="btn btn-primary" id="install-btn">Install g8s</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 2. HERO SECTION -->
+    <section class="section hero-section" id="overview">
+      <div class="container hero-grid">
+        <div class="hero-content">
+          <div data-ui="true">
+            <div class="badge">
+              <span class="badge-dot" aria-hidden="true"></span>
+              <span>Open source zero-trust process harness (&lt;25MB static pure-Go binary)</span>
+            </div>
+          </div>
+
+          <h1 class="hero-title">Zero-trust process harness for AI coding agents</h1>
+
+          <p class="hero-subhead">
+            k8s orchestrates compute containers; g8s orchestrates AI agent CLI workers. Private Git worktrees, path-scoped write receipts, and lossless verification firewalls in a single static binary.
+          </p>
+
+          <div class="stake-line">
+            Without containment, autonomous agents write anywhere, leak tokens in ambient shells, and leave runaway zombie processes.
+          </div>
+
+          <div class="terminology-bridges">
+            <div class="bridge-item">
+              <strong>write receipt</strong> (a single-use cryptographic token that names exactly which files a worker may touch)
+            </div>
+            <div class="bridge-item">
+              <strong>CAS lease</strong> (a compare-and-swap lock in SQLite WAL that prevents two workers from claiming the same task)
+            </div>
+            <div class="bridge-item">
+              <strong>gate lane</strong> (a risk-calibrated verification pipeline ranging from fast docs checks to dual-blind security audits)
+            </div>
+          </div>
+
+          <div class="dual-action-hub">
+            <div class="action-block">
+              <div class="action-header">
+                <span class="action-label">Developer install (macOS &amp; Linux)</span>
+                <button type="button" class="copy-btn" data-copy-target="#hero-install-cmd" aria-label="Copy install command to clipboard">
+                  Copy
+                </button>
+              </div>
+              <pre class="action-code"><code id="hero-install-cmd">curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash</code></pre>
+            </div>
+
+            <div class="action-block">
+              <div class="action-header">
+                <span class="action-label">Agent copy-prompt (The Dagger Pattern)</span>
+                <button type="button" class="copy-btn" data-copy-target="#hero-agent-prompt" aria-label="Copy agent prompt to clipboard">
+                  Copy
+                </button>
+              </div>
+              <pre class="action-code action-code-prompt"><code id="hero-agent-prompt">Install g8s from https://github.com/tamld/g8s, run `g8s doctor --json`, and configure g8s stdio MCP server in my agent settings.</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fig. 1 Terminal Viewport -->
+        <div class="fig-terminal" aria-label="Interactive terminal demonstrations">
+          <div class="terminal-header">
+            <div class="terminal-tabs" role="tablist" aria-label="Terminal demonstration tabs" data-terminal-tabs="true">
+              <button type="button" class="term-tab-btn" role="tab" aria-selected="true" aria-controls="pane-doctor" id="tab-doctor">
+                g8s doctor --json
+              </button>
+              <button type="button" class="term-tab-btn" role="tab" aria-selected="false" aria-controls="pane-submit" id="tab-submit" tabindex="-1">
+                g8s submit
+              </button>
+              <button type="button" class="term-tab-btn" role="tab" aria-selected="false" aria-controls="pane-receipt" id="tab-receipt" tabindex="-1">
+                g8s receipt issue
+              </button>
+            </div>
+            <span class="terminal-fig-tag">Fig. 1 The g8s Process Harness</span>
+          </div>
+
+          <div class="terminal-viewport">
+            <div class="terminal-pane active" id="pane-doctor" role="tabpanel" aria-labelledby="tab-doctor" data-terminal-pane="true">
+              <pre class="terminal-pre"><code><span class="tok-comment"># Health diagnostic checks running in &lt;14ms</span>
+{
+  <span class="tok-key">"v"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"doctor"</span>,
+  <span class="tok-key">"cmd"</span>: <span class="tok-str">"doctor"</span>,
+  <span class="tok-key">"data"</span>: {
+    <span class="tok-key">"ok"</span>: <span class="tok-ok">true</span>,
+    <span class="tok-key">"checks"</span>: [
+      {<span class="tok-key">"name"</span>: <span class="tok-str">"sqlite_wal"</span>, <span class="tok-key">"status"</span>: <span class="tok-ok">"pass"</span>, <span class="tok-key">"latency_ms"</span>: <span class="tok-num">0.4</span>},
+      {<span class="tok-key">"name"</span>: <span class="tok-str">"git_worktree_engine"</span>, <span class="tok-key">"status"</span>: <span class="tok-ok">"pass"</span>, <span class="tok-key">"version"</span>: <span class="tok-str">"2.44.0"</span>},
+      {<span class="tok-key">"name"</span>: <span class="tok-str">"posix_process_group"</span>, <span class="tok-key">"status"</span>: <span class="tok-ok">"pass"</span>, <span class="tok-key">"setpgid"</span>: <span class="tok-ok">true</span>},
+      {<span class="tok-key">"name"</span>: <span class="tok-str">"zero_cgo_boundary"</span>, <span class="tok-key">"status"</span>: <span class="tok-ok">"pass"</span>, <span class="tok-key">"cgo_enabled"</span>: <span class="tok-num">0</span>},
+      {<span class="tok-key">"name"</span>: <span class="tok-str">"provider_gateways"</span>, <span class="tok-key">"status"</span>: <span class="tok-ok">"pass"</span>, <span class="tok-key">"detected"</span>: [<span class="tok-str">"9router"</span>, <span class="tok-str">"openai"</span>, <span class="tok-str">"agy"</span>]}
+    ]
+  },
+  <span class="tok-key">"at"</span>: <span class="tok-str">"2026-11-04T01:30:00Z"</span>
+}</code></pre>
+            </div>
+
+            <div class="terminal-pane" id="pane-submit" role="tabpanel" aria-labelledby="tab-submit" data-terminal-pane="true" hidden>
+              <pre class="terminal-pre"><code><span class="tok-comment"># Enqueue task with CAS lease into durable SQLite WAL queue</span>
+{
+  <span class="tok-key">"v"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"task"</span>,
+  <span class="tok-key">"cmd"</span>: <span class="tok-str">"submit"</span>,
+  <span class="tok-key">"data"</span>: {
+    <span class="tok-key">"task_id"</span>: <span class="tok-str">"015ea318-b977-4aed-85cf-4b0cb9c4cce1"</span>,
+    <span class="tok-key">"idempotency_key"</span>: <span class="tok-str">"scout-providers-01"</span>,
+    <span class="tok-key">"schema_version"</span>: <span class="tok-str">"agy.task.v1"</span>,
+    <span class="tok-key">"state"</span>: <span class="tok-ok">"QUEUED"</span>,
+    <span class="tok-key">"priority"</span>: <span class="tok-num">0</span>,
+    <span class="tok-key">"request"</span>: {
+      <span class="tok-key">"actor"</span>: <span class="tok-str">"operator"</span>,
+      <span class="tok-key">"effort"</span>: <span class="tok-str">"medium"</span>,
+      <span class="tok-key">"permission"</span>: <span class="tok-str">"read_only"</span>,
+      <span class="tok-key">"prompt"</span>: <span class="tok-str">"Scan internal/provider and map all exported interfaces"</span>,
+      <span class="tok-key">"role"</span>: <span class="tok-str">"scout"</span>,
+      <span class="tok-key">"timeout"</span>: <span class="tok-str">"90s"</span>
+    },
+    <span class="tok-key">"attempts"</span>: <span class="tok-num">0</span>,
+    <span class="tok-key">"max_attempts"</span>: <span class="tok-num">1</span>
+  }
+}</code></pre>
+            </div>
+
+            <div class="terminal-pane" id="pane-receipt" role="tabpanel" aria-labelledby="tab-receipt" data-terminal-pane="true" hidden>
+              <pre class="terminal-pre"><code><span class="tok-comment"># Single-use write receipt minted with path-scoped capability</span>
+{
+  <span class="tok-key">"v"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"receipt"</span>,
+  <span class="tok-key">"cmd"</span>: <span class="tok-str">"receipt issue"</span>,
+  <span class="tok-key">"data"</span>: {
+    <span class="tok-key">"receipt_id"</span>: <span class="tok-str">"67992e6a-f88a-4b8a-b711-b233fb6b1623"</span>,
+    <span class="tok-key">"allowed_paths"</span>: [<span class="tok-str">"internal/config/*.go"</span>],
+    <span class="tok-key">"ttl_seconds"</span>: <span class="tok-num">3600</span>,
+    <span class="tok-key">"single_use"</span>: <span class="tok-ok">true</span>,
+    <span class="tok-key">"status"</span>: <span class="tok-ok">"ISSUED"</span>,
+    <span class="tok-key">"hash"</span>: <span class="tok-str">"sha256:d8c4fa02..."</span>
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. THE PROBLEM -->
+    <section class="section" id="problem">
+      <div class="container">
+        <div class="section-header">
+          <h2>Ambient shell risk vs zero-trust harness</h2>
+          <p class="section-desc">
+            Why letting autonomous agents execute directly in ambient user shells leads to silent catastrophic failures.
+          </p>
+        </div>
+
+        <div class="problem-grid">
+          <div class="problem-card problem-card-ambient">
+            <h3 class="problem-card-title">
+              <span>Ambient shell execution</span>
+              <span class="tag-mono">Status quo</span>
+            </h3>
+            <ul class="problem-list">
+              <li class="problem-item">
+                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <div>
+                  <span class="problem-item-title">Unbounded filesystem authority</span>
+                  <span class="problem-item-desc">Workers execute arbitrary commands and can accidentally mutate or delete files outside target modules.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <div>
+                  <span class="problem-item-title">Orphan zombie processes</span>
+                  <span class="problem-item-desc">Child processes survive agent crashes, remaining hidden in background loops and pegging CPU cores at 100%.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <div>
+                  <span class="problem-item-title">Working tree corruption</span>
+                  <span class="problem-item-desc">Failed agent experiments and uncommitted syntax errors directly pollute developer checkout state.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <div>
+                  <span class="problem-item-title">Context quota flooding</span>
+                  <span class="problem-item-desc">Megabytes of raw compiler tracebacks flood the coordinator context window, depleting model quotas.</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <div class="problem-card problem-card-g8s">
+            <h3 class="problem-card-title">
+              <span>g8s zero-trust process harness</span>
+              <span class="tag-mono">Guaranteed</span>
+            </h3>
+            <ul class="problem-list">
+              <li class="problem-item">
+                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <div>
+                  <span class="problem-item-title">Path-scoped write receipts</span>
+                  <span class="problem-item-desc">Mutations require single-use, time-limited capability receipts listing exact allowed file paths.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <div>
+                  <span class="problem-item-title">Clean process group termination</span>
+                  <span class="problem-item-desc">POSIX process groups (Setpgid) guarantee entire child trees terminate cleanly on timeout or abort.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <div>
+                  <span class="problem-item-title">Fail-closed Git worktrees</span>
+                  <span class="problem-item-desc">Each task executes in an isolated Git worktree; only verified, accepted changes are delivered.</span>
+                </div>
+              </li>
+              <li class="problem-item">
+                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <div>
+                  <span class="problem-item-title">Lossless information firewall</span>
+                  <span class="problem-item-desc">Transforms megabytes of raw logs into compact, structured verification receipts for the orchestrator.</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. CAPABILITIES -->
+    <section class="section" id="capabilities">
+      <div class="container">
+        <div class="section-header">
+          <h2>Engineered capabilities with proof artifacts</h2>
+          <p class="section-desc">
+            Core safety mechanisms grounded directly in repository specifications, executable test suites, and architectural records.
+          </p>
+        </div>
+
+        <div class="cap-grid">
+          <!-- Cap 1 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Zero-trust containment tiers (F0/F1/F2)</h3>
+              <p class="cap-desc">Decouples sovereign F0 planner authority from bounded F1 execution worktrees and nested F2 subagents.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s roles
+{"v":1,"kind":"roles","data":[{"name":"scout","permission":"read_only","tier":"F1"},{"name":"implementer","permission":"workspace_write","tier":"F1"}]}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="docs/decisions/0032-containment-levels.md">docs/decisions/0032-containment-levels.md</a>
+            </div>
+          </div>
+
+          <!-- Cap 2 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Single-use write receipts</h3>
+              <p class="cap-desc">Eliminates ambient shell write access. Mutations require time-limited tokens listing exact allowed file paths.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s receipt issue --path "internal/config/*.go" --ttl 3600
+{"receipt_id":"67992e6a-f88a-4b8a-b711-b233fb6b1623","allowed_paths":["internal/config/*.go"],"ttl_s":3600,"state":"ISSUED"}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="schemas/receipt-v1.schema.json">schemas/receipt-v1.schema.json</a>
+            </div>
+          </div>
+
+          <!-- Cap 3 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Risk-tiered ALDC gate lanes (0/D/R/F/S)</h3>
+              <p class="cap-desc">Routes mutations dynamically from fast documentation edits (Lane 0) to security-critical kernels (Lane S).</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s feature inspect --path internal/receipt/receipt.go
+{"lane":"S","checks":["gosec","semgrep","holdout_partition","seeded_mutant"]}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="docs/decisions/0024-gate-lane-routing.md">docs/decisions/0024-gate-lane-routing.md</a>
+            </div>
+          </div>
+
+          <!-- Cap 4 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Cross-repository fleet hygiene</h3>
+              <p class="cap-desc">Verifies uncommitted changes, unpushed branches, and detached HEADs across sister repositories before dispatch.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s fleet status --require-clean
+{"v":1,"kind":"fleet","clean":true,"checked_repositories":4,"drift_detected":0}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="spec/openspec/32-fleet-hygiene-spec.md">spec/openspec/32-fleet-hygiene-spec.md</a>
+            </div>
+          </div>
+
+          <!-- Cap 5 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Multi-coordinator interop mesh (RT-MESH)</h3>
+              <p class="cap-desc">Enables Claude, Codex, and Antigravity to coordinate over a shared SQLite WAL ledger with CAS locks.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s coordinator mesh status
+{"mesh_version":"v1","peers":["claude-f0","codex-f0","agy-f0"],"active_leases":2}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="spec/openspec/46-peer-coordinator-ledger-spec.md">spec/openspec/46-peer-coordinator-ledger-spec.md</a>
+            </div>
+          </div>
+
+          <!-- Cap 6 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">System-1 reflex triage (Jev)</h3>
+              <p class="cap-desc">Enforces Sensor != Decider before file mutation, halting unauthorized sandbox escapes in sub-10ms.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s reflex triage --summary "Update config parser" --files "internal/config/config.go"
+{"verdict":"ALLOW","lane":"D","escalation_required":false,"latency_ms":8}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="docs/decisions/0034-config-driven-llm-consumer-9router.md">docs/decisions/0034-config-driven-llm-consumer-9router.md</a>
+            </div>
+          </div>
+
+          <!-- Cap 7 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">6-stage QA and seeded mutant canary</h3>
+              <p class="cap-desc">Replaces unverified model claims with mechanical proofs: holdout isolation and seeded mutant canaries.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s verify --task 015ea318-b977-4aed-85cf-4b0cb9c4cce1 --json
+{"v":1,"verdict":"PASS","stages_passed":6,"mutant_canary":"KILLED","holdout_clean":true}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="internal/verifier/qapipeline.go">internal/verifier/qapipeline.go</a>
+            </div>
+          </div>
+
+          <!-- Cap 8 -->
+          <div class="cap-card">
+            <div class="cap-card-header">
+              <h3 class="cap-title">Native pure-Go agent I/O and ContextPack</h3>
+              <p class="cap-desc">Replaces shell scripts with pure-Go regex search, line-slicing reader, atomic CAS editor, and AST compressor.</p>
+            </div>
+            <div class="cap-terminal">
+              <pre class="cap-pre"><code>$ g8s search "WriteReceipt" --json
+{"matches":[{"file":"internal/receipt/receipt.go","line":42,"text":"type WriteReceipt struct {"}]}</code></pre>
+            </div>
+            <div class="cap-citation">
+              <span>Proof artifact:</span>
+              <a href="offer/SEARCH_GUIDE.md">offer/SEARCH_GUIDE.md</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. QUICKSTART -->
+    <section class="section" id="quickstart">
+      <div class="container">
+        <div class="section-header">
+          <h2>Installed and verified in sixty seconds</h2>
+          <p class="section-desc">
+            Single static binary with zero CGO dependencies. Runs 100% locally with zero phone-home network calls.
+          </p>
+        </div>
+
+        <!-- Platform Tabs -->
+        <div class="quickstart-tabs-nav" role="tablist" aria-label="Installation platform selection" data-qs-tabs="true">
+          <button type="button" class="qs-tab-btn" role="tab" aria-selected="true" aria-controls="qs-curl" id="tab-qs-curl">
+            macOS &amp; Linux (curl)
+          </button>
+          <button type="button" class="qs-tab-btn" role="tab" aria-selected="false" aria-controls="qs-brew" id="tab-qs-brew" tabindex="-1">
+            Homebrew
+          </button>
+          <button type="button" class="qs-tab-btn" role="tab" aria-selected="false" aria-controls="qs-go" id="tab-qs-go" tabindex="-1">
+            Go toolchain
+          </button>
+          <button type="button" class="qs-tab-btn" role="tab" aria-selected="false" aria-controls="qs-source" id="tab-qs-source" tabindex="-1">
+            Build from source
+          </button>
+        </div>
+
+        <div class="qs-tab-panel active" id="qs-curl" role="tabpanel" aria-labelledby="tab-qs-curl" data-qs-panel="true">
+          <div class="install-snippet-box">
+            <code class="install-snippet-code" id="cmd-qs-curl">curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash</code>
+            <button type="button" class="copy-btn" data-copy-target="#cmd-qs-curl" aria-label="Copy curl install command">Copy</button>
+          </div>
+        </div>
+
+        <div class="qs-tab-panel" id="qs-brew" role="tabpanel" aria-labelledby="tab-qs-brew" data-qs-panel="true" hidden>
+          <div class="install-snippet-box">
+            <code class="install-snippet-code" id="cmd-qs-brew">brew tap tamld/homebrew-tap
+brew install g8s</code>
+            <button type="button" class="copy-btn" data-copy-target="#cmd-qs-brew" aria-label="Copy brew install command">Copy</button>
+          </div>
+        </div>
+
+        <div class="qs-tab-panel" id="qs-go" role="tabpanel" aria-labelledby="tab-qs-go" data-qs-panel="true" hidden>
+          <div class="install-snippet-box">
+            <code class="install-snippet-code" id="cmd-qs-go">go install github.com/tamld/g8s/cmd/g8s@latest</code>
+            <button type="button" class="copy-btn" data-copy-target="#cmd-qs-go" aria-label="Copy go install command">Copy</button>
+          </div>
+        </div>
+
+        <div class="qs-tab-panel" id="qs-source" role="tabpanel" aria-labelledby="tab-qs-source" data-qs-panel="true" hidden>
+          <div class="install-snippet-box">
+            <code class="install-snippet-code" id="cmd-qs-source">git clone https://github.com/tamld/g8s.git
+cd g8s
+make local
+./bin/g8s doctor --json</code>
+            <button type="button" class="copy-btn" data-copy-target="#cmd-qs-source" aria-label="Copy build from source command">Copy</button>
+          </div>
+        </div>
+
+        <div class="source-link-bar">
+          Security audit: <a href="https://github.com/tamld/g8s/blob/main/scripts/install.sh" target="_blank" rel="noopener noreferrer">View install.sh source code on GitHub</a>
+        </div>
+
+        <!-- 60-Second Execution Cycle -->
+        <div class="cycle-timeline">
+          <div class="cycle-step">
+            <div class="cycle-step-header">
+              <span class="cycle-step-tag" data-ui="true">DIAGNOSE</span>
+              <span class="cycle-step-title">Run local doctor health diagnostics</span>
+            </div>
+            <pre class="cycle-code-pre"><code>./bin/g8s doctor --json</code></pre>
+          </div>
+
+          <div class="cycle-step">
+            <div class="cycle-step-header">
+              <span class="cycle-step-tag" data-ui="true">INSPECT</span>
+              <span class="cycle-step-title">Inspect registered zero-trust role contracts</span>
+            </div>
+            <pre class="cycle-code-pre"><code>./g8s roles
+./g8s permissions</code></pre>
+          </div>
+
+          <div class="cycle-step">
+            <div class="cycle-step-header">
+              <span class="cycle-step-tag" data-ui="true">ENQUEUE</span>
+              <span class="cycle-step-title">Submit a bounded task to the SQLite WAL queue</span>
+            </div>
+            <pre class="cycle-code-pre"><code>./g8s submit \
+  --idempotency-key demo-1 \
+  --prompt "inventory the module" \
+  --model gemini-3.8-flash-high \
+  --role collector \
+  --permission read_only \
+  --add-dir . \
+  --timeout 30s</code></pre>
+          </div>
+
+          <div class="cycle-step">
+            <div class="cycle-step-header">
+              <span class="cycle-step-tag" data-ui="true">CLAIM &amp; PROCESS</span>
+              <span class="cycle-step-title">Process task in isolated Git worktree</span>
+            </div>
+            <pre class="cycle-code-pre"><code>./g8s get &lt;task-id&gt;
+g8s worker --once</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. ARCHITECTURE -->
+    <section class="section" id="architecture">
+      <div class="container">
+        <div class="section-header">
+          <h2>Two-axis architecture and containment rings</h2>
+          <p class="section-desc">
+            Physical isolation rings (Axis X) combined with orthogonal control strata (Axis Y) for complete zero-trust delegation.
+          </p>
+        </div>
+
+        <div class="arch-card">
+          <!-- Isometric Hand-Drawn SVG Architecture Diagram -->
+          <svg class="arch-svg-container" viewBox="0 0 880 440" width="100%" height="100%" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">g8s Zero-Trust Isometric Architecture</title>
+            <desc id="arch-desc">Isometric diagram showing Ring F0 Sovereign Supervisor, g8s Process Kernel, and Ring F1 Worker containment tiers.</desc>
+
+            <defs>
+              <linearGradient id="slabF0" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#1e1b4b"/>
+                <stop offset="100%" stop-color="#2e1065"/>
+              </linearGradient>
+              <linearGradient id="slabKernel" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#064e3b"/>
+                <stop offset="100%" stop-color="#022c22"/>
+              </linearGradient>
+              <linearGradient id="slabF1" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#0c4a6e"/>
+                <stop offset="100%" stop-color="#082f49"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Grid Ground -->
+            <path d="M 440 20 L 820 160 L 440 300 L 60 160 Z" fill="#080c14" stroke="#172230" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+            <!-- LEVEL 1 (BOTTOM): RING F1 WORKERS & F2 SUBAGENTS -->
+            <g transform="translate(0, 110)">
+              <!-- Base 3D Extrusion -->
+              <polygon points="440,190 760,280 760,298 440,208" fill="#061c28"/>
+              <polygon points="440,190 120,280 120,298 440,208" fill="#031118"/>
+              <!-- Top Face -->
+              <polygon points="440,100 760,190 440,280 120,190" fill="url(#slabF1)" stroke="#38bdf8" stroke-width="1.5"/>
+              <text x="440" y="165" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#7dd3fc" text-anchor="middle">RING F1 (WORKER MUSCLE) &amp; RING F2 (SUBAGENTS)</text>
+              <text x="440" y="190" font-family="-apple-system, sans-serif" font-size="13" fill="#cbd5e1" text-anchor="middle">Private Git Worktrees · POSIX Setpgid Process Groups · WriteReceipt.AllowedPaths Jail</text>
+            </g>
+
+            <!-- CONNECTOR LEVEL 1 -> 2 -->
+            <line x1="440" y1="210" x2="440" y2="178" stroke="#05df72" stroke-width="2.5" stroke-dasharray="4 3"/>
+            <circle cx="440" cy="195" r="4" fill="#05df72"/>
+
+            <!-- LEVEL 2 (MIDDLE): g8s PURE-GO ENGINE KERNEL -->
+            <g transform="translate(0, 30)">
+              <polygon points="440,150 760,240 760,256 440,166" fill="#021c14"/>
+              <polygon points="440,150 120,240 120,256 440,166" fill="#01100b"/>
+              <polygon points="440,60 760,150 440,240 120,150" fill="url(#slabKernel)" stroke="#05df72" stroke-width="1.8"/>
+              <text x="440" y="125" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#6ee7b7" text-anchor="middle">g8s HARNESS KERNEL (ZERO-CGO ENGINE)</text>
+              <text x="440" y="150" font-family="-apple-system, sans-serif" font-size="13" fill="#e2e8f0" text-anchor="middle">SQLite WAL CAS Leases · Gate Lanes 0/D/R/F/S · Information Firewall · System-1 Jev</text>
+            </g>
+
+            <!-- CONNECTOR LEVEL 2 -> 3 -->
+            <line x1="440" y1="90" x2="440" y2="58" stroke="#38bdf8" stroke-width="2.5" stroke-dasharray="4 3"/>
+            <circle cx="440" cy="74" r="4" fill="#38bdf8"/>
+
+            <!-- LEVEL 3 (TOP): RING F0 BRAIN / SUPERVISOR TIER -->
+            <g transform="translate(0, -50)">
+              <polygon points="440,110 760,200 760,224 440,134" fill="#150f2e"/>
+              <polygon points="440,110 120,200 120,224 440,134" fill="#0e0920"/>
+              <polygon points="440,20 760,110 440,200 120,110" fill="url(#slabF0)" stroke="#818cf8" stroke-width="1.8"/>
+              <text x="440" y="85" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#c7d2fe" text-anchor="middle">RING F0 — SOVEREIGN SUPERVISOR TIER (FULL TRUST)</text>
+              <text x="440" y="110" font-family="-apple-system, sans-serif" font-size="13" fill="#e0e7ff" text-anchor="middle">Strategic Orchestrator (Claude / Codex / Antigravity) · Exclusive Git Commit &amp; Receipt Minting</text>
+            </g>
+          </svg>
+
+          <div class="arch-legend-grid">
+            <div class="legend-box">
+              <div class="legend-title legend-f0">
+                <span class="badge-dot" aria-hidden="true"></span>
+                <span>F0 Brain Tier</span>
+              </div>
+              <p class="legend-desc">Holds exclusive authority over architecture decisions, commit history, and write receipt minting. Never executes untrusted code directly.</p>
+            </div>
+
+            <div class="legend-box">
+              <div class="legend-title legend-kernel">
+                <span class="badge-dot" aria-hidden="true"></span>
+                <span>Harness Kernel</span>
+              </div>
+              <p class="legend-desc">Pure-Go zero-trust mediator. Manages SQLite WAL task queue, CAS worker leases, reflex triage, and lossless log compaction.</p>
+            </div>
+
+            <div class="legend-box">
+              <div class="legend-title legend-f1">
+                <span class="badge-dot" aria-hidden="true"></span>
+                <span>F1 &amp; F2 Workers</span>
+              </div>
+              <p class="legend-desc">Ephemerally spawned in private Git worktrees and POSIX process groups. Mutations strictly bounded by in-process path receipts.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. DOCS HUB (Diátaxis Framework) -->
+    <section class="section" id="docs">
+      <div class="container">
+        <div class="section-header">
+          <h2>Documentation index and references</h2>
+          <p class="section-desc">
+            Organized across four distinct quadrants of the Diátaxis documentation framework for learning, solving, understanding, and reference.
+          </p>
+        </div>
+
+        <div class="docs-quad-grid">
+          <div class="docs-quad-card">
+            <h3 class="docs-quad-heading">
+              <span class="tag-mono">1. Tutorials</span>
+              <span>Learning-oriented</span>
+            </h3>
+            <ul class="docs-list">
+              <li>
+                <a href="docs/quickstart.md">60-second quickstart guide</a>
+                <span class="docs-item-meta">From zero to delegated agent task execution in 60s.</span>
+              </li>
+              <li>
+                <a href="docs/user-guide/providers.md">LLM gateway provider setup</a>
+                <span class="docs-item-meta">Configuring OpenAI, Anthropic, and 9router connections.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="docs-quad-card">
+            <h3 class="docs-quad-heading">
+              <span class="tag-mono">2. Governance</span>
+              <span>Invariant laws</span>
+            </h3>
+            <ul class="docs-list">
+              <li>
+                <a href="spec/constitution.md">Spec constitution (6 invariant laws)</a>
+                <span class="docs-item-meta">Non-negotiable architectural axioms governing all agent mutations.</span>
+              </li>
+              <li>
+                <a href="AGENTS.md">Agent onboarding protocol</a>
+                <span class="docs-item-meta">Zero-trust capability delegation protocol for AI workers.</span>
+              </li>
+              <li>
+                <a href="docs/AGENTS_FULL.md">Full SSoT architecture map</a>
+                <span class="docs-item-meta">Comprehensive reference of strata, roles, and boundaries.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="docs-quad-card">
+            <h3 class="docs-quad-heading">
+              <span class="tag-mono">3. Architecture</span>
+              <span>Understanding</span>
+            </h3>
+            <ul class="docs-list">
+              <li>
+                <a href="docs/decisions/">Architecture decision records (37 ADRs)</a>
+                <span class="docs-item-meta">Formal design history and rationale across all major subsystems.</span>
+              </li>
+              <li>
+                <a href="docs/decisions/0032-containment-levels.md">ADR-0032 Containment levels</a>
+                <span class="docs-item-meta">Zero-trust tiers (F0/F1/F2) and cardinality laws.</span>
+              </li>
+              <li>
+                <a href="docs/decisions/0037-reach-layer.md">ADR-0037 Reach platform data</a>
+                <span class="docs-item-meta">Ordered fallback chains with quarantine circuit breakers.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="docs-quad-card">
+            <h3 class="docs-quad-heading">
+              <span class="tag-mono">4. Reference</span>
+              <span>Information-oriented</span>
+            </h3>
+            <ul class="docs-list">
+              <li>
+                <a href="docs/user-guide/cli-reference.md">CLI command reference (50+ commands)</a>
+                <span class="docs-item-meta">Complete flag specifications, schemas, and exit code directory.</span>
+              </li>
+              <li>
+                <a href="docs/user-guide/receipt-workflow.md">Receipt delegation workflow</a>
+                <span class="docs-item-meta">Cryptographic minting, path validation, and consumption cycles.</span>
+              </li>
+              <li>
+                <a href="offer/README.md">Offer bundle for sister repositories</a>
+                <span class="docs-item-meta">Pull-based adoption and repo-agnostic CI verification gates.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. PROOF -->
+    <section class="section" id="proof">
+      <div class="container">
+        <div class="section-header">
+          <h2>Continuous integration and empirical proof</h2>
+          <p class="section-desc">
+            Empirical quality metrics and continuous security verification enforced on every pull request.
+          </p>
+        </div>
+
+        <div class="proof-metrics-grid">
+          <div class="metric-card">
+            <div class="metric-val">82.50%</div>
+            <div class="metric-label">Test coverage ratchet baseline</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">&lt;25MB</div>
+            <div class="metric-label">Static pure-Go binary footprint</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">Zero CGO</div>
+            <div class="metric-label">100% portable pure-Go compilation</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">0 bytes</div>
+            <div class="metric-label">Zero phone-home network telemetry</div>
+          </div>
+        </div>
+
+        <div class="proof-details-grid">
+          <div class="proof-detail-card">
+            <h3 class="proof-detail-title">Security &amp; supply chain battery</h3>
+            <ul class="proof-detail-list">
+              <li>Full SAST triad: <code>golangci-lint</code>, <code>gosec</code>, <code>semgrep</code>, and GitHub <code>CodeQL</code>.</li>
+              <li>Automated SPDX 2.3 JSON SBOM generated per release via Syft with signed checksums.</li>
+              <li>Native Windows Server 2022 runner CI running PowerShell e2e and process kill tests.</li>
+              <li>Fail-closed SHA-256 validation enforced in all standalone installer scripts.</li>
+            </ul>
+          </div>
+
+          <div class="proof-detail-card">
+            <h3 class="proof-detail-title">Living dogfood story</h3>
+            <ul class="proof-detail-list">
+              <li>g8s is developed entirely using g8s workers under single-use write receipts.</li>
+              <li>Commit <code>df2b7fc</code>: Coordinator interop ledger &amp; RT-MESH v1 protocol.</li>
+              <li>Commit <code>a455449</code>: External CLI agent adapters &amp; sandboxed execution fixes.</li>
+              <li>Commit <code>6518b58</code>: 4-pillar AppSec verification battery &amp; threat model gates.</li>
+              <li>Commit <code>5406740</code>: Doctor diagnostic engine &amp; evidence retention loops.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. COMMUNITY -->
+    <section class="section" id="community">
+      <div class="container">
+        <div class="community-card">
+          <div class="community-left">
+            <h2>Open-source community and development</h2>
+            <p class="section-desc">
+              MIT licensed. Built by systems engineers and distributed system architects for the next generation of autonomous coding agents.
+            </p>
+          </div>
+
+          <div class="community-actions">
+            <a href="https://github.com/tamld/g8s" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
+              View repository on GitHub
+            </a>
+            <a href="https://github.com/tamld/g8s/releases" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">
+              All releases
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div>
+        <span>g8s (The Gatekeepers) — Open Source Zero-Trust Process Harness. MIT License.</span>
+      </div>
+
+      <ul class="footer-links">
+        <li><a href="https://github.com/tamld/g8s" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+        <li><a href="https://github.com/tamld/g8s/releases" target="_blank" rel="noopener noreferrer">Releases</a></li>
+        <li><a href="docs/quickstart.md">Quickstart</a></li>
+        <li><a href="spec/constitution.md">Constitution</a></li>
+        <li><a href="SECURITY.md">Security</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
