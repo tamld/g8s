@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aegis — Sovereign Multi-Agent Governance Framework &amp; Web Control Plane</title>
+  <meta name="description" content="Sovereign multi-agent governance framework wrapping AI coding agents in deterministic verification covenants. Zero prompt drift, zero assertion pruning, and zero unverified diffs.">
+  <meta property="og:title" content="Aegis — Sovereign Multi-Agent Governance Framework">
+  <meta property="og:description" content="Your AI writes the code. Aegis guarantees nothing hallucinated reaches main. Deterministic covenants and real-time Web Control Plane.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://github.com/tamld/g8s">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Aegis — Sovereign Multi-Agent Governance Framework">
+  <meta name="twitter:description" content="Deterministic verification covenants for autonomous AI coding agents.">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo.svg">
+  <link rel="stylesheet" href="../assets/aegis/styles.css" integrity="sha384-BtFOkFLVoCBzN6vOGoLIyC4NdDI4mLJMrIkTBO2XrfDqx0U8K2dVhlbHjo8H2RJv" crossorigin="anonymous">
+  <script src="../assets/aegis/main.js" integrity="sha384-LU0yIntcU7QQH0xicTReY5wjMAgyGTIjMWcM0axG6d+MNcaUa7PKMd0IUYa7kRLm" crossorigin="anonymous" defer></script>
+</head>
+<body>
+  <a href="#overview" class="skip-link">Skip to main content</a>
+
+  <!-- 1. NAVIGATION -->
+  <header class="site-nav">
+    <div class="container nav-container">
+      <div class="nav-left">
+        <a href="#overview" class="brand-link" aria-label="Aegis home">
+          <svg class="brand-seal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+          <span>Aegis</span>
+        </a>
+        <span class="version-pill">Release v0.6.0</span>
+      </div>
+
+      <nav class="nav-menu" data-nav-menu aria-label="Primary navigation">
+        <ul class="nav-links">
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#personas">Personas</a></li>
+          <li><a href="#anatomy">Dual-Engine</a></li>
+          <li><a href="#playground">Simulator</a></li>
+          <li><a href="#cognitive-loop">Cognitive Loop</a></li>
+          <li><a href="#governance-matrix">FSM Matrix</a></li>
+          <li><a href="#threat-matrix">Threat Model</a></li>
+          <li><a href="#spec-library">Conceptual Library</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-right">
+        <span class="live-status-pill">
+          <span class="status-dot-pulse" aria-hidden="true"></span>
+          <span>COVENANT ARMED • ZERO DRIFT</span>
+        </span>
+        <a href="mailto:tam@flowaxon.com?subject=Aegis%20Pilot%20Access%20Request&amp;body=Hi%20Aegis%20Team%2C%0A%0AI%20would%20like%20to%20request%20evaluation%20access%20for%20our%20engineering%20team.%0A%0AOrganization%3A%20%0ATeam%20Size%3A%20%0APrimary%20Agent%20Stack%3A%20%0AKey%20Governance%20Pain%20Point%3A%20%0A%0AThank%20you!" class="btn btn-primary btn-sm">Request Access</a>
+        <button type="button" class="mobile-toggle" data-mobile-toggle aria-expanded="false" aria-label="Toggle navigation menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 2. HERO SECTION -->
+    <section class="section hero-section" id="overview">
+      <div class="container hero-grid">
+        <div class="hero-content reveal">
+          <div class="covenant-crest-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Sovereign Governance Framework • Release v0.6.0 Baseline</span>
+          </div>
+
+          <h1 class="hero-tagline">
+            Your AI writes the code. Aegis guarantees nothing hallucinated reaches main.
+          </h1>
+
+          <p class="hero-subhead">
+            A sovereign multi-agent governance framework and real-time Web Control Plane wrapping AI coding agents in deterministic verification covenants. Zero prompt drift, zero assertion pruning, and zero unverified diffs.
+          </p>
+
+          <div class="hero-actions">
+            <a href="mailto:tam@flowaxon.com?subject=Aegis%20Pilot%20Evaluation%20Request&amp;body=Hi%20Aegis%20Team%2C%0A%0AI%20would%20like%20to%20request%20evaluation%20access%20for%20our%20engineering%20team.%0A%0AOrganization%3A%20%0ATeam%20Size%3A%20%0APrimary%20Agent%20Stack%3A%20%0AKey%20Governance%20Pain%20Point%3A%20%0A%0AThank%20you!" class="btn btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
+              <span>Request Pilot Access</span>
+            </a>
+            <a href="#playground" class="btn btn-secondary">Explore Covenant Simulator</a>
+          </div>
+
+          <!-- 4 Core KPIs -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-num">0%</div>
+              <div class="kpi-title">Goal Drift</div>
+              <p class="kpi-desc">Sealed SHA-256 Covenant Baton injected at every state transition.</p>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-num">100%</div>
+              <div class="kpi-title">Assertion Integrity</div>
+              <p class="kpi-desc">Test assertions and .skip injections mechanically intercepted.</p>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-num">5D</div>
+              <div class="kpi-title">Precedent Recall</div>
+              <p class="kpi-desc">Institutional memory graph ranks historical lessons before execution.</p>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-num">&lt;200ms</div>
+              <div class="kpi-title">Circuit Breaker</div>
+              <p class="kpi-desc">Instant termination on unhandled errors with automatic rollback.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Access Reality Card -->
+        <aside class="access-reality-card reveal">
+          <div class="access-header">
+            <h3>Sovereign Access Reality</h3>
+            <span class="access-badge">Private Deployment</span>
+          </div>
+
+          <p class="access-reality-text">
+            Aegis is maintained within a private sovereign repository. Access to the framework runtime and pilot evaluation program is granted upon direct request.
+          </p>
+
+          <ul class="access-invariants-list">
+            <li>
+              <span class="access-check-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong>Zero Phantom Packages:</strong> No unverified npm, pip, or dummy curl scripts. Direct consultation for platform engineering teams.
+              </div>
+            </li>
+            <li>
+              <span class="access-check-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong>Dual-Engine Synergy:</strong> Pairs with the public g8s static Go kernel for process isolation and single-use write receipts.
+              </div>
+            </li>
+            <li>
+              <span class="access-check-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong>Zero External Dependencies:</strong> Standalone executable runtime backed by local durable SQLite WAL storage.
+              </div>
+            </li>
+            <li>
+              <span class="access-check-icon" aria-hidden="true">✓</span>
+              <div>
+                <strong>Sensor ≠ Decider Law:</strong> The model generating the code is strictly forbidden from judging its correctness.
+              </div>
+            </li>
+          </ul>
+
+          <a href="mailto:tam@flowaxon.com?subject=Aegis%20Pilot%20Access%20Inquiry" class="btn btn-primary btn-block">
+            <span>Contact Platform Team</span>
+          </a>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 3. PERSONAS SECTION -->
+    <section class="section" id="personas">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Target Consumer Personas</div>
+          <h2>Eliminating operational friction across the engineering hierarchy</h2>
+          <p class="section-desc">
+            Autonomous AI coding tools break down when trust is probabilistic. Aegis replaces conversational optimism with deterministic, unforgeable mechanical covenants.
+          </p>
+        </div>
+
+        <div class="personas-grid">
+          <!-- Persona 1 -->
+          <article class="persona-card reveal">
+            <div class="persona-header">
+              <div class="persona-category">Builders</div>
+              <h3 class="persona-title">AI Agent &amp; Harness Engineers</h3>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Daily Operational Friction</div>
+              <p class="persona-friction">
+                Agents loop endlessly, drift from initial prompt constraints, and burn expensive frontier token budgets on dead ends.
+              </p>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Concrete Value Delivery</div>
+              <p class="persona-delivery">
+                Compact prompt batons injected at every state transition eliminate amnesia and keep token budgets bounded. Monotonic watermarks prevent circular regression loops.
+              </p>
+            </div>
+          </article>
+
+          <!-- Persona 2 -->
+          <article class="persona-card reveal">
+            <div class="persona-header">
+              <div class="persona-category">Governors</div>
+              <h3 class="persona-title">Platform &amp; Security Architects</h3>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Daily Operational Friction</div>
+              <p class="persona-friction">
+                Bureaucratic review processes slow down routine fixes while high-risk changes risk production regressions, credential leaks, and out-of-scope blast radius.
+              </p>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Concrete Value Delivery</div>
+              <p class="persona-delivery">
+                Proportional governance routes tasks into Express, Standard, or Fortress lanes. Path-scoped write receipts physically constrain mutations strictly to authorized scope.
+              </p>
+            </div>
+          </article>
+
+          <!-- Persona 3 -->
+          <article class="persona-card reveal">
+            <div class="persona-header">
+              <div class="persona-category">Adopters</div>
+              <h3 class="persona-title">Engineering Leads &amp; Maintainers</h3>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Daily Operational Friction</div>
+              <p class="persona-friction">
+                Repetitive bugs recur across agent sessions; diffs contain hidden assertion deletions, hollow mock stubs, and synthetic passes.
+              </p>
+            </div>
+
+            <div class="persona-block">
+              <div class="persona-block-label">Concrete Value Delivery</div>
+              <p class="persona-delivery">
+                Permanent 5D causal memory ensures past lessons prevent future errors. Mechanical Crucible gates verify physical diff evidence and block assertion pruning.
+              </p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. ANATOMY: DUAL-ENGINE ARCHITECTURE -->
+    <section class="section" id="anatomy">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">System Topology</div>
+          <h2>The dual-engine architecture: Kernel vs. Framework</h2>
+          <p class="section-desc">
+            Aegis provides sovereign cognitive governance, while g8s provides operating system level process containment and write receipt authorization.
+          </p>
+        </div>
+
+        <div class="quote-banner reveal">
+          <blockquote class="quote-vietnamese">
+            &ldquo;Aegis l&agrave; framework, d&ugrave;ng g8s để cụ thể h&oacute;a cho người d&ugrave;ng.&rdquo;
+          </blockquote>
+          <p class="quote-english">
+            &ldquo;Aegis is the operational execution and verification framework; g8s is the low-level orchestration kernel that instantiates and enforces it for users.&rdquo;
+          </p>
+        </div>
+
+        <div class="dual-engine-grid">
+          <!-- Engine 1: g8s -->
+          <div class="engine-card reveal">
+            <span class="engine-tag">The Orchestration Kernel</span>
+            <h3 class="engine-title">g8s (Go Static Binary)</h3>
+            <p class="engine-lead">
+              Pure Go process-level containment kernel enforcing operating system boundaries with zero runtime dependencies.
+            </p>
+            <ul class="engine-feature-list">
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>POSIX Process Groups:</strong> Killable process trees (<code>Setpgid</code>) terminating runaway subagent loops cleanly.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>Ephemeral Git Worktrees:</strong> Isolated sandbox worktrees preventing dirty diffs from corrupting working trees.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>Path-Scoped Write Receipts:</strong> Cryptographically issued single-use receipts enforcing strict path whitelists in-process.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>SQLite WAL Task Queue:</strong> Single-winner CAS atomic lease queue coordinating parallel worker tasks.</div>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Engine 2: Aegis -->
+          <div class="engine-card reveal">
+            <span class="engine-tag">The Governance Framework</span>
+            <h3 class="engine-title">Aegis (Cognitive Engine)</h3>
+            <p class="engine-lead">
+              Sovereign operational framework governing the agent lifecycle with cryptographic covenants and multi-persona falsification.
+            </p>
+            <ul class="engine-feature-list">
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>Cryptographic Promise Lock:</strong> Natural-language requirements compiled into immutable SHA-256 covenants.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>7-State FSM Engine:</strong> Risk-proportional state machine routing tasks across Express, Standard, and Fortress lanes.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>5D Causal Memory Graph:</strong> Axiomatic truths and precedent case law ranked to prevent repeat failures.</div>
+              </li>
+              <li>
+                <span class="engine-bullet" aria-hidden="true">&bull;</span>
+                <div><strong>Zero-Theater Crucibles:</strong> Mechanical evidence interceptors enforcing the strict Sensor &ne; Decider invariant.</div>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Interface Contract Table -->
+        <div class="contract-bridge-card reveal">
+          <h3 class="bridge-title">Kernel &harr; Framework Interface Contract</h3>
+          <p>
+            The two layers interact via clean JSON-RPC envelopes, strict write receipt claims, and structured round verification receipts.
+          </p>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Governance Dimension</th>
+                  <th>Aegis Sovereign Framework</th>
+                  <th>g8s Containment Kernel</th>
+                  <th>Boundary Invariant</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="cell-bold">Task Scheduling</td>
+                  <td>Decomposes intent into disjoint DAG packets</td>
+                  <td>Enqueues and leases via SQLite WAL</td>
+                  <td>Single-winner atomic CAS lease</td>
+                </tr>
+                <tr>
+                  <td class="cell-bold">Execution Sandbox</td>
+                  <td>Defines allowed file paths and token bounds</td>
+                  <td>Creates isolated Git worktree &amp; OS pgid</td>
+                  <td>1 issue = 1 worker = 1 receipt</td>
+                </tr>
+                <tr>
+                  <td class="cell-bold">File Mutation</td>
+                  <td>Issues single-use Write Receipt claim</td>
+                  <td>Validates receipt in-process before write</td>
+                  <td>Mutations rejected if out of scope</td>
+                </tr>
+                <tr>
+                  <td class="cell-bold">Adjudication</td>
+                  <td>Mechanical Crucible verification gates</td>
+                  <td>Harvests exit codes, logs, and git status</td>
+                  <td>Sensor &ne; Decider (Author cannot judge)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. INTERACTIVE COVENANT SIMULATOR -->
+    <section class="section" id="playground">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Interactive Sandbox</div>
+          <h2>Covenant Ratchet &amp; Anti-Drift Simulator</h2>
+          <p class="section-desc">
+            Experience how Aegis compiles natural language requirements into SHA-256 covenants, injects token batons, and intercepts adversarial assertion deletions with an instant circuit-breaker rewind.
+          </p>
+        </div>
+
+        <div class="simulator-container reveal">
+          <div class="sim-header">
+            <div class="sim-header-left">
+              <span class="sim-header-title">Covenant Verification Console</span>
+              <span class="version-pill">Simulated Environment</span>
+            </div>
+            <div id="sim-status-pill" class="sim-status-pill status-idle">IDLE</div>
+          </div>
+
+          <div class="sim-body">
+            <!-- Left Form Controls -->
+            <div class="sim-form-column">
+              <div class="sim-form-group">
+                <label for="sim-preset-select" class="sim-label">Choose Requirement Preset</label>
+                <select id="sim-preset-select" class="sim-select">
+                  <option value="auth">Security: JWT Authentication &amp; Rate Limiting</option>
+                  <option value="tenant">Data Architecture: Tenant Schema Migration</option>
+                  <option value="worker">Concurrency: Worker Queue Race Condition Fix</option>
+                </select>
+              </div>
+
+              <div class="sim-form-group">
+                <label for="sim-requirement-input" class="sim-label">Natural Language Requirement</label>
+                <textarea id="sim-requirement-input" class="sim-textarea">Implement JWT token authentication with rate limiting and revocation list in SQLite.</textarea>
+              </div>
+
+              <div class="sim-actions">
+                <button type="button" id="sim-compile-btn" class="btn btn-primary btn-sm">1. Compile Covenant</button>
+                <button type="button" id="sim-step-btn" class="btn btn-secondary btn-sm" disabled>2. Advance Stage</button>
+                <button type="button" id="sim-inject-btn" class="btn btn-danger btn-sm" disabled>3. Inject Regression</button>
+                <button type="button" id="sim-reset-btn" class="btn btn-secondary btn-sm">Reset</button>
+              </div>
+
+              <div class="sim-meta-box">
+                <div class="sim-meta-item">
+                  <div class="sim-meta-key">Covenant Promise Digest</div>
+                  <div id="sim-digest-val" class="sim-meta-val">sha256:none (uncompiled)</div>
+                </div>
+                <div class="sim-meta-item">
+                  <div class="sim-meta-key">Active Anti-Drift Baton</div>
+                  <div id="sim-baton-val" class="sim-meta-val">Awaiting covenant compilation...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Telemetry & Event Log -->
+            <div class="sim-output-column">
+              <div class="sim-telemetry-header">
+                <span class="sim-label">Execution Telemetry Stream</span>
+                <span id="sim-stage-indicator" class="sim-stage-badge">Awaiting intent compilation</span>
+              </div>
+              <div id="sim-log-box" class="sim-log-box" role="log" aria-live="polite">
+                <div class="sim-log-row sim-log-info">[INIT] Simulator ready. Select a requirement preset and click "1. Compile Covenant".</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. 5-STAGE COGNITIVE EXECUTION LOOP -->
+    <section class="section" id="cognitive-loop">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Task Lifecycle</div>
+          <h2>5-Stage cognitive-evolutionary execution loop</h2>
+          <p class="section-desc">
+            A self-correcting autonomous task lifecycle driving agents from raw natural language intent to permanent institutional case-law maturation.
+          </p>
+        </div>
+
+        <div class="reveal">
+          <div class="loop-tablist" role="tablist" data-loop-tabs aria-label="Cognitive Loop Stages">
+            <button type="button" class="loop-tab" role="tab" id="tab-stage-1" aria-controls="pane-stage-1" aria-selected="true" tabindex="0">Stage 1: Covenant Intake</button>
+            <button type="button" class="loop-tab" role="tab" id="tab-stage-2" aria-controls="pane-stage-2" aria-selected="false" tabindex="-1">Stage 2: DAG Decomposition</button>
+            <button type="button" class="loop-tab" role="tab" id="tab-stage-3" aria-controls="pane-stage-3" aria-selected="false" tabindex="-1">Stage 3: 5D Adversarial Debate</button>
+            <button type="button" class="loop-tab" role="tab" id="tab-stage-4" aria-controls="pane-stage-4" aria-selected="false" tabindex="-1">Stage 4: Monotonic Ratchet</button>
+            <button type="button" class="loop-tab" role="tab" id="tab-stage-5" aria-controls="pane-stage-5" aria-selected="false" tabindex="-1">Stage 5: Meta-Maturation</button>
+          </div>
+
+          <!-- Pane 1 -->
+          <div class="loop-pane active" id="pane-stage-1" role="tabpanel" aria-labelledby="tab-stage-1" data-loop-pane>
+            <div class="loop-pane-header">
+              <h3 class="loop-pane-title">Stage 1: Intent Intake &amp; Covenant Sealing</h3>
+              <span class="loop-pane-num">STEP 01 OF 05</span>
+            </div>
+            <div class="loop-grid">
+              <div>
+                <p>
+                  Natural language prompts are notoriously prone to context degradation. Stage 1 takes incoming requirements and parses them into a tamper-evident covenant contract sealed with an out-of-band SHA-256 promise digest.
+                </p>
+                <p>
+                  The covenant establishes unambiguous boundary definitions: explicit forbidden operations, whitelist file paths, required test assertions, and maximum token budgets before execution is authorized.
+                </p>
+              </div>
+              <div class="loop-invariants-card">
+                <div class="loop-invariants-title">Key Invariants &amp; Defenses</div>
+                <ul class="engine-feature-list">
+                  <li><strong>Target Failure:</strong> Long-horizon prompt drift and constraint amnesia.</li>
+                  <li><strong>Guarantee:</strong> Immutable promise anchor; prompt cannot silently change during execution.</li>
+                  <li><strong>Artifact:</strong> Signed SHA-256 Covenant Token Baton injected into every subsequent subtask.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pane 2 -->
+          <div class="loop-pane" id="pane-stage-2" role="tabpanel" aria-labelledby="tab-stage-2" data-loop-pane hidden>
+            <div class="loop-pane-header">
+              <h3 class="loop-pane-title">Stage 2: Disjoint Task DAG Decomposition</h3>
+              <span class="loop-pane-num">STEP 02 OF 05</span>
+            </div>
+            <div class="loop-grid">
+              <div>
+                <p>
+                  Monolithic agent runs fail because subagents develop horizontal dependencies and step on each other's files. Stage 2 enforces the Cardinality Law: <code>1 issue = 1 worker = 1 receipt</code>.
+                </p>
+                <p>
+                  The covenant is decomposed into a directed acyclic graph (DAG) of isolated work packets. Subagents operate with zero direct horizontal communication, sharing state only through frozen briefs and disjoint receipts.
+                </p>
+              </div>
+              <div class="loop-invariants-card">
+                <div class="loop-invariants-title">Key Invariants &amp; Defenses</div>
+                <ul class="engine-feature-list">
+                  <li><strong>Target Failure:</strong> Conflicting file edits, race conditions, and uncontrolled blast radius.</li>
+                  <li><strong>Guarantee:</strong> Strict isolation: workers never coordinate horizontally.</li>
+                  <li><strong>Artifact:</strong> Single-use, path-scoped write authorization receipt per DAG node.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pane 3 -->
+          <div class="loop-pane" id="pane-stage-3" role="tabpanel" aria-labelledby="tab-stage-3" data-loop-pane hidden>
+            <div class="loop-pane-header">
+              <h3 class="loop-pane-title">Stage 3: 5D Causal Selection &amp; Adversarial Debate</h3>
+              <span class="loop-pane-num">STEP 03 OF 05</span>
+            </div>
+            <div class="loop-grid">
+              <div>
+                <p>
+                  Before writing a single line of code, the implementation plan is submitted to five orthogonal automated personas: Systems Architecture, Security Red Team, Causal Memory, Spatial UX Physics, and Minimalist SRE.
+                </p>
+                <p>
+                  The personas engage in multi-round thesis, antithesis, and synthesis stress testing. Candidate implementation choices are simultaneously ranked against the 5D Causal Memory Graph to identify known failure precedents.
+                </p>
+              </div>
+              <div class="loop-invariants-card">
+                <div class="loop-invariants-title">Key Invariants &amp; Defenses</div>
+                <ul class="engine-feature-list">
+                  <li><strong>Target Failure:</strong> Premature implementation of flawed designs and blindspot oversights.</li>
+                  <li><strong>Guarantee:</strong> Code execution cannot start while unresolved counterexamples remain.</li>
+                  <li><strong>Artifact:</strong> Falsification Ledger and Causal Precedent Ranking Scorecard.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pane 4 -->
+          <div class="loop-pane" id="pane-stage-4" role="tabpanel" aria-labelledby="tab-stage-4" data-loop-pane hidden>
+            <div class="loop-pane-header">
+              <h3 class="loop-pane-title">Stage 4: Monotonic Ratchet Verification &amp; Crucible</h3>
+              <span class="loop-pane-num">STEP 04 OF 05</span>
+            </div>
+            <div class="loop-grid">
+              <div>
+                <p>
+                  During code generation, Aegis enforces a monotonic quality ratchet. Verification is continuous: test pass rates, contract assertions, and coverage baselines can never decrease.
+                </p>
+                <p>
+                  If an agent attempts a shortcut—such as commenting out an assertion or introducing a mock stub—the Crucible intercepts the physical diff immediately. Execution rewinds to the last verified checkpoint or forks an alternative branch.
+                </p>
+              </div>
+              <div class="loop-invariants-card">
+                <div class="loop-invariants-title">Key Invariants &amp; Defenses</div>
+                <ul class="engine-feature-list">
+                  <li><strong>Target Failure:</strong> Assertion pruning, test skipping, and regressions in existing functionality.</li>
+                  <li><strong>Guarantee:</strong> Non-regression guarantee: work never moves forward if high-water marks decrease.</li>
+                  <li><strong>Artifact:</strong> Physical diff evidence logs and unforgeable Round Receipts.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pane 5 -->
+          <div class="loop-pane" id="pane-stage-5" role="tabpanel" aria-labelledby="tab-stage-5" data-loop-pane hidden>
+            <div class="loop-pane-header">
+              <h3 class="loop-pane-title">Stage 5: Meta-Maturation Retrospective</h3>
+              <span class="loop-pane-num">STEP 05 OF 05</span>
+            </div>
+            <div class="loop-grid">
+              <div>
+                <p>
+                  Autonomous sessions typically terminate tabula rasa, losing everything learned during execution. Aegis closes the loop by transforming verified ticket outcomes into permanent institutional memory.
+                </p>
+                <p>
+                  Enforcing synaptic homeostasis, lessons must prove measurable ROI in preventing repeats or be automatically retired. Every executed ticket systematically updates system precedent weights.
+                </p>
+              </div>
+              <div class="loop-invariants-card">
+                <div class="loop-invariants-title">Key Invariants &amp; Defenses</div>
+                <ul class="engine-feature-list">
+                  <li><strong>Target Failure:</strong> Systemic amnesia and repeating identical debugging errors across sessions.</li>
+                  <li><strong>Guarantee:</strong> Closed-loop maturation: historical solutions permanently guide future agents.</li>
+                  <li><strong>Artifact:</strong> Structured Reflection Receipt promoting verified case law to the 5D Graph.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. GOVERNANCE MATRIX & THREAT MODEL -->
+    <section class="section" id="governance-matrix">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Proportional Friction</div>
+          <h2>Risk-proportional FSM &amp; Crucible verification matrix</h2>
+          <p class="section-desc">
+            Governance ceremony must scale monotonically with blast radius. Aegis eliminates overhead on trivial updates while enforcing ironclad mechanical gating on security perimeters.
+          </p>
+        </div>
+
+        <!-- 3 Governance Lanes -->
+        <div class="lane-details-grid reveal">
+          <div class="lane-card">
+            <span class="lane-badge lane-badge-express">Express Lane</span>
+            <h3>4 FSM Stops</h3>
+            <p><strong>Target Work:</strong> Typo fixes, doc improvements, cosmetic CSS updates.</p>
+            <ul class="engine-feature-list">
+              <li><strong>Stops:</strong> Intake &rarr; Plan &rarr; Exec &rarr; Crucible.</li>
+              <li><strong>Blast Radius:</strong> Low (&lt;3 non-critical files touched).</li>
+              <li><strong>Review Ceremony:</strong> Lightweight automated diff check; zero human delay.</li>
+            </ul>
+          </div>
+
+          <div class="lane-card lane-card-highlight">
+            <span class="lane-badge lane-badge-standard">Standard Lane</span>
+            <h3>7 FSM Stops</h3>
+            <p><strong>Target Work:</strong> Routine feature engineering, bug fixes, refactoring.</p>
+            <ul class="engine-feature-list">
+              <li><strong>Stops:</strong> Full 7-state lifecycle with 5D causal recall.</li>
+              <li><strong>Blast Radius:</strong> Moderate (feature packages, unit suites).</li>
+              <li><strong>Review Ceremony:</strong> 2-round adversarial debate and full crucible gates.</li>
+            </ul>
+          </div>
+
+          <div class="lane-card">
+            <span class="lane-badge lane-badge-fortress">Fortress Lane</span>
+            <h3>7 Stops + Double-Blind</h3>
+            <p><strong>Target Work:</strong> Auth, cryptographic operations, DB migrations, security boundaries.</p>
+            <ul class="engine-feature-list">
+              <li><strong>Stops:</strong> 7 stops + blind falsification + mutant testing.</li>
+              <li><strong>Blast Radius:</strong> High (cross-boundary security impact).</li>
+              <li><strong>Review Ceremony:</strong> Disjoint-family blind adjudicator; zero self-reporting.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Crucible Gates Table -->
+        <div class="table-responsive reveal">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Crucible Mechanical Gate</th>
+                <th>Validation Mechanism</th>
+                <th>Failure Intercepted</th>
+                <th>Enforcement Invariant</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="cell-bold">Plan-Diff Matching</td>
+                <td>Compares planned file list against actual <code>git diff --name-only</code></td>
+                <td>Out-of-scope file modifications and accidental deletions</td>
+                <td>Diff must be a strict subset of declared allowed paths</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">Assertion Guard</td>
+                <td>AST analysis scanning for deleted <code>assert</code>, <code>expect</code>, or added <code>.skip</code></td>
+                <td>Silent assertion pruning to force fake green builds</td>
+                <td>Assertion count on modified suites cannot decrease</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">Evidence Provenance</td>
+                <td>Binds test claims directly to physical SHA-256 runtime output logs</td>
+                <td>Hallucinated or fabricated test victory claims</td>
+                <td>No claim without reproducible physical evidence receipt</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">Zero-Theater Verifier</td>
+                <td>Inspects AST function bodies for empty stubs or unhandled TODOs</td>
+                <td>Mocked or superficial implementations masquerading as done</td>
+                <td>Functions must contain substantive operational logic</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- THREAT MATRIX & VALUE HIERARCHY -->
+    <section class="section" id="threat-matrix">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Autonomous Agent Failure Taxonomy</div>
+          <h2>Deterministic mechanical defenses against known LLM failure modes</h2>
+          <p class="section-desc">
+            Frontier coding agents suffer from well-documented systemic failure modes. Aegis replaces conversational rules with deterministic, unforgeable defenses.
+          </p>
+        </div>
+
+        <!-- Failure Taxonomy Table -->
+        <div class="table-responsive reveal">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>LLM Failure Mode</th>
+                <th>Root Cause Analysis</th>
+                <th>Aegis Deterministic Defense</th>
+                <th>Mechanical Guarantee</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="cell-bold">1. Assertion Pruning</td>
+                <td>Agent prunes test assertions to force green exit status</td>
+                <td>Crucible AST Assertion Guard intercepts deleted checks</td>
+                <td>100% assertion integrity; high-water mark protected</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">2. Context Drift</td>
+                <td>Loss of prompt constraints as context token depth expands</td>
+                <td>Step-wise SHA-256 Covenant Token Batons injected at each hop</td>
+                <td>0% goal drift across arbitrary reasoning horizons</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">3. Out-of-Scope Mutation</td>
+                <td>Agent edits unrelated config, env, or build scripts</td>
+                <td>In-process write receipt enforcement on exact allowed paths</td>
+                <td>Zero mutations outside cryptographically bounded scope</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">4. Reviewer Sycophancy</td>
+                <td>Reviewer LLM approves peer code due to superficial polish</td>
+                <td>Double-blind review packet stripping model identity and prose</td>
+                <td>Falsification-first testing; Sensor &ne; Decider</td>
+              </tr>
+              <tr>
+                <td class="cell-bold">5. Epistemic Amnesia</td>
+                <td>Debugging solutions vanish the moment the session closes</td>
+                <td>5D Causal Memory Graph with synaptic homeostasis</td>
+                <td>Permanent institutional case law prevents repeated bugs</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Immutable Value Hierarchy -->
+        <div class="value-hierarchy-card reveal">
+          <h3>The Immutable Value Hierarchy</h3>
+          <p>
+            Autonomous coding agents experience reasoning deadlocks when asked to balance competing priorities. Aegis breaks deadlocks by enforcing an immutable lexicographic value axis:
+          </p>
+          <div class="hierarchy-formula">
+            INTEGRITY (x10) &gt; SAFETY (x5) &gt; UTILITY (x1) &gt; EFFICIENCY (x0)
+          </div>
+          <div class="hierarchy-grid">
+            <div class="hierarchy-item">
+              <div class="hierarchy-weight">Rank 1 &bull; Weight 10</div>
+              <div class="hierarchy-name">Integrity</div>
+              <p>Truth above all. Deleting test assertions, faking green test results, or hiding failures is strictly forbidden.</p>
+            </div>
+            <div class="hierarchy-item">
+              <div class="hierarchy-weight">Rank 2 &bull; Weight 5</div>
+              <div class="hierarchy-name">Safety</div>
+              <p>Do no harm. Prevent unauthorized file mutations, credential leaks, and out-of-scope blast radius.</p>
+            </div>
+            <div class="hierarchy-item">
+              <div class="hierarchy-weight">Rank 3 &bull; Weight 1</div>
+              <div class="hierarchy-name">Utility</div>
+              <p>Fulfill the user's requested functionality faithfully within bounds. Utility never overrides safety.</p>
+            </div>
+            <div class="hierarchy-item">
+              <div class="hierarchy-weight">Rank 4 &bull; Weight 0</div>
+              <div class="hierarchy-name">Efficiency</div>
+              <p>Speed is completely subordinate. Performance or token economy never justifies cutting corners on integrity.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. PUBLIC CONCEPTUAL LIBRARY & RELEASE PROOF -->
+    <section class="section" id="spec-library">
+      <div class="container">
+        <div class="section-header reveal">
+          <div class="section-label">Open Conceptual Foundations</div>
+          <h2>Public conceptual library &amp; specification index</h2>
+          <p class="section-desc">
+            Core theoretical models, alignment frameworks, and verification philosophies published openly to raise the bar for autonomous AI engineering.
+          </p>
+        </div>
+
+        <div class="concept-grid reveal">
+          <div class="concept-card">
+            <div class="concept-num">CONCEPT 01</div>
+            <h3 class="concept-title">The Covenant Ratchet Model</h3>
+            <p class="concept-meta">
+              Compiles natural-language prompts into an out-of-band SHA-256 promise digest, accompanied by step-wise token batons and monotonic metric ratchets.
+            </p>
+            <div class="concept-proof">
+              Non-regression guarantee: execution cannot proceed if high-water marks decrease.
+            </div>
+          </div>
+
+          <div class="concept-card">
+            <div class="concept-num">CONCEPT 02</div>
+            <h3 class="concept-title">Risk-Proportional Governance</h3>
+            <p class="concept-meta">
+              Taxonomy mapping blast-radius metrics (files touched, security boundaries, architectural strata) directly to proportional governance tiers.
+            </p>
+            <div class="concept-proof">
+              Monotonic ceremony pricing: eliminates friction on minor edits without compromising critical perimeters.
+            </div>
+          </div>
+
+          <div class="concept-card">
+            <div class="concept-num">CONCEPT 03</div>
+            <h3 class="concept-title">Sensor &ne; Decider Adjudication Standard</h3>
+            <p class="concept-meta">
+              The architectural separation of observation from adjudication. The language model authoring code is strictly barred from judging its correctness.
+            </p>
+            <div class="concept-proof">
+              Adjudication relies exclusively on unforgeable physical runtime artifacts and diff evidence.
+            </div>
+          </div>
+
+          <div class="concept-card">
+            <div class="concept-num">CONCEPT 04</div>
+            <h3 class="concept-title">5D Causal Memory Architecture</h3>
+            <p class="concept-meta">
+              Structured institutional memory graph spanning axiomatic truths, architectural constraints, and verified cause-and-effect precedents.
+            </p>
+            <div class="concept-proof">
+              Synaptic homeostasis: historical lessons must demonstrate measurable ROI to remain active.
+            </div>
+          </div>
+        </div>
+
+        <!-- Release Proof -->
+        <div class="proof-box reveal">
+          <div class="section-label">Verification Story</div>
+          <h3>Release v0.6.0 Baseline Themes</h3>
+          <p>
+            Aegis v0.6.0 introduces end-to-end mechanical governance, sovereign Web Control Plane visualization, and automated causal memory ranking.
+          </p>
+          <div class="proof-themes-grid">
+            <div class="proof-theme-card">
+              <h4>Sovereign Web Control Plane</h4>
+              <p>Real-time visual monitoring, interactive state management, SVG state graphs, and 6-vector spatial telemetry.</p>
+            </div>
+            <div class="proof-theme-card">
+              <h4>7-State FSM Engine</h4>
+              <p>Deterministic state progression, automated lane routing, checkpoint rollbacks, and parallel branch forking.</p>
+            </div>
+            <div class="proof-theme-card">
+              <h4>Mechanical Crucible Triad</h4>
+              <p>100% mechanical gating covering plan-diff matching, assertion integrity, and reproducible evidence logs.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. ACCESS MODEL & PILOT REQUEST -->
+    <section class="section access-section" id="access-footer">
+      <div class="container">
+        <div class="access-pilot-card reveal">
+          <div class="section-label">Private Sovereign Deployment</div>
+          <h2 class="access-pilot-title">Request Aegis pilot evaluation access</h2>
+          <p class="access-pilot-subhead">
+            Aegis is deployed across private core infrastructure. We provide evaluation access directly to platform architecture and AI engineering teams upon request.
+          </p>
+
+          <div class="access-pilot-action">
+            <a href="mailto:tam@flowaxon.com?subject=Aegis%20Pilot%20Evaluation%20Request&amp;body=Hi%20Aegis%20Team%2C%0A%0AI%20would%20like%20to%20request%20evaluation%20access%20for%20our%20engineering%20team.%0A%0AOrganization%3A%20%0ATeam%20Size%3A%20%0APrimary%20Agent%20Stack%20(Claude%20Code%2C%20Cursor%2C%20Codex%2C%20etc.)%3A%20%0AKey%20Governance%20Pain%20Point%3A%20%0A%0AThank%20you!" class="btn btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                <polyline points="22,6 12,13 2,6"></polyline>
+              </svg>
+              <span>Email Pilot Evaluation Team</span>
+            </a>
+            <button type="button" class="btn btn-secondary copy-btn" data-copy-text="tam@flowaxon.com">
+              <span>Copy Contact Address</span>
+            </button>
+          </div>
+
+          <div class="access-instruction-box">
+            <div class="instruction-title">What to include in your request</div>
+            <ul class="instruction-list">
+              <li>Engineering organization and autonomous coding fleet size.</li>
+              <li>Primary agent runtimes in use (Claude Code, Cursor, OpenCode, Codex).</li>
+              <li>Specific governance pain points (assertion pruning, context drift, test skips).</li>
+              <li>Deployment environment requirements (air-gapped local workstation vs. private server).</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- SITE FOOTER -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">Aegis</div>
+          <p class="footer-desc">
+            Sovereign multi-agent governance framework &amp; Web Control Plane. Wraps AI coding agents in deterministic verification covenants.
+          </p>
+        </div>
+
+        <div>
+          <div class="footer-column-title">Framework</div>
+          <ul class="footer-links">
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#personas">Personas</a></li>
+            <li><a href="#anatomy">Dual-Engine Topology</a></li>
+            <li><a href="#playground">Covenant Simulator</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-column-title">Governance</div>
+          <ul class="footer-links">
+            <li><a href="#cognitive-loop">Cognitive Loop</a></li>
+            <li><a href="#governance-matrix">Proportional FSM</a></li>
+            <li><a href="#threat-matrix">Failure Taxonomy</a></li>
+            <li><a href="#spec-library">Conceptual Library</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="footer-column-title">Constellation</div>
+          <ul class="footer-links">
+            <li><a href="../index.html">g8s Orchestration Kernel</a></li>
+            <li><a href="https://github.com/tamld/g8s" target="_blank" rel="noopener noreferrer">GitHub Repository</a></li>
+            <li><a href="#access-footer">Request Access</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>
+          Aegis Sovereign Framework &bull; Release v0.6.0 Baseline &bull; Private Sovereign Repository
+        </div>
+        <div>
+          Built with Zero Dependencies &bull; Verified via g8s Kernel &bull; FlowAxon Engineering
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
