@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "g8s Process Reflection Receipt Schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "cycle_id",
+    "evaluated_at",
+    "jev_model",
+    "jev_prompt_sha256",
+    "consecutive_empty_prune_cycles",
+    "prune_ratio",
+    "verdicts",
+    "prune_list",
+    "add_list"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "cycle_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evaluated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jev_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jev_prompt_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "consecutive_empty_prune_cycles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "prune_ratio": {
+      "type": "number",
+      "minimum": 0
+    },
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_verdict"
+      }
+    },
+    "prune_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/prune_entry"
+      }
+    },
+    "add_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/add_proposal"
+      }
+    },
+    "is_fallback": {
+      "type": "boolean"
+    },
+    "batch_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cache_hits": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "artifact_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256",
+        "score",
+        "theater_prob",
+        "classification",
+        "evidence_refs"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "theater_prob": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "classification": {
+          "type": "string",
+          "enum": ["keep", "prune", "amend"]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": ["jev", "jev-cache", "deterministic"]
+        },
+        "rationale": {
+          "type": "string"
+        }
+      }
+    },
+    "prune_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256",
+        "reason",
+        "evidence_refs"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "add_proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proposal_id",
+        "target_path",
+        "summary",
+        "lane",
+        "evidence_refs"
+      ],
+      "properties": {
+        "proposal_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lane": {
+          "type": "string",
+          "enum": ["0", "D", "R", "F", "S"]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        }
+      }
+    }
+  }
+}
