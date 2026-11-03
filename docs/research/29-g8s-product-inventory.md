@@ -12,7 +12,7 @@
 ### One-Sentence Product Definition
 **`g8s` (The Gatekeepers) is a single-binary, zero-trust process execution and capability harness (<25MB static pure-Go binary, Zero-CGO) that protects developer workstations and CI runners by isolating autonomous AI agent CLI workers into private Git worktrees, bounding filesystem mutations with single-use write receipts, and capturing verifiable execution evidence.**
 
-*Market Analogy*: *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."* ([README.md](wt-772f98ad/README.md))
+*Market Analogy*: *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."* (`README.md`)
 
 ### Target Audience & The Market Problem
 - **Target Audience**: AI software engineers, platform architects, and engineering teams deploying autonomous coding agent loops (`claude`, `codex`, `agy`, `gemini`, local LLMs) on local workstations, shared homelab servers, or CI/CD pipelines.
@@ -35,7 +35,7 @@ Every install command below is verified against and quoted verbatim from source 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
   ```
-- **Source Citation**: [scripts/install.sh](wt-772f98ad/scripts/install.sh)
+- **Source Citation**: `scripts/install.sh`
 - **Mechanism**: Auto-detects OS and architecture, downloads release archive from GitHub Releases, enforces fail-closed SHA-256 verification against `checksums.txt`, unpacks to `${G8S_INSTALL_DIR:-$HOME/.local/bin}` (or `/usr/local/bin` if root), and runs `g8s version`.
 - **Environment Overrides**: `G8S_VERSION=v0.22.0`, `G8S_INSTALL_DIR=/custom/bin`.
 
@@ -45,7 +45,7 @@ Every install command below is verified against and quoted verbatim from source 
   ```powershell
   irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
   ```
-- **Source Citation**: [scripts/install.ps1](wt-772f98ad/scripts/install.ps1)
+- **Source Citation**: `scripts/install.ps1`
 - **Mechanism**: Resolves latest release via GitHub API, downloads `g8s_<ver>_windows_<arch>.zip`, verifies SHA-256 against `checksums.txt` fail-closed, extracts `g8s.exe` to `$LOCALAPPDATA\Programs\g8s\bin`, and registers the directory in User `PATH`.
 
 ### 3. Homebrew Tap (macOS & Linux)
@@ -55,7 +55,7 @@ Every install command below is verified against and quoted verbatim from source 
   brew tap tamld/homebrew-tap
   brew install g8s
   ```
-- **Source Citation**: [docs/quickstart.md](wt-772f98ad/docs/quickstart.md), [.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml)
+- **Source Citation**: `docs/quickstart.md`, `.goreleaser.yaml`
 - **Release Status**: Declaratively registered in `.goreleaser.yaml:131-142` (`tamld/homebrew-tap`); release SOP tracked in `docs/RELEASE_SOP.md:60` (`tamld/homebrew-tap/g8s.rb`).
 
 ### 4. Go Toolchain (`go install`)
@@ -64,7 +64,7 @@ Every install command below is verified against and quoted verbatim from source 
   ```bash
   go install github.com/tamld/g8s/cmd/g8s@latest
   ```
-- **Source Citation**: [README.md](wt-772f98ad/README.md), [docs/quickstart.md](wt-772f98ad/docs/quickstart.md)
+- **Source Citation**: `README.md`, `docs/quickstart.md`
 
 ### 5. Build from Source (`make local`)
 - **Target**: Developer environments with `git` and `go`.
@@ -75,19 +75,19 @@ Every install command below is verified against and quoted verbatim from source 
   make local
   ./bin/g8s doctor --json
   ```
-- **Source Citation**: [README.md](wt-772f98ad/README.md), [Makefile](wt-772f98ad/Makefile)
+- **Source Citation**: `README.md`, `Makefile`
 - **Mechanism**: Builds pure-Go static binary with Zero-CGO, embedding immutable git commit SHA, build timestamp, and `BuildSource=local-dev` ldflags into `./bin/g8s`.
 
 ### 6. Direct GitHub Releases Pre-Compiled Archives
 - **Target**: Offline or hermetic deployment environments.
 - **URL**: `https://github.com/tamld/g8s/releases`
-- **Source Citation**: [.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml), [docs/quickstart.md](wt-772f98ad/docs/quickstart.md)
+- **Source Citation**: `.goreleaser.yaml`, `docs/quickstart.md`
 - **Published Artifacts**:
   - `g8s_<ver>_darwin_all.tar.gz` (macOS Apple Silicon & Intel Universal binary)
   - `g8s_<ver>_linux_amd64.tar.gz` (Linux x86_64)
   - `g8s_<ver>_linux_arm64.tar.gz` (Linux ARM64 / aarch64)
   - `g8s_<ver>_windows_amd64.zip` (Windows x64)
-- **Integrity Verification**: `sha256sum -c checksums.txt` ([.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml))
+- **Integrity Verification**: `sha256sum -c checksums.txt` (`.goreleaser.yaml`)
 
 ### 7. Linux System Package Managers
 - **Target**: Debian/Ubuntu (`.deb`), RHEL/Fedora/CentOS (`.rpm`), Alpine Linux (`.apk`).
@@ -97,19 +97,19 @@ Every install command below is verified against and quoted verbatim from source 
   sudo rpm -i g8s_*.rpm         # RedHat / Fedora
   apk add --allow-untrusted g8s_*.apk  # Alpine
   ```
-- **Source Citation**: [.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml) (NFPM package generator)
+- **Source Citation**: `.goreleaser.yaml` (NFPM package generator)
 
 ### 8. Windows Package Managers (Winget & Chocolatey)
 - **Winget**:
   ```powershell
   winget install TamLD.g8s
   ```
-  *Source Citation*: [packaging/winget/manifest.yaml](wt-772f98ad/packaging/winget/manifest.yaml)
+  *Source Citation*: `packaging/winget/manifest.yaml`
 - **Chocolatey**:
   ```powershell
   choco install g8s
   ```
-  *Source Citation*: [packaging/chocolatey/g8s.nuspec](wt-772f98ad/packaging/chocolatey/g8s.nuspec)
+  *Source Citation*: `packaging/chocolatey/g8s.nuspec`
 
 ### 9. In-Binary Self-Update
 - **Command**:
@@ -117,11 +117,11 @@ Every install command below is verified against and quoted verbatim from source 
   g8s update
   g8s update --check
   ```
-- **Source Citation**: [cmd/g8s/lifecycle.go](wt-772f98ad/cmd/g8s/lifecycle.go), [spec/openspec/40-lifecycle-uninstall-update-spec.md](wt-772f98ad/spec/openspec/40-lifecycle-uninstall-update-spec.md)
+- **Source Citation**: `cmd/g8s/lifecycle.go`, `spec/openspec/40-lifecycle-uninstall-update-spec.md`
 - **Mechanism**: Queries GitHub Releases API, checks current version against latest tag, downloads archive, verifies SHA-256 fail-closed, and performs atomic binary swap on disk.
 
 ### 10. Container Images Status (`ghcr.io/tamld/g8s`)
-- **Status**: Documented gap / roadmap item ([plans/261101-cicd-world-practice-audit/report-B-security-release.md](wt-772f98ad/plans/261101-cicd-world-practice-audit/report-B-security-release.md) F14). No active OCI container images are currently built or pushed to GHCR.
+- **Status**: Documented gap / roadmap item (`plans/261101-cicd-world-practice-audit/report-B-security-release.md` F14). No active OCI container images are currently built or pushed to GHCR.
 
 ---
 
@@ -204,31 +204,31 @@ When `g8s worker --once` runs, the harness claims the task atomically via SQLite
 
 | Feature Name | Concrete Benefit for Users & Teams | Proof Artifact in Repo |
 | :--- | :--- | :--- |
-| **Zero-Trust Containment Tiers (`F0/F1/F2`)** | Enforces physical sandboxing: Brain (`F0`) holds exclusive commit and architecture authority; Worker (`F1`) executes in private worktrees; Subagent (`F2`) is strictly bounded by F1's receipt boundary. | [docs/decisions/0032-containment-levels.md](wt-772f98ad/docs/decisions/0032-containment-levels.md), [internal/charter/charter_test.go](wt-772f98ad/internal/charter/charter_test.go), [spec/constitution.md](wt-772f98ad/spec/constitution.md) |
-| **Single-Use Write Receipts** | Eliminates ambient shell write access; workers can mutate files only when presented with a cryptographically tracked, time-limited ($\le 3600s$), path-scoped (`AllowedPaths`) token consumed atomically. | [internal/receipt/receipt.go](wt-772f98ad/internal/receipt/receipt.go), [internal/receipt/receipt_test.go](wt-772f98ad/internal/receipt/receipt_test.go), [schemas/receipt-v1.schema.json](wt-772f98ad/schemas/receipt-v1.schema.json) |
-| **Risk-Tiered ALDC Gate Lanes (`0 / D / R / F / S`)** | Routes tasks to appropriate verification lanes—from fast documentation updates (Lane 0) to security-critical code changes (Lane S) requiring dual-blind verification and grey-box fuzzing. | [.g8s/lane-bundles.yml](wt-772f98ad/.g8s/lane-bundles.yml), [internal/lane/lane_test.go](wt-772f98ad/internal/lane/lane_test.go), [docs/decisions/0024-gate-lane-routing.md](wt-772f98ad/docs/decisions/0024-gate-lane-routing.md), Issue [#514](https://github.com/tamld/g8s/issues/514) |
-| **Cross-Repository Fleet Hygiene** | Prevents dirty drift across multi-repo workspaces with `g8s fleet status`, verifying uncommitted changes, unpushed branches, and detached HEADs across sister repositories before allowing execution. | [cmd/g8s/fleet.go](wt-772f98ad/cmd/g8s/fleet.go), [cmd/g8s/fleet_test.go](wt-772f98ad/cmd/g8s/fleet_test.go), [spec/openspec/32-fleet-hygiene-spec.md](wt-772f98ad/spec/openspec/32-fleet-hygiene-spec.md) (`DELTA-32`) |
-| **Multi-Coordinator Interop Mesh (`RT-MESH v1`)** | Connects equal-peer F0 coordinators (Claude, Codex, Antigravity) through a shared SQLite WAL ledger with CAS claims, revision fences, and typed idempotent messages (`UNIQUE message_id`). | [spec/openspec/46-peer-coordinator-ledger-spec.md](wt-772f98ad/spec/openspec/46-peer-coordinator-ledger-spec.md), [cmd/g8s/coordinator_mesh.go](wt-772f98ad/cmd/g8s/coordinator_mesh.go), PRs [#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), Issue [#699](https://github.com/tamld/g8s/issues/699) |
-| **Platform Reach Layer & Fallback Chains** | Acquires live research and web docs through ordered fallback chains (`g8s reach read`) with persistent health tracking, path ownership ledgers, and quarantine circuit-breakers. | [docs/decisions/0037-reach-layer.md](wt-772f98ad/docs/decisions/0037-reach-layer.md), [cmd/g8s/reach.go](wt-772f98ad/cmd/g8s/reach.go), [cmd/g8s/reach_test.go](wt-772f98ad/cmd/g8s/reach_test.go), [internal/reach/chain_test.go](wt-772f98ad/internal/reach/chain_test.go), Issue [#704](https://github.com/tamld/g8s/issues/704) |
-| **System-1 Reflex Triage (`Jev`)** | Non-autoregressive fast triage enforcing "Sensor ≠ Decider" before file mutation, validating context packets and immediately halting unauthorized sandbox escape attempts. | [cmd/g8s/reflex.go](wt-772f98ad/cmd/g8s/reflex.go), [internal/reflex/jev.go](wt-772f98ad/internal/reflex/jev.go), [internal/reflex/jev_test.go](wt-772f98ad/internal/reflex/jev_test.go), [internal/reflex/triage_v2_test.go](wt-772f98ad/internal/reflex/triage_v2_test.go) |
-| **Universal LLM Consumer & `9router` Gateway** | Direct synchronous CLI execution (`g8s llm-call`) and worker queuing across OpenAI, Anthropic, and 9router with adaptive effort timeouts (`45s`/`90s`/`240s`) and live model scorecard. | [docs/decisions/0034-config-driven-llm-consumer-9router.md](wt-772f98ad/docs/decisions/0034-config-driven-llm-consumer-9router.md), [cmd/g8s/llm_call.go](wt-772f98ad/cmd/g8s/llm_call.go), [cmd/g8s/llm_call_test.go](wt-772f98ad/cmd/g8s/llm_call_test.go), [.g8s/agent-models.yml](wt-772f98ad/.g8s/agent-models.yml) (`DELTA-25`) |
-| **Zero-CGO Cross-Platform Parity** | 100% pure Go compilation with `CGO_ENABLED=0` and modernc SQLite; guarantees byte-for-byte behavior and process tree kill safety across macOS, Linux, and Windows. | [.github/workflows/windows-e2e.yml](wt-772f98ad/.github/workflows/windows-e2e.yml), [cmd/g8s/autopilot_probe_windows.go](wt-772f98ad/cmd/g8s/autopilot_probe_windows.go), [cmd/g8s/autopilot_probe_unix.go](wt-772f98ad/cmd/g8s/autopilot_probe_unix.go), [Makefile](wt-772f98ad/Makefile) |
-| **Supply Chain Attestation & SPDX SBOM** | Hardens distribution with signed releases, automated SPDX 2.3 JSON SBOM generation via Syft, and fail-closed SHA-256 checks mapped directly to OWASP Agentic Top 10 (2025). | [.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml), [docs/security/owasp-agentic-slsa-sbom.md](wt-772f98ad/docs/security/owasp-agentic-slsa-sbom.md), [scripts/install.sh](wt-772f98ad/scripts/install.sh), Issue [#639](https://github.com/tamld/g8s/issues/639) |
-| **6-Stage AI QA Pipeline & Seeded Mutant Canary** | Replaces unverified model claims with mechanical proofs: holdout suite isolation (`E_HOLDOUT_CONTAMINATION`), seeded mutant canary runs (`--canary-mutant`), and epistemic claim auditing. | [internal/verifier/qapipeline.go](wt-772f98ad/internal/verifier/qapipeline.go), [internal/verifier/qapipeline_test.go](wt-772f98ad/internal/verifier/qapipeline_test.go), [cmd/g8s/qa_report.go](wt-772f98ad/cmd/g8s/qa_report.go), [cmd/g8s/verify.go](wt-772f98ad/cmd/g8s/verify.go) |
-| **Native Pure-Go Agent I/O & ContextPack** | Eliminates shell dependencies (`rg`, `sed`, `awk`, `jq`) with pure-Go regex search, line-slicing reader, atomic CAS editor, dot-path selector, and 4-tier AST context compressor. | [cmd/g8s/search.go](wt-772f98ad/cmd/g8s/search.go), [cmd/g8s/fsops.go](wt-772f98ad/cmd/g8s/fsops.go), [cmd/g8s/context_pack.go](wt-772f98ad/cmd/g8s/context_pack.go), [internal/contextpack/contextpack_test.go](wt-772f98ad/internal/contextpack/contextpack_test.go), [offer/SEARCH_GUIDE.md](wt-772f98ad/offer/SEARCH_GUIDE.md) |
+| **Zero-Trust Containment Tiers (`F0/F1/F2`)** | Enforces physical sandboxing: Brain (`F0`) holds exclusive commit and architecture authority; Worker (`F1`) executes in private worktrees; Subagent (`F2`) is strictly bounded by F1's receipt boundary. | `docs/decisions/0032-containment-levels.md`, `internal/charter/charter_test.go`, `spec/constitution.md` |
+| **Single-Use Write Receipts** | Eliminates ambient shell write access; workers can mutate files only when presented with a cryptographically tracked, time-limited ($\le 3600s$), path-scoped (`AllowedPaths`) token consumed atomically. | `internal/receipt/receipt.go`, `internal/receipt/receipt_test.go`, `schemas/receipt-v1.schema.json` |
+| **Risk-Tiered ALDC Gate Lanes (`0 / D / R / F / S`)** | Routes tasks to appropriate verification lanes—from fast documentation updates (Lane 0) to security-critical code changes (Lane S) requiring dual-blind verification and grey-box fuzzing. | `.g8s/lane-bundles.yml`, `internal/lane/lane_test.go`, `docs/decisions/0024-gate-lane-routing.md`, Issue [#514](https://github.com/tamld/g8s/issues/514) |
+| **Cross-Repository Fleet Hygiene** | Prevents dirty drift across multi-repo workspaces with `g8s fleet status`, verifying uncommitted changes, unpushed branches, and detached HEADs across sister repositories before allowing execution. | `cmd/g8s/fleet.go`, `cmd/g8s/fleet_test.go`, `spec/openspec/32-fleet-hygiene-spec.md` (`DELTA-32`) |
+| **Multi-Coordinator Interop Mesh (`RT-MESH v1`)** | Connects equal-peer F0 coordinators (Claude, Codex, Antigravity) through a shared SQLite WAL ledger with CAS claims, revision fences, and typed idempotent messages (`UNIQUE message_id`). | `spec/openspec/46-peer-coordinator-ledger-spec.md`, `cmd/g8s/coordinator_mesh.go`, PRs [#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), Issue [#699](https://github.com/tamld/g8s/issues/699) |
+| **Platform Reach Layer & Fallback Chains** | Acquires live research and web docs through ordered fallback chains (`g8s reach read`) with persistent health tracking, path ownership ledgers, and quarantine circuit-breakers. | `docs/decisions/0037-reach-layer.md`, `cmd/g8s/reach.go`, `cmd/g8s/reach_test.go`, `internal/reach/chain_test.go`, Issue [#704](https://github.com/tamld/g8s/issues/704) |
+| **System-1 Reflex Triage (`Jev`)** | Non-autoregressive fast triage enforcing "Sensor ≠ Decider" before file mutation, validating context packets and immediately halting unauthorized sandbox escape attempts. | `cmd/g8s/reflex.go`, `internal/reflex/jev.go`, `internal/reflex/jev_test.go`, `internal/reflex/triage_v2_test.go` |
+| **Universal LLM Consumer & `9router` Gateway** | Direct synchronous CLI execution (`g8s llm-call`) and worker queuing across OpenAI, Anthropic, and 9router with adaptive effort timeouts (`45s`/`90s`/`240s`) and live model scorecard. | `docs/decisions/0034-config-driven-llm-consumer-9router.md`, `cmd/g8s/llm_call.go`, `cmd/g8s/llm_call_test.go`, `.g8s/agent-models.yml` (`DELTA-25`) |
+| **Zero-CGO Cross-Platform Parity** | 100% pure Go compilation with `CGO_ENABLED=0` and modernc SQLite; guarantees byte-for-byte behavior and process tree kill safety across macOS, Linux, and Windows. | `.github/workflows/windows-e2e.yml`, `cmd/g8s/autopilot_probe_windows.go`, `cmd/g8s/autopilot_probe_unix.go`, `Makefile` |
+| **Supply Chain Attestation & SPDX SBOM** | Hardens distribution with signed releases, automated SPDX 2.3 JSON SBOM generation via Syft, and fail-closed SHA-256 checks mapped directly to OWASP Agentic Top 10 (2025). | `.goreleaser.yaml`, `docs/security/owasp-agentic-slsa-sbom.md`, `scripts/install.sh`, Issue [#639](https://github.com/tamld/g8s/issues/639) |
+| **6-Stage AI QA Pipeline & Seeded Mutant Canary** | Replaces unverified model claims with mechanical proofs: holdout suite isolation (`E_HOLDOUT_CONTAMINATION`), seeded mutant canary runs (`--canary-mutant`), and epistemic claim auditing. | `internal/verifier/qapipeline.go`, `internal/verifier/qapipeline_test.go`, `cmd/g8s/qa_report.go`, `cmd/g8s/verify.go` |
+| **Native Pure-Go Agent I/O & ContextPack** | Eliminates shell dependencies (`rg`, `sed`, `awk`, `jq`) with pure-Go regex search, line-slicing reader, atomic CAS editor, dot-path selector, and 4-tier AST context compressor. | `cmd/g8s/search.go`, `cmd/g8s/fsops.go`, `cmd/g8s/context_pack.go`, `internal/contextpack/contextpack_test.go`, `offer/SEARCH_GUIDE.md` |
 
 ---
 
 ## 5. DOCS SURFACE + GAPS
 
 ### What Exists Today
-1. **Core Governance & Protocol**: [AGENTS.md](wt-772f98ad/AGENTS.md), [docs/AGENTS_FULL.md](wt-772f98ad/docs/AGENTS_FULL.md), [spec/constitution.md](wt-772f98ad/spec/constitution.md) (6 Invariant Laws).
-2. **Architecture & Decisions**: [docs/ARCHITECTURE.md](wt-772f98ad/docs/ARCHITECTURE.md) and 37 formal ADRs in `docs/decisions/` (`0001` through `0037`).
-3. **Product & Engineering Specs**: [docs/PRD.md](wt-772f98ad/docs/PRD.md), [docs/SRS.md](wt-772f98ad/docs/SRS.md), [docs/DOD_DOR.md](wt-772f98ad/docs/DOD_DOR.md), and OpenSpec Deltas (`DELTA-01` through `DELTA-47`).
-4. **User Guides**: [docs/quickstart.md](wt-772f98ad/docs/quickstart.md), [docs/user-guide/cli-reference.md](wt-772f98ad/docs/user-guide/cli-reference.md), [docs/user-guide/mcp-tools.md](wt-772f98ad/docs/user-guide/mcp-tools.md), [docs/user-guide/receipt-workflow.md](wt-772f98ad/docs/user-guide/receipt-workflow.md), [docs/user-guide/providers.md](wt-772f98ad/docs/user-guide/providers.md).
-5. **Security & Assurance**: [docs/security/owasp-agentic-slsa-sbom.md](wt-772f98ad/docs/security/owasp-agentic-slsa-sbom.md), [docs/security/threat-model-stride.md](wt-772f98ad/docs/security/threat-model-stride.md).
-6. **IDE Integrations**: Dedicated configs for [Claude Desktop](wt-772f98ad/docs/integrations/claude-desktop.md), [Cursor](wt-772f98ad/docs/integrations/cursor.md), [Windsurf](wt-772f98ad/docs/integrations/windsurf.md), and [Antigravity](wt-772f98ad/docs/integrations/antigravity.md).
-7. **Offer Bundle**: Pull-based adoption for sister repos ([offer/README.md](wt-772f98ad/offer/README.md), [offer/SEARCH_GUIDE.md](wt-772f98ad/offer/SEARCH_GUIDE.md)).
+1. **Core Governance & Protocol**: `AGENTS.md`, `docs/AGENTS_FULL.md`, `spec/constitution.md` (6 Invariant Laws).
+2. **Architecture & Decisions**: `docs/ARCHITECTURE.md` and 37 formal ADRs in `docs/decisions/` (`0001` through `0037`).
+3. **Product & Engineering Specs**: `docs/PRD.md`, `docs/SRS.md`, `docs/DOD_DOR.md`, and OpenSpec Deltas (`DELTA-01` through `DELTA-47`).
+4. **User Guides**: `docs/quickstart.md`, `docs/user-guide/cli-reference.md`, `docs/user-guide/mcp-tools.md`, `docs/user-guide/receipt-workflow.md`, `docs/user-guide/providers.md`.
+5. **Security & Assurance**: `docs/security/owasp-agentic-slsa-sbom.md`, `docs/security/threat-model-stride.md`.
+6. **IDE Integrations**: Dedicated configs for `Claude Desktop`, `Cursor`, `Windsurf`, and `Antigravity`.
+7. **Offer Bundle**: Pull-based adoption for sister repos (`offer/README.md`, `offer/SEARCH_GUIDE.md`).
 
 ### Honest Gap List (What Is Missing for a Commercial Product Site)
 1. **Interactive Installation Selector**: Visitors need a tabbed GUI selector that instantly reveals the 1-click command for their exact OS/tool combination (macOS/Homebrew, Linux/Apt, Windows/PowerShell, or Go).
@@ -237,26 +237,26 @@ When `g8s worker --once` runs, the harness claims the task atomically via SQLite
 4. **Auto-Generated CLI Reference Explorer**: `docs/user-guide/cli-reference.md` is manually maintained markdown; it lags behind the 45+ actual CLI subcommands (`reach`, `coordinator`, `scorecard`, `f0` are omitted in some guides).
 5. **Interactive 1-Click MCP Config Generator**: Needs a dropdown where a user selects Claude Desktop, Cursor, or VS Code and copies a pre-populated JSON snippet with automatically resolved binary paths.
 6. **FAQ & Objection Handling**: No public-facing answers to natural enterprise questions ("Why not standard Docker?", "How does g8s compare to LangChain/CrewAI?", "What is SQLite WAL latency?").
-7. **Missing Container Image (`ghcr.io/tamld/g8s`)**: Documented as an audit finding ([plans/261101-cicd-world-practice-audit/report-B-security-release.md](wt-772f98ad/plans/261101-cicd-world-practice-audit/report-B-security-release.md)) but not yet built in CI.
+7. **Missing Container Image (`ghcr.io/tamld/g8s`)**: Documented as an audit finding (`plans/261101-cicd-world-practice-audit/report-B-security-release.md`) but not yet built in CI.
 
 ---
 
 ## 6. PROOF (Verifiable Evidence Grounded in Repo)
 
 - **Continuous Integration Gates**:
-  - [.github/workflows/ci.yml](wt-772f98ad/.github/workflows/ci.yml): Zero-CGO verification on Ubuntu & macOS (`go vet`, `go test -count=1`, `go test -race`).
-  - [.github/workflows/windows-e2e.yml](wt-772f98ad/.github/workflows/windows-e2e.yml): Native Windows Server 2022 runner running PowerShell e2e, process group kill tests, and path resolution.
-  - [.github/workflows/quality.yml](wt-772f98ad/.github/workflows/quality.yml): Complete SAST triad (`golangci-lint`, `gosec`, `semgrep`, `CodeQL`) and quantitative coverage gate.
-  - [.github/workflows/dogfood.yml](wt-772f98ad/.github/workflows/dogfood.yml): Weekly automated self-audit running `make dogfood` roundtrip with automated GitHub issue creation on failure.
-  - [.github/workflows/release.yml](wt-772f98ad/.github/workflows/release.yml): Tag-triggered GoReleaser pipeline generating cross-platform archives, SHA-256 checksums, and SPDX SBOMs.
+  - `.github/workflows/ci.yml`: Zero-CGO verification on Ubuntu & macOS (`go vet`, `go test -count=1`, `go test -race`).
+  - `.github/workflows/windows-e2e.yml`: Native Windows Server 2022 runner running PowerShell e2e, process group kill tests, and path resolution.
+  - `.github/workflows/quality.yml`: Complete SAST triad (`golangci-lint`, `gosec`, `semgrep`, `CodeQL`) and quantitative coverage gate.
+  - `.github/workflows/dogfood.yml`: Weekly automated self-audit running `make dogfood` roundtrip with automated GitHub issue creation on failure.
+  - `.github/workflows/release.yml`: Tag-triggered GoReleaser pipeline generating cross-platform archives, SHA-256 checksums, and SPDX SBOMs.
 - **Strict Code Coverage Baseline & Ratchet**:
-  - Tracked in [.g8s/coverage-baseline](wt-772f98ad/.g8s/coverage-baseline): **`82.50%`**.
+  - Tracked in `.g8s/coverage-baseline`: **`82.50%`**.
   - CI Quality Gate enforces aggregate coverage $\ge 80\%$ across all internal packages.
-  - Ratchet gate ([tools/ci_coverage_ratchet.sh](wt-772f98ad/tools/ci_coverage_ratchet.sh), ADR-0024 Gate G4) fails if coverage drops $>0.25\%$ below baseline.
+  - Ratchet gate (`tools/ci_coverage_ratchet.sh`, ADR-0024 Gate G4) fails if coverage drops $>0.25\%$ below baseline.
 - **Supply Chain Security & SPDX Provenance**:
   - Every release builds with immutable ldflags stamping `Version`, `Commit`, and `BuildTime`.
-  - Full SPDX 2.3 JSON SBOM generated per archive via Syft ([.goreleaser.yaml](wt-772f98ad/.goreleaser.yaml)).
-  - Standalone installers enforce fail-closed checksum checks ([scripts/install.sh](wt-772f98ad/scripts/install.sh), [scripts/install.ps1](wt-772f98ad/scripts/install.ps1)).
+  - Full SPDX 2.3 JSON SBOM generated per archive via Syft (`.goreleaser.yaml`).
+  - Standalone installers enforce fail-closed checksum checks (`scripts/install.sh`, `scripts/install.ps1`).
 - **The Living Dogfood Story ("g8s builds g8s")**:
   - `g8s` is developed entirely using `g8s` workers: all features, bugfixes, and refactors are submitted via `g8s submit`, executed inside private worktrees under write receipts, and verified with `g8s verify`.
   - Historical commit evidence:
