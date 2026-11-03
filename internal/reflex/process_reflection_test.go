@@ -55,7 +55,8 @@ func TestJevPromptsRegistryParityAndModelPinning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read prompts: %v", err)
 	}
-	if err := os.WriteFile(crlfPrompts, bytes.ReplaceAll(rawPrompts, []byte("\n"), []byte("\r\n")), 0o600); err != nil {
+	lfPrompts := bytes.ReplaceAll(rawPrompts, []byte("\r\n"), []byte("\n"))
+	if err := os.WriteFile(crlfPrompts, bytes.ReplaceAll(lfPrompts, []byte("\n"), []byte("\r\n")), 0o600); err != nil {
 		t.Fatalf("write crlf prompts: %v", err)
 	}
 	crlfGate := NewReflexGate(WithPromptsFile(crlfPrompts), WithKeys(nil), WithEnvFile(false))
