@@ -508,6 +508,8 @@ features:
       - "cmd/g8s/context_pack*.go"
       - "cmd/g8s/providers_conformance*.go"
       - ".g8s/provider-conformance.yml"
+      - ".g8s/jev-prompts.yml"
+      - "schemas/process-reflection-receipt-v1.schema.json"
       - "offer/templates/providers.example.json"
       - "docs/user-guide/providers.md"
       - "docs/user-guide/provider-matrix.md"
@@ -550,6 +552,7 @@ features:
       - "internal/provider/provider_test.go"
       - "internal/config/config_test.go"
       - "cmd/g8s/llm_call_test.go"
+      - "internal/reflex/process_reflection_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:

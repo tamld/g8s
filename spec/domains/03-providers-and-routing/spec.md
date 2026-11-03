@@ -38,3 +38,9 @@ The routing and telemetry subsystem MUST expose `g8s scorecard [status|audit|kai
 - **GIVEN** a worker task executed via `Supervisor.RunOnce` and a verification run evaluated via `Verifier.Verify`
 - **WHEN** the attempt finishes and verification checks complete
 - **THEN** `model_quality_events.jsonl` records one `ModelOutcomeRecord` per attempt (without duplicate CLI wrapper rows) and `gate_outcome_events.jsonl` records per-check outcomes and flake transitions
+
+#### Scenario: Audited Jev v2 prompt registry, batch cache, and D-09 ProcessReflectionReceipt judge enforce evidence refs
+<!-- tests: TestJevPromptsRegistryParityAndModelPinning, TestBatchEvaluateItemInQuestionAndCache, TestProcessReflectionReceiptSchemaAndEvidenceRefGate, TestJudgeProcessArtifactsPromptManifestAudit -->
+- **GIVEN** `.g8s/jev-prompts.yml` pinned to `jev-1.14.0` and `schemas/process-reflection-receipt-v1.schema.json`
+- **WHEN** `ReflexGate.JudgeProcessArtifacts` evaluates sense artifacts or `ValidateProcessReflectionReceipt` inspects a receipt
+- **THEN** item payloads are packed per-question (`<= 50k` tokens) with SHA-256 caching, `.g8s/jev-prompts.yml` SHA-256 matches the audit manifest, and any verdict lacking verifiable `evidence_refs` is rejected with `E_REFLECTION_UNVERIFIED_VERDICT`
