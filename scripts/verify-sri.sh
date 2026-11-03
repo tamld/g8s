@@ -22,6 +22,15 @@ for html in index.html sites/g8s.html sites/aegis.html; do
   fi
   if [ "$html" = "index.html" ]; then
     C_HASH="$CSS_HASH"; J_HASH="$JS_HASH"
+  elif [ "$html" = "sites/aegis.html" ]; then
+    AEGIS_CSS="assets/aegis/styles.css"
+    AEGIS_JS="assets/aegis/main.js"
+    if [ ! -f "$AEGIS_CSS" ] || [ ! -f "$AEGIS_JS" ]; then
+      echo "❌ FAIL: Aegis target assets do not exist ($AEGIS_CSS or $AEGIS_JS)"
+      exit 1
+    fi
+    C_HASH="sha384-$(openssl dgst -sha384 -binary "$AEGIS_CSS" | openssl base64 -A)"
+    J_HASH="sha384-$(openssl dgst -sha384 -binary "$AEGIS_JS" | openssl base64 -A)"
   else
     if [ -f assets/css/flowaxon.css ] && [ -f assets/js/flowaxon.js ]; then
       C_HASH="sha384-$(openssl dgst -sha384 -binary assets/css/flowaxon.css | openssl base64 -A)"
