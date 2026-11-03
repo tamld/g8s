@@ -43,7 +43,8 @@ func runSubmit(args []string) {
 	promptFlag := fs.String("prompt", "", "task prompt handed to the worker")
 	promptFile := fs.String("prompt-file", "", "path to file containing task prompt")
 	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner, researcher, implementer, sec-auditor, analyst)")
-	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text)")
+	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text; use --allow-workspace-write to opt in)")
+	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
 	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
 	timeout := fs.String("timeout", "30s", "execution window for the worker (e.g. 900s, 15m; bare integer is treated as seconds)")
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
@@ -63,6 +64,11 @@ func runSubmit(args []string) {
 	if err := fs.Parse(args); err != nil {
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
+	workspaceWriteOptInRestore, workspaceWriteOptInErr := withWorkspaceWriteOptIn(*allowWorkspaceWrite)
+	if workspaceWriteOptInErr != nil {
+		exitRuntime("submit", "", *traceID, cli.CodeRuntime, workspaceWriteOptInErr, "", *jsonl)
+	}
+	defer workspaceWriteOptInRestore()
 
 	// Enforce Stratum Adjacency (DELTA-33 / ADR-0035): S1 FederationCoordinator
 	// cannot bypass S2 DomainGovernor to submit S3 worker tasks directly.
