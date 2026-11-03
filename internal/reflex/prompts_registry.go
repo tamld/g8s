@@ -1,6 +1,7 @@
 package reflex
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -129,14 +130,14 @@ type JevPromptsConfig struct {
 	Questions     JevQuestionGroups `yaml:"questions"`
 }
 
-// DefaultPromptSHA256 returns the SHA-256 hex digest of the embedded default prompts YAML.
+// DefaultPromptSHA256 returns the canonical LF-normalized SHA-256 hex digest of the embedded default prompts YAML.
 func DefaultPromptSHA256() string {
-	sum := sha256.Sum256([]byte(defaultJevPromptsYAML))
-	return hex.EncodeToString(sum[:])
+	return sha256Hex([]byte(defaultJevPromptsYAML))
 }
 
 func sha256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
+	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	sum := sha256.Sum256(normalized)
 	return hex.EncodeToString(sum[:])
 }
 

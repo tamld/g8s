@@ -1,6 +1,7 @@
 package reflex
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +23,8 @@ func sha256FileHex(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
+	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	sum := sha256.Sum256(normalized)
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -44,6 +47,20 @@ func TestJevPromptsRegistryParityAndModelPinning(t *testing.T) {
 	}
 	if gate.PromptSHA256() != DefaultPromptSHA256() {
 		t.Fatalf("embedded default SHA mismatch")
+	}
+
+	// Verify Windows core.autocrlf=true (\r\n) checkout produces the identical canonical SHA-256.
+	crlfPrompts := filepath.Join(t.TempDir(), "jev-prompts-crlf.yml")
+	rawPrompts, err := os.ReadFile(promptsPath)
+	if err != nil {
+		t.Fatalf("read prompts: %v", err)
+	}
+	if err := os.WriteFile(crlfPrompts, bytes.ReplaceAll(rawPrompts, []byte("\n"), []byte("\r\n")), 0o600); err != nil {
+		t.Fatalf("write crlf prompts: %v", err)
+	}
+	crlfGate := NewReflexGate(WithPromptsFile(crlfPrompts), WithKeys(nil), WithEnvFile(false))
+	if crlfGate.PromptSHA256() != DefaultPromptSHA256() {
+		t.Fatalf("CRLF prompt SHA drift: got %s, want %s", crlfGate.PromptSHA256(), DefaultPromptSHA256())
 	}
 
 	cfg := gate.PromptsConfig()
@@ -229,7 +246,7 @@ func TestBatchEvaluateItemInQuestionAndCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cache file missing: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("cache file mode want 0600, got %o", info.Mode().Perm())
 	}
 
