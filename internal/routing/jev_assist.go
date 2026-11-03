@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -80,7 +81,7 @@ func loadJevKeys(ctx context.Context) []string {
 	addKey(os.Getenv("TYPESAFE_API_KEY_FALLBACK"))
 
 	if len(keys) == 0 {
-		for _, d := range []string{".", "..", "../.."} {
+		for _, d := range dotEnvSearchDirs() {
 			data, err := os.ReadFile(filepath.Join(d, ".env"))
 			if err != nil {
 				continue
@@ -139,6 +140,39 @@ func rotateKey(keys []string) {
 	keyPoolIdx = (keyPoolIdx + 1) % len(keys)
 }
 
+func jevAssistModel() string {
+	if m := strings.TrimSpace(os.Getenv("G8S_JEV_MODEL")); m != "" {
+		return m
+	}
+	return "jev-1.14.0"
+}
+
+func jevAssistRetryBackoff() []time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("G8S_JEV_RETRY_BACKOFF_MS")); raw != "" {
+		parts := strings.Split(raw, ",")
+		out := make([]time.Duration, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			ms, err := strconv.Atoi(p)
+			if err != nil || ms < 0 {
+				continue
+			}
+			out = append(out, time.Duration(ms)*time.Millisecond)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return []time.Duration{50 * time.Millisecond, 120 * time.Millisecond}
+}
+
+func isJevAssistRetryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code == 529
+}
+
 // Answer represents a typed Jev question response.
 type Answer struct {
 	Type          string             `json:"type"`
@@ -171,7 +205,6 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		return layer1, nil
 	}
 
-	activeKey := getActiveKey(keys)
 	endpoint := getJevEndpoint(ctx)
 
 	// Build choice sets. The real TypeSafe SystemOne API (openapi.json) requires
@@ -179,35 +212,7 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	// of when it applies; a bare list (or a question with no `type`) is rejected
 	// with 422. Role descriptions come from the harness role registry so the
 	// catalog Jev sees stays in sync with `g8s roles`.
-	providerSet := make(map[string]struct{})
-	modelSet := make(map[string]struct{})
-	for _, c := range candidates {
-		providerSet[c.provider] = struct{}{}
-		modelSet[c.model] = struct{}{}
-	}
-	providerCriteria := make(map[string]string, len(providerSet))
-	for p := range providerSet {
-		var pModels []string
-		for _, c := range candidates {
-			if c.provider == p && !containsStr(pModels, c.model) {
-				pModels = append(pModels, c.model)
-			}
-		}
-		providerCriteria[p] = fmt.Sprintf("Registered provider serving models: %s.", strings.Join(pModels, ", "))
-	}
-	modelCriteria := make(map[string]string, len(modelSet))
-	for m := range modelSet {
-		// State the provider↔model binding explicitly: the deterministic
-		// validator enforces the PAIR, so the suggestion catalog must carry it
-		// (a Jev suggestion of an unbound pair is rejected as unknown).
-		bindings := make([]string, 0, 2)
-		for _, c := range candidates {
-			if c.model == m {
-				bindings = append(bindings, c.provider)
-			}
-		}
-		modelCriteria[m] = fmt.Sprintf("Model served by provider %s.", strings.Join(bindings, " or "))
-	}
+	routeTargetCriteria := BuildRouteTargetCriteria(candidates)
 	roleCriteria := make(map[string]string)
 	for _, r := range harness.RoleNames() {
 		if role, err := harness.GetRole(r); err == nil && strings.TrimSpace(role.Purpose) != "" {
@@ -218,7 +223,7 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	}
 
 	payload := map[string]any{
-		"model": "jev-latest",
+		"model": jevAssistModel(),
 		"state": map[string]any{
 			"prompt":       req.Prompt,
 			"paths":        req.Paths,
@@ -226,15 +231,10 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 			"timeout_hint": req.TimeoutHint,
 		},
 		"questions": map[string]any{
-			"provider": map[string]any{
+			"route_target": map[string]any{
 				"type":         "choice",
-				"instructions": "Suggest the best provider for this task. Must be the exact provider serving the chosen model.",
-				"criteria":     providerCriteria,
-			},
-			"model": map[string]any{
-				"type":         "choice",
-				"instructions": "Suggest the best model for this task.",
-				"criteria":     modelCriteria,
+				"instructions": "Suggest the best registered provider/model pair for this task (exact joint route target).",
+				"criteria":     routeTargetCriteria,
 			},
 			"role": map[string]any{
 				"type":         "choice",
@@ -273,35 +273,64 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		return layer1, nil
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
-	if err != nil {
-		layer1.IsFallback = true
-		layer1.Reason = fmt.Sprintf("Jev assist unavailable (request error: %v); fallback to %s", err, layer1.Reason)
-		layer1.Source = "deterministic"
-		return layer1, nil
+	client := &http.Client{Timeout: 2500 * time.Millisecond}
+	backoffs := jevAssistRetryBackoff()
+	maxAttempts := 1 + len(backoffs)
+	var resp *http.Response
+	var lastErr error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		activeKey := getActiveKey(keys)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+		if err != nil {
+			layer1.IsFallback = true
+			layer1.Reason = fmt.Sprintf("Jev assist unavailable (request error: %v); fallback to %s", err, layer1.Reason)
+			layer1.Source = "deterministic"
+			return layer1, nil
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+activeKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err = client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			rotateKey(keys)
+		} else if isJevAssistRetryableStatus(resp.StatusCode) {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("HTTP %d from Jev", resp.StatusCode)
+			rotateKey(keys)
+		} else {
+			lastErr = nil
+			break
+		}
+
+		if attempt >= len(backoffs) {
+			break
+		}
+		delay := backoffs[attempt]
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			layer1.IsFallback = true
+			layer1.Reason = fmt.Sprintf("Jev assist unavailable (%v); fallback to %s", ctx.Err(), layer1.Reason)
+			layer1.Source = "deterministic"
+			return layer1, nil
+		case <-timer.C:
+		}
 	}
 
-	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 2500 * time.Millisecond}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		rotateKey(keys)
+	if lastErr != nil || resp == nil {
 		layer1.IsFallback = true
-		layer1.Reason = fmt.Sprintf("Jev assist unavailable (%v); fallback to %s", err, layer1.Reason)
+		if lastErr != nil {
+			layer1.Reason = fmt.Sprintf("Jev assist unavailable (%v); fallback to %s", lastErr, layer1.Reason)
+		} else {
+			layer1.Reason = fmt.Sprintf("Jev assist unavailable (no response); fallback to %s", layer1.Reason)
+		}
 		layer1.Source = "deterministic"
 		return layer1, nil
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		rotateKey(keys)
-		layer1.IsFallback = true
-		layer1.Reason = fmt.Sprintf("Jev assist unavailable (HTTP 429 rate limit rotated); fallback to %s", layer1.Reason)
-		layer1.Source = "deterministic"
-		return layer1, nil
-	}
 
 	if resp.StatusCode != http.StatusOK {
 		layer1.IsFallback = true
@@ -324,10 +353,9 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 		usageOut = jevResp.Usage.OutputTokens
 	}
 
-	sugProvider := strings.TrimSpace(jevResp.Answers["provider"].Choice)
-	sugModel := strings.TrimSpace(jevResp.Answers["model"].Choice)
+	sugProvider, sugModel, routeConf := ParseJevAssistRouteAnswers(jevResp.Answers)
 	sugRole := strings.TrimSpace(jevResp.Answers["role"].Choice)
-	sugReason := strings.TrimSpace(jevResp.Answers["reason"].Choice)
+	sugReason := fmt.Sprintf("Jev suggested provider=%s model=%s role=%s", sugProvider, sugModel, sugRole)
 
 	// Deterministic Validation of Jev suggestion
 	if sugProvider == "" || sugModel == "" || sugRole == "" {
@@ -363,19 +391,12 @@ func jevAssist(ctx context.Context, req RouteRequest, layer1 Decision, candidate
 	}
 
 	// Compute composite confidence bounded by weakest link
-	conf := jevResp.Answers["model"].Confidence
-	if pConf := jevResp.Answers["provider"].Confidence; pConf > 0 && (conf <= 0 || pConf < conf) {
-		conf = pConf
-	}
+	conf := routeConf
 	if rConf := jevResp.Answers["role"].Confidence; rConf > 0 && (conf <= 0 || rConf < conf) {
 		conf = rConf
 	}
 	if conf <= 0 {
 		conf = 0.85
-	}
-
-	if sugReason == "" {
-		sugReason = fmt.Sprintf("Jev suggested provider=%s model=%s role=%s", sugProvider, sugModel, sugRole)
 	}
 
 	rawLane := strings.TrimSpace(jevResp.Answers["lane"].Choice)

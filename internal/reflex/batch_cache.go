@@ -1,7 +1,6 @@
 package reflex
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -324,26 +323,12 @@ func (g *ReflexGate) postJevBatch(ctx context.Context, sharedState map[string]an
 		return JevResponse{}, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(bodyBytes))
+	resp, err := g.postJevHTTPWithRetry(ctx, bodyBytes)
 	if err != nil {
-		return JevResponse{}, err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.client.Do(httpReq)
-	if err != nil {
-		if len(g.keys) > 1 {
-			g.rotateKey()
-		}
 		return JevResponse{}, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusTooManyRequests {
-		g.rotateKey()
-		return JevResponse{}, fmt.Errorf("HTTP 429 rate limit")
-	}
 	if resp.StatusCode != http.StatusOK {
 		return JevResponse{}, fmt.Errorf("HTTP %d from Jev", resp.StatusCode)
 	}

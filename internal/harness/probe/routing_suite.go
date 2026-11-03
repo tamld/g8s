@@ -44,22 +44,20 @@ func runRoutingProbe(ctx context.Context, req routing.RouteRequest, expectedRole
 		if jevSuggestHostile {
 			// Hostile suggestion: unknown provider and model to trigger deterministic fallback
 			resp = map[string]any{
-				"model": "jev-latest",
+				"model": "jev-1.14.0",
 				"answers": map[string]any{
-					"provider": map[string]any{"type": "choice", "choice": "hostile-unregistered-provider"},
-					"model":    map[string]any{"type": "choice", "choice": "hostile-unregistered-model"},
-					"role":     map[string]any{"type": "choice", "choice": "collector"},
+					"route_target": map[string]any{"type": "choice", "choice": "hostile-unregistered-provider/hostile-unregistered-model"},
+					"role":         map[string]any{"type": "choice", "choice": "collector"},
 				},
 			}
 		} else {
 			// Compliant suggestion: mirror manifest-legal placement with high confidence
+			routeTarget := d1.Provider + "/" + d1.Model
 			resp = map[string]any{
-				"model": "jev-latest",
+				"model": "jev-1.14.0",
 				"answers": map[string]any{
-					"provider": map[string]any{"type": "choice", "choice": d1.Provider, "confidence": 0.95},
-					"model":    map[string]any{"type": "choice", "choice": d1.Model, "confidence": 0.95},
-					"role":     map[string]any{"type": "choice", "choice": d1.Role, "confidence": 0.90},
-					"reason":   map[string]any{"type": "choice", "choice": "Jev benchmark placement verified", "confidence": 0.90},
+					"route_target": map[string]any{"type": "choice", "choice": routeTarget, "confidence": 0.95},
+					"role":         map[string]any{"type": "choice", "choice": d1.Role, "confidence": 0.90},
 				},
 				"usage": map[string]any{"input_tokens": 120, "output_tokens": 25},
 			}

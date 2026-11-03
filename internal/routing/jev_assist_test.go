@@ -327,34 +327,28 @@ func TestJevAssist_ConfidenceAndReasonVariations(t *testing.T) {
 		wantReason string
 	}{
 		{
-			name: "provider confidence is weakest link",
+			name: "route_target confidence is weakest link",
 			answers: map[string]Answer{
-				"provider": {Choice: "agy", Confidence: 0.65},
-				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.95},
-				"role":     {Choice: "collector", Confidence: 0.85},
-				"reason":   {Choice: "explicit reason"},
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.65},
+				"role":         {Choice: "collector", Confidence: 0.85},
 			},
 			wantConf:   0.65,
-			wantReason: "explicit reason",
+			wantReason: "Jev suggested provider=agy model=gemini-3.8-flash-high role=collector",
 		},
 		{
 			name: "role confidence is weakest link",
 			answers: map[string]Answer{
-				"provider": {Choice: "agy", Confidence: 0.95},
-				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.90},
-				"role":     {Choice: "collector", Confidence: 0.60},
-				"reason":   {Choice: "role weakest"},
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.95},
+				"role":         {Choice: "collector", Confidence: 0.60},
 			},
 			wantConf:   0.60,
-			wantReason: "role weakest",
+			wantReason: "Jev suggested provider=agy model=gemini-3.8-flash-high role=collector",
 		},
 		{
-			name: "zero confidence fallback and empty reason",
+			name: "zero confidence fallback",
 			answers: map[string]Answer{
-				"provider": {Choice: "agy", Confidence: 0.0},
-				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.0},
-				"role":     {Choice: "collector", Confidence: 0.0},
-				"reason":   {Choice: ""},
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.0},
+				"role":         {Choice: "collector", Confidence: 0.0},
 			},
 			wantConf:   0.85,
 			wantReason: "Jev suggested provider=agy model=gemini-3.8-flash-high role=collector",
@@ -365,7 +359,7 @@ func TestJevAssist_ConfidenceAndReasonVariations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(JevResponse{Model: "jev-latest", Answers: tc.answers})
+				_ = json.NewEncoder(w).Encode(JevResponse{Model: "jev-1.14.0", Answers: tc.answers})
 			}))
 			defer ts.Close()
 
@@ -558,11 +552,10 @@ func TestJevAssist_LaneAndEffortSafetyMonotonicity(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(JevResponse{
 			Answers: map[string]Answer{
-				"provider": {Choice: "agy", Confidence: 0.95},
-				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.95},
-				"role":     {Choice: "test-runner", Confidence: 0.95},
-				"lane":     {Choice: "D", Confidence: 0.90},
-				"effort":   {Choice: "low", Confidence: 0.90},
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.95},
+				"role":         {Choice: "test-runner", Confidence: 0.95},
+				"lane":         {Choice: "D", Confidence: 0.90},
+				"effort":       {Choice: "low", Confidence: 0.90},
 			},
 		})
 	}))
@@ -593,11 +586,10 @@ func TestJevAssist_LaneAndEffortSafetyMonotonicity(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(JevResponse{
 			Answers: map[string]Answer{
-				"provider": {Choice: "agy", Confidence: 0.95},
-				"model":    {Choice: "gemini-3.8-flash-high", Confidence: 0.95},
-				"role":     {Choice: "collector", Confidence: 0.95},
-				"lane":     {Choice: "S", Confidence: 0.92},
-				"effort":   {Choice: "xhigh", Confidence: 0.92},
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.95},
+				"role":         {Choice: "collector", Confidence: 0.95},
+				"lane":         {Choice: "S", Confidence: 0.92},
+				"effort":       {Choice: "xhigh", Confidence: 0.92},
 			},
 		})
 	}))
@@ -621,5 +613,107 @@ func TestJevAssist_LaneAndEffortSafetyMonotonicity(t *testing.T) {
 	}
 	if dec2.SuggestedEffort != "xhigh" {
 		t.Errorf("SuggestedEffort = %q, want xhigh (upgrade medium -> xhigh allowed)", dec2.SuggestedEffort)
+	}
+}
+
+func TestParseRouteTargetChoice(t *testing.T) {
+	p, m, ok := ParseRouteTargetChoice("9router/nvidia/llama-3.3-70b")
+	if !ok || p != "9router" || m != "nvidia/llama-3.3-70b" {
+		t.Fatalf("ParseRouteTargetChoice slash model = (%q, %q, %v), want 9router, nvidia/llama-3.3-70b, true", p, m, ok)
+	}
+}
+
+func TestJevAssistChoicePermutationEval(t *testing.T) {
+	forward := map[string]float64{"agy/m1": 0.9, "claude/m2": 0.1}
+	reversed := map[string]float64{"claude/m2": 0.1, "agy/m1": 0.9}
+	if got := ChoicePermutationAgreement(forward, reversed); got != 1.0 {
+		t.Fatalf("ChoicePermutationAgreement stable pair = %v, want 1.0", got)
+	}
+	unstable := map[string]float64{"claude/m2": 0.95, "agy/m1": 0.05}
+	if got := ChoicePermutationAgreement(forward, unstable); got != 0.0 {
+		t.Fatalf("ChoicePermutationAgreement unstable pair = %v, want 0.0", got)
+	}
+	rate := EvaluateChoicePermutationStability([]struct {
+		Forward  map[string]float64
+		Reversed map[string]float64
+	}{
+		{Forward: forward, Reversed: reversed},
+		{Forward: forward, Reversed: forward},
+		{Forward: forward, Reversed: reversed},
+		{Forward: forward, Reversed: forward},
+		{Forward: forward, Reversed: reversed},
+		{Forward: forward, Reversed: forward},
+		{Forward: unstable, Reversed: reversed},
+	})
+	if rate < ChoicePermutationAgreementThreshold() {
+		t.Fatalf("EvaluateChoicePermutationStability = %v, want >= %v", rate, ChoicePermutationAgreementThreshold())
+	}
+
+	criteria := BuildRouteTargetCriteria([]candidateModel{
+		{provider: "9router", model: "nvidia/llama-3.3-70b"},
+		{provider: "claude", model: "claude-haiku-4-5"},
+	})
+	if _, ok := criteria["9router/nvidia/llama-3.3-70b"]; !ok {
+		t.Fatalf("BuildRouteTargetCriteria missing slash model key, got %v", criteria)
+	}
+}
+
+func TestJevAssist_HTTP429_RecoversOnRetry(t *testing.T) {
+	os.Setenv("G8S_JEV_RETRY_BACKOFF_MS", "1,1")
+	defer os.Unsetenv("G8S_JEV_RETRY_BACKOFF_MS")
+
+	attempts := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(JevResponse{
+			Answers: map[string]Answer{
+				"route_target": {Choice: "agy/gemini-3.8-flash-high", Confidence: 0.95},
+				"role":         {Choice: "collector", Confidence: 0.90},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	ctx := WithJevAssist(context.Background(), ts.URL, "key-1", "key-2")
+	layer1 := Decision{Provider: "claude", Model: "claude-haiku-4-5", Role: "summarizer", Reason: "default"}
+	dec, err := jevAssist(ctx, RouteRequest{}, layer1, testCandidates())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dec.Source != "jev" || dec.IsFallback {
+		t.Fatalf("expected jev success after retry, got source=%q fallback=%v attempts=%d", dec.Source, dec.IsFallback, attempts)
+	}
+}
+
+func TestLoadJevKeys_GitRootBoundary(t *testing.T) {
+	t.Setenv("TYPESAFE_API_KEYS", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY_FALLBACK", "")
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("TYPESAFE_API_KEY=outside-repo\n"), 0o600); err != nil {
+		t.Fatalf("write outside .env: %v", err)
+	}
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("TYPESAFE_API_KEY=inside-repo\n"), 0o600); err != nil {
+		t.Fatalf("write repo .env: %v", err)
+	}
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	t.Chdir(sub)
+
+	keys := loadJevKeys(context.Background())
+	if len(keys) != 1 || keys[0] != "inside-repo" {
+		t.Fatalf("loadJevKeys = %v, want [inside-repo] (must not read parent .env)", keys)
 	}
 }
