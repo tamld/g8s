@@ -39,6 +39,12 @@ The routing and telemetry subsystem MUST expose `g8s scorecard [status|audit|kai
 - **WHEN** the attempt finishes and verification checks complete
 - **THEN** `model_quality_events.jsonl` records one `ModelOutcomeRecord` per attempt (without duplicate CLI wrapper rows) and `gate_outcome_events.jsonl` records per-check outcomes and flake transitions
 
+#### Scenario: Jev v2 Wave 2 joint route_target, retry, and memory promotion noul gate
+<!-- tests: TestJevAssistChoicePermutationEval, TestParseRouteTargetChoice, TestEvaluateMemoryEntryOnlineAndOffline -->
+- **GIVEN** Jev assist routing with manifest-legal candidates and declarative `memory_promotion` noul questions in `.g8s/jev-prompts.yml`
+- **WHEN** `jevAssist` posts a single `route_target` `<provider>/<model>` choice (model pin `jev-1.14.0`) or `EvaluateMemoryEntry` inspects a memory note online
+- **THEN** unbound provider/model pairs are structurally impossible, HTTP `429`/`529` retries rotate keys with bounded backoff, and memory promotion blocks when either noul ≥ `memory_block_breach_prob`
+
 #### Scenario: Audited Jev v2 prompt registry, batch cache, and D-09 ProcessReflectionReceipt judge enforce evidence refs
 <!-- tests: TestJevPromptsRegistryParityAndModelPinning, TestBatchEvaluateItemInQuestionAndCache, TestProcessReflectionReceiptSchemaAndEvidenceRefGate, TestJudgeProcessArtifactsPromptManifestAudit -->
 - **GIVEN** `.g8s/jev-prompts.yml` pinned to `jev-1.14.0` and `schemas/process-reflection-receipt-v1.schema.json`
