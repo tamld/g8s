@@ -225,7 +225,9 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 		return nil, fmt.Errorf("openai provider requires non-empty model in spec")
 	}
 
-	isAnthropic := p.protocol == "anthropic" || (p.protocol == "9router" && strings.HasPrefix(strings.ToLower(spec.Model), "anthropic-messages/"))
+	// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+	// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+	isAnthropic := p.protocol == "anthropic" || (p.protocol == "9router" && len(spec.Model) >= len("anthropic-messages/") && strings.EqualFold(spec.Model[:len("anthropic-messages/")], "anthropic-messages/"))
 	if isAnthropic {
 		return p.spawnAnthropic(ctx, spec)
 	}
@@ -406,7 +408,11 @@ func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, er
 		respBody, _ := io.ReadAll(resp.Body)
 		bodyStr := string(respBody)
 		fullErr := fmt.Sprintf("%s returned status %d: %s", p.name, resp.StatusCode, bodyStr)
-		if strings.Contains(bodyStr, "AgentService requested an unsupported IDE tool") || (resp.StatusCode == http.StatusBadRequest && strings.HasPrefix(strings.ToLower(strings.TrimSpace(spec.Model)), "cu/")) {
+
+		// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
+		// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
+		trimmedModel := strings.TrimSpace(spec.Model)
+		if strings.Contains(bodyStr, "AgentService requested an unsupported IDE tool") || (resp.StatusCode == http.StatusBadRequest && len(trimmedModel) >= 3 && strings.EqualFold(trimmedModel[:3], "cu/")) {
 			fullErr += " (hint: 9router cu/* proxies Cursor IDE AgentService which requires native IDE tool calls; use --provider cursor or a non-cu/* model such as 9router/deep-coding or 9router/fast-agent)"
 		}
 		return newImmediateHandleWithMetadata(p.name, "FAILED", "", fullErr, 1, start, "", 0, 0, 0), nil

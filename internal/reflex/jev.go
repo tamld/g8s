@@ -74,14 +74,17 @@ type OutputQualityVerdict struct {
 // ReflexSignal represents pure perception telemetry emitted by a System 1 reflex sensor.
 // It carries empirical measurements without dictating supervisor actions.
 type ReflexSignal struct {
-	RiskScore  float64 `json:"risk_score"`  // 0.0 (benign) -> 5.0 (critical)
-	BreachProb float64 `json:"breach_prob"` // 0.0 -> 1.0 (estimated probability of sandbox breach)
-	Confidence float64 `json:"confidence"`  // confidence score [0..1]
-	LatencyMs  int64   `json:"latency_ms"`
-	Source     string  `json:"source"` // "jev" | "deterministic"
-	Reason     string  `json:"reason,omitempty"`
-	KeyUsed    string  `json:"key_used,omitempty"`
-	IsFallback bool    `json:"is_fallback"`
+	RiskScore     float64 `json:"risk_score"`  // 0.0 (benign) -> 5.0 (critical)
+	BreachProb    float64 `json:"breach_prob"` // 0.0 -> 1.0 (estimated probability of sandbox breach)
+	Confidence    float64 `json:"confidence"`  // confidence score [0..1]
+	LatencyMs     int64   `json:"latency_ms"`
+	Source        string  `json:"source"` // "jev" | "deterministic"
+	Reason        string  `json:"reason,omitempty"`
+	KeyUsed       string  `json:"key_used,omitempty"`
+	IsFallback    bool    `json:"is_fallback"`
+	ModelResolved string  `json:"model_resolved,omitempty"`
+	InputTokens   int     `json:"input_tokens,omitempty"`
+	OutputTokens  int     `json:"output_tokens,omitempty"`
 }
 
 // TriageVerdict represents the authoritative decision made by the g8s Supervisor policy engine.
@@ -122,14 +125,20 @@ type JevResponse struct {
 
 // ReflexGate coordinates System 1 evaluations and policy gating.
 type ReflexGate struct {
-	endpoint   string
-	model      string
-	keys       []string
-	keysSet    bool
-	keyIdx     int
-	mu         sync.Mutex
-	client     *http.Client
-	useEnvFile bool
+	endpoint            string
+	model               string
+	modelOverride       string
+	promptsFileOverride string
+	cachePath           string
+	cacheTTLOverride    time.Duration
+	promptsConfig       JevPromptsConfig
+	promptSHA256        string
+	keys                []string
+	keysSet             bool
+	keyIdx              int
+	mu                  sync.Mutex
+	client              *http.Client
+	useEnvFile          bool
 }
 
 // Option configures ReflexGate.
@@ -162,11 +171,94 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+func WithModel(model string) Option {
+	return func(g *ReflexGate) {
+		g.modelOverride = strings.TrimSpace(model)
+	}
+}
+
+func WithPromptsFile(path string) Option {
+	return func(g *ReflexGate) {
+		g.promptsFileOverride = strings.TrimSpace(path)
+	}
+}
+
+func WithCachePath(path string) Option {
+	return func(g *ReflexGate) {
+		g.cachePath = strings.TrimSpace(path)
+	}
+}
+
+func WithCacheTTL(d time.Duration) Option {
+	return func(g *ReflexGate) {
+		g.cacheTTLOverride = d
+	}
+}
+
+// Model returns the resolved Jev model identifier.
+func (g *ReflexGate) Model() string {
+	return g.model
+}
+
+// PromptSHA256 returns the SHA-256 hex digest of the loaded prompts YAML bytes.
+func (g *ReflexGate) PromptSHA256() string {
+	return g.promptSHA256
+}
+
+// PromptsConfig returns the loaded declarative Jev prompts registry.
+func (g *ReflexGate) PromptsConfig() JevPromptsConfig {
+	return g.promptsConfig
+}
+
+func (g *ReflexGate) l1QuestionsMap() map[string]any {
+	out := map[string]any{}
+	for name, q := range g.promptsConfig.Questions.L1Triage {
+		entry := map[string]any{
+			"type":         q.Type,
+			"instructions": q.Instructions,
+		}
+		if len(q.Criteria) > 0 {
+			entry["criteria"] = q.Criteria
+		}
+		out[name] = entry
+	}
+	return out
+}
+
+func (g *ReflexGate) l3QuestionsMap() map[string]any {
+	out := map[string]any{}
+	for name, q := range g.promptsConfig.Questions.L3OutputQuality {
+		entry := map[string]any{
+			"type":         q.Type,
+			"instructions": q.Instructions,
+		}
+		if len(q.Criteria) > 0 {
+			entry["criteria"] = q.Criteria
+		}
+		out[name] = entry
+	}
+	return out
+}
+
+func (g *ReflexGate) memoryPromotionQuestionsMap() map[string]any {
+	out := map[string]any{}
+	for name, q := range g.promptsConfig.Questions.MemoryPromotion {
+		entry := map[string]any{
+			"type":         q.Type,
+			"instructions": q.Instructions,
+		}
+		if len(q.Criteria) > 0 {
+			entry["criteria"] = q.Criteria
+		}
+		out[name] = entry
+	}
+	return out
+}
+
 // NewReflexGate returns an initialized ReflexGate with key pool and failover.
 func NewReflexGate(opts ...Option) *ReflexGate {
 	gate := &ReflexGate{
 		endpoint:   "https://api.typesafe.ai/v1/systemone",
-		model:      "jev-latest",
 		client:     &http.Client{Timeout: 2500 * time.Millisecond},
 		useEnvFile: true,
 	}
@@ -174,6 +266,15 @@ func NewReflexGate(opts ...Option) *ReflexGate {
 	for _, opt := range opts {
 		opt(gate)
 	}
+
+	raw, cfg, err := gate.loadPromptsBytes()
+	if err != nil {
+		raw = []byte(defaultJevPromptsYAML)
+		cfg, _ = ParseJevPromptsYAML(raw)
+	}
+	gate.promptsConfig = cfg
+	gate.promptSHA256 = sha256Hex(raw)
+	gate.model = resolveJevModel(gate.modelOverride, cfg)
 
 	if !gate.keysSet && len(gate.keys) == 0 {
 		gate.keys = gate.loadKeys()
@@ -200,7 +301,7 @@ func (g *ReflexGate) loadKeys() []string {
 	addKey(os.Getenv("TYPESAFE_API_KEY_FALLBACK"))
 
 	if len(keys) == 0 && g.useEnvFile {
-		for _, d := range []string{".", "..", "../.."} {
+		for _, d := range dotEnvSearchDirs() {
 			envPath := filepath.Join(d, ".env")
 			data, err := os.ReadFile(envPath)
 			if err != nil {
@@ -294,22 +395,12 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		"allowed_paths":  req.AllowedPaths,
 	}
 	if req.ContextPacket != nil {
-		state["context_packet"] = req.ContextPacket
+		state["context_packet"] = capContextPacketState(req.ContextPacket, defaultContextPacketCap)
 	}
 	payload := map[string]any{
-		"model": g.model,
-		"state": state,
-		"questions": map[string]any{
-			"risk_tier": map[string]any{
-				"type":         "score",
-				"instructions": "Rate the operational risk level of this mutation.",
-				"criteria":     []string{"benign", "low", "medium", "high", "critical"},
-			},
-			"sandbox_breach": map[string]any{
-				"type":         "noul",
-				"instructions": "Does this mutation access or tamper with private credentials, root SSH keys, .env secrets, or escape sandbox boundaries?",
-			},
-		},
+		"model":     g.model,
+		"state":     state,
+		"questions": g.l1QuestionsMap(),
 	}
 
 	bodyBytes, err := json.Marshal(payload)
@@ -318,27 +409,11 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 	}
 
 	start := time.Now()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(bodyBytes))
+	resp, err := g.postJevHTTPWithRetry(ctx, bodyBytes)
 	if err != nil {
-		return g.deterministicFallbackSignal(req, err.Error()), nil
-	}
-
-	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.client.Do(httpReq)
-	if err != nil {
-		if len(g.keys) > 1 {
-			g.rotateKey()
-		}
 		return g.deterministicFallbackSignal(req, err.Error()), nil
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		g.rotateKey()
-		return g.deterministicFallbackSignal(req, "HTTP 429 rate limit rotated"), nil
-	}
 
 	if resp.StatusCode != http.StatusOK {
 		return g.deterministicFallbackSignal(req, fmt.Sprintf("HTTP %d from Jev", resp.StatusCode)), nil
@@ -376,7 +451,7 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		reason = "confidence derived from deterministic classifier (live Jev omitted it)"
 	}
 
-	return ReflexSignal{
+	sig := ReflexSignal{
 		RiskScore:  riskScore,
 		BreachProb: breachProb,
 		Confidence: conf,
@@ -385,7 +460,13 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 		KeyUsed:    MaskKey(activeKey),
 		Reason:     reason,
 		IsFallback: false,
-	}, nil
+	}
+	if jevResp.Model != "" {
+		sig.ModelResolved = jevResp.Model
+	}
+	sig.InputTokens = jevResp.Usage.InputTokens
+	sig.OutputTokens = jevResp.Usage.OutputTokens
+	return sig, nil
 }
 
 func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageVerdict {
@@ -421,23 +502,13 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 		"duration_sec":  req.DurationSec,
 	}
 	if req.ContextPacket != nil {
-		state["context_packet"] = req.ContextPacket
+		state["context_packet"] = capContextPacketState(req.ContextPacket, defaultContextPacketCap)
 	}
 
 	payload := map[string]any{
-		"model": g.model,
-		"state": state,
-		"questions": map[string]any{
-			"output_quality": map[string]any{
-				"type":         "score",
-				"instructions": "Rate the quality of this worker output (0=garbage/hallucination/incoherent, 5=high-quality genuine evidence with actionable content).",
-				"criteria":     []string{"garbage", "low", "mediocre", "good", "high-quality"},
-			},
-			"output_authenticity": map[string]any{
-				"type":         "noul",
-				"instructions": "Does this output look like fabricated or hallucinated content rather than genuine task completion?",
-			},
-		},
+		"model":     g.model,
+		"state":     state,
+		"questions": g.l3QuestionsMap(),
 	}
 
 	bodyBytes, err := json.Marshal(payload)
@@ -446,26 +517,12 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 	}
 
 	start := time.Now()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(bodyBytes))
+	resp, err := g.postJevHTTPWithRetry(ctx, bodyBytes)
 	if err != nil {
-		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+activeKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.client.Do(httpReq)
-	if err != nil {
-		if len(g.keys) > 1 {
-			g.rotateKey()
-		}
 		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, err.Error()), nil
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusTooManyRequests {
-		g.rotateKey()
-		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, "HTTP 429"), nil
-	}
 	if resp.StatusCode != http.StatusOK {
 		return g.deterministicFallbackSignal(TriageRequest{TaskID: req.TaskID}, fmt.Sprintf("HTTP %d from Jev", resp.StatusCode)), nil
 	}
@@ -491,7 +548,7 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 		conf = 0.7 // #329 calibration: deterministic classifier default
 	}
 
-	return ReflexSignal{
+	sig := ReflexSignal{
 		RiskScore:  riskScore,
 		BreachProb: authAns.Noul,
 		Confidence: conf,
@@ -499,7 +556,13 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 		Source:     "jev",
 		KeyUsed:    MaskKey(activeKey),
 		IsFallback: false,
-	}, nil
+	}
+	if jevResp.Model != "" {
+		sig.ModelResolved = jevResp.Model
+	}
+	sig.InputTokens = jevResp.Usage.InputTokens
+	sig.OutputTokens = jevResp.Usage.OutputTokens
+	return sig, nil
 }
 
 // EvaluateOutputQuality applies the L3 policy to an output quality signal.
@@ -508,10 +571,11 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 // uncertain quality defaults to accept, not reject).
 func EvaluateOutputQuality(signal ReflexSignal) OutputQualityVerdict {
 	quality := 5.0 - signal.RiskScore // invert back
+	th := defaultPromptsConfig().Thresholds
 	if signal.IsFallback {
 		return OutputQualityVerdict{Action: "skip", Quality: quality, Confidence: signal.Confidence, Reason: "deterministic fallback — no live assessment"}
 	}
-	if quality <= 1.5 && signal.Confidence >= 0.6 {
+	if quality <= th.L3RejectMaxQuality && signal.Confidence >= th.L3RejectMinConfidence {
 		return OutputQualityVerdict{Action: "reject", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f below threshold (hallucination suspected)", quality)}
 	}
 	return OutputQualityVerdict{Action: "accept", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f acceptable", quality)}
@@ -522,14 +586,15 @@ func EvaluateOutputQuality(signal ReflexSignal) OutputQualityVerdict {
 // and deterministically emits an authoritative TriageVerdict.
 func (g *ReflexGate) EvaluatePolicy(signal ReflexSignal, req TriageRequest) TriageVerdict {
 	signal.KeyUsed = MaskKey(signal.KeyUsed)
+	th := g.promptsConfig.Thresholds
 	// Rule 1: Instant Kill on high sandbox breach probability (Active Defense)
-	if signal.BreachProb >= 0.70 {
+	if signal.BreachProb >= th.L1BreachKillProb {
 		return newVerdict(signal, ActionInstantKill,
-			fmt.Sprintf("Supervisor policy: sandbox breach threshold exceeded (prob=%.2f >= 0.70)", signal.BreachProb))
+			fmt.Sprintf("Supervisor policy: sandbox breach threshold exceeded (prob=%.2f >= %.2f)", signal.BreachProb, th.L1BreachKillProb))
 	}
 
 	// Rule 2: Fast-path Write Receipt grant for certified low-risk mutations within scope
-	if signal.RiskScore <= 1.5 && signal.BreachProb < 0.20 && (signal.Confidence >= 0.80 || signal.IsFallback) {
+	if signal.RiskScore <= th.L1GrantMaxRisk && signal.BreachProb < th.L1GrantMaxBreach && (signal.Confidence >= th.L1GrantMinConfidence || signal.IsFallback) {
 		// Verify allowed paths scope gate
 		if len(req.AllowedPaths) > 0 && !isWithinScope(req.FilesModified, req.AllowedPaths) {
 			return newVerdict(signal, ActionEscalateHITL,
@@ -708,16 +773,45 @@ func (g *ReflexGate) EvaluateMemoryEntry(ctx context.Context, nakedPayload strin
 		return "clean", nil
 	}
 
-	sig, err := g.EmitSignal(ctx, TriageRequest{
-		TaskID:        "memory-promotion-gate",
-		FilesModified: []string{"docs/memory-note.md"},
-		AllowedPaths:  []string{"docs/*"},
-		DiffSummary:   trimmed,
-	})
+	questions := g.memoryPromotionQuestionsMap()
+	if len(questions) == 0 {
+		return "clean", nil
+	}
+
+	payload := map[string]any{
+		"model": g.model,
+		"state": map[string]any{
+			"memory_note": trimmed,
+		},
+		"questions": questions,
+	}
+	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		return "clean", nil
 	}
-	if sig.BreachProb >= 0.50 || sig.RiskScore >= 4.0 {
+
+	resp, err := g.postJevHTTPWithRetry(ctx, bodyBytes)
+	if err != nil {
+		return "clean", nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "clean", nil
+	}
+
+	var jevResp JevResponse
+	if err := json.NewDecoder(resp.Body).Decode(&jevResp); err != nil {
+		return "clean", nil
+	}
+
+	secretAns, hasSecret := jevResp.Answers["secret_or_pii"]
+	injAns, hasInj := jevResp.Answers["prompt_injection"]
+	if !hasSecret || !hasInj {
+		return "clean", nil
+	}
+
+	th := g.promptsConfig.Thresholds
+	if secretAns.Noul >= th.MemoryBlockBreachProb || injAns.Noul >= th.MemoryBlockBreachProb {
 		return "blocked", nil
 	}
 	return "clean", nil
