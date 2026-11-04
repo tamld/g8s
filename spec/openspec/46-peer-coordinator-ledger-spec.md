@@ -1,8 +1,8 @@
 # OpenSpec DELTA-46: Peer Coordinator Ledger
 
 * **Specification ID**: `DELTA-46`
-* **Status**: `PROPOSED` — experimental branch, not released or admitted.
-* **Implementation Status**: `PROPOSED`
+* **Status**: `APPLIED` — merged in PR #700 and AM2 retention PR #760; blind spec-vs-code review (`ae3a8020`, issue #751) mapped 37 normative requirements; non-blocking verification/doc deltas tracked in issue #758.
+* **Implementation Status**: `APPLIED` (RT-MESH v1 core PR #700 + AM2 retention PR #760; verification/doc deltas tracked in issue #758)
 * **Target Packages**: `internal/mesh`, `internal/mcp`, `cmd/g8s`
 * **Milestone**: `M6 (LLM Consumer & Fleet)`
 * **domain_href**: `spec/domains/05-stratum-federation/spec.md#R2-peer-coordinator-ledger`
