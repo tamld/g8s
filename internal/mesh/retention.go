@@ -63,6 +63,14 @@ func msgPrune(ctx context.Context, s *Store, input json.RawMessage) (any, error)
 		if r.DryRun {
 			return nil
 		}
+		prunedAt := s.now().UTC().Format(time.RFC3339)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO message_tombstones(message_id, digest, seq, pruned_at)
+			SELECT message_id, digest, seq, ? FROM messages WHERE acked = 1 AND created_at < ?`,
+			prunedAt, cutoffStr,
+		); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx,
 			`DELETE FROM messages WHERE acked = 1 AND created_at < ?`, cutoffStr,
 		)

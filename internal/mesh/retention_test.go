@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +36,42 @@ func retentionMessageCount(t *testing.T, s *Store) int {
 		t.Fatalf("count messages: %v", err)
 	}
 	return n
+}
+
+func retentionTombstoneCount(t *testing.T, s *Store) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM message_tombstones`).Scan(&n); err != nil {
+		t.Fatalf("count tombstones: %v", err)
+	}
+	return n
+}
+
+func retentionSendSeq(t *testing.T, s *Store, msgID string) int64 {
+	t.Helper()
+	raw := msgMustExec(t, s, "send", map[string]any{
+		"node_id": "sender", "incarnation": "s1", "message_id": msgID,
+		"to_node": "rec", "to_incarnation": "r1", "kind": "k",
+		"payload": map[string]any{"id": msgID},
+	})
+	var out struct {
+		Seq int64 `json:"seq"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("send seq: %v", err)
+	}
+	return out.Seq
+}
+
+func retentionPendingInbox(t *testing.T, s *Store) []Message {
+	t.Helper()
+	var ib struct {
+		Messages []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(msgMustExec(t, s, "inbox", map[string]any{"node_id": "rec", "incarnation": "r1"}), &ib); err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	return ib.Messages
 }
 
 func retentionClaimCount(t *testing.T, s *Store) int {
@@ -97,6 +134,9 @@ func TestMeshRetentionPrune(t *testing.T) {
 	if retentionMessageCount(t, s) != 3 {
 		t.Fatalf("dry_run must not delete rows, got %d messages", retentionMessageCount(t, s))
 	}
+	if retentionTombstoneCount(t, s) != 0 {
+		t.Fatalf("dry_run must not create tombstones, got %d", retentionTombstoneCount(t, s))
+	}
 
 	pruneRaw := msgMustExec(t, s, "prune", map[string]any{"older_than": "168h", "dry_run": false})
 	var pr msgPruneResp
@@ -108,6 +148,9 @@ func TestMeshRetentionPrune(t *testing.T) {
 	}
 	if retentionMessageCount(t, s) != 2 {
 		t.Fatalf("expected 2 messages after prune, got %d", retentionMessageCount(t, s))
+	}
+	if retentionTombstoneCount(t, s) != 1 {
+		t.Fatalf("expected 1 tombstone after prune, got %d", retentionTombstoneCount(t, s))
 	}
 
 	var snap msgSnapResp
@@ -160,5 +203,81 @@ func TestMeshRetentionPruneDefaultOlderThan(t *testing.T) {
 	var out msgPruneResp
 	if err := json.Unmarshal(raw, &out); err != nil || out.Pruned != 1 {
 		t.Fatalf("default 168h prune: %+v err=%v", out, err)
+	}
+}
+
+func TestMeshRetentionPruneTombstoneDedup(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	retentionSetupPair(t, s)
+	s.now = func() time.Time { return now.Add(-200 * time.Hour) }
+	firstSeq := retentionSendSeq(t, s, "pruned_msg")
+	retentionAck(t, s, "pruned_msg")
+
+	s.now = func() time.Time { return now }
+	msgMustExec(t, s, "prune", map[string]any{"older_than": "168h", "dry_run": false})
+	if retentionMessageCount(t, s) != 0 {
+		t.Fatalf("expected no message rows after prune, got %d", retentionMessageCount(t, s))
+	}
+	if retentionTombstoneCount(t, s) != 1 {
+		t.Fatalf("expected one tombstone, got %d", retentionTombstoneCount(t, s))
+	}
+
+	reSeq := retentionSendSeq(t, s, "pruned_msg")
+	if reSeq != firstSeq {
+		t.Fatalf("idempotent resend after prune: seq %d want %d", reSeq, firstSeq)
+	}
+	if len(retentionPendingInbox(t, s)) != 0 {
+		t.Fatal("tombstone idempotent resend must not redeliver to inbox")
+	}
+	if retentionMessageCount(t, s) != 0 {
+		t.Fatalf("idempotent resend must not insert message row, got %d", retentionMessageCount(t, s))
+	}
+
+	if err := msgExecErr(t, s, "send", map[string]any{
+		"node_id": "sender", "incarnation": "s1", "message_id": "pruned_msg",
+		"to_node": "rec", "to_incarnation": "r1", "kind": "k",
+		"payload": map[string]any{"id": "pruned_msg", "different": true},
+	}); err == nil || !strings.Contains(err.Error(), "ID_CONFLICT") {
+		t.Fatalf("expected ID_CONFLICT after prune for different digest, got %v", err)
+	}
+}
+
+func TestMeshRetentionPruneTombstoneDurability(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retentionSetupPair(t, s)
+	s.now = func() time.Time { return now.Add(-200 * time.Hour) }
+	wantSeq := retentionSendSeq(t, s, "dur_msg")
+	retentionAck(t, s, "dur_msg")
+	s.now = func() time.Time { return now }
+	msgMustExec(t, s, "prune", map[string]any{"older_than": "168h"})
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.now = func() time.Time { return now }
+
+	gotSeq := retentionSendSeq(t, s2, "dur_msg")
+	if gotSeq != wantSeq {
+		t.Fatalf("after reopen: seq %d want %d", gotSeq, wantSeq)
+	}
+	if len(retentionPendingInbox(t, s2)) != 0 {
+		t.Fatal("reopened store: tombstone must block redelivery")
 	}
 }
