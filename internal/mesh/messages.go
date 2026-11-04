@@ -22,6 +22,7 @@ func init() {
 	handlers["ack"] = msgAck
 	handlers["snapshot"] = msgSnapshot
 	handlers["wait"] = msgWait
+	handlers["prune"] = msgPrune
 }
 
 func actorTx(ctx context.Context, tx *sql.Tx, node, inc string) error {
