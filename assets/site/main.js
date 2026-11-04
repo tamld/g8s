@@ -1,11 +1,14 @@
 /**
- * g8s Product Site — Interactive Controls
- * Zero dependencies · CSP-clean · Vanilla JS (ES2022)
- * Manages tab switching, copy-to-clipboard interactions, and keyboard accessibility
+ * g8s Product Site — Interactive Controls & Motion Engine
+ * Zero dependencies · CSP-clean · Vanilla JS (ES2022) · B7 Motion Law
+ * Manages tab switching, copy-to-clipboard interactions, keyboard accessibility, and scroll reveals
  */
 
 (function () {
   'use strict';
+
+  // Mark DOM as JS-enabled for graceful degradation
+  document.documentElement.classList.add('js');
 
   // Initialize all interactive modules once DOM is parsed
   function init() {
@@ -13,6 +16,7 @@
     setupQuickstartTabs();
     setupCopyButtons();
     setupKeyboardTabs();
+    setupScrollReveals();
   }
 
   /**
@@ -169,6 +173,38 @@
           tabs[nextIndex].click();
         }
       });
+    });
+  }
+
+  /**
+   * Scroll Reveal and Signature Stamp Engine (B7 Motion Law)
+   * Triggers once when elements enter the viewport; fail-open fallback if unobserved
+   */
+  function setupScrollReveals() {
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('[data-reveal], [data-stamp]').forEach((el) => {
+        el.classList.add('is-revealed');
+        if (el.hasAttribute('data-stamp')) {
+          el.classList.add('is-stamped');
+        }
+      });
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-revealed');
+          if (entry.target.hasAttribute('data-stamp')) {
+            entry.target.classList.add('is-stamped');
+          }
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.1 });
+
+    document.querySelectorAll('[data-reveal], [data-stamp]').forEach((el) => {
+      observer.observe(el);
     });
   }
 
