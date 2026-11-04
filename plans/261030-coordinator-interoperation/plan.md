@@ -67,7 +67,7 @@ Planning artifacts: source-bound peer review, recorded decision dispositions, lo
 
 ## 2026-11-04 status
 
-Campaign tracker [#699](https://github.com/tamld/g8s/issues/699) is **closed**; remaining work is one-issue-one-receipt ([#750](https://github.com/tamld/g8s/issues/750)–[#756](https://github.com/tamld/g8s/issues/756)). Phase 3 native inbox/recovery evidence remains in [phase-03-native-drill.md](./phase-03-native-drill.md). Phase 4 convergence above is unchanged; **open Phase 4 scope** is inbox retention ([#752](https://github.com/tamld/g8s/issues/752)), RT-MESH v1.1 amendments A1–A5 ([#754](https://github.com/tamld/g8s/issues/754)), and fence-at-mutation ADR ([#755](https://github.com/tamld/g8s/issues/755)).
+Campaign tracker [#699](https://github.com/tamld/g8s/issues/699) is **closed**; remaining work is one-issue-one-receipt ([#750](https://github.com/tamld/g8s/issues/750)–[#756](https://github.com/tamld/g8s/issues/756)). Phase 3 native inbox/recovery evidence remains in [phase-03-native-drill.md](./phase-03-native-drill.md). Phase 4 convergence above is unchanged; **open Phase 4 scope** is RT-MESH v1.1 amendments A1–A5 ([#754](https://github.com/tamld/g8s/issues/754)), fence-at-mutation ADR ([#755](https://github.com/tamld/g8s/issues/755)), and spec 46 verification deltas ([#758](https://github.com/tamld/g8s/issues/758)).
 
 **AM1** (`busy_timeout` 5000→30000): **closed as measured no-op** — 8 concurrent writers × 40 `coordinator mesh --op send` = **320/320** messages persisted, **0** `SQLITE_BUSY`, per-send **p95 35ms** (agy co-sign 2026-11-01; drill under `$G8S_STATE_DIR/am1-drill/` per [#699](https://github.com/tamld/g8s/issues/699) comment).
 
@@ -77,8 +77,8 @@ Campaign tracker [#699](https://github.com/tamld/g8s/issues/699) is **closed**; 
 - [x] Land CI/CD depth + OWASP agentic red suites (audit items 1–5, 8) — PR [#707](https://github.com/tamld/g8s/pull/707) (`5eed521`)
 - [x] Complete Phase 3 native drill artifacts — [phase-03-native-drill.md](./phase-03-native-drill.md) (converged 2026-10-31)
 - [x] AM1 concurrent-send measurement — no timeout increase warranted ([#699](https://github.com/tamld/g8s/issues/699))
-- [ ] AM2 mesh inbox retention / rotation — [#752](https://github.com/tamld/g8s/issues/752)
+- [x] AM2 mesh inbox retention / rotation — [#752](https://github.com/tamld/g8s/issues/752) (PR [#760](https://github.com/tamld/g8s/pull/760))
 - [ ] RT-MESH v1.1 A1–A5 — [#754](https://github.com/tamld/g8s/issues/754)
 - [ ] fence-at-mutation enforcement ADR — [#755](https://github.com/tamld/g8s/issues/755)
-- [ ] Promote OpenSpec DELTA-46 from PROPOSED — [#751](https://github.com/tamld/g8s/issues/751)
+- [x] Promote OpenSpec DELTA-46 from PROPOSED to APPLIED — [#751](https://github.com/tamld/g8s/issues/751) (blind review `ae3a8020`; verification deltas in [#758](https://github.com/tamld/g8s/issues/758))
 - [x] Roadmap v0.22.x interop row + this plan status — [#750](https://github.com/tamld/g8s/issues/750) (this edit)

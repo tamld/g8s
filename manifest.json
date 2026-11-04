@@ -528,7 +528,7 @@
       "id": "DELTA-46",
       "title": "Peer Coordinator Ledger",
       "path": "spec/openspec/46-peer-coordinator-ledger-spec.md",
-      "status": "PROPOSED"
+      "status": "APPLIED"
     },
     {
       "id": "DELTA-47",

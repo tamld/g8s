@@ -42,7 +42,7 @@ Every F1 worker and F2 subagent execution MUST inherit deterministic capability-
 <!-- inherited-from: DELTA-46 -->
 <!-- feature_id: FEAT-COORDINATOR-MESH-01 -->
 
-Peer coordinators MUST synchronize accepted task knowledge via monotonic `context_revision` counters, SHA-256 artifact digests, durable recipient-bound inbox messages, and idempotent deduplication (`PROPOSED DELTA-46`).
+Peer coordinators MUST synchronize accepted task knowledge via monotonic `context_revision` counters, SHA-256 artifact digests, durable recipient-bound inbox messages, and idempotent deduplication (`DELTA-46`).
 
 #### Scenario: Durable peer inbox deduplication, quota provenance, and revision-bound acceptance
 <!-- tests: TestMeshAcceptRevisionAndIdempotence, TestMeshMessageRoundTripAndDedup, TestMeshQuotaOwnershipAndValidation, TestMeshInboxDurableReopen, TestMeshWaitCancellation -->

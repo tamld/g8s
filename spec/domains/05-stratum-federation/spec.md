@@ -27,7 +27,7 @@ Multi-repository delegation MUST obey Orthogonal Control Strata (`S0..S3 + O-Pla
 <!-- inherited-from: DELTA-46 -->
 <!-- feature_id: FEAT-COORDINATOR-MESH-01 -->
 
-Multiple equal-peer F0 coordinators sharing an explicit local SQLite WAL ledger MUST register node incarnations, publish self-observed quota with provenance, acquire non-overlapping path-scoped task claims under immediate transactions, and reject worker (`F1`/`F2`) or stale-incarnation mutations (`PROPOSED DELTA-46`).
+Multiple equal-peer F0 coordinators sharing an explicit local SQLite WAL ledger MUST register node incarnations, publish self-observed quota with provenance, acquire non-overlapping path-scoped task claims under immediate transactions, and reject worker (`F1`/`F2`) or stale-incarnation mutations (`DELTA-46`).
 
 #### Scenario: Equal-peer coordinator mesh claims, incarnation fencing, and CLI/MCP parity
 <!-- tests: TestMeshOverlappingClaimsSingleWinner, TestMeshDisjointClaims, TestMeshClaimRejectsTraversalAndChangedReplay, TestMeshAllPeersSameRights, TestMeshLeaseExpiry, TestMeshStaleIncarnation, TestCoordinatorMeshNativeRegistrationAndParity, TestCoordinatorMeshRejectsWorkerAndUnknownArgs -->
