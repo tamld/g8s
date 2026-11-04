@@ -22,6 +22,7 @@ func init() {
 	handlers["ack"] = msgAck
 	handlers["snapshot"] = msgSnapshot
 	handlers["wait"] = msgWait
+	handlers["prune"] = msgPrune
 }
 
 func actorTx(ctx context.Context, tx *sql.Tx, node, inc string) error {
@@ -233,6 +234,16 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 		var exSeq int64
 		var exDig string
 		err := tx.QueryRowContext(ctx, "SELECT seq, digest FROM messages WHERE message_id = ?", r.MessageID).Scan(&exSeq, &exDig)
+		if err == nil {
+			if exDig == digest {
+				seq = exSeq
+				return nil
+			}
+			return errors.New("ID_CONFLICT: message_id exists with different digest")
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		err = tx.QueryRowContext(ctx, "SELECT seq, digest FROM message_tombstones WHERE message_id = ?", r.MessageID).Scan(&exSeq, &exDig)
 		if err == nil {
 			if exDig == digest {
 				seq = exSeq

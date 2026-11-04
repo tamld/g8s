@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,9 @@ import (
 )
 
 func TestCoordinatorMeshNativeRegistrationAndParity(t *testing.T) {
+	t.Setenv("G8S_TIER", "")
+	t.Setenv("G8S_STRATUM", "")
+
 	s := NewServer(strings.NewReader(""), &bytes.Buffer{}, nil, nil, nil)
 
 	// Verify tool is registered in tools/list
@@ -183,6 +187,107 @@ func TestCoordinatorMeshNativeRegistrationAndParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(mcpParsed, coreParsed) {
 		t.Fatalf("semantic mismatch between MCP output and core output:\nMCP:  %s\nCore: %s", string(raw), string(coreRaw))
+	}
+
+	// MCP prune dry-run parity
+	sendArgs := json.RawMessage(fmt.Sprintf(`{
+		"mesh_dir": %q,
+		"operation": "send",
+		"input": {
+			"node_id": "test-coordinator",
+			"incarnation": "inc-001",
+			"message_id": "parity-msg",
+			"to_node": "test-coordinator",
+			"to_incarnation": "inc-001",
+			"kind": "note",
+			"payload": {"text": "prune parity"}
+		}
+	}`, dir))
+	if _, rpcErr := s.coordinatorMeshTool(context.Background(), sendArgs); rpcErr != nil {
+		t.Fatalf("coordinatorMeshTool send failed: %+v", rpcErr)
+	}
+	ackArgs := json.RawMessage(fmt.Sprintf(`{
+		"mesh_dir": %q,
+		"operation": "ack",
+		"input": {
+			"node_id": "test-coordinator",
+			"incarnation": "inc-001",
+			"message_id": "parity-msg"
+		}
+	}`, dir))
+	if _, rpcErr := s.coordinatorMeshTool(context.Background(), ackArgs); rpcErr != nil {
+		t.Fatalf("coordinatorMeshTool ack failed: %+v", rpcErr)
+	}
+
+	pruneArgs := json.RawMessage(fmt.Sprintf(`{
+		"mesh_dir": %q,
+		"operation": "prune",
+		"input": {"older_than": "168h", "dry_run": true}
+	}`, dir))
+	pruneRes, rpcErr := s.coordinatorMeshTool(context.Background(), pruneArgs)
+	if rpcErr != nil {
+		t.Fatalf("coordinatorMeshTool prune dry-run failed: %+v", rpcErr)
+	}
+	pruneRaw, ok := pruneRes.(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected json.RawMessage prune result, got %T", pruneRes)
+	}
+	corePruneRaw, err := coreStore.Execute(context.Background(), "prune", json.RawMessage(`{"older_than":"168h","dry_run":true}`))
+	if err != nil {
+		t.Fatalf("coreStore.Execute prune dry-run failed: %v", err)
+	}
+	var mcpPrune, corePrune map[string]any
+	if err := json.Unmarshal(pruneRaw, &mcpPrune); err != nil {
+		t.Fatalf("unmarshal MCP prune: %v", err)
+	}
+	if err := json.Unmarshal(corePruneRaw, &corePrune); err != nil {
+		t.Fatalf("unmarshal core prune: %v", err)
+	}
+	if !reflect.DeepEqual(mcpPrune, corePrune) {
+		t.Fatalf("prune dry-run mismatch MCP=%s core=%s", string(pruneRaw), string(corePruneRaw))
+	}
+}
+
+func TestCoordinatorMeshMCPEnumMatchesMeshHandlers(t *testing.T) {
+	t.Setenv("G8S_TIER", "")
+	t.Setenv("G8S_STRATUM", "")
+
+	s := NewServer(strings.NewReader(""), &bytes.Buffer{}, nil, nil, nil)
+	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
+	if resp.Error != nil {
+		t.Fatalf("tools/list error: %+v", resp.Error)
+	}
+	var listResult struct {
+		Tools []toolDescriptor `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &listResult); err != nil {
+		t.Fatalf("unmarshal tools/list result: %v", err)
+	}
+	var meshTool *toolDescriptor
+	for i := range listResult.Tools {
+		if listResult.Tools[i].Name == "g8s_coordinator_mesh" {
+			meshTool = &listResult.Tools[i]
+			break
+		}
+	}
+	if meshTool == nil {
+		t.Fatal("g8s_coordinator_mesh not found in tools/list")
+	}
+	var schema struct {
+		Properties struct {
+			Operation struct {
+				Enum []string `json:"enum"`
+			} `json:"operation"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(meshTool.InputSchema, &schema); err != nil {
+		t.Fatalf("unmarshal coordinator mesh input schema: %v", err)
+	}
+	want := mesh.Operations()
+	got := append([]string(nil), schema.Properties.Operation.Enum...)
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MCP operation enum mismatch: got %v want %v", got, want)
 	}
 }
 

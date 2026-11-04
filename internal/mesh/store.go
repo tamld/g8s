@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 const schemaSQL = `CREATE TABLE IF NOT EXISTS nodes(node_id TEXT PRIMARY KEY, incarnation TEXT NOT NULL, capabilities TEXT NOT NULL, observed_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS quotas(node_id TEXT PRIMARY KEY, incarnation TEXT NOT NULL, observation TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT UNIQUE NOT NULL, sender TEXT NOT NULL, sender_inc TEXT NOT NULL, recipient TEXT NOT NULL, recipient_inc TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS message_tombstones(message_id TEXT PRIMARY KEY, digest TEXT NOT NULL, seq INTEGER NOT NULL, pruned_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS claims(task_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, incarnation TEXT NOT NULL, resource TEXT NOT NULL, paths TEXT NOT NULL, context_revision INTEGER NOT NULL, expires_at INTEGER NOT NULL, state TEXT NOT NULL, artifact_ref TEXT NOT NULL DEFAULT '', artifact_sha256 TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS meta(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
 INSERT OR IGNORE INTO meta(id, revision) VALUES(1, 0);`
@@ -68,6 +70,22 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// Operations returns the registered mesh operation names in stable sorted order.
+func Operations() []string {
+	ops := make([]string, 0, len(handlers))
+	for op := range handlers {
+		ops = append(ops, op)
+	}
+	slices.Sort(ops)
+	return ops
+}
+
+// ValidOperation reports whether op is a registered mesh operation.
+func ValidOperation(op string) bool {
+	_, ok := handlers[op]
+	return ok
 }
 
 func (s *Store) Execute(ctx context.Context, op string, input json.RawMessage) (json.RawMessage, error) {
