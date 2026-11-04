@@ -131,18 +131,22 @@ g8s worker --once
 
 ### Paradigm 2: Đột biến giới hạn quyền (Capability-Scoped Mutation)
 Cấp biên nhận dùng 1 lần khóa chặt đường dẫn trước khi sửa đổi:
+`--allow-workspace-write` tạm thời đặt `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` cho một lần gọi CLI đó. Nếu bỏ qua hoặc đặt false, giá trị biến môi trường hiện có không đổi; vẫn hỗ trợ `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` đã có sẵn.
+
 ```bash
 # 1. Cấp biên nhận ghi có thời hạn cho thư mục chỉ định
-RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select --selector .data.receipt_id)
+RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select data.receipt_id)
 
 # 2. Giao task cho worker kèm mã biên nhận
 g8s submit \
+  --idempotency-key "test-config-01" \
   --role test-runner \
   --permission workspace_write \
+  --allow-workspace-write \
   --receipt-id "$RECEIPT_ID" \
   --prompt "Thêm unit test kiểm tra validate config trong internal/config"
 
-g8s worker --once
+g8s worker --once --allow-workspace-write
 ```
 
 ### Paradigm 3: Tiêu thụ Gateway LLM hướng cấu hình (Config-Driven LLM Consumer)

@@ -212,7 +212,7 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 		// the escape hatch so supervisors do not have to read source to
 		// discover it. Receipts remain mandatory for workspace_write
 		// regardless of this flag (harness gate).
-		return errors.New("workspace_write is disabled by default; set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
+		return errors.New("workspace_write is disabled by default; pass --allow-workspace-write to g8s submit/worker (or set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment) to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
 	}
 
 	// The harness re-validates with the receipt ID carried in the payload
