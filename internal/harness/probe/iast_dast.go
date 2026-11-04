@@ -82,13 +82,13 @@ func restoreEnvVar(name, value string, wasSet bool) error {
 }
 
 func restoreEnvVars(restores ...func() error) error {
-	var first error
+	var errs []error
 	for _, restore := range restores {
-		if err := restore(); err != nil && first == nil {
-			first = err
+		if err := restore(); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return first
+	return errors.Join(errs...)
 }
 
 // RuntimeSensor captures baseline and post-probe runtime state for hygiene verification.
