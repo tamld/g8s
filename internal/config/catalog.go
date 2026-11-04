@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/tamld/g8s/internal/cli"
 )
 
 // CurrentCatalogSchemaVersion is the required schema version for agent-models catalogs.
@@ -58,12 +60,23 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("field %q: %s", e.Field, e.Msg)
 }
 
+// Profile is a named dispatch preset for g8s submit (#725).
+type Profile struct {
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+	Timeout    string `json:"timeout"`
+	Role       string `json:"role"`
+	Permission string `json:"permission"`
+}
+
 // Catalog represents the agent-models catalog (agent-models.v1).
 type Catalog struct {
 	SchemaVersion  string                     `json:"schema_version"`
 	CatalogVersion int                        `json:"catalog_version"`
 	VerifiedAt     string                     `json:"verified_at"`
 	Sources        []string                   `json:"sources"`
+	Profiles       map[string]Profile         `json:"profiles,omitempty"`
 	Providers      map[string]ProviderCatalog `json:"providers"`
 }
 
@@ -105,6 +118,35 @@ type MergeReport struct {
 	SkippedProviders     int      `json:"skipped_providers"`
 	UnknownProviders     int      `json:"unknown_providers"`
 	SkippedProviderNames []string `json:"skipped_provider_names,omitempty"`
+}
+
+// Profile returns a dispatch preset by name (case-sensitive key; lookup is case-insensitive).
+func (c *Catalog) Profile(name string) (Profile, bool) {
+	if c == nil || len(c.Profiles) == 0 {
+		return Profile{}, false
+	}
+	if p, ok := c.Profiles[name]; ok {
+		return p, true
+	}
+	for k, v := range c.Profiles {
+		if strings.EqualFold(k, name) {
+			return v, true
+		}
+	}
+	return Profile{}, false
+}
+
+// ProfileNames returns sorted dispatch preset names.
+func (c *Catalog) ProfileNames() []string {
+	if c == nil || len(c.Profiles) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(c.Profiles))
+	for name := range c.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // FindProvider searches for a provider by name within the catalog (case-insensitive).
@@ -306,6 +348,69 @@ func parseFlowMap(s string) (map[string]int, error) {
 	return res, nil
 }
 
+func parseFlowMapString(s string) (map[string]string, error) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
+		return nil, fmt.Errorf("expected flow map enclosed in {}, got %q", s)
+	}
+	inner := strings.TrimSpace(s[1 : len(s)-1])
+	if inner == "" {
+		return make(map[string]string), nil
+	}
+	parts := strings.Split(inner, ",")
+	res := make(map[string]string, len(parts))
+	for _, part := range parts {
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("invalid map entry %q", part)
+		}
+		k := cleanYAMLValue(kv[0])
+		v := cleanYAMLValue(kv[1])
+		res[k] = v
+	}
+	return res, nil
+}
+
+func profileFromFlowMap(name string, fields map[string]string) (Profile, error) {
+	const (
+		keyProvider   = "provider"
+		keyModel      = "model"
+		keyEffort     = "effort"
+		keyTimeout    = "timeout"
+		keyRole       = "role"
+		keyPermission = "permission"
+	)
+	allowed := map[string]bool{
+		keyProvider: true, keyModel: true, keyEffort: true,
+		keyTimeout: true, keyRole: true, keyPermission: true,
+	}
+	for k := range fields {
+		if !allowed[k] {
+			return Profile{}, &ValidationError{Field: "profiles", Model: name, Msg: fmt.Sprintf("unknown field %q", k)}
+		}
+	}
+	p := Profile{
+		Provider:   fields[keyProvider],
+		Model:      fields[keyModel],
+		Effort:     fields[keyEffort],
+		Timeout:    fields[keyTimeout],
+		Role:       fields[keyRole],
+		Permission: fields[keyPermission],
+	}
+	if strings.TrimSpace(p.Provider) == "" {
+		return Profile{}, &ValidationError{Field: "profiles", Model: name, Msg: "provider is required"}
+	}
+	if strings.TrimSpace(p.Model) == "" {
+		return Profile{}, &ValidationError{Field: "profiles", Model: name, Msg: "model is required"}
+	}
+	if strings.TrimSpace(p.Timeout) != "" {
+		if _, _, err := cli.ParseTimeoutDuration(p.Timeout); err != nil {
+			return Profile{}, &ValidationError{Field: "profiles", Model: name, Msg: fmt.Sprintf("timeout: %v", err)}
+		}
+	}
+	return p, nil
+}
+
 func parseBool(s string) (bool, error) {
 	val := strings.ToLower(cleanYAMLValue(s))
 	switch val {
@@ -323,11 +428,12 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	cat := &Catalog{
 		Sources:   []string{},
+		Profiles:  make(map[string]Profile),
 		Providers: make(map[string]ProviderCatalog),
 	}
 
 	var (
-		currentSection         string // "sources" or "providers"
+		currentSection         string // "sources", "profiles", or "providers"
 		currentProviderName    string
 		currentProvider        *ProviderCatalog
 		currentModel           *ModelCatalog
@@ -392,6 +498,8 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 				cat.VerifiedAt = val
 			case "sources":
 				currentSection = "sources"
+			case "profiles":
+				currentSection = "profiles"
 			case "providers":
 				currentSection = "providers"
 			default:
@@ -408,6 +516,30 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 				cat.Sources = append(cat.Sources, val)
 				continue
 			}
+
+		case "profiles":
+			if leadingSpaces < 2 {
+				return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("profile entry must be indented under profiles: %q", trimmed)}
+			}
+			idx := strings.IndexByte(trimmed, ':')
+			if idx == -1 {
+				return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid profile line %q", trimmed)}
+			}
+			profName := cleanYAMLValue(trimmed[:idx])
+			rest := strings.TrimSpace(trimmed[idx+1:])
+			if !strings.HasPrefix(rest, "{") {
+				return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("profile %q must use a flow map", profName)}
+			}
+			fields, err := parseFlowMapString(rest)
+			if err != nil {
+				return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("profile %q: %v", profName, err)}
+			}
+			prof, err := profileFromFlowMap(profName, fields)
+			if err != nil {
+				return nil, err
+			}
+			cat.Profiles[profName] = prof
+			continue
 
 		case "providers":
 			// Provider header: indent 1..3 spaces and ends with ":"

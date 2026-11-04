@@ -17,6 +17,13 @@ sources:
   - https://docs.mistral.ai/capabilities/reasoning/
   - https://openrouter.ai/docs/use-cases/reasoning-tokens
 
+# Dispatch presets for `g8s submit -profile <name>` (#725).
+profiles:
+  impl-medium:    {provider: cursor, model: composer-2.5, effort: medium, timeout: 600s, role: implementer, permission: workspace_write}
+  scout-fast:     {provider: cursor, model: composer-2.5, effort: low, timeout: 180s, role: scout, permission: read_only}
+  verifier:       {provider: cursor, model: composer-2.5, effort: high, timeout: 420s, role: verifier, permission: read_only}
+  docs-retriever: {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
+
 providers:
   openai:
     effort_style: named

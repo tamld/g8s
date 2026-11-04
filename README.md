@@ -117,12 +117,15 @@ make local
 ### Paradigm 1: Read-Only Reconnaissance
 Safely explore a codebase without granting write permissions:
 ```bash
-# Submit a read-only reconnaissance task
+# Submit a read-only reconnaissance task (explicit flags or a catalog profile).
+# --profile requires .g8s/agent-models.yml discoverable from the working directory (run inside the repo).
 g8s submit \
+  --profile scout-fast \
   --idempotency-key "scout-providers-01" \
-  --role scout \
-  --permission read_only \
   --prompt "Scan internal/provider and map all exported interfaces"
+
+# Capture task id from the JSON envelope
+g8s submit --profile scout-fast --idempotency-key scout-02 --prompt "..." --json --select data.task_id
 
 # Run one worker attempt to process the task
 g8s worker --once

@@ -61,7 +61,23 @@ func runSubmit(args []string) {
 	premiseRepo := fs.String("premise-repo", "", "repository root for --premise-check probes (defaults to the working directory)")
 	overrideReason := fs.String("override-reason", "", "explicit operator reason to dispatch despite contradicted premises (recorded in the event log)")
 	enforceConformance := fs.Bool("enforce-conformance", false, "refuse dispatch when the provider FAILed required DELTA-43 conformance probes (.g8s/provider-conformance.yml)")
+	profileFlag := fs.String("profile", "", "dispatch preset from .g8s/agent-models.yml profiles (fills provider, model, effort, timeout, role, permission when not overridden)")
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintln(out, "Usage: g8s submit [flags]")
+		fmt.Fprintln(out, "\nQueue a durable worker task with harness safety checks.")
+		fmt.Fprintln(out, "\nExamples:")
+		fmt.Fprintln(out, "  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"Map provider packages\"")
+		fmt.Fprintln(out, "  g8s submit --profile scout-fast --idempotency-key scout-02 --prompt \"...\" --json --select data.task_id")
+		fmt.Fprintln(out, "  g8s submit --profile impl-medium --allow-workspace-write --receipt-id \"$RECEIPT_ID\" \\")
+		fmt.Fprintln(out, "    --idempotency-key impl-01 --prompt \"Implement bounded change\"")
+		fmt.Fprintln(out, "\nFlags:")
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		exitUsage("submit", "", *traceID, err.Error(), "Check 'g8s submit --help'", *jsonl)
 	}
 	workspaceWriteOptInRestore, workspaceWriteOptInErr := withWorkspaceWriteOptIn(*allowWorkspaceWrite)
@@ -83,12 +99,11 @@ func runSubmit(args []string) {
 		exitUsage("submit", "route", *traceID, fmt.Sprintf("invalid --route %q: must be 'auto' or 'manual'", *routeFlag), "Specify --route=auto or --route=manual", *jsonl)
 	}
 
-	if !config.IsValidEffortLevel(*effortFlag) {
-		exitUsage("submit", "effort", *traceID, fmt.Sprintf("invalid --effort %q: allowed ladder is [%s]", *effortFlag, strings.Join(config.EffortLadder, ", ")), fmt.Sprintf("Specify an effort level from [%s]", strings.Join(config.EffortLadder, ", ")), *jsonl)
-	}
-
 	var effortPassed bool
 	var providerPassed bool
+	var modelPassed bool
+	var rolePassed bool
+	var permissionPassed bool
 	var blastRadiusPassed bool
 	var locEstimatePassed bool
 	var toolPolicyPassed bool
@@ -97,8 +112,17 @@ func runSubmit(args []string) {
 		if f.Name == "provider" {
 			providerPassed = true
 		}
+		if f.Name == "model" {
+			modelPassed = true
+		}
 		if f.Name == "effort" {
 			effortPassed = true
+		}
+		if f.Name == "role" {
+			rolePassed = true
+		}
+		if f.Name == "permission" {
+			permissionPassed = true
 		}
 		if f.Name == "blast-radius" {
 			blastRadiusPassed = true
@@ -114,8 +138,52 @@ func runSubmit(args []string) {
 		}
 	})
 
+	var appliedProfile string
+	var timeoutFromProfile bool
+	var effortFromProfile bool
+	profileName := strings.TrimSpace(*profileFlag)
+	if profileName != "" {
+		catalog, catErr := config.LoadDefaultCatalog()
+		if catErr != nil {
+			exitUsage("submit", "profile", *traceID,
+				fmt.Sprintf("load agent-models catalog: %v", catErr),
+				"-profile needs .g8s/agent-models.yml discoverable from the working directory (run inside the repo) — or pass explicit -provider/-model/-effort flags",
+				*jsonl)
+		}
+		prof, ok := catalog.Profile(profileName)
+		if !ok {
+			hint := fmt.Sprintf("Available profiles: %s", strings.Join(catalog.ProfileNames(), ", "))
+			exitUsage("submit", "profile", *traceID, fmt.Sprintf("unknown profile %q", profileName), hint, *jsonl)
+		}
+		appliedProfile = profileName
+		if !providerPassed && strings.TrimSpace(prof.Provider) != "" {
+			*providerFlag = prof.Provider
+		}
+		if !modelPassed && strings.TrimSpace(prof.Model) != "" {
+			*model = prof.Model
+		}
+		if !effortPassed && strings.TrimSpace(prof.Effort) != "" {
+			*effortFlag = prof.Effort
+			effortFromProfile = true
+		}
+		if !rolePassed && strings.TrimSpace(prof.Role) != "" {
+			*role = prof.Role
+		}
+		if !permissionPassed && strings.TrimSpace(prof.Permission) != "" {
+			*permission = prof.Permission
+		}
+		if !timeoutPassed && strings.TrimSpace(prof.Timeout) != "" {
+			*timeout = prof.Timeout
+			timeoutFromProfile = true
+		}
+	}
+
+	if !config.IsValidEffortLevel(*effortFlag) {
+		exitUsage("submit", "effort", *traceID, fmt.Sprintf("invalid --effort %q: allowed ladder is [%s]", *effortFlag, strings.Join(config.EffortLadder, ", ")), fmt.Sprintf("Specify an effort level from [%s]", strings.Join(config.EffortLadder, ", ")), *jsonl)
+	}
+
 	var timeoutDuration time.Duration
-	if timeoutPassed {
+	if timeoutPassed || timeoutFromProfile {
 		d, eff, err := cli.ParseTimeoutDuration(*timeout)
 		if err != nil {
 			exitUsage("submit", "timeout", *traceID, err.Error(), "Specify a positive duration such as '900s' or '15m' (bare integer is treated as seconds)", *jsonl)
@@ -150,6 +218,8 @@ func runSubmit(args []string) {
 		if trimmed == "" {
 			exitUsage("submit", "provider", *traceID, "--provider must be a non-empty string when specified", "Provide a non-empty provider name", *jsonl)
 		}
+		effectiveProvider = trimmed
+	} else if trimmed := strings.TrimSpace(*providerFlag); trimmed != "" {
 		effectiveProvider = trimmed
 	} else {
 		if mgr, err := settings.NewManager(""); err == nil {
@@ -336,7 +406,7 @@ func runSubmit(args []string) {
 	hasSignals := blastRadiusPassed || locEstimatePassed
 	var sigRes lane.SignalResult
 	var explicitEffort string
-	if effortPassed {
+	if effortPassed || effortFromProfile {
 		explicitEffort = *effortFlag
 	}
 
@@ -352,14 +422,14 @@ func runSubmit(args []string) {
 			defaultEffort,
 		)
 		requestedEffort = sigRes.Effort
-		if effortPassed {
+		if effortPassed || effortFromProfile {
 			effortOverride = true
 			if sigRes.OverrideDown {
 				effortOverrideDown = true
 			}
 		}
 	} else {
-		if effortPassed {
+		if effortPassed || effortFromProfile {
 			requestedEffort = *effortFlag
 			effortOverride = true
 			if lane.IsOverrideDown(*effortFlag, defaultEffort) {
@@ -407,7 +477,7 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, effortErr, "Failed to resolve effort", *jsonl)
 	}
 
-	if !timeoutPassed {
+	if !timeoutPassed && !timeoutFromProfile {
 		effTimeout := defaultTimeoutForEffort(effortRes.Applied)
 		if effTimeout != "" {
 			*timeout = effTimeout
@@ -534,6 +604,9 @@ func runSubmit(args []string) {
 	}
 	if effectiveProvider != "" {
 		payloadMap["provider"] = effectiveProvider
+	}
+	if appliedProfile != "" {
+		payloadMap["profile"] = appliedProfile
 	}
 	if *receiptID != "" {
 		payloadMap["receipt_id"] = *receiptID

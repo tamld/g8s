@@ -909,3 +909,68 @@ func TestCatalogMergeNilSafety(t *testing.T) {
 		t.Errorf("expected zero report on nil manifest: %+v", rep2)
 	}
 }
+
+func TestParseCatalogProfilesValid(t *testing.T) {
+	yaml := testCatalogYAML + `
+profiles:
+  scout-fast: {provider: cursor, model: composer-2.5, effort: low, timeout: 180s, role: scout, permission: read_only}
+`
+	cat, err := ParseCatalog([]byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	prof, ok := cat.Profile("scout-fast")
+	if !ok {
+		t.Fatal("expected scout-fast profile")
+	}
+	if prof.Provider != "cursor" || prof.Model != "composer-2.5" || prof.Effort != "low" {
+		t.Errorf("unexpected profile fields: %+v", prof)
+	}
+	if prof.Timeout != "180s" || prof.Role != "scout" || prof.Permission != "read_only" {
+		t.Errorf("unexpected profile metadata: %+v", prof)
+	}
+}
+
+func TestParseCatalogProfilesValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		extra   string
+		wantSub string
+	}{
+		{
+			name: "unknown field",
+			extra: `
+profiles:
+  bad: {provider: cursor, model: m, extra: x}
+`,
+			wantSub: "unknown field",
+		},
+		{
+			name: "empty model",
+			extra: `
+profiles:
+  bad: {provider: cursor, model: "", effort: low}
+`,
+			wantSub: "model is required",
+		},
+		{
+			name: "bad timeout",
+			extra: `
+profiles:
+  bad: {provider: cursor, model: m, timeout: banana}
+`,
+			wantSub: "timeout",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseCatalog([]byte(testCatalogYAML + tc.extra))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("error = %v, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
