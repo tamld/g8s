@@ -50,7 +50,7 @@ The routing and telemetry subsystem MUST expose `g8s scorecard [status|audit|kai
 <!-- inherited-from: issue #725 -->
 <!-- feature_id: FEAT-LLMCALL-01 -->
 
-Named presets in `.g8s/agent-models.yml` under `profiles:` supply the explicit dispatch triple (`provider`, `model`, `effort`) plus `timeout`, `role`, and `permission`. `g8s submit -profile <name>` applies each preset field unless the operator passed the corresponding flag (`fs.Visit` precedence). Unknown profile names fail at parse time with `E_USAGE` and a sorted hint of available names. Profile timeouts use the same `ParseTimeoutDuration` and receipt TTL cross-check as explicit `-timeout`. Profile `workspace_write` still requires an active receipt and harness gates; `-profile` never bypasses isolation.
+Named presets in `.g8s/agent-models.yml` under `profiles:` supply the explicit dispatch triple (`provider`, `model`, `effort`) plus `timeout`, `role`, and `permission`. `g8s submit -profile <name>` applies each preset field unless the operator passed the corresponding flag (`fs.Visit` precedence). Resolving `-profile` uses the same `.g8s/agent-models.yml` discovery walk as routing (from the process working directory upward); when no catalog file is discoverable, the CLI exits `2` with `E_USAGE` and an actionable hint to run inside the repo or pass explicit `-provider`/`-model`/`-effort`. Unknown profile names fail at parse time with `E_USAGE` and a sorted hint of available names. Profile timeouts use the same `ParseTimeoutDuration` and receipt TTL cross-check as explicit `-timeout`. Profile `workspace_write` still requires an active receipt and harness gates; `-profile` never bypasses isolation.
 
 #### Scenario: Catalog profile fills dispatch fields and records provenance
 <!-- tests: TestSubmitProfile_FillsFields, TestParseCatalogProfilesValid -->
@@ -63,6 +63,12 @@ Named presets in `.g8s/agent-models.yml` under `profiles:` supply the explicit d
 - **GIVEN** no matching preset name
 - **WHEN** `g8s submit --profile no-such --idempotency-key k --prompt p` runs
 - **THEN** the CLI exits `2` with `E_USAGE`, lists available profile names, and does not insert a task row
+
+#### Scenario: Submit profile without discoverable catalog fails usage before queue write
+<!-- tests: TestSubmitProfile_MissingCatalogFromCWD -->
+- **GIVEN** a working directory where `.g8s/agent-models.yml` is not discoverable
+- **WHEN** `g8s submit --profile scout-fast --idempotency-key k --prompt p` runs
+- **THEN** the CLI exits `2` with `E_USAGE` and hints to run inside the repo or pass explicit dispatch flags, without inserting a task row
 
 #### Scenario: Audited Jev v2 prompt registry, batch cache, and D-09 ProcessReflectionReceipt judge enforce evidence refs
 <!-- tests: TestJevPromptsRegistryParityAndModelPinning, TestBatchEvaluateItemInQuestionAndCache, TestProcessReflectionReceiptSchemaAndEvidenceRefGate, TestJudgeProcessArtifactsPromptManifestAudit -->

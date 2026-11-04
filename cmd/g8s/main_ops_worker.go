@@ -560,15 +560,15 @@ func runWorker(args []string) {
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
 	fs.Usage = func() {
-		fmt.Println("Usage: g8s worker [flags]")
-		fmt.Println("\nClaim and execute durable tasks from the queue.")
-		fmt.Println("\nExamples:")
-		fmt.Println("  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"...\" --json --select data.task_id")
-		fmt.Println("  g8s worker --once --allow-workspace-write")
-		fmt.Println("\nFlags:")
+		out := fs.Output()
+		fmt.Fprintln(out, "Usage: g8s worker [flags]")
+		fmt.Fprintln(out, "\nClaim and execute durable tasks from the queue.")
+		fmt.Fprintln(out, "\nExamples:")
+		fmt.Fprintln(out, "  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"...\" --json --select data.task_id")
+		fmt.Fprintln(out, "  g8s worker --once --allow-workspace-write")
+		fmt.Fprintln(out, "\nFlags:")
 		fs.PrintDefaults()
 	}
-	fs.SetOutput(os.Stdout)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)

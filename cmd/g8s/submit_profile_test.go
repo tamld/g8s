@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -170,5 +172,120 @@ func TestSubmitProfile_WorkspaceWriteWithoutReceipt(t *testing.T) {
 	}
 	if env.Error == nil || env.Error.Code != cli.CodeHarness {
 		t.Errorf("expected E_HARNESS, got %+v (raw: %s)", env.Error, raw)
+	}
+}
+
+func TestSubmitProfile_ExplicitModelOverride(t *testing.T) {
+	t.Setenv("G8S_STATE_DIR", t.TempDir())
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "profile_model_override.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + filepath.Join(t.TempDir(), "absent-providers.json"),
+	}
+
+	const overrideModel = "other-model"
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--profile", "scout-fast",
+		"--model", overrideModel,
+		"--idempotency-key", "profile-override-model",
+		"--prompt", "Scout with explicit model",
+	)
+	if code != 0 {
+		t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+
+	reqJSON := getTaskRequestJSON(t, dbPath, "profile-override-model")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["model"] != overrideModel {
+		t.Errorf("model = %v, want %q from explicit flag", payload["model"], overrideModel)
+	}
+	if payload["provider"] != "cursor" {
+		t.Errorf("provider = %v, want cursor from profile", payload["provider"])
+	}
+	if payload["role"] != "scout" {
+		t.Errorf("role = %v, want scout from profile", payload["role"])
+	}
+	if payload["permission"] != "read_only" {
+		t.Errorf("permission = %v, want read_only from profile", payload["permission"])
+	}
+	if payload["timeout"] != "180s" {
+		t.Errorf("timeout = %v, want 180s from profile", payload["timeout"])
+	}
+	if payload["effort_applied"] != "low" && payload["effort"] != "low" {
+		t.Errorf("effort = %v / effort_applied = %v, want low from profile", payload["effort"], payload["effort_applied"])
+	}
+}
+
+func TestSubmitProfile_MissingCatalogFromCWD(t *testing.T) {
+	t.Setenv("G8S_STATE_DIR", t.TempDir())
+	binPath := buildG8sBinary(t)
+	emptyWD := t.TempDir()
+	dbPath := filepath.Join(emptyWD, "should-not-exist.db")
+
+	cmd := exec.Command(binPath, "submit",
+		"--profile", "scout-fast",
+		"--idempotency-key", "no-catalog",
+		"--prompt", "Task",
+		"--json",
+	)
+	cmd.Dir = emptyWD
+	cmd.Env = append(os.Environ(),
+		"G8S_STATE_DIR="+t.TempDir(),
+		"G8S_DB="+dbPath,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exitCode := 0
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
+	}
+	if exitCode != 2 {
+		t.Fatalf("expected exit 2, got %d stdout=%q stderr=%s", exitCode, stdout.String(), stderr.String())
+	}
+	combined := stderr.String()
+	if !strings.Contains(combined, "agent-models") || !strings.Contains(combined, "discoverable") {
+		t.Errorf("expected catalog discovery hint, got stderr: %s", combined)
+	}
+	if _, statErr := os.Stat(dbPath); statErr == nil {
+		t.Errorf("expected no database write, but %s exists", dbPath)
+	}
+}
+
+func TestSubmitBadFlagKeepsStdoutClean(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	stateDir := t.TempDir()
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "submit", args: []string{"submit", "--bogus-flag", "-json"}},
+		{name: "worker", args: []string{"worker", "--bogus-flag"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(binPath, tc.args...)
+			cmd.Env = append(os.Environ(), "G8S_STATE_DIR="+stateDir)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if err == nil {
+				t.Fatal("expected non-zero exit for unknown flag")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("expected empty stdout, got %q (stderr: %s)", stdout.String(), stderr.String())
+			}
+			if stderr.Len() == 0 {
+				t.Fatalf("expected non-empty stderr")
+			}
+		})
 	}
 }

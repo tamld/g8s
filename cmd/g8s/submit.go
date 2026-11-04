@@ -63,17 +63,17 @@ func runSubmit(args []string) {
 	enforceConformance := fs.Bool("enforce-conformance", false, "refuse dispatch when the provider FAILed required DELTA-43 conformance probes (.g8s/provider-conformance.yml)")
 	profileFlag := fs.String("profile", "", "dispatch preset from .g8s/agent-models.yml profiles (fills provider, model, effort, timeout, role, permission when not overridden)")
 	fs.Usage = func() {
-		fmt.Println("Usage: g8s submit [flags]")
-		fmt.Println("\nQueue a durable worker task with harness safety checks.")
-		fmt.Println("\nExamples:")
-		fmt.Println("  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"Map provider packages\"")
-		fmt.Println("  g8s submit --profile scout-fast --idempotency-key scout-02 --prompt \"...\" --json --select data.task_id")
-		fmt.Println("  g8s submit --profile impl-medium --allow-workspace-write --receipt-id \"$RECEIPT_ID\" \\")
-		fmt.Println("    --idempotency-key impl-01 --prompt \"Implement bounded change\"")
-		fmt.Println("\nFlags:")
+		out := fs.Output()
+		fmt.Fprintln(out, "Usage: g8s submit [flags]")
+		fmt.Fprintln(out, "\nQueue a durable worker task with harness safety checks.")
+		fmt.Fprintln(out, "\nExamples:")
+		fmt.Fprintln(out, "  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"Map provider packages\"")
+		fmt.Fprintln(out, "  g8s submit --profile scout-fast --idempotency-key scout-02 --prompt \"...\" --json --select data.task_id")
+		fmt.Fprintln(out, "  g8s submit --profile impl-medium --allow-workspace-write --receipt-id \"$RECEIPT_ID\" \\")
+		fmt.Fprintln(out, "    --idempotency-key impl-01 --prompt \"Implement bounded change\"")
+		fmt.Fprintln(out, "\nFlags:")
 		fs.PrintDefaults()
 	}
-	fs.SetOutput(os.Stdout)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
@@ -145,7 +145,10 @@ func runSubmit(args []string) {
 	if profileName != "" {
 		catalog, catErr := config.LoadDefaultCatalog()
 		if catErr != nil {
-			exitRuntime("submit", "profile", *traceID, cli.CodeRuntime, fmt.Errorf("load agent-models catalog: %w", catErr), "Ensure .g8s/agent-models.yml is present", *jsonl)
+			exitUsage("submit", "profile", *traceID,
+				fmt.Sprintf("load agent-models catalog: %v", catErr),
+				"-profile needs .g8s/agent-models.yml discoverable from the working directory (run inside the repo) — or pass explicit -provider/-model/-effort flags",
+				*jsonl)
 		}
 		prof, ok := catalog.Profile(profileName)
 		if !ok {
