@@ -28,11 +28,67 @@ import (
 // CategoryIASTDAST classifies in-process IAST runtime hygiene and DAST red-team boundary probes (Issue #601).
 const CategoryIASTDAST ProbeCategory = "iast-dast"
 
+// trackedEnvVars lists delegation/worker env keys probes may touch; used by RuntimeSensor and jailProbeEnv.
 var trackedEnvVars = []string{
 	"G8S_TIER",
+	"G8S_STRATUM",
 	"G8S_SCOPE_ROOT",
 	"G8S_RECEIPT_ID",
+	"G8S_PERMISSION",
+	"G8S_TASK_ID",
+	"G8S_ROLE",
 	"AGY_MCP_ALLOW_WORKSPACE_WRITE",
+}
+
+// jailProbeEnv snapshots trackedEnvVars, unsets all of them, applies overrides, and returns a restore closure.
+func jailProbeEnv(overrides map[string]string) (restore func() error, err error) {
+	type snap struct {
+		val string
+		set bool
+	}
+	snaps := make([]snap, len(trackedEnvVars))
+	restores := make([]func() error, len(trackedEnvVars))
+	for i, name := range trackedEnvVars {
+		val, set := os.LookupEnv(name)
+		snaps[i] = snap{val: val, set: set}
+		name := name
+		s := snaps[i]
+		restores[i] = func() error { return restoreEnvVar(name, s.val, s.set) }
+	}
+	for _, name := range trackedEnvVars {
+		if uErr := os.Unsetenv(name); uErr != nil {
+			return nil, errors.Join(fmt.Errorf("unset %s: %w", name, uErr), restoreEnvVars(restores...))
+		}
+	}
+	for name, val := range overrides {
+		if sErr := os.Setenv(name, val); sErr != nil {
+			return nil, errors.Join(fmt.Errorf("set %s: %w", name, sErr), restoreEnvVars(restores...))
+		}
+	}
+	return func() error { return restoreEnvVars(restores...) }, nil
+}
+
+// mcpToolCallReadTimeout bounds stdio JSON-RPC reads in sendMCPToolCall (overridable in tests).
+var mcpToolCallReadTimeout = 10 * time.Second
+
+// ErrMCPToolCallReadTimeout is returned when the MCP peer does not respond within mcpToolCallReadTimeout.
+var ErrMCPToolCallReadTimeout = errors.New("mcp tool call read timed out")
+
+func restoreEnvVar(name, value string, wasSet bool) error {
+	if wasSet {
+		return os.Setenv(name, value)
+	}
+	return os.Unsetenv(name)
+}
+
+func restoreEnvVars(restores ...func() error) error {
+	var errs []error
+	for _, restore := range restores {
+		if err := restore(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // RuntimeSensor captures baseline and post-probe runtime state for hygiene verification.
@@ -182,22 +238,44 @@ func sendMCPToolCall(w io.Writer, r *bufio.Reader, id int, tool string, args map
 	if _, err := fmt.Fprintf(w, "%s\n", req); err != nil {
 		return nil, err
 	}
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		return nil, err
+	type readResult struct {
+		line []byte
+		err  error
 	}
-	var rpcResp struct {
-		Error *mcpRPCError `json:"error"`
+	readCh := make(chan readResult, 1)
+	go func() {
+		line, readErr := r.ReadBytes('\n')
+		readCh <- readResult{line: line, err: readErr}
+	}()
+	timeout := mcpToolCallReadTimeout
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case res := <-readCh:
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		if res.err != nil {
+			return nil, res.err
+		}
+		var rpcResp struct {
+			Error *mcpRPCError `json:"error"`
+		}
+		if err := json.Unmarshal(res.line, &rpcResp); err != nil {
+			return nil, err
+		}
+		return rpcResp.Error, nil
+	case <-timer.C:
+		return nil, fmt.Errorf("%w (limit %s)", ErrMCPToolCallReadTimeout, timeout)
 	}
-	if err := json.Unmarshal(line, &rpcResp); err != nil {
-		return nil, err
-	}
-	return rpcResp.Error, nil
 }
 
 // AuditSwarmReceiptContention tests 8-worker concurrent CAS receipt validation
 // and fsops.Edit contention, asserting single-winner semantics and zero leaks.
-func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
+func AuditSwarmReceiptContention(ctx context.Context) (outcome string, err error) {
 	tmpDir, err := os.MkdirTemp("", "probe-swarm-*")
 	if err != nil {
 		return "", err
@@ -205,6 +283,16 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
+
+	restoreEnv, err := jailProbeEnv(nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if rErr := restoreEnv(); rErr != nil && err == nil {
+			err = rErr
+		}
+	}()
 
 	dbPath := filepath.Join(tmpDir, "receipts.db")
 	mgr, err := receipt.NewReceiptManager(dbPath, nil)
@@ -279,6 +367,9 @@ func AuditSwarmReceiptContention(ctx context.Context) (string, error) {
 	mgr.Close()
 	cleanupProbeTempDir(tmpDir)
 
+	if err := restoreEnv(); err != nil {
+		return "", err
+	}
 	if err := sensor.Verify(8); err != nil {
 		return OutcomeClassBlocked, fmt.Errorf("sensor verify failed: %w", err)
 	}
@@ -303,7 +394,7 @@ func NewSwarmReceiptContentionProbe() *Probe {
 
 // AuditSymlinkScopeEscape verifies that under G8S_TIER=F1 + G8S_SCOPE_ROOT=scopeDir,
 // ResolveDelegationContext, VerifyScope, Read, Edit, and Search reject symlinks and out-of-scope widening.
-func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
+func AuditSymlinkScopeEscape(ctx context.Context) (outcome string, err error) {
 	tmpDir, err := os.MkdirTemp("", "probe-symlink-*")
 	if err != nil {
 		return "", err
@@ -331,24 +422,18 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create symlink: %w", err)
 	}
 
-	origTier, tierSet := os.LookupEnv("G8S_TIER")
-	origScope, scopeSet := os.LookupEnv("G8S_SCOPE_ROOT")
-	restoreEnv := func() {
-		if tierSet {
-			_ = os.Setenv("G8S_TIER", origTier)
-		} else {
-			_ = os.Unsetenv("G8S_TIER")
-		}
-		if scopeSet {
-			_ = os.Setenv("G8S_SCOPE_ROOT", origScope)
-		} else {
-			_ = os.Unsetenv("G8S_SCOPE_ROOT")
-		}
+	restoreEnv, err := jailProbeEnv(map[string]string{
+		"G8S_TIER":       "F1",
+		"G8S_SCOPE_ROOT": scopeDir,
+	})
+	if err != nil {
+		return "", err
 	}
-	defer restoreEnv()
-
-	_ = os.Setenv("G8S_TIER", "F1")
-	_ = os.Setenv("G8S_SCOPE_ROOT", scopeDir)
+	defer func() {
+		if rErr := restoreEnv(); rErr != nil && err == nil {
+			err = rErr
+		}
+	}()
 
 	// 1. ResolveDelegationContext must reject parent directory widening
 	if _, _, err := fsops.ResolveDelegationContext("", tmpDir, false); err == nil {
@@ -390,7 +475,9 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 		return OutcomeClassBlocked, errors.New("search.Execute accepted out-of-scope root outsideDir")
 	}
 
-	restoreEnv()
+	if err := restoreEnv(); err != nil {
+		return "", err
+	}
 	cleanupProbeTempDir(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
@@ -417,7 +504,7 @@ func NewSymlinkScopeEscapeProbe() *Probe {
 
 // AuditHTTPMCPDASTBoundary tests in-process HTTP and MCP stdio servers with a real receipt.Manager,
 // asserting single-use receipt consumption, blocked replay attempts, and clean runtime hygiene.
-func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
+func AuditHTTPMCPDASTBoundary(ctx context.Context) (outcome string, err error) {
 	tmpDir, err := os.MkdirTemp("", "probe-dast-*")
 	if err != nil {
 		return "", err
@@ -425,6 +512,16 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
+
+	restoreEnv, err := jailProbeEnv(nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if rErr := restoreEnv(); rErr != nil && err == nil {
+			err = rErr
+		}
+	}()
 
 	dbPath := filepath.Join(tmpDir, "receipts.db")
 	mgr, err := receipt.NewReceiptManager(dbPath, nil)
@@ -531,6 +628,10 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
+	defer outW.Close()
+	defer outR.Close()
+	defer inW.Close()
+	defer inR.Close()
 
 	mcpServer := mcp.NewServer(inR, outW, nil, mgr, nil)
 
@@ -580,19 +681,23 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	}
 
 	inW.Close()
+	shutdownTimer := time.NewTimer(500 * time.Millisecond)
+	defer shutdownTimer.Stop()
 	select {
 	case serveErr := <-mcpDone:
 		if serveErr != nil && !errors.Is(serveErr, context.Canceled) {
 			return "", fmt.Errorf("mcp ServeStdio failed: %w", serveErr)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-shutdownTimer.C:
 		cancelMCP()
 		if serveErr := <-mcpDone; serveErr != nil && !errors.Is(serveErr, context.Canceled) {
 			return "", fmt.Errorf("mcp ServeStdio failed after cancel: %w", serveErr)
 		}
 	}
-	outR.Close()
-	outW.Close()
+
+	if err := restoreEnv(); err != nil {
+		return "", err
+	}
 
 	mgr.Close()
 	cleanupProbeTempDir(tmpDir)
