@@ -162,7 +162,8 @@ const ReceiptSchemaVersion = "agy.receipt.v1"
 // ValidateSubmitRequest enforces the v0.1 submission safety envelope before
 // any hashing or persistence: prompt presence, required model, explicit scope
 // roots, and the disabled escape hatches (no_sandbox, custom agy binary,
-// workspace_write unless the deployment opt-in env var is set). Scope-root
+// workspace_write unless opted in via --allow-workspace-write on submit/worker
+// or AGY_MCP_ALLOW_WORKSPACE_WRITE=1). Scope-root
 // denial and blocked-prompt checks are delegated to the shared harness.
 func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	var payload struct {
@@ -212,7 +213,7 @@ func ValidateSubmitRequest(req SubmitTaskRequest) error {
 		// the escape hatch so supervisors do not have to read source to
 		// discover it. Receipts remain mandatory for workspace_write
 		// regardless of this flag (harness gate).
-		return errors.New("workspace_write is disabled by default; set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
+		return errors.New("workspace_write is disabled by default; pass --allow-workspace-write to g8s submit/worker (or set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 in the worker environment) to enable delegated writes (a single-use, path-scoped write receipt is still mandatory)")
 	}
 
 	// The harness re-validates with the receipt ID carried in the payload

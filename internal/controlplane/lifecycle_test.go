@@ -2,9 +2,38 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
+
+func TestValidateSubmitRequestWorkspaceWriteRejectionHint(t *testing.T) {
+	t.Setenv("AGY_MCP_ALLOW_WORKSPACE_WRITE", "")
+	payload, err := json.Marshal(map[string]string{"prompt": "mutate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ValidateSubmitRequest(SubmitTaskRequest{
+		Payload:    payload,
+		Model:      "test-model",
+		AddDirs:    []string{"internal/config"},
+		Permission: "workspace_write",
+	})
+	if err == nil {
+		t.Fatal("expected workspace_write without opt-in to be rejected")
+	}
+	msg := err.Error()
+	for _, sub := range []string{
+		"workspace_write is disabled by default",
+		"--allow-workspace-write",
+		"AGY_MCP_ALLOW_WORKSPACE_WRITE",
+	} {
+		if !strings.Contains(msg, sub) {
+			t.Fatalf("rejection hint missing %q: %s", sub, msg)
+		}
+	}
+}
 
 // #346: delegated-write receipts consume exactly once; replay by another
 // task trips ErrReceiptAlreadyConsumed; re-consume by the owner is

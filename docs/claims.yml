@@ -320,9 +320,10 @@
     source: skills/g8s-supervisor/SKILL.md
 
 - id: claim-workspace-write-disabled-default
-  claim: "Delegated workspace_write is disabled by default unless explicitly enabled via environment variable"
+  claim: "Delegated workspace_write is disabled by default; opt-in via --allow-workspace-write on g8s submit or g8s worker (scoped to that invocation) or AGY_MCP_ALLOW_WORKSPACE_WRITE=1; a write receipt remains mandatory"
   evidence:
     test: TestDispatchRejectsWorkspaceWriteBeforeDispatcherRuns
+    test: TestValidateSubmitRequestWorkspaceWriteRejectionHint
     eval: ""
     demo: 'bin/g8s submit --idempotency-key k1 --prompt "p" --permission workspace_write --receipt-id r1'
     source: docs/ENTERPRISE_LEDGER.md
