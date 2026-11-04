@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -558,7 +559,20 @@ func runWorker(args []string) {
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
+	fs.Usage = func() {
+		fmt.Println("Usage: g8s worker [flags]")
+		fmt.Println("\nClaim and execute durable tasks from the queue.")
+		fmt.Println("\nExamples:")
+		fmt.Println("  g8s submit --profile scout-fast --idempotency-key scout-01 --prompt \"...\" --json --select data.task_id")
+		fmt.Println("  g8s worker --once --allow-workspace-write")
+		fmt.Println("\nFlags:")
+		fs.PrintDefaults()
+	}
+	fs.SetOutput(os.Stdout)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		exitUsage("worker", "", *traceID, err.Error(), "", *jsonl)
 	}
 	workspaceWriteOptInRestore, workspaceWriteOptInErr := withWorkspaceWriteOptIn(*allowWorkspaceWrite)

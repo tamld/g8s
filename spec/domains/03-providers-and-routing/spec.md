@@ -45,6 +45,25 @@ The routing and telemetry subsystem MUST expose `g8s scorecard [status|audit|kai
 - **WHEN** `jevAssist` posts a single `route_target` `<provider>/<model>` choice (model pin `jev-1.14.0`) or `EvaluateMemoryEntry` inspects a memory note online
 - **THEN** unbound provider/model pairs are structurally impossible, HTTP `429`/`529` retries rotate keys with bounded backoff, and memory promotion blocks when either noul ≥ `memory_block_breach_prob`
 
+### R5 — Submit dispatch profiles (`-profile`) {#R5-submit-dispatch-profiles}
+
+<!-- inherited-from: issue #725 -->
+<!-- feature_id: FEAT-LLMCALL-01 -->
+
+Named presets in `.g8s/agent-models.yml` under `profiles:` supply the explicit dispatch triple (`provider`, `model`, `effort`) plus `timeout`, `role`, and `permission`. `g8s submit -profile <name>` applies each preset field unless the operator passed the corresponding flag (`fs.Visit` precedence). Unknown profile names fail at parse time with `E_USAGE` and a sorted hint of available names. Profile timeouts use the same `ParseTimeoutDuration` and receipt TTL cross-check as explicit `-timeout`. Profile `workspace_write` still requires an active receipt and harness gates; `-profile` never bypasses isolation.
+
+#### Scenario: Catalog profile fills dispatch fields and records provenance
+<!-- tests: TestSubmitProfile_FillsFields, TestParseCatalogProfilesValid -->
+- **GIVEN** a valid `profiles.scout-fast` entry in `.g8s/agent-models.yml`
+- **WHEN** `g8s submit --profile scout-fast --idempotency-key k --prompt p` succeeds
+- **THEN** the queued request JSON carries the preset provider, model, effort, role, permission, timeout, and `"profile":"scout-fast"`
+
+#### Scenario: Unknown submit profile fails closed before queue write
+<!-- tests: TestSubmitProfile_UnknownName -->
+- **GIVEN** no matching preset name
+- **WHEN** `g8s submit --profile no-such --idempotency-key k --prompt p` runs
+- **THEN** the CLI exits `2` with `E_USAGE`, lists available profile names, and does not insert a task row
+
 #### Scenario: Audited Jev v2 prompt registry, batch cache, and D-09 ProcessReflectionReceipt judge enforce evidence refs
 <!-- tests: TestJevPromptsRegistryParityAndModelPinning, TestBatchEvaluateItemInQuestionAndCache, TestProcessReflectionReceiptSchemaAndEvidenceRefGate, TestJudgeProcessArtifactsPromptManifestAudit -->
 - **GIVEN** `.g8s/jev-prompts.yml` pinned to `jev-1.14.0` and `schemas/process-reflection-receipt-v1.schema.json`
