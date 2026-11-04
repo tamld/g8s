@@ -251,8 +251,10 @@ func isTrustBoundaryPath(p string) bool {
 
 // RouteDeterministic evaluates Layer 1 zero-network deterministic routing rules.
 func RouteDeterministic(req RouteRequest) Decision {
-	candidates := extractCandidates(req.Manifest)
+	return routeDeterministicWithCandidates(req, extractCandidates(req.Manifest))
+}
 
+func routeDeterministicWithCandidates(req RouteRequest, candidates []candidateModel) Decision {
 	// Rule 1: Trust-boundary paths (highest governance priority)
 	hasTrustPath := false
 	for _, p := range req.Paths {
@@ -409,12 +411,12 @@ func Route(ctx context.Context, req RouteRequest) (Decision, error) {
 	}
 	req.Manifest = manifest
 
-	layer1 := RouteDeterministic(req)
+	candidates := extractCandidates(req.Manifest)
+	layer1 := routeDeterministicWithCandidates(req, candidates)
 
 	dec := layer1
 	mode := getRouterMode(ctx)
 	if mode == "jev_assisted" {
-		candidates := extractCandidates(req.Manifest)
 		var err error
 		dec, err = jevAssist(ctx, req, layer1, candidates)
 		if err != nil {

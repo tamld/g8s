@@ -204,6 +204,10 @@ func RecordModelOutcome(stateDir string, rec ModelOutcomeRecord) error {
 	return err
 }
 
+// computeScorecardFn is the scorecard aggregation entry point used by routing filters;
+// tests may swap it to count invocations (restored via t.Cleanup).
+var computeScorecardFn = ComputeScorecard
+
 // ComputeScorecard aggregates the rolling window of observations per (provider, model)
 // and computes composite quality scores, health statuses, and routing recommendations.
 func ComputeScorecard(stateDir string, providerFilter string, windowSize int) ([]ModelQualityScore, error) {
@@ -435,7 +439,7 @@ func filterQuarantinedCandidates(candidates []candidateModel) []candidateModel {
 	if len(candidates) <= 1 {
 		return candidates
 	}
-	scores, err := ComputeScorecard("", "", DefaultScorecardWindow)
+	scores, err := computeScorecardFn("", "", DefaultScorecardWindow)
 	if err != nil || len(scores) == 0 {
 		return candidates
 	}
