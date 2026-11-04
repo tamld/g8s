@@ -593,6 +593,8 @@ func getUnreachableClosedPort(t *testing.T) string {
 }
 
 func TestRedtest_Guarantee3_RouteNeverTouchesNetworkWhenUnconfigured(t *testing.T) {
+	// Isolate ambient scorecard state.
+	t.Setenv("G8S_STATE_DIR", t.TempDir())
 	manifest := redtestManifest()
 	closedEndpoint := getUnreachableClosedPort(t)
 

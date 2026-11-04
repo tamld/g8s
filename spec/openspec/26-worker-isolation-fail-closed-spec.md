@@ -39,7 +39,7 @@ When a claimed task specifies `permission: "workspace_write"`:
    - `Result`: JSON envelope containing `"ok": false`, `"status": "isolation_unavailable"`, and diagnostic `"error"` / `"reason"` text.
    - `Err`: Sanitized failure description.
 5. **No Resource / Lease Leak**: If the isolator returned a non-nil `release` function before failing, `release(false)` MUST be invoked. The attempt MUST be marked finished on the control plane so the lease is released cleanly.
-6. **No Shared-Write Bypass**: No flag, environment variable, or configuration option shall permit falling back to shared checkout for `workspace_write`.
+6. **No Shared-Write Bypass**: `g8s submit` and `g8s worker` accept boolean `--allow-workspace-write`. When true, flag temporarily sets `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` for that CLI invocation; when omitted or false, it leaves existing environment value unchanged, so existing `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` remains enabled. This flag does not rewrite permission or create a persistent grant. Receipt, path, TTL, isolation, stratum, and profile gates remain mandatory. No flag, environment variable, or configuration option shall permit falling back to shared checkout for `workspace_write`.
 
 ### Requirement: Preservation of Read-Only & Isolated Execution (DELTA-26 R2)
 

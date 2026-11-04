@@ -130,20 +130,22 @@ g8s worker --once
 
 ### Paradigm 2: Capability-Scoped Mutation
 Issue a single-use, path-scoped receipt before mutating files:
+`--allow-workspace-write` temporarily sets `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` for that CLI invocation. If omitted or false, existing environment value stays unchanged; existing `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` remains supported.
+
 ```bash
 # 1. Issue single-use write receipt scoped to a specific directory
-RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select --selector .data.receipt_id)
+RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select data.receipt_id)
 
 # 2. Dispatch worker bounded by the receipt
-export AGY_MCP_ALLOW_WORKSPACE_WRITE=1
 g8s submit \
   --idempotency-key "test-config-01" \
   --role test-runner \
   --permission workspace_write \
+  --allow-workspace-write \
   --receipt-id "$RECEIPT_ID" \
   --prompt "Add unit tests for config validation in internal/config"
 
-g8s worker --once
+g8s worker --once --allow-workspace-write
 ```
 
 ### Paradigm 3: Universal Config-Driven LLM Gateway Consumer

@@ -557,9 +557,15 @@ func runWorker(args []string) {
 	provider := fs.String("provider", "", "restrict claims to tasks targeting this provider (serial and concurrent)")
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
+	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("worker", "", *traceID, err.Error(), "", *jsonl)
 	}
+	workspaceWriteOptInRestore, workspaceWriteOptInErr := withWorkspaceWriteOptIn(*allowWorkspaceWrite)
+	if workspaceWriteOptInErr != nil {
+		exitRuntime("worker", "", *traceID, cli.CodeRuntime, workspaceWriteOptInErr, "", *jsonl)
+	}
+	defer workspaceWriteOptInRestore()
 	if *concurrency < 1 {
 		exitUsage("worker", "concurrency", *traceID, "--concurrency must be >= 1", "", *jsonl)
 	}
