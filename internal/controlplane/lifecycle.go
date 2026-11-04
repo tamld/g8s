@@ -162,7 +162,8 @@ const ReceiptSchemaVersion = "agy.receipt.v1"
 // ValidateSubmitRequest enforces the v0.1 submission safety envelope before
 // any hashing or persistence: prompt presence, required model, explicit scope
 // roots, and the disabled escape hatches (no_sandbox, custom agy binary,
-// workspace_write unless the deployment opt-in env var is set). Scope-root
+// workspace_write unless opted in via --allow-workspace-write on submit/worker
+// or AGY_MCP_ALLOW_WORKSPACE_WRITE=1). Scope-root
 // denial and blocked-prompt checks are delegated to the shared harness.
 func ValidateSubmitRequest(req SubmitTaskRequest) error {
 	var payload struct {

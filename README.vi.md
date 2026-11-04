@@ -176,7 +176,7 @@ g8s read internal/provider/registry.go --lines 20:50
 g8s edit internal/config/config.go --old "timeout = 30s" --new "timeout = 60s"
 
 # Trích xuất giá trị JSON dot-path (thay thế jq)
-cat result.json | g8s select --selector .data.status
+cat result.json | g8s select data.status
 ```
 
 ---
