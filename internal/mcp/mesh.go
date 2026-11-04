@@ -18,17 +18,25 @@ type coordinatorMeshArgs struct {
 	Input     json.RawMessage `json:"input"`
 }
 
-var validMeshOperations = map[string]bool{
-	"register":      true,
-	"quota-publish": true,
-	"send":          true,
-	"inbox":         true,
-	"ack":           true,
-	"claim":         true,
-	"release":       true,
-	"accept":        true,
-	"snapshot":      true,
-	"wait":          true,
+func coordinatorMeshToolDescriptor() toolDescriptor {
+	ops := mesh.Operations()
+	enumParts := make([]string, len(ops))
+	for i, op := range ops {
+		enumParts[i] = `"` + op + `"`
+	}
+	schema := fmt.Sprintf(
+		`{"type":"object","properties":{"mesh_dir":{"type":"string","minLength":1},"operation":{"type":"string","enum":[%s]},"input":{"type":"object"}},"required":["mesh_dir","operation","input"],"additionalProperties":false}`,
+		strings.Join(enumParts, ","),
+	)
+	desc := fmt.Sprintf(
+		"Execute coordinator mesh operations (%s) against a SQLite mesh ledger.",
+		strings.Join(ops, ", "),
+	)
+	return toolDescriptor{
+		Name:        "g8s_coordinator_mesh",
+		Description: desc,
+		InputSchema: json.RawMessage(schema),
+	}
 }
 
 // coordinatorMeshTool executes coordinator mesh operations against a SQLite mesh ledger.
@@ -67,7 +75,7 @@ func (s *Server) coordinatorMeshTool(ctx context.Context, args json.RawMessage) 
 	if strings.TrimSpace(a.Operation) == "" {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "missing required field: operation"}
 	}
-	if !validMeshOperations[a.Operation] {
+	if !mesh.ValidOperation(a.Operation) {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: fmt.Sprintf("invalid operation: %q", a.Operation)}
 	}
 

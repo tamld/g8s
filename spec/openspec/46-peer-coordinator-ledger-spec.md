@@ -34,7 +34,7 @@ All requests and results are JSON objects. Unknown operations and malformed/unkn
 
 ## Durability and limits
 
-SQLite WAL, busy timeout, immediate write transactions and 0600 database/0700 directory. Validate JSON before opening a write transaction. Bound payload, pending capacity and list result sizes. Retain message IDs/content digests and accepted task results for the experiment's lifetime to preserve deduplication. Explicit future retention must not erase deduplication inside the retry horizon. Crash/reopen must retain messages and quota.
+SQLite WAL, busy timeout, immediate write transactions and 0600 database/0700 directory. Validate JSON before opening a write transaction. Bound payload, pending capacity and list result sizes. `messages.created_at` is always written as UTC RFC3339 so retention cutoff comparisons remain correct under lexical string order. Retain message IDs/content digests and accepted task results for the experiment's lifetime to preserve deduplication. Explicit future retention must not erase deduplication inside the retry horizon. Message tombstones (`message_id`, digest, seq) are never removed by `prune` and are retained for the ledger lifetime (small rows); explicit tombstone compaction is a future AM item. Crash/reopen must retain messages and quota.
 
 ## Verification scenarios
 
@@ -43,9 +43,9 @@ SQLite WAL, busy timeout, immediate write transactions and 0600 database/0700 di
 - Three real sessions each detect their own quota and publish it, read the same revision/snapshot, claim disjoint contributions to one problem, send/ACK results and record accepted artifact references. Zero steady-state GUI actions and zero human message relays.
 
 #### Scenario: Peer coordinator ledger operations, claims, inbox durability, and CLI/MCP parity
-<!-- tests: TestMeshOverlappingClaimsSingleWinner, TestMeshDisjointClaims, TestMeshAcceptRevisionAndIdempotence, TestMeshLeaseExpiry, TestMeshClaimRejectsTraversalAndChangedReplay, TestMeshAllPeersSameRights, TestMeshMessageRoundTripAndDedup, TestMeshQuotaOwnershipAndValidation, TestMeshInboxDurableReopen, TestMeshStaleIncarnation, TestMeshWaitCancellation, TestCoordinatorMeshNativeRegistrationAndParity, TestCoordinatorMeshRejectsWorkerAndUnknownArgs -->
+<!-- tests: TestMeshOverlappingClaimsSingleWinner, TestMeshDisjointClaims, TestMeshAcceptRevisionAndIdempotence, TestMeshLeaseExpiry, TestMeshClaimRejectsTraversalAndChangedReplay, TestMeshAllPeersSameRights, TestMeshMessageRoundTripAndDedup, TestMeshQuotaOwnershipAndValidation, TestMeshInboxDurableReopen, TestMeshStaleIncarnation, TestMeshWaitCancellation, TestMeshRetentionPrune, TestMeshRetentionPruneDefaultOlderThan, TestMeshRetentionPruneTombstoneDedup, TestMeshRetentionPruneTombstoneDurability, TestMeshMessageCreatedAtUTCFormat, TestCoordinatorMeshNativeRegistrationAndParity, TestCoordinatorMeshMCPEnumMatchesMeshHandlers, TestCoordinatorMeshRejectsWorkerAndUnknownArgs -->
 - **GIVEN** an explicit SQLite WAL peer coordinator ledger directory
-- **WHEN** equal-peer coordinators execute `register`, `quota-publish`, `send`, `inbox`, `ack`, `claim`, `release`, `accept`, `snapshot`, and `wait` across CLI and MCP surfaces
+- **WHEN** equal-peer coordinators execute `register`, `quota-publish`, `send`, `inbox`, `ack`, `claim`, `release`, `accept`, `snapshot`, `wait`, and `prune` across CLI and MCP surfaces
 - **THEN** all invariants for single-winner overlapping claims, disjoint claims, revisioned artifact acceptance, message deduplication, recipient-only ACK, quota ownership, durable reopen, and worker-tier rejection hold
 
 Unit tests cannot certify platform quota availability, native wakeup, model quality, Git fencing or reduction in consumed account quota. Those require separate current evidence.

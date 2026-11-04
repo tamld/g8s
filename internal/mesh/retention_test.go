@@ -248,6 +248,34 @@ func TestMeshRetentionPruneTombstoneDedup(t *testing.T) {
 	}
 }
 
+func TestMeshMessageCreatedAtUTCFormat(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	retentionSetupPair(t, s)
+	retentionSend(t, s, "utc_fmt")
+	var createdAt string
+	if err := s.db.QueryRow(`SELECT created_at FROM messages WHERE message_id = ?`, "utc_fmt").Scan(&createdAt); err != nil {
+		t.Fatalf("read created_at: %v", err)
+	}
+	parsed, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		t.Fatalf("created_at %q is not RFC3339: %v", createdAt, err)
+	}
+	if parsed.Location() != time.UTC {
+		t.Fatalf("created_at %q must be UTC, got location %v", createdAt, parsed.Location())
+	}
+	if createdAt != parsed.UTC().Format(time.RFC3339) {
+		t.Fatalf("created_at %q must equal canonical UTC RFC3339 %q", createdAt, parsed.UTC().Format(time.RFC3339))
+	}
+	if !strings.HasSuffix(createdAt, "Z") {
+		t.Fatalf("created_at %q must use Zulu suffix for UTC RFC3339", createdAt)
+	}
+}
+
 func TestMeshRetentionPruneTombstoneDurability(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)

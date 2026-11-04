@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,6 +70,22 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// Operations returns the registered mesh operation names in stable sorted order.
+func Operations() []string {
+	ops := make([]string, 0, len(handlers))
+	for op := range handlers {
+		ops = append(ops, op)
+	}
+	slices.Sort(ops)
+	return ops
+}
+
+// ValidOperation reports whether op is a registered mesh operation.
+func ValidOperation(op string) bool {
+	_, ok := handlers[op]
+	return ok
 }
 
 func (s *Store) Execute(ctx context.Context, op string, input json.RawMessage) (json.RawMessage, error) {

@@ -50,7 +50,7 @@ func runCoordinatorMesh(args []string) {
 
 	op := strings.TrimSpace(*opFlag)
 	if op == "" {
-		exitUsage("coordinator", "mesh", *traceID, "--op is required", "Valid operations: register, quota-publish, send, inbox, ack, claim, release, accept, snapshot, wait", *jsonl)
+		exitUsage("coordinator", "mesh", *traceID, "--op is required", "Valid operations: "+strings.Join(mesh.Operations(), ", "), *jsonl)
 	}
 
 	inputData := []byte("{}")
