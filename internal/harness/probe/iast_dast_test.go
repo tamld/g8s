@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIASTRuntimeHygieneSensor(t *testing.T) {
@@ -77,6 +80,9 @@ func TestIASTDASTHelpers_ErrorPaths(t *testing.T) {
 func TestIASTDASTProbes_AllPass(t *testing.T) {
 	ctx := context.Background()
 
+	presetReceipt := "rc-ambient-worker"
+	t.Setenv("G8S_RECEIPT_ID", presetReceipt)
+
 	// Ensure AuditSymlinkScopeEscape covers both set and unset G8S_TIER / G8S_SCOPE_ROOT restoration
 	t.Setenv("G8S_TIER", "F0")
 	t.Setenv("G8S_SCOPE_ROOT", t.TempDir())
@@ -108,10 +114,43 @@ func TestIASTDASTProbes_AllPass(t *testing.T) {
 		t.Fatalf("PassedProbes = %d, want 3", pri.PassedProbes)
 	}
 
+	gotReceipt, gotReceiptSet := os.LookupEnv("G8S_RECEIPT_ID")
+	if !gotReceiptSet || gotReceipt != presetReceipt {
+		t.Fatalf("G8S_RECEIPT_ID not restored: want (set=true val=%q) got (set=%v val=%q)",
+			presetReceipt, gotReceiptSet, gotReceipt)
+	}
+
 	// Verify DefaultSuite registration and FilterSuite by CategoryIASTDAST
 	filtered := FilterSuite(DefaultSuite(), nil, string(CategoryIASTDAST))
 	if len(filtered.Probes) != 3 {
 		t.Fatalf("FilterSuite(%q) returned %d probes, want 3", CategoryIASTDAST, len(filtered.Probes))
+	}
+}
+
+func TestSendMCPToolCall_ReadTimeout(t *testing.T) {
+	prev := mcpToolCallReadTimeout
+	mcpToolCallReadTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { mcpToolCallReadTimeout = prev })
+
+	responseR, _ := io.Pipe()
+	t.Cleanup(func() { _ = responseR.Close() })
+	reader := bufio.NewReader(responseR)
+	var request bytes.Buffer
+
+	start := time.Now()
+	_, err := sendMCPToolCall(&request, reader, 1, "g8s_edit", map[string]any{"ok": "val"})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error from stalled MCP reader")
+	}
+	if !errors.Is(err, ErrMCPToolCallReadTimeout) {
+		t.Fatalf("expected ErrMCPToolCallReadTimeout, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("sendMCPToolCall blocked too long: %v", elapsed)
+	}
+	if request.Len() == 0 {
+		t.Fatal("expected JSON-RPC request to be written before read timeout")
 	}
 }
 

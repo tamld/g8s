@@ -35,6 +35,29 @@ var trackedEnvVars = []string{
 	"AGY_MCP_ALLOW_WORKSPACE_WRITE",
 }
 
+// mcpToolCallReadTimeout bounds stdio JSON-RPC reads in sendMCPToolCall (overridable in tests).
+var mcpToolCallReadTimeout = 10 * time.Second
+
+// ErrMCPToolCallReadTimeout is returned when the MCP peer does not respond within mcpToolCallReadTimeout.
+var ErrMCPToolCallReadTimeout = errors.New("mcp tool call read timed out")
+
+func restoreEnvVar(name, value string, wasSet bool) error {
+	if wasSet {
+		return os.Setenv(name, value)
+	}
+	return os.Unsetenv(name)
+}
+
+func restoreEnvVars(restores ...func() error) error {
+	var first error
+	for _, restore := range restores {
+		if err := restore(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 // RuntimeSensor captures baseline and post-probe runtime state for hygiene verification.
 type RuntimeSensor struct {
 	TempRoot           string
@@ -182,17 +205,31 @@ func sendMCPToolCall(w io.Writer, r *bufio.Reader, id int, tool string, args map
 	if _, err := fmt.Fprintf(w, "%s\n", req); err != nil {
 		return nil, err
 	}
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		return nil, err
+	type readResult struct {
+		line []byte
+		err  error
 	}
-	var rpcResp struct {
-		Error *mcpRPCError `json:"error"`
+	readCh := make(chan readResult, 1)
+	go func() {
+		line, readErr := r.ReadBytes('\n')
+		readCh <- readResult{line: line, err: readErr}
+	}()
+	timeout := mcpToolCallReadTimeout
+	select {
+	case res := <-readCh:
+		if res.err != nil {
+			return nil, res.err
+		}
+		var rpcResp struct {
+			Error *mcpRPCError `json:"error"`
+		}
+		if err := json.Unmarshal(res.line, &rpcResp); err != nil {
+			return nil, err
+		}
+		return rpcResp.Error, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("%w (limit %s)", ErrMCPToolCallReadTimeout, timeout)
 	}
-	if err := json.Unmarshal(line, &rpcResp); err != nil {
-		return nil, err
-	}
-	return rpcResp.Error, nil
 }
 
 // AuditSwarmReceiptContention tests 8-worker concurrent CAS receipt validation
@@ -303,7 +340,7 @@ func NewSwarmReceiptContentionProbe() *Probe {
 
 // AuditSymlinkScopeEscape verifies that under G8S_TIER=F1 + G8S_SCOPE_ROOT=scopeDir,
 // ResolveDelegationContext, VerifyScope, Read, Edit, and Search reject symlinks and out-of-scope widening.
-func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
+func AuditSymlinkScopeEscape(ctx context.Context) (outcome string, err error) {
 	tmpDir, err := os.MkdirTemp("", "probe-symlink-*")
 	if err != nil {
 		return "", err
@@ -333,22 +370,25 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 
 	origTier, tierSet := os.LookupEnv("G8S_TIER")
 	origScope, scopeSet := os.LookupEnv("G8S_SCOPE_ROOT")
-	restoreEnv := func() {
-		if tierSet {
-			_ = os.Setenv("G8S_TIER", origTier)
-		} else {
-			_ = os.Unsetenv("G8S_TIER")
+	origReceipt, receiptSet := os.LookupEnv("G8S_RECEIPT_ID")
+	restoreTier := func() error { return restoreEnvVar("G8S_TIER", origTier, tierSet) }
+	restoreScope := func() error { return restoreEnvVar("G8S_SCOPE_ROOT", origScope, scopeSet) }
+	restoreReceipt := func() error { return restoreEnvVar("G8S_RECEIPT_ID", origReceipt, receiptSet) }
+	defer func() {
+		if rErr := restoreEnvVars(restoreTier, restoreScope, restoreReceipt); rErr != nil && err == nil {
+			err = rErr
 		}
-		if scopeSet {
-			_ = os.Setenv("G8S_SCOPE_ROOT", origScope)
-		} else {
-			_ = os.Unsetenv("G8S_SCOPE_ROOT")
-		}
-	}
-	defer restoreEnv()
+	}()
 
-	_ = os.Setenv("G8S_TIER", "F1")
-	_ = os.Setenv("G8S_SCOPE_ROOT", scopeDir)
+	if err := os.Setenv("G8S_TIER", "F1"); err != nil {
+		return "", fmt.Errorf("set G8S_TIER: %w", err)
+	}
+	if err := os.Setenv("G8S_SCOPE_ROOT", scopeDir); err != nil {
+		return "", fmt.Errorf("set G8S_SCOPE_ROOT: %w", err)
+	}
+	if err := os.Unsetenv("G8S_RECEIPT_ID"); err != nil {
+		return "", fmt.Errorf("unset G8S_RECEIPT_ID: %w", err)
+	}
 
 	// 1. ResolveDelegationContext must reject parent directory widening
 	if _, _, err := fsops.ResolveDelegationContext("", tmpDir, false); err == nil {
@@ -390,7 +430,9 @@ func AuditSymlinkScopeEscape(ctx context.Context) (string, error) {
 		return OutcomeClassBlocked, errors.New("search.Execute accepted out-of-scope root outsideDir")
 	}
 
-	restoreEnv()
+	if err := restoreEnvVars(restoreTier, restoreScope, restoreReceipt); err != nil {
+		return "", err
+	}
 	cleanupProbeTempDir(tmpDir)
 
 	if err := sensor.Verify(8); err != nil {
@@ -417,7 +459,7 @@ func NewSymlinkScopeEscapeProbe() *Probe {
 
 // AuditHTTPMCPDASTBoundary tests in-process HTTP and MCP stdio servers with a real receipt.Manager,
 // asserting single-use receipt consumption, blocked replay attempts, and clean runtime hygiene.
-func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
+func AuditHTTPMCPDASTBoundary(ctx context.Context) (outcome string, err error) {
 	tmpDir, err := os.MkdirTemp("", "probe-dast-*")
 	if err != nil {
 		return "", err
@@ -425,6 +467,17 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	defer cleanupProbeTempDir(tmpDir)
 
 	sensor := CaptureRuntimeSensor(tmpDir)
+
+	origReceipt, receiptSet := os.LookupEnv("G8S_RECEIPT_ID")
+	restoreReceipt := func() error { return restoreEnvVar("G8S_RECEIPT_ID", origReceipt, receiptSet) }
+	defer func() {
+		if rErr := restoreReceipt(); rErr != nil && err == nil {
+			err = rErr
+		}
+	}()
+	if err := os.Unsetenv("G8S_RECEIPT_ID"); err != nil {
+		return "", fmt.Errorf("unset G8S_RECEIPT_ID: %w", err)
+	}
 
 	dbPath := filepath.Join(tmpDir, "receipts.db")
 	mgr, err := receipt.NewReceiptManager(dbPath, nil)
@@ -593,6 +646,10 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (string, error) {
 	}
 	outR.Close()
 	outW.Close()
+
+	if err := restoreReceipt(); err != nil {
+		return "", err
+	}
 
 	mgr.Close()
 	cleanupProbeTempDir(tmpDir)
