@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,20 @@ type testEnvelope struct {
 	At         string          `json:"at"`
 }
 
+// ambientDelegationEnvVars lists harness-injected delegation variables that F1 workers
+// inherit from g8s worker hydration. cmd/g8s tests assume a clean ambient env; TestMain
+// clears these once before m.Run(). Tests that need a value use t.Setenv. G8S_STATE_DIR is
+// not listed — tests manage it themselves.
+var ambientDelegationEnvVars = []string{
+	"G8S_TIER",
+	"G8S_STRATUM",
+	"G8S_SCOPE_ROOT",
+	"G8S_RECEIPT_ID",
+	"G8S_PERMISSION",
+	"G8S_TASK_ID",
+	"AGY_MCP_ALLOW_WORKSPACE_WRITE",
+}
+
 var (
 	sharedBinOnce sync.Once
 	sharedBinDir  string
@@ -32,11 +47,25 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	for _, key := range ambientDelegationEnvVars {
+		if err := os.Unsetenv(key); err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(%q): %v\n", key, err)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	if sharedBinDir != "" {
 		_ = os.RemoveAll(sharedBinDir)
 	}
 	os.Exit(code)
+}
+
+func TestMain_ScrubsAmbientDelegationEnv(t *testing.T) {
+	for _, key := range ambientDelegationEnvVars {
+		if got := os.Getenv(key); got != "" {
+			t.Errorf("ambient delegation env %q = %q, want empty", key, got)
+		}
+	}
 }
 
 func buildG8sBinary(t *testing.T) string {
