@@ -55,6 +55,63 @@ func TestIASTRuntimeHygieneSensor(t *testing.T) {
 	}
 }
 
+func TestJailProbeEnv_RestoresExactly(t *testing.T) {
+	t.Run("unset vars stay unset", func(t *testing.T) {
+		for _, name := range trackedEnvVars {
+			_ = os.Unsetenv(name)
+		}
+		restore, err := jailProbeEnv(map[string]string{"G8S_TIER": "F1"})
+		if err != nil {
+			t.Fatalf("jailProbeEnv: %v", err)
+		}
+		if v, set := os.LookupEnv("G8S_TIER"); !set || v != "F1" {
+			t.Fatalf("override G8S_TIER: set=%v val=%q", set, v)
+		}
+		if _, set := os.LookupEnv("G8S_STRATUM"); set {
+			t.Fatal("G8S_STRATUM should be unset under jail")
+		}
+		if err := restore(); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		for _, name := range trackedEnvVars {
+			if _, set := os.LookupEnv(name); set {
+				t.Fatalf("%s should remain unset after restore", name)
+			}
+		}
+	})
+
+	t.Run("set vars restored to prior values", func(t *testing.T) {
+		t.Setenv("G8S_TIER", "F0-ambient")
+		t.Setenv("G8S_STRATUM", "S3-A")
+		t.Setenv("G8S_PERMISSION", "read_only")
+		scopeRoot := t.TempDir()
+		t.Setenv("G8S_SCOPE_ROOT", scopeRoot)
+
+		restore, err := jailProbeEnv(map[string]string{
+			"G8S_TIER":       "F1",
+			"G8S_SCOPE_ROOT": filepath.Join(scopeRoot, "inner"),
+		})
+		if err != nil {
+			t.Fatalf("jailProbeEnv: %v", err)
+		}
+		if err := restore(); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+
+		assertEnv := func(name, want string) {
+			t.Helper()
+			got, set := os.LookupEnv(name)
+			if !set || got != want {
+				t.Fatalf("%s: want (set=true %q) got (set=%v %q)", name, want, set, got)
+			}
+		}
+		assertEnv("G8S_TIER", "F0-ambient")
+		assertEnv("G8S_STRATUM", "S3-A")
+		assertEnv("G8S_PERMISSION", "read_only")
+		assertEnv("G8S_SCOPE_ROOT", scopeRoot)
+	})
+}
+
 func TestIASTDASTHelpers_ErrorPaths(t *testing.T) {
 	if _, err := postJSONEdit("http://127.0.0.1:0/invalid", map[string]any{"bad": make(chan int)}); err == nil {
 		t.Fatal("expected marshal error in postJSONEdit")
@@ -80,17 +137,18 @@ func TestIASTDASTHelpers_ErrorPaths(t *testing.T) {
 func TestIASTDASTProbes_AllPass(t *testing.T) {
 	ctx := context.Background()
 
-	presetReceipt := "rc-ambient-worker"
-	t.Setenv("G8S_RECEIPT_ID", presetReceipt)
-
-	// Ensure AuditSymlinkScopeEscape covers both set and unset G8S_TIER / G8S_SCOPE_ROOT restoration
-	t.Setenv("G8S_TIER", "F0")
-	t.Setenv("G8S_SCOPE_ROOT", t.TempDir())
-	if outcome, err := AuditSymlinkScopeEscape(ctx); err != nil || outcome != OutcomeClassCompleted {
-		t.Fatalf("AuditSymlinkScopeEscape with preset env failed: outcome=%q err=%v", outcome, err)
+	presets := map[string]string{
+		"G8S_TIER":       "F1",
+		"G8S_STRATUM":    "S3-A",
+		"G8S_PERMISSION": "read_only",
+		"G8S_RECEIPT_ID": "rc-ambient",
+		"G8S_SCOPE_ROOT": t.TempDir(),
+		"G8S_TASK_ID":    "t-ambient",
+		"G8S_ROLE":       "scout",
 	}
-	_ = os.Unsetenv("G8S_TIER")
-	_ = os.Unsetenv("G8S_SCOPE_ROOT")
+	for name, val := range presets {
+		t.Setenv(name, val)
+	}
 
 	suite := &ProbeSuite{
 		Name:        "IAST/DAST Red-Team Suite",
@@ -114,13 +172,13 @@ func TestIASTDASTProbes_AllPass(t *testing.T) {
 		t.Fatalf("PassedProbes = %d, want 3", pri.PassedProbes)
 	}
 
-	gotReceipt, gotReceiptSet := os.LookupEnv("G8S_RECEIPT_ID")
-	if !gotReceiptSet || gotReceipt != presetReceipt {
-		t.Fatalf("G8S_RECEIPT_ID not restored: want (set=true val=%q) got (set=%v val=%q)",
-			presetReceipt, gotReceiptSet, gotReceipt)
+	for name, want := range presets {
+		got, set := os.LookupEnv(name)
+		if !set || got != want {
+			t.Fatalf("%s not restored: want (set=true val=%q) got (set=%v val=%q)", name, want, set, got)
+		}
 	}
 
-	// Verify DefaultSuite registration and FilterSuite by CategoryIASTDAST
 	filtered := FilterSuite(DefaultSuite(), nil, string(CategoryIASTDAST))
 	if len(filtered.Probes) != 3 {
 		t.Fatalf("FilterSuite(%q) returned %d probes, want 3", CategoryIASTDAST, len(filtered.Probes))
