@@ -64,3 +64,21 @@ Planning artifacts: source-bound peer review, recorded decision dispositions, lo
 - **Core Implementation (`internal/mesh/*`, `cmd/g8s/coordinator_mesh.go`, `internal/mcp/mesh.go`, `DELTA-46`)**: SQLite WAL peer ledger with 10 deterministic operations (`register`, `quota-publish`, `send`, `inbox`, `ack`, `claim`, `release`, `accept`, `snapshot`, `wait`), CLI/MCP parity (`g8s coordinator mesh` and `g8s_coordinator_mesh`), and 16 passing unit/regression tests (`claims_test.go`, `messages_test.go`, `drills_test.go`, `internal/mcp/mesh_test.go`).
 - **RT-MESH v1 Real-Time Protocol (`realtime-protocol.md`)**: Ratified across peers with verified R1 long-poll wake latency (`107ms`), R2 4-claimer single-winner CAS race + `context_revision` fence, R3 `message_id` idempotent echo vs. digest-collision rejection, and R4 cross-platform live round-trip (`25s`).
 - **Three-Platform Ledger Convergence (`seq1..seq34`) & K5 Programmatic Quota Self-Check**: Codex, AGY, and ZCode coordinated handoffs, claims, and artifact acceptances through the shared SQLite ledger; AGY verified programmatic self-observation of all three quota windows (`gemini_weekly`, `gemini_five_hour`, `claude_gpt_weekly`) via `orca account list --json` (`antigravity-cli`) and `orca terminal read`.
+
+## 2026-11-04 status
+
+Campaign tracker [#699](https://github.com/tamld/g8s/issues/699) is **closed**; remaining work is one-issue-one-receipt ([#750](https://github.com/tamld/g8s/issues/750)–[#756](https://github.com/tamld/g8s/issues/756)). Phase 3 native inbox/recovery evidence remains in [phase-03-native-drill.md](./phase-03-native-drill.md). Phase 4 convergence above is unchanged; **open Phase 4 scope** is inbox retention ([#752](https://github.com/tamld/g8s/issues/752)), RT-MESH v1.1 amendments A1–A5 ([#754](https://github.com/tamld/g8s/issues/754)), and fence-at-mutation ADR ([#755](https://github.com/tamld/g8s/issues/755)).
+
+**AM1** (`busy_timeout` 5000→30000): **closed as measured no-op** — 8 concurrent writers × 40 `coordinator mesh --op send` = **320/320** messages persisted, **0** `SQLITE_BUSY`, per-send **p95 35ms** (agy co-sign 2026-11-01; drill under `$G8S_STATE_DIR/am1-drill/` per [#699](https://github.com/tamld/g8s/issues/699) comment).
+
+### Post-cut checklist (2026-11-04)
+
+- [x] Land interop ledger + RT-MESH v1 on main — PR [#700](https://github.com/tamld/g8s/pull/700) (`df2b7fc`)
+- [x] Land CI/CD depth + OWASP agentic red suites (audit items 1–5, 8) — PR [#707](https://github.com/tamld/g8s/pull/707) (`5eed521`)
+- [x] Complete Phase 3 native drill artifacts — [phase-03-native-drill.md](./phase-03-native-drill.md) (converged 2026-10-31)
+- [x] AM1 concurrent-send measurement — no timeout increase warranted ([#699](https://github.com/tamld/g8s/issues/699))
+- [ ] AM2 mesh inbox retention / rotation — [#752](https://github.com/tamld/g8s/issues/752)
+- [ ] RT-MESH v1.1 A1–A5 — [#754](https://github.com/tamld/g8s/issues/754)
+- [ ] fence-at-mutation enforcement ADR — [#755](https://github.com/tamld/g8s/issues/755)
+- [ ] Promote OpenSpec DELTA-46 from PROPOSED — [#751](https://github.com/tamld/g8s/issues/751)
+- [x] Roadmap v0.22.x interop row + this plan status — [#750](https://github.com/tamld/g8s/issues/750) (this edit)
