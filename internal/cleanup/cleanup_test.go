@@ -789,8 +789,10 @@ func TestFindGhostProcesses_HeartbeatPIDMapping(t *testing.T) {
 	}
 
 	pm := &DefaultProcessManager{
-		RepoDir: tempDir,
-		Lister:  lister,
+		RepoDir:           tempDir,
+		Lister:            lister,
+		AncestorSelfPID:   900_001,
+		AncestorParentPID: 900_002,
 	}
 
 	ghosts, err := pm.FindGhostProcesses(context.Background(), tempDir, 5*time.Minute, clock)

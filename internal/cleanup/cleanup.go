@@ -135,6 +135,11 @@ type CleanupGitRunner interface {
 type DefaultProcessManager struct {
 	RepoDir string
 	Lister  process.ProcessLister
+	// AncestorSelfPID and AncestorParentPID override os.Getpid/os.Getppid when
+	// building the supervisor-ancestry exclusion set in FindGhostProcesses.
+	// Zero values use the real process IDs (production default).
+	AncestorSelfPID   int
+	AncestorParentPID int
 }
 
 func (d *DefaultProcessManager) getLister() process.ProcessLister {
@@ -260,8 +265,14 @@ func (d *DefaultProcessManager) FindGhostProcesses(ctx context.Context, heartbea
 	}
 
 	var ghosts []ProcessInfo
-	selfPID := os.Getpid()
-	parentPID := os.Getppid()
+	selfPID := d.AncestorSelfPID
+	if selfPID == 0 {
+		selfPID = os.Getpid()
+	}
+	parentPID := d.AncestorParentPID
+	if parentPID == 0 {
+		parentPID = os.Getppid()
+	}
 
 	ppidByPID := make(map[int]int, len(procs))
 	for _, p := range procs {
