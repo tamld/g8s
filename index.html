@@ -13,8 +13,8 @@
   <meta name="twitter:title" content="g8s — Zero-Trust Process Harness for AI Coding Agents">
   <meta name="twitter:description" content="Contain and orchestrate your AI coding agents with zero ambient shell authority.">
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
-  <link rel="stylesheet" href="assets/site/styles.css" integrity="sha384-xBqCBxYrHHn2+abNsQGt7dgd3bGgTd7Btmqv64fo4OABMtPPVYI4nyst1aCn3/LE" crossorigin="anonymous">
-  <script src="assets/site/main.js" integrity="sha384-5v40f9sGJ/yRmeG7fzQtDxjGSHB/Hfl2V6Qf0jOoTvLtqokh3ZmTvtr1cMSlyjto" crossorigin="anonymous" defer></script>
+  <link rel="stylesheet" href="assets/site/styles.css" integrity="sha384-wWozXiEcLzMaLf5IKumoH0aqhEyT8KrnPSSZAkhd6M6dQVlSEtaVdgS63v0EwXZ7" crossorigin="anonymous">
+  <script src="assets/site/main.js" integrity="sha384-zVTgfnupLH5AyqtPxEnkag1Yk0Na8CHiBWuboluYmqT8W+ZLnsGNBf2kz+VO41Ce" crossorigin="anonymous" defer></script>
 </head>
 <body>
 
@@ -54,14 +54,12 @@
     <section class="section hero-section" id="overview">
       <div class="container hero-grid">
         <div class="hero-content">
-          <div data-ui="true">
-            <div class="badge">
-              <span class="badge-dot" aria-hidden="true"></span>
-              <span>Open source zero-trust process harness (&lt;25MB static pure-Go binary)</span>
-            </div>
+          <div class="badge">
+            <span class="badge-dot" aria-hidden="true"></span>
+            <span>Open source zero-trust process harness (&lt;25MB static pure-Go binary)</span>
           </div>
 
-          <h1 class="hero-title">Zero-trust process harness for AI coding agents</h1>
+          <h1 class="hero-title">Zero-trust harness for AI agents</h1>
 
           <p class="hero-subhead">
             k8s orchestrates compute containers; g8s orchestrates AI agent CLI workers. Private Git worktrees, path-scoped write receipts, and lossless verification firewalls in a single static binary.
@@ -192,7 +190,7 @@
     </section>
 
     <!-- 3. THE PROBLEM -->
-    <section class="section" id="problem">
+    <section class="section" id="problem" data-reveal="true">
       <div class="container">
         <div class="section-header">
           <h2>Ambient shell risk vs zero-trust harness</h2>
@@ -209,28 +207,28 @@
             </h3>
             <ul class="problem-list">
               <li class="problem-item">
-                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <span class="icon-fail" aria-hidden="true">[x]</span>
                 <div>
                   <span class="problem-item-title">Unbounded filesystem authority</span>
                   <span class="problem-item-desc">Workers execute arbitrary commands and can accidentally mutate or delete files outside target modules.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <span class="icon-fail" aria-hidden="true">[x]</span>
                 <div>
                   <span class="problem-item-title">Orphan zombie processes</span>
                   <span class="problem-item-desc">Child processes survive agent crashes, remaining hidden in background loops and pegging CPU cores at 100%.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <span class="icon-fail" aria-hidden="true">[x]</span>
                 <div>
                   <span class="problem-item-title">Working tree corruption</span>
                   <span class="problem-item-desc">Failed agent experiments and uncommitted syntax errors directly pollute developer checkout state.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-fail" data-ui="true" aria-hidden="true">[x]</span>
+                <span class="icon-fail" aria-hidden="true">[x]</span>
                 <div>
                   <span class="problem-item-title">Context quota flooding</span>
                   <span class="problem-item-desc">Megabytes of raw compiler tracebacks flood the coordinator context window, depleting model quotas.</span>
@@ -246,28 +244,28 @@
             </h3>
             <ul class="problem-list">
               <li class="problem-item">
-                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <span class="icon-pass" aria-hidden="true">[ok]</span>
                 <div>
                   <span class="problem-item-title">Path-scoped write receipts</span>
                   <span class="problem-item-desc">Mutations require single-use, time-limited capability receipts listing exact allowed file paths.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <span class="icon-pass" aria-hidden="true">[ok]</span>
                 <div>
                   <span class="problem-item-title">Clean process group termination</span>
                   <span class="problem-item-desc">POSIX process groups (Setpgid) guarantee entire child trees terminate cleanly on timeout or abort.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <span class="icon-pass" aria-hidden="true">[ok]</span>
                 <div>
                   <span class="problem-item-title">Fail-closed Git worktrees</span>
                   <span class="problem-item-desc">Each task executes in an isolated Git worktree; only verified, accepted changes are delivered.</span>
                 </div>
               </li>
               <li class="problem-item">
-                <span class="icon-pass" data-ui="true" aria-hidden="true">[ok]</span>
+                <span class="icon-pass" aria-hidden="true">[ok]</span>
                 <div>
                   <span class="problem-item-title">Lossless information firewall</span>
                   <span class="problem-item-desc">Transforms megabytes of raw logs into compact, structured verification receipts for the orchestrator.</span>
@@ -279,143 +277,169 @@
       </div>
     </section>
 
-    <!-- 4. CAPABILITIES -->
+    <!-- 4. CAPABILITIES (Recomposed: Spotlights with Real Captures + Signature Motion + Spec Ladder) -->
     <section class="section" id="capabilities">
       <div class="container">
-        <div class="section-header">
+        <div class="section-header" data-reveal="true">
           <h2>Engineered capabilities with proof artifacts</h2>
           <p class="section-desc">
             Core safety mechanisms grounded directly in repository specifications, executable test suites, and architectural records.
           </p>
         </div>
 
-        <div class="cap-grid">
-          <!-- Cap 1 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Zero-trust containment tiers (F0/F1/F2)</h3>
-              <p class="cap-desc">Decouples sovereign F0 planner authority from bounded F1 execution worktrees and nested F2 subagents.</p>
+        <!-- Capability Spotlights (Narrative Splits with Real Fragments) -->
+        <div class="cap-spotlights">
+          <!-- Spotlight 1: Doctor Diagnostics -->
+          <div class="cap-spotlight" data-reveal="true">
+            <div class="cap-spotlight-narrative">
+              <span class="cap-cat-label">Verification engine</span>
+              <h3 class="cap-spotlight-title">Sub-millisecond diagnostics across all engine boundaries</h3>
+              <p class="cap-spotlight-desc">
+                Autonomous agents require verified local prerequisites before taking flight. <code>g8s doctor</code> audits SQLite WAL connectivity, git worktree engines, and active AI worker CLIs (agy, claude, codex) in under 14ms with zero network egress.
+              </p>
+              <div class="cap-spotlight-citation">
+                <span>Specification contract:</span>
+                <a href="docs/user-guide/cli-reference.md">docs/user-guide/cli-reference.md</a>
+              </div>
             </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s roles
-{"v":1,"kind":"roles","data":[{"name":"scout","permission":"read_only","tier":"F1"},{"name":"implementer","permission":"workspace_write","tier":"F1"}]}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="docs/decisions/0032-containment-levels.md">docs/decisions/0032-containment-levels.md</a>
-            </div>
-          </div>
-
-          <!-- Cap 2 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Single-use write receipts</h3>
-              <p class="cap-desc">Eliminates ambient shell write access. Mutations require time-limited tokens listing exact allowed file paths.</p>
-            </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s receipt issue --path "internal/config/*.go" --ttl 3600
-{"receipt_id":"67992e6a-f88a-4b8a-b711-b233fb6b1623","allowed_paths":["internal/config/*.go"],"ttl_s":3600,"state":"ISSUED"}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="schemas/receipt-v1.schema.json">schemas/receipt-v1.schema.json</a>
+            <div class="cap-fragment-frame">
+              <img src="assets/captures/g8s-doctor-cli.png" alt="Real g8s doctor diagnostics terminal output" class="cap-fragment-img" width="1040" height="720" loading="lazy">
             </div>
           </div>
 
-          <!-- Cap 3 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Risk-tiered ALDC gate lanes (0/D/R/F/S)</h3>
-              <p class="cap-desc">Routes mutations dynamically from fast documentation edits (Lane 0) to security-critical kernels (Lane S).</p>
+          <!-- Spotlight 2: Task Orchestration (Inverted Narrative Split) -->
+          <div class="cap-spotlight cap-spotlight-invert" data-reveal="true">
+            <div class="cap-fragment-frame">
+              <img src="assets/captures/g8s-submit-cli.png" alt="Real g8s submit task enqueueing terminal output" class="cap-fragment-img" width="1040" height="780" loading="lazy">
             </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s feature inspect --path internal/receipt/receipt.go
-{"lane":"S","checks":["gosec","semgrep","holdout_partition","seeded_mutant"]}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="docs/decisions/0024-gate-lane-routing.md">docs/decisions/0024-gate-lane-routing.md</a>
-            </div>
-          </div>
-
-          <!-- Cap 4 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Cross-repository fleet hygiene</h3>
-              <p class="cap-desc">Verifies uncommitted changes, unpushed branches, and detached HEADs across sister repositories before dispatch.</p>
-            </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s fleet status --require-clean
-{"v":1,"kind":"fleet","clean":true,"checked_repositories":4,"drift_detected":0}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="spec/openspec/32-fleet-hygiene-spec.md">spec/openspec/32-fleet-hygiene-spec.md</a>
+            <div class="cap-spotlight-narrative">
+              <span class="cap-cat-label">Queue and worker affinity</span>
+              <h3 class="cap-spotlight-title">Compare-and-swap queueing with atomic worker leases</h3>
+              <p class="cap-spotlight-desc">
+                Submit tasks with immutable idempotency keys and strict role contracts. Workers claim tasks through SQLite WAL compare-and-swap locks, preventing race conditions across multi-agent loops and enforcing parent worktree directory jails.
+              </p>
+              <div class="cap-spotlight-citation">
+                <span>Specification contract:</span>
+                <a href="spec/openspec/32-fleet-hygiene-spec.md">spec/openspec/32-fleet-hygiene-spec.md</a>
+              </div>
             </div>
           </div>
 
-          <!-- Cap 5 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Multi-coordinator interop mesh (RT-MESH)</h3>
-              <p class="cap-desc">Enables Claude, Codex, and Antigravity to coordinate over a shared SQLite WAL ledger with CAS locks.</p>
+          <!-- Spotlight 3: Capability Jail & Signature Motion -->
+          <div class="cap-spotlight" data-reveal="true">
+            <div class="cap-spotlight-narrative">
+              <span class="cap-cat-label">Capability boundary</span>
+              <h3 class="cap-spotlight-title">Single-use write receipts and path-scoped mutation envelopes</h3>
+              <p class="cap-spotlight-desc">
+                Eliminates ambient shell write authority. Workers inherit <code>G8S_RECEIPT_ID</code> and <code>G8S_SCOPE_ROOT</code>. Any attempt to modify a path outside <code>AllowedPaths</code> is blocked in-process with <code>E_RECEIPT_SCOPE_EXCEEDED</code>.
+              </p>
+              <!-- ONE Signature Motion: Receipt Seal Stamp (B7 Law) -->
+              <div class="seal-container">
+                <div class="receipt-seal" data-stamp="true">
+                  <span class="seal-icon" aria-hidden="true">&#x2B22;</span>
+                  <span class="seal-text">Verified write receipt (SHA-256 sealed)</span>
+                </div>
+              </div>
+              <div class="cap-spotlight-citation">
+                <span>Proof artifact:</span>
+                <a href="schemas/receipt-v1.schema.json">schemas/receipt-v1.schema.json</a>
+              </div>
             </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s coordinator mesh status
-{"mesh_version":"v1","peers":["claude-f0","codex-f0","agy-f0"],"active_leases":2}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="spec/openspec/46-peer-coordinator-ledger-spec.md">spec/openspec/46-peer-coordinator-ledger-spec.md</a>
-            </div>
-          </div>
-
-          <!-- Cap 6 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">System-1 reflex triage (Jev)</h3>
-              <p class="cap-desc">Enforces Sensor != Decider before file mutation, halting unauthorized sandbox escapes in sub-10ms.</p>
-            </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s reflex triage --summary "Update config parser" --files "internal/config/config.go"
-{"verdict":"ALLOW","lane":"D","escalation_required":false,"latency_ms":8}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="docs/decisions/0034-config-driven-llm-consumer-9router.md">docs/decisions/0034-config-driven-llm-consumer-9router.md</a>
+            <div class="cap-fragment-frame">
+              <img src="assets/captures/g8s-roles-cli.png" alt="Real g8s roles capability matrix terminal output" class="cap-fragment-img" width="1040" height="520" loading="lazy">
             </div>
           </div>
 
-          <!-- Cap 7 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">6-stage QA and seeded mutant canary</h3>
-              <p class="cap-desc">Replaces unverified model claims with mechanical proofs: holdout isolation and seeded mutant canaries.</p>
+          <!-- Spotlight 4: Mutation Profiles & Permission Boundaries -->
+          <div class="cap-spotlight cap-spotlight-invert" data-reveal="true">
+            <div class="cap-fragment-frame">
+              <img src="assets/captures/g8s-permissions-cli.png" alt="Real g8s permissions capability boundary matrix terminal output" class="cap-fragment-img" width="1040" height="420" loading="lazy">
             </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s verify --task 015ea318-b977-4aed-85cf-4b0cb9c4cce1 --json
-{"v":1,"verdict":"PASS","stages_passed":6,"mutant_canary":"KILLED","holdout_clean":true}</code></pre>
-            </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="internal/verifier/qapipeline.go">internal/verifier/qapipeline.go</a>
+            <div class="cap-spotlight-narrative">
+              <span class="cap-cat-label">Mutation profiles</span>
+              <h3 class="cap-spotlight-title">Explicit permission contracts governing worker authority</h3>
+              <p class="cap-spotlight-desc">
+                Every worker process is constrained by registered permission profiles: read-only automation, supplied-text reasoning, or explicit workspace write capability. Zero ambient elevation is permitted without cryptographic Brain authorization.
+              </p>
+              <div class="cap-spotlight-citation">
+                <span>Specification contract:</span>
+                <a href="spec/constitution.md">spec/constitution.md</a>
+              </div>
             </div>
           </div>
+        </div>
 
-          <!-- Cap 8 -->
-          <div class="cap-card">
-            <div class="cap-card-header">
-              <h3 class="cap-title">Native pure-Go agent I/O and ContextPack</h3>
-              <p class="cap-desc">Replaces shell scripts with pure-Go regex search, line-slicing reader, atomic CAS editor, and AST compressor.</p>
+        <!-- Spec Ladder: Large-Type Architectural Specification Rows -->
+        <div class="spec-ladder-header" data-reveal="true">
+          <h3>Architectural capability specifications</h3>
+          <p class="section-desc">Formal specification contracts and deterministic runtime gates built into the static binary.</p>
+        </div>
+
+        <div class="spec-ladder">
+          <!-- Row 1 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">Lane S</span>
+            <div class="spec-content">
+              <div class="spec-row-title">Risk-tiered ALDC gate lanes (0/D/R/F/S)</div>
+              <div class="spec-row-desc">Routes mutations dynamically from fast documentation edits (Lane 0) to security-critical kernels (Lane S) with mandatory holdouts.</div>
+              <code class="spec-row-code">$ g8s feature inspect --path internal/receipt/receipt.go</code>
             </div>
-            <div class="cap-terminal">
-              <pre class="cap-pre"><code>$ g8s search "WriteReceipt" --json
-{"matches":[{"file":"internal/receipt/receipt.go","line":42,"text":"type WriteReceipt struct {"}]}</code></pre>
+            <a href="docs/decisions/0024-gate-lane-routing.md" class="spec-link">ADR-0024 &rarr;</a>
+          </div>
+
+          <!-- Row 2 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">RT-Mesh</span>
+            <div class="spec-content">
+              <div class="spec-row-title">Multi-coordinator interop mesh (RT-MESH)</div>
+              <div class="spec-row-desc">Enables Claude, Codex, and Antigravity to coordinate over a shared SQLite WAL ledger with CAS locks and heartbeat timeouts.</div>
+              <code class="spec-row-code">$ g8s coordinator mesh status</code>
             </div>
-            <div class="cap-citation">
-              <span>Proof artifact:</span>
-              <a href="offer/SEARCH_GUIDE.md">offer/SEARCH_GUIDE.md</a>
+            <a href="spec/openspec/46-peer-coordinator-ledger-spec.md" class="spec-link">DELTA-46 &rarr;</a>
+          </div>
+
+          <!-- Row 3 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">Fleet sync</span>
+            <div class="spec-content">
+              <div class="spec-row-title">Cross-repository fleet hygiene verification</div>
+              <div class="spec-row-desc">Verifies uncommitted changes, unpushed branches, and detached HEADs across sister repositories before dispatching worker waves.</div>
+              <code class="spec-row-code">$ g8s fleet status --require-clean</code>
             </div>
+            <a href="spec/openspec/32-fleet-hygiene-spec.md" class="spec-link">DELTA-32 &rarr;</a>
+          </div>
+
+          <!-- Row 4 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">Jev reflex</span>
+            <div class="spec-content">
+              <div class="spec-row-title">System-1 reflex triage (Sensor != Decider)</div>
+              <div class="spec-row-desc">Enforces Sensor != Decider before file mutation, halting unauthorized sandbox escapes in sub-10ms with zero token overhead.</div>
+              <code class="spec-row-code">$ g8s reflex triage --summary "Update config parser"</code>
+            </div>
+            <a href="docs/decisions/0034-config-driven-llm-consumer-9router.md" class="spec-link">ADR-0034 &rarr;</a>
+          </div>
+
+          <!-- Row 5 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">Canary QA</span>
+            <div class="spec-content">
+              <div class="spec-row-title">6-stage QA and seeded mutant canary proofs</div>
+              <div class="spec-row-desc">Replaces unverified model claims with mechanical proofs: out-of-worktree holdout test suites and seeded mutant canary kills.</div>
+              <code class="spec-row-code">$ g8s verify --task &lt;task-id&gt; --json</code>
+            </div>
+            <a href="internal/verifier/qapipeline.go" class="spec-link">QA Pipeline &rarr;</a>
+          </div>
+
+          <!-- Row 6 -->
+          <div class="spec-row" data-reveal="true">
+            <span class="spec-badge">ContextPack</span>
+            <div class="spec-content">
+              <div class="spec-row-title">Native pure-Go agent I/O and ContextPack</div>
+              <div class="spec-row-desc">Replaces external shell utilities with pure-Go regex search, line-slicing reader, atomic CAS editor, and AST compression.</div>
+              <code class="spec-row-code">$ g8s search "WriteReceipt" --json</code>
+            </div>
+            <a href="offer/SEARCH_GUIDE.md" class="spec-link">Search Guide &rarr;</a>
           </div>
         </div>
       </div>
@@ -424,7 +448,7 @@
     <!-- 5. QUICKSTART -->
     <section class="section" id="quickstart">
       <div class="container">
-        <div class="section-header">
+        <div class="section-header" data-reveal="true">
           <h2>Installed and verified in sixty seconds</h2>
           <p class="section-desc">
             Single static binary with zero CGO dependencies. Runs 100% locally with zero phone-home network calls.
@@ -432,7 +456,7 @@
         </div>
 
         <!-- Platform Tabs -->
-        <div class="quickstart-tabs-nav" role="tablist" aria-label="Installation platform selection" data-qs-tabs="true">
+        <div class="quickstart-tabs-nav" role="tablist" aria-label="Installation platform selection" data-qs-tabs="true" data-reveal="true">
           <button type="button" class="qs-tab-btn" role="tab" aria-selected="true" aria-controls="qs-curl" id="tab-qs-curl">
             macOS &amp; Linux (curl)
           </button>
@@ -479,32 +503,32 @@ make local
           </div>
         </div>
 
-        <div class="source-link-bar">
+        <div class="source-link-bar" data-reveal="true">
           Security audit: <a href="https://github.com/tamld/g8s/blob/main/scripts/install.sh" target="_blank" rel="noopener noreferrer">View install.sh source code on GitHub</a>
         </div>
 
-        <!-- 60-Second Execution Cycle -->
+        <!-- 60-Second Execution Cycle: Connected Linear Track -->
         <div class="cycle-timeline">
-          <div class="cycle-step">
+          <div class="cycle-step" data-reveal="true">
             <div class="cycle-step-header">
-              <span class="cycle-step-tag" data-ui="true">DIAGNOSE</span>
+              <span class="cycle-step-tag">Diagnose</span>
               <span class="cycle-step-title">Run local doctor health diagnostics</span>
             </div>
             <pre class="cycle-code-pre"><code>./bin/g8s doctor --json</code></pre>
           </div>
 
-          <div class="cycle-step">
+          <div class="cycle-step" data-reveal="true">
             <div class="cycle-step-header">
-              <span class="cycle-step-tag" data-ui="true">INSPECT</span>
+              <span class="cycle-step-tag">Inspect</span>
               <span class="cycle-step-title">Inspect registered zero-trust role contracts</span>
             </div>
             <pre class="cycle-code-pre"><code>./g8s roles
 ./g8s permissions</code></pre>
           </div>
 
-          <div class="cycle-step">
+          <div class="cycle-step" data-reveal="true">
             <div class="cycle-step-header">
-              <span class="cycle-step-tag" data-ui="true">ENQUEUE</span>
+              <span class="cycle-step-tag">Enqueue</span>
               <span class="cycle-step-title">Submit a bounded task to the SQLite WAL queue</span>
             </div>
             <pre class="cycle-code-pre"><code>./g8s submit \
@@ -517,9 +541,9 @@ make local
   --timeout 30s</code></pre>
           </div>
 
-          <div class="cycle-step">
+          <div class="cycle-step" data-reveal="true">
             <div class="cycle-step-header">
-              <span class="cycle-step-tag" data-ui="true">CLAIM &amp; PROCESS</span>
+              <span class="cycle-step-tag">Claim and process</span>
               <span class="cycle-step-title">Process task in isolated Git worktree</span>
             </div>
             <pre class="cycle-code-pre"><code>./g8s get &lt;task-id&gt;
@@ -532,14 +556,14 @@ g8s worker --once</code></pre>
     <!-- 6. ARCHITECTURE -->
     <section class="section" id="architecture">
       <div class="container">
-        <div class="section-header">
+        <div class="section-header" data-reveal="true">
           <h2>Two-axis architecture and containment rings</h2>
           <p class="section-desc">
             Physical isolation rings (Axis X) combined with orthogonal control strata (Axis Y) for complete zero-trust delegation.
           </p>
         </div>
 
-        <div class="arch-card">
+        <div class="arch-card" data-reveal="true">
           <!-- Isometric Hand-Drawn SVG Architecture Diagram -->
           <svg class="arch-svg-container" viewBox="0 0 880 440" width="100%" height="100%" role="img" aria-labelledby="arch-title arch-desc">
             <title id="arch-title">g8s Zero-Trust Isometric Architecture</title>
@@ -571,7 +595,7 @@ g8s worker --once</code></pre>
               <!-- Top Face -->
               <polygon points="440,100 760,190 440,280 120,190" fill="url(#slabF1)" stroke="#38bdf8" stroke-width="1.5"/>
               <text x="440" y="165" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#7dd3fc" text-anchor="middle">RING F1 (WORKER MUSCLE) &amp; RING F2 (SUBAGENTS)</text>
-              <text x="440" y="190" font-family="-apple-system, sans-serif" font-size="13" fill="#cbd5e1" text-anchor="middle">Private Git Worktrees · POSIX Setpgid Process Groups · WriteReceipt.AllowedPaths Jail</text>
+              <text x="440" y="190" font-family="-apple-system, sans-serif" font-size="13" fill="#cbd5e1" text-anchor="middle">Private Git Worktrees &middot; POSIX Setpgid Process Groups &middot; WriteReceipt.AllowedPaths Jail</text>
             </g>
 
             <!-- CONNECTOR LEVEL 1 -> 2 -->
@@ -584,7 +608,7 @@ g8s worker --once</code></pre>
               <polygon points="440,150 120,240 120,256 440,166" fill="#01100b"/>
               <polygon points="440,60 760,150 440,240 120,150" fill="url(#slabKernel)" stroke="#05df72" stroke-width="1.8"/>
               <text x="440" y="125" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#6ee7b7" text-anchor="middle">g8s HARNESS KERNEL (ZERO-CGO ENGINE)</text>
-              <text x="440" y="150" font-family="-apple-system, sans-serif" font-size="13" fill="#e2e8f0" text-anchor="middle">SQLite WAL CAS Leases · Gate Lanes 0/D/R/F/S · Information Firewall · System-1 Jev</text>
+              <text x="440" y="150" font-family="-apple-system, sans-serif" font-size="13" fill="#e2e8f0" text-anchor="middle">SQLite WAL CAS Leases &middot; Gate Lanes 0/D/R/F/S &middot; Information Firewall &middot; System-1 Jev</text>
             </g>
 
             <!-- CONNECTOR LEVEL 2 -> 3 -->
@@ -596,13 +620,13 @@ g8s worker --once</code></pre>
               <polygon points="440,110 760,200 760,224 440,134" fill="#150f2e"/>
               <polygon points="440,110 120,200 120,224 440,134" fill="#0e0920"/>
               <polygon points="440,20 760,110 440,200 120,110" fill="url(#slabF0)" stroke="#818cf8" stroke-width="1.8"/>
-              <text x="440" y="85" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#c7d2fe" text-anchor="middle">RING F0 — SOVEREIGN SUPERVISOR TIER (FULL TRUST)</text>
-              <text x="440" y="110" font-family="-apple-system, sans-serif" font-size="13" fill="#e0e7ff" text-anchor="middle">Strategic Orchestrator (Claude / Codex / Antigravity) · Exclusive Git Commit &amp; Receipt Minting</text>
+              <text x="440" y="85" font-family="-apple-system, sans-serif" font-size="13" font-weight="700" fill="#c7d2fe" text-anchor="middle">RING F0 &mdash; SOVEREIGN SUPERVISOR TIER (FULL TRUST)</text>
+              <text x="440" y="110" font-family="-apple-system, sans-serif" font-size="13" fill="#e0e7ff" text-anchor="middle">Strategic Orchestrator (Claude / Codex / Antigravity) &middot; Exclusive Git Commit &amp; Receipt Minting</text>
             </g>
           </svg>
 
           <div class="arch-legend-grid">
-            <div class="legend-box">
+            <div class="legend-box" data-reveal="true">
               <div class="legend-title legend-f0">
                 <span class="badge-dot" aria-hidden="true"></span>
                 <span>F0 Brain Tier</span>
@@ -610,7 +634,7 @@ g8s worker --once</code></pre>
               <p class="legend-desc">Holds exclusive authority over architecture decisions, commit history, and write receipt minting. Never executes untrusted code directly.</p>
             </div>
 
-            <div class="legend-box">
+            <div class="legend-box" data-reveal="true">
               <div class="legend-title legend-kernel">
                 <span class="badge-dot" aria-hidden="true"></span>
                 <span>Harness Kernel</span>
@@ -618,7 +642,7 @@ g8s worker --once</code></pre>
               <p class="legend-desc">Pure-Go zero-trust mediator. Manages SQLite WAL task queue, CAS worker leases, reflex triage, and lossless log compaction.</p>
             </div>
 
-            <div class="legend-box">
+            <div class="legend-box" data-reveal="true">
               <div class="legend-title legend-f1">
                 <span class="badge-dot" aria-hidden="true"></span>
                 <span>F1 &amp; F2 Workers</span>
@@ -630,95 +654,101 @@ g8s worker --once</code></pre>
       </div>
     </section>
 
-    <!-- 7. DOCS HUB (Diátaxis Framework) -->
+    <!-- 7. DOCS HUB (Diátaxis Editorial 2-Column Index) -->
     <section class="section" id="docs">
       <div class="container">
-        <div class="section-header">
+        <div class="section-header" data-reveal="true">
           <h2>Documentation index and references</h2>
           <p class="section-desc">
             Organized across four distinct quadrants of the Diátaxis documentation framework for learning, solving, understanding, and reference.
           </p>
         </div>
 
-        <div class="docs-quad-grid">
-          <div class="docs-quad-card">
-            <h3 class="docs-quad-heading">
-              <span class="tag-mono">1. Tutorials</span>
-              <span>Learning-oriented</span>
-            </h3>
-            <ul class="docs-list">
-              <li>
-                <a href="docs/quickstart.md">60-second quickstart guide</a>
-                <span class="docs-item-meta">From zero to delegated agent task execution in 60s.</span>
-              </li>
-              <li>
-                <a href="docs/user-guide/providers.md">LLM gateway provider setup</a>
-                <span class="docs-item-meta">Configuring OpenAI, Anthropic, and 9router connections.</span>
-              </li>
-            </ul>
+        <div class="docs-index-grid">
+          <!-- Col 1: Learning & Governance -->
+          <div class="docs-col">
+            <div class="docs-quad-section" data-reveal="true">
+              <h3 class="docs-quad-heading">
+                <span class="tag-mono">1. Tutorials</span>
+                <span>Learning-oriented</span>
+              </h3>
+              <ul class="docs-list">
+                <li>
+                  <a href="docs/quickstart.md">60-second quickstart guide</a>
+                  <span class="docs-item-meta">From zero to delegated agent task execution in 60s.</span>
+                </li>
+                <li>
+                  <a href="docs/user-guide/providers.md">LLM gateway provider setup</a>
+                  <span class="docs-item-meta">Configuring OpenAI, Anthropic, and 9router connections.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="docs-quad-section" data-reveal="true">
+              <h3 class="docs-quad-heading">
+                <span class="tag-mono">2. Governance</span>
+                <span>Invariant laws</span>
+              </h3>
+              <ul class="docs-list">
+                <li>
+                  <a href="spec/constitution.md">Spec constitution (6 invariant laws)</a>
+                  <span class="docs-item-meta">Non-negotiable architectural axioms governing all agent mutations.</span>
+                </li>
+                <li>
+                  <a href="AGENTS.md">Agent onboarding protocol</a>
+                  <span class="docs-item-meta">Zero-trust capability delegation protocol for AI workers.</span>
+                </li>
+                <li>
+                  <a href="docs/AGENTS_FULL.md">Full SSoT architecture map</a>
+                  <span class="docs-item-meta">Comprehensive reference of strata, roles, and boundaries.</span>
+                </li>
+              </ul>
+            </div>
           </div>
 
-          <div class="docs-quad-card">
-            <h3 class="docs-quad-heading">
-              <span class="tag-mono">2. Governance</span>
-              <span>Invariant laws</span>
-            </h3>
-            <ul class="docs-list">
-              <li>
-                <a href="spec/constitution.md">Spec constitution (6 invariant laws)</a>
-                <span class="docs-item-meta">Non-negotiable architectural axioms governing all agent mutations.</span>
-              </li>
-              <li>
-                <a href="AGENTS.md">Agent onboarding protocol</a>
-                <span class="docs-item-meta">Zero-trust capability delegation protocol for AI workers.</span>
-              </li>
-              <li>
-                <a href="docs/AGENTS_FULL.md">Full SSoT architecture map</a>
-                <span class="docs-item-meta">Comprehensive reference of strata, roles, and boundaries.</span>
-              </li>
-            </ul>
-          </div>
+          <!-- Col 2: Architecture & Reference -->
+          <div class="docs-col">
+            <div class="docs-quad-section" data-reveal="true">
+              <h3 class="docs-quad-heading">
+                <span class="tag-mono">3. Architecture</span>
+                <span>Understanding</span>
+              </h3>
+              <ul class="docs-list">
+                <li>
+                  <a href="docs/decisions/">Architecture decision records (37 ADRs)</a>
+                  <span class="docs-item-meta">Formal design history and rationale across all major subsystems.</span>
+                </li>
+                <li>
+                  <a href="docs/decisions/0032-containment-levels.md">ADR-0032 Containment levels</a>
+                  <span class="docs-item-meta">Zero-trust tiers (F0/F1/F2) and cardinality laws.</span>
+                </li>
+                <li>
+                  <a href="docs/decisions/0037-reach-layer.md">ADR-0037 Reach platform data</a>
+                  <span class="docs-item-meta">Ordered fallback chains with quarantine circuit breakers.</span>
+                </li>
+              </ul>
+            </div>
 
-          <div class="docs-quad-card">
-            <h3 class="docs-quad-heading">
-              <span class="tag-mono">3. Architecture</span>
-              <span>Understanding</span>
-            </h3>
-            <ul class="docs-list">
-              <li>
-                <a href="docs/decisions/">Architecture decision records (37 ADRs)</a>
-                <span class="docs-item-meta">Formal design history and rationale across all major subsystems.</span>
-              </li>
-              <li>
-                <a href="docs/decisions/0032-containment-levels.md">ADR-0032 Containment levels</a>
-                <span class="docs-item-meta">Zero-trust tiers (F0/F1/F2) and cardinality laws.</span>
-              </li>
-              <li>
-                <a href="docs/decisions/0037-reach-layer.md">ADR-0037 Reach platform data</a>
-                <span class="docs-item-meta">Ordered fallback chains with quarantine circuit breakers.</span>
-              </li>
-            </ul>
-          </div>
-
-          <div class="docs-quad-card">
-            <h3 class="docs-quad-heading">
-              <span class="tag-mono">4. Reference</span>
-              <span>Information-oriented</span>
-            </h3>
-            <ul class="docs-list">
-              <li>
-                <a href="docs/user-guide/cli-reference.md">CLI command reference (50+ commands)</a>
-                <span class="docs-item-meta">Complete flag specifications, schemas, and exit code directory.</span>
-              </li>
-              <li>
-                <a href="docs/user-guide/receipt-workflow.md">Receipt delegation workflow</a>
-                <span class="docs-item-meta">Cryptographic minting, path validation, and consumption cycles.</span>
-              </li>
-              <li>
-                <a href="offer/README.md">Offer bundle for sister repositories</a>
-                <span class="docs-item-meta">Pull-based adoption and repo-agnostic CI verification gates.</span>
-              </li>
-            </ul>
+            <div class="docs-quad-section" data-reveal="true">
+              <h3 class="docs-quad-heading">
+                <span class="tag-mono">4. Reference</span>
+                <span>Information-oriented</span>
+              </h3>
+              <ul class="docs-list">
+                <li>
+                  <a href="docs/user-guide/cli-reference.md">CLI command reference (50+ commands)</a>
+                  <span class="docs-item-meta">Complete flag specifications, schemas, and exit code directory.</span>
+                </li>
+                <li>
+                  <a href="docs/user-guide/receipt-workflow.md">Receipt delegation workflow</a>
+                  <span class="docs-item-meta">Cryptographic minting, path validation, and consumption cycles.</span>
+                </li>
+                <li>
+                  <a href="offer/README.md">Offer bundle for sister repositories</a>
+                  <span class="docs-item-meta">Pull-based adoption and repo-agnostic CI verification gates.</span>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -727,34 +757,35 @@ g8s worker --once</code></pre>
     <!-- 8. PROOF -->
     <section class="section" id="proof">
       <div class="container">
-        <div class="section-header">
+        <div class="section-header" data-reveal="true">
           <h2>Continuous integration and empirical proof</h2>
           <p class="section-desc">
             Empirical quality metrics and continuous security verification enforced on every pull request.
           </p>
         </div>
 
-        <div class="proof-metrics-grid">
-          <div class="metric-card">
+        <!-- Metrics Strip: Unboxed -->
+        <div class="proof-metrics-strip" data-reveal="true">
+          <div class="metric-strip-item">
             <div class="metric-val">82.50%</div>
             <div class="metric-label">Test coverage ratchet baseline</div>
           </div>
-          <div class="metric-card">
+          <div class="metric-strip-item">
             <div class="metric-val">&lt;25MB</div>
             <div class="metric-label">Static pure-Go binary footprint</div>
           </div>
-          <div class="metric-card">
+          <div class="metric-strip-item">
             <div class="metric-val">Zero CGO</div>
             <div class="metric-label">100% portable pure-Go compilation</div>
           </div>
-          <div class="metric-card">
+          <div class="metric-strip-item">
             <div class="metric-val">0 bytes</div>
             <div class="metric-label">Zero phone-home network telemetry</div>
           </div>
         </div>
 
         <div class="proof-details-grid">
-          <div class="proof-detail-card">
+          <div class="proof-detail-card" data-reveal="true">
             <h3 class="proof-detail-title">Security &amp; supply chain battery</h3>
             <ul class="proof-detail-list">
               <li>Full SAST triad: <code>golangci-lint</code>, <code>gosec</code>, <code>semgrep</code>, and GitHub <code>CodeQL</code>.</li>
@@ -764,7 +795,7 @@ g8s worker --once</code></pre>
             </ul>
           </div>
 
-          <div class="proof-detail-card">
+          <div class="proof-detail-card" data-reveal="true">
             <h3 class="proof-detail-title">Living dogfood story</h3>
             <ul class="proof-detail-list">
               <li>g8s is developed entirely using g8s workers under single-use write receipts.</li>
@@ -781,9 +812,9 @@ g8s worker --once</code></pre>
     <!-- 9. COMMUNITY -->
     <section class="section" id="community">
       <div class="container">
-        <div class="community-card">
+        <div class="community-card" data-reveal="true">
           <div class="community-left">
-            <h2>Open-source community and development</h2>
+            <h2>Open-source community</h2>
             <p class="section-desc">
               MIT licensed. Built by systems engineers and distributed system architects for the next generation of autonomous coding agents.
             </p>
@@ -806,7 +837,7 @@ g8s worker --once</code></pre>
   <footer class="site-footer">
     <div class="container footer-container">
       <div>
-        <span>g8s (The Gatekeepers) — Open Source Zero-Trust Process Harness. MIT License.</span>
+        <span>g8s (The Gatekeepers) &mdash; Open Source Zero-Trust Process Harness. MIT License.</span>
       </div>
 
       <ul class="footer-links">
