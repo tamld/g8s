@@ -328,7 +328,7 @@
 
           const originalText = btn.innerHTML;
           btn.classList.add('copied');
-          btn.innerHTML = '<span aria-hidden="true">✓</span> Copied';
+          btn.innerHTML = '<span class="copied-indicator" aria-hidden="true"></span> Copied';
           btn.setAttribute('aria-label', 'Copied to clipboard');
 
           setTimeout(() => {
