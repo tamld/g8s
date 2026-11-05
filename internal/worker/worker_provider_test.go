@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +121,7 @@ func TestSupervisorProviderExecution(t *testing.T) {
 		}
 		sup := NewSupervisor(env.store, env.runDir,
 			WithRunner(env.runner),
+			WithWorktreeIsolator(&fakeWorktreeIsolator{dir: filepath.Join(t.TempDir(), "wt-codex")}),
 			WithPollInterval(2*time.Millisecond),
 			WithProviderCommandResolver(NewProviderCommandResolver(resolverOpts)),
 		)
@@ -133,9 +135,10 @@ func TestSupervisorProviderExecution(t *testing.T) {
 		}
 
 		submitTask(t, env, "task-codex-exec", 1, map[string]any{
-			"provider": "codex",
-			"model":    "codex-base",
-			"prompt":   "refactor",
+			"permission": "workspace_write",
+			"provider":   "codex",
+			"model":      "codex-base",
+			"prompt":     "refactor",
 		})
 
 		task, err := sup.RunOnce(ctx, RunOptions{WorkerID: "w-codex", LeaseSeconds: 10})

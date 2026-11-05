@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/harness"
@@ -279,6 +280,7 @@ type Supervisor struct {
 	binaryPath      string
 	evidenceDir     string
 	streamCallback  StreamCallback
+	providers       []config.ProviderEntry
 
 	// commandResolver optionally overrides the dispatch-contract argv with
 	// an operator-defined invocation template keyed by model ID (DELTA-10
@@ -329,6 +331,7 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 		pollInterval:    defaultPollInterval,
 		captureMaxBytes: defaultCaptureBytes,
 		binaryPath:      "",
+		providers:       config.BuiltinPlatformProviders(),
 		evidenceDir:     evidenceDir,
 	}
 	for _, opt := range opts {
@@ -443,6 +446,18 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	if req.Permission == "" {
 		req.Permission = dispatch.DefaultPermission
+	}
+	if err := checkReadOnlyEnforcement(s.resolveTaskProvider(req), req.Permission); err != nil {
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.cp.GetTask(ctx, task.TaskID)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "claim_refused_read_only",
+				"code": "E_READ_ONLY_UNENFORCEABLE", "error": err.Error(),
+			}),
+			Success: false, Retryable: false, Err: err.Error(),
+		})
 	}
 	if req.Permission == "supplied_text" && req.ToolPolicy == "" {
 		req.ToolPolicy = "none"

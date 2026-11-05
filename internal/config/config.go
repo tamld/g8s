@@ -27,8 +27,12 @@ type ModelEntry struct {
 
 // ProviderEntry is one operator-declared provider in the registry file.
 type ProviderEntry struct {
-	Class               string            `json:"class"`
-	Name                string            `json:"name"`
+	Class string `json:"class"`
+	Name  string `json:"name"`
+	// Enforcement declares where task permissions are mechanically enforced.
+	// Omitted values default to external-cli; only receipt-aware providers
+	// should declare in-process.
+	Enforcement         string            `json:"enforcement,omitempty"`
 	DefaultModel        string            `json:"default_model,omitempty"`
 	Protocol            string            `json:"protocol,omitempty"` // "openai" (default), "anthropic", "9router"
 	BaseURL             string            `json:"base_url,omitempty"`
@@ -46,6 +50,34 @@ type ProviderEntry struct {
 	// are substituted verbatim into the exec argv; templates never
 	// originate from task payloads.
 	Args []string `json:"args,omitempty"`
+}
+
+const (
+	EnforcementExternalCLI = "external-cli"
+	EnforcementInProcess   = "in-process"
+)
+
+// EffectiveEnforcement defaults providers without an explicit declaration to
+// external CLI enforcement.
+func (p ProviderEntry) EffectiveEnforcement() string {
+	if p.Enforcement == "" {
+		return EnforcementExternalCLI
+	}
+	return p.Enforcement
+}
+
+// BuiltinPlatformProviders is the built-in platform registry. AGY enforces
+// delegated receipts in-process; external coding CLIs do not.
+func BuiltinPlatformProviders() []ProviderEntry {
+	return []ProviderEntry{
+		{Name: "agy", Class: classPlatformDispatch, Enforcement: EnforcementInProcess},
+		{Name: "claude", Class: classPlatformDispatch},
+		{Name: "codex", Class: classPlatformDispatch},
+		{Name: "opencode", Class: classPlatformDispatch},
+		{Name: "commandcode", Class: classPlatformDispatch},
+		{Name: "qwen", Class: classPlatformDispatch},
+		{Name: "cursor", Class: classPlatformDispatch},
+	}
 }
 
 // SupportsDirectExecution reports whether the provider can be called directly (api_call class).
@@ -229,6 +261,9 @@ func Load(path string) (*File, error) {
 		return nil, fmt.Errorf("parse provider config: %w", err)
 	}
 	for i, p := range f.Providers {
+		if p.EffectiveEnforcement() != EnforcementExternalCLI && p.EffectiveEnforcement() != EnforcementInProcess {
+			return nil, fmt.Errorf("provider %d (%s): unknown enforcement %q (want external-cli or in-process)", i, p.Name, p.Enforcement)
+		}
 		if p.Protocol != "" {
 			proto := strings.ToLower(strings.TrimSpace(p.Protocol))
 			if proto != "openai" && proto != "anthropic" && proto != "9router" {
