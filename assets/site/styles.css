@@ -450,6 +450,70 @@ a:hover {
   font-size: 13px;
 }
 
+/* Hero isometric engine (Fig. 0) */
+.hero-engine {
+  margin-bottom: 24px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hero-engine-frame {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--bg-surface);
+}
+
+.hero-engine-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 7;
+  max-height: min(52vh, 320px);
+  background-color: var(--bg-terminal);
+}
+
+.hero-engine-readout {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--signal-green);
+  background-color: var(--bg-terminal-header);
+  min-height: 2.4em;
+  word-break: break-word;
+}
+
+.hero-engine-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.hero-engine-fig {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.hero-engine-note code {
+  font-size: 12px;
+  color: var(--signal-blue);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-engine-canvas {
+    max-height: 280px;
+  }
+}
+
 /* Dual-Action Hub */
 .dual-action-hub {
   display: flex;
