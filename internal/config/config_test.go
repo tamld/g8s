@@ -1,11 +1,59 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/testenv"
 )
+
+func TestMain(m *testing.M) {
+	if err := testenv.ScrubAmbientDelegationEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func TestProviderEnforcement(t *testing.T) {
+	for _, tt := range []struct {
+		name, field, want string
+		invalid           bool
+	}{
+		{name: "omitted defaults external", want: EnforcementExternalCLI},
+		{name: "explicit external", field: `,"enforcement":"external-cli"`, want: EnforcementExternalCLI},
+		{name: "explicit in-process", field: `,"enforcement":"in-process"`, want: EnforcementInProcess},
+		{name: "unknown rejected", field: `,"enforcement":"trusted"`, invalid: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := Load(writeTemp(t, `{"providers":[{"class":"platform_dispatch","name":"custom","models":[{"id":"m"}]`+tt.field+`}]}`))
+			if tt.invalid {
+				if err == nil || !strings.Contains(err.Error(), "unknown enforcement") {
+					t.Fatalf("expected enforcement validation error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := f.Providers[0].EffectiveEnforcement(); got != tt.want {
+				t.Fatalf("enforcement = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	for _, p := range BuiltinPlatformProviders() {
+		want := EnforcementExternalCLI
+		if p.Name == "agy" {
+			want = EnforcementInProcess
+		}
+		if got := p.EffectiveEnforcement(); got != want {
+			t.Errorf("%s enforcement = %q, want %q", p.Name, got, want)
+		}
+	}
+}
 
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
