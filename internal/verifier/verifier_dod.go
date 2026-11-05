@@ -201,6 +201,9 @@ func splitVerifierHints(hint string) []string {
 	return tokens
 }
 
+// ⚡ Bolt Optimization: Hoist dynamic regexp.MustCompile calls to package level for zero-allocation processing.
+var reSHA = regexp.MustCompile(`(?i)sha256:([a-f0-9]+)`)
+
 func verifyArtifactSupportingEvidence(artifactPath string, workerEvidence string, evidence TrustedEvidence) (string, error) {
 	root := evidence.WorktreeDir
 	if root == "" {
@@ -268,7 +271,6 @@ func verifyArtifactSupportingEvidence(artifactPath string, workerEvidence string
 	actualSHA := hex.EncodeToString(h[:])
 
 	if workerEvidence != "" {
-		reSHA := regexp.MustCompile(`(?i)sha256:([a-f0-9]+)`)
 		if sm := reSHA.FindStringSubmatch(workerEvidence); len(sm) > 1 {
 			claimed := strings.ToLower(sm[1])
 			if !strings.HasPrefix(actualSHA, claimed) && !strings.HasPrefix(claimed, actualSHA) {
