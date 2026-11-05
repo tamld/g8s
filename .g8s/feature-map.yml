@@ -1024,6 +1024,7 @@ features:
       - "internal/initwiz/**"
       - "internal/completion/**"
       - "internal/lifecycle/**"
+      - "internal/testenv/**"
     collision_domain: "cli-surface"
     owned_paths:
       - "cmd/g8s/**"
@@ -1055,6 +1056,7 @@ features:
       - "!offer/templates/providers.example.json"
       - "!offer/templates/feature-map.yml"
       - "!offer/profiles/seeds/**"
+      - "internal/testenv/**"
       - "offer.go"
       - "offer_test.go"
       - "packaging/**"
