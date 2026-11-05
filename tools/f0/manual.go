@@ -52,7 +52,7 @@ func manualCommand(args []string) int {
 	}
 
 	// Compute git blob hash
-	cmd := exec.Command("git", "-C", absRepo, "hash-object", file)
+	cmd := exec.Command("git", "-C", absRepo, "hash-object", "--", file)
 	out, err := cmd.Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "f0 manual: computing blob hash for %s: %v\n", file, err)
