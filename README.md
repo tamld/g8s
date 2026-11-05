@@ -351,6 +351,7 @@ g8s/
 │   ├── state/ — implements pure FSM transition validation and append-only event logging across all g8s lifecycle domains per DEBT-31
 │   ├── supervisor/ — coordinates the fix loop across planning, role enforcement, worker execution, review, and RCA
 │   ├── telemetry/ — ingests execution trace events, distills failure patterns, and provides preflight context injection
+│   ├── testenv/ — provides helpers imported only by test files
 │   ├── vault/ — implements a Zero-CGO, decoupled Knowledge Vault for g8s utilizing SQLite FTS5 with BM25 ranking to index and retrieve Tri-Anchor contextual distillation records
 │   ├── verifier/ — implements verifier-class registry and acceptance verification (issue #515, SCORECARD S-7)
 │   ├── watch/ — implements the blocking watch primitive (#371): poll a condition until it reaches a terminal state, then emit a verdict
