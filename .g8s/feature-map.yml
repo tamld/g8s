@@ -1045,6 +1045,7 @@ features:
       - "!cmd/g8s/doctor*.go"
       - "!cmd/g8s/cleanup*.go"
       - "!cmd/g8s/fleet*.go"
+      - "!cmd/g8s/gates*.go"
       - "!cmd/g8s/feature*.go"
       - "!cmd/g8s/coordinator_mesh*.go"
       - "internal/cli/**"
@@ -1079,6 +1080,7 @@ features:
       - "CHANGELOG.md"
     interfaces:
       cli:
+        - "gates"
         - "version"
         - "init"
         - "update"

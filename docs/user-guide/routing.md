@@ -157,3 +157,27 @@ When tasks are submitted with `--route auto`, the stored `request_json` includes
 | `role` | `string` | `"summarizer"` | Harness role profile contract. |
 | `route_source` | `string` | `"deterministic"` | Decision source: `"deterministic"` or `"jev"`. |
 | `route_reason` | `string` | `"documentation paths route to summarizer role with lightweight model"` | Human-readable audit explanation of the routing decision. |
+
+---
+
+## Scorecard ledgers (model quality & CI gate history)
+
+Rolling reflex telemetry lives under the session state directory (same tree as `runs/`):
+
+| File | Contents |
+| :--- | :--- |
+| `model_quality_events.jsonl` | One `ModelOutcomeRecord` per worker attempt (`internal/routing`, `RecordModelOutcome`). |
+| `gate_outcome_events.jsonl` | Per-check verifier outcomes (`internal/verifier`, `RecordGateOutcomes`). |
+| `gate_ci_run_events.jsonl` | GitHub Actions workflow runs ingested offline (`internal/routing`, `RecordCIGateRuns`). |
+
+Record CI workflow rows after fetching runs (fields: `workflow`, `name`, `conclusion`, `sha`, `started_at` — compatible with `gh run list --json`):
+
+```sh
+gh run list --workflow "CI.yml" --limit 5 --json workflowName,name,conclusion,headSha,createdAt \
+  | jq '[.[] | {workflow:.workflowName, name:.name, conclusion:.conclusion, sha:.headSha, started_at:.createdAt}]' \
+  | g8s gates record --json
+
+g8s gates list --json
+```
+
+Override paths with `G8S_CI_GATE_HISTORY_PATH` (full file path) or pass `--state-dir` to both subcommands.
