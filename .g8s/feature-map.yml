@@ -1057,6 +1057,7 @@ features:
       - "!offer/templates/feature-map.yml"
       - "!offer/profiles/seeds/**"
       - "internal/testenv/**"
+      - "cmd/g8s/gates*.go"
       - "offer.go"
       - "offer_test.go"
       - "packaging/**"
@@ -1079,6 +1080,7 @@ features:
       - "CHANGELOG.md"
     interfaces:
       cli:
+        - "gates"
         - "version"
         - "init"
         - "update"

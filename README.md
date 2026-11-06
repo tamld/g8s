@@ -340,7 +340,7 @@ g8s/
 │   ├── reflex/ — implements a System 1 non-autoregressive decision gate for g8s subagent mutation triage, write receipt fast-pathing, and instant circuit-breaking on sandbox escapes
 │   ├── registry/ — provides a cross-platform wrapper around Windows registry operations for installer detection, path validation, and system environment checks
 │   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
-│   ├── routing/ — routes tasks to providers, models, and roles using deterministic rules and optional LLM assistance
+│   ├── routing/ — CI workflow run history for reflex scorecard (D9-S1, #714)
 │   ├── runtime/ — provides runtime verification utilities for executable identity and process management
 │   ├── search/ — implements a native cross-platform file discovery and content search engine
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
