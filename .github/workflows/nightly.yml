@@ -18,6 +18,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  surface-inventory:
+    name: surface-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: surface-inventory
+        run: bash tools/ci_surface_inventory.sh
+
   nightly-battery:
     name: Nightly Full Battery
     runs-on: ubuntu-latest
