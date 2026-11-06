@@ -86,6 +86,17 @@ g8s tasks --state QUEUED --limit 20
 ### 4. `g8s cancel <task-id>`
 Cancels an active, leased, or queued task in the SQLite control plane.
 
+#### Cancelling a running task (two phases)
+
+While a worker holds a **RUNNING** lease, `g8s cancel` does **not** jump straight to terminal `CANCELLED`. It sets `cancel_requested` so the worker can stop cooperatively. The attempt then finishes in **WORKER_COMPLETED** with a cancelled result envelope. A **second** `g8s cancel` after the worker has exited (task no longer `RUNNING`) seals terminal `CANCELLED`. Same task id, same attempt count; request/result content hashes are unchanged across that second call.
+
+| Phase | Task state (queue row) | `cancel_requested` | Result envelope (sanitized) | Notes |
+| :--- | :--- | :---: | :--- | :--- |
+| 1 — request stop while running | `RUNNING` → `WORKER_COMPLETED` | `true` | `ok`: **false**, `status`: **cancelled** | Worker observes cancel, terminates attempt; `FinishAttempt` records the verdict. |
+| 2 — seal after worker exit | `WORKER_COMPLETED` → `CANCELLED` | `true` | (stored result unchanged) | Second cancel on the non-running task applies terminal `CANCELLED` without replaying the provider. |
+
+**Rule of thumb:** cancel is idempotent-ish — the first call **requests** cooperative stop on a live attempt; a later call on the **idle** task **seals** terminal cancellation.
+
 ```sh
 # Cancel by positional ID
 g8s cancel 3d6f4520-21a4-4f4a-9cbb-9d7fb2389d31
