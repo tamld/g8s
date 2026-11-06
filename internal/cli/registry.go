@@ -21,7 +21,7 @@ type CommandContract struct {
 }
 
 // CanonicalCommandContracts returns the authoritative Generative Surface Contract v2
-// for all 67 top-level g8s CLI commands (#677).
+// for all 68 top-level g8s CLI commands (#677).
 func CanonicalCommandContracts() []CommandContract {
 	return []CommandContract{
 		{Name: "submit", Stratum: "S2", EnvelopeKinds: []string{"task"}, Description: "Queue an asynchronous durable task with harness safety checks"},
@@ -89,6 +89,7 @@ func CanonicalCommandContracts() []CommandContract {
 		{Name: "f0", Stratum: "S2", EnvelopeKinds: []string{"f0_gate_check", "f0_status"}, Description: "F0 supervisor commitment-point gate and status checks (g8s f0 gate check|status)"},
 		{Name: "coordinator", Stratum: "S2", EnvelopeKinds: []string{"coordinator_intake", "coordinator_mastery", "coordinator_mesh"}, Description: "Coordinator Cognitive Intake, Root-Core Deconstruction, Domain Mastery Scorecard & Multi-Node Mesh (g8s coordinator intake|mastery|mesh)"},
 		{Name: "scorecard", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"scorecard_5axis"}, Description: "DELTA-45 5-Axis Cross-Evaluation & Kaizen Engine (g8s scorecard status|audit|kaizen)"},
+		{Name: "gates", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"ci_gate_history_record", "ci_gate_history_list"}, Description: "Ingest and list CI workflow run history for reflex scorecard (g8s gates record|list)"},
 		{Name: "audit", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"audit_log"}, Description: "Query transactional enterprise access-audit log (#441: g8s audit list [--actor] [--action])"},
 		{Name: "version", Stratum: "S0/S1/S2/S3", EnvelopeKinds: []string{"version"}, Description: "Show application version"},
 		{Name: "help", Stratum: "S0/S1/S2/S3", Description: "Show this message"},

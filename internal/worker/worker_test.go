@@ -529,6 +529,107 @@ func TestRunOnceLostStartRaceReportsLeaseLossWithoutFinishing(t *testing.T) {
 	}
 }
 
+// TestCollectCompletionAppendsModelOutcomeWithSessionStateDir exercises the
+// supervisor.collect terminal path with a real control plane store and asserts
+// model_quality_events.jsonl is written under a session state layout (parent of runs/).
+func TestCollectCompletionAppendsModelOutcomeWithSessionStateDir(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	stateRoot := filepath.Join(tmp, ".local", "state", "g8s", "sess-test")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatalf("mkdir state root: %v", err)
+	}
+	runRoot := filepath.Join(stateRoot, "runs")
+	dbPath := filepath.Join(stateRoot, "cp.db")
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		t.Fatalf("open control plane: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	sup := NewSupervisor(store, runRoot, WithRunner(&fakeRunner{}))
+	sup.clock = func() time.Time { return time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC) }
+	t.Setenv("G8S_MODEL_SCORECARD_PATH", "")
+	t.Setenv("G8S_TELEMETRY", "")
+
+	payload, _ := json.Marshal(map[string]any{
+		"prompt": "p", "timeout": "30s", "provider": "test-prov", "model": "test-model",
+	})
+	_, err = store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
+		IdempotencyKey: "collect-score-ledger-1",
+		Payload:        payload,
+		Model:          "test-model",
+		Role:           "collector",
+		Permission:     "read_only",
+		Timeout:        "30s",
+		AddDirs:        []string{"."},
+		MaxAttempts:    3,
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	claimed, err := store.ClaimTask(ctx, "w-collect", 60)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %+v", err, claimed)
+	}
+	token := derefString(claimed.LeaseToken)
+	if !store.StartTask(claimed.TaskID, "w-collect", token) {
+		t.Fatal("StartTask returned false")
+	}
+
+	var req taskRequest
+	if err := json.Unmarshal(claimed.Request, &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	attemptDir := filepath.Join(runRoot, claimed.TaskID, fmt.Sprintf("attempt-%d", claimed.Attempts))
+	if err := os.MkdirAll(attemptDir, 0o700); err != nil {
+		t.Fatalf("mkdir attempt: %v", err)
+	}
+	resultPath := filepath.Join(attemptDir, "result.json")
+	stdoutPath := filepath.Join(attemptDir, "worker.stdout")
+	stderrPath := filepath.Join(attemptDir, "worker.stderr")
+	_ = os.WriteFile(resultPath, []byte(`{"ok":true,"status":"succeeded"}`), 0o600)
+	_ = os.WriteFile(stdoutPath, nil, 0o600)
+	_ = os.WriteFile(stderrPath, nil, 0o600)
+
+	child := newFakeChild(0)
+	child.closeOnce.Do(func() { close(child.done) })
+
+	startTime := sup.clock()
+	final, cerr := sup.collect(ctx, child, "", claimed.TaskID, "w-collect", token,
+		attemptDir, filepath.Join(attemptDir, "prompt.txt"), resultPath, stdoutPath, stderrPath,
+		"", "read_only", "", startTime, "", req)
+	if cerr != nil {
+		t.Fatalf("collect: %v", cerr)
+	}
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("state = %q, want WORKER_COMPLETED", final.State)
+	}
+
+	ledgerPath := filepath.Join(stateRoot, "model_quality_events.jsonl")
+	raw, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	var rec routing.ModelOutcomeRecord
+	line := strings.TrimSpace(strings.Split(string(raw), "\n")[0])
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		t.Fatalf("unmarshal ledger: %v", err)
+	}
+	if rec.TaskID != claimed.TaskID {
+		t.Fatalf("task_id = %q, want %q", rec.TaskID, claimed.TaskID)
+	}
+	if rec.Provider != "test-prov" || rec.ModelRequested != "test-model" {
+		t.Fatalf("provider/model = %q / %q, want test-prov / test-model", rec.Provider, rec.ModelRequested)
+	}
+	if !rec.Success {
+		t.Fatalf("expected success, got %+v", rec)
+	}
+	if rec.DurationMs < 0 {
+		t.Fatalf("duration_ms = %d", rec.DurationMs)
+	}
+}
+
 func TestFinishAttemptRejectsStaleToken(t *testing.T) {
 	env := newWorkerEnv(t, nil)
 	ctx := context.Background()
