@@ -36,6 +36,25 @@ All requests and results are JSON objects. Unknown operations and malformed/unkn
 
 SQLite WAL, busy timeout, immediate write transactions and 0600 database/0700 directory. Validate JSON before opening a write transaction. Bound payload, pending capacity and list result sizes. `messages.created_at` is always written as UTC RFC3339 so retention cutoff comparisons remain correct under lexical string order. Retain message IDs/content digests and accepted task results for the experiment's lifetime to preserve deduplication. Explicit future retention must not erase deduplication inside the retry horizon. Message tombstones (`message_id`, digest, seq) are never removed by `prune` and are retained for the ledger lifetime (small rows); explicit tombstone compaction is a future AM item. Crash/reopen must retain messages and quota.
 
+## Resource limits (implementation-verified)
+
+These are implementation bounds for the current ledger, not changes to the normative operation requirements above.
+
+| Surface | Current bound |
+| --- | --- |
+| IDs validated by `validID` | 1..128 ASCII bytes from `[A-Za-z0-9_.-]` (node/incarnation and message IDs); claim/accept identifiers retain their operation-specific validation. |
+| Registered nodes | 64; retrying or replacing an existing node does not allocate another slot. |
+| Quota observation | 1..16 windows. |
+| Request and payload size | Core `Execute` input and CLI input each cap the entire JSON request at 16,384 bytes. The send handler independently caps the payload object at 16,384 bytes; the public request envelope consumes part of the available input budget. |
+| Message capacity | 10,000 stored message rows total, including ACKed rows until pruning; 1,000 pending messages per recipient node/incarnation. Dedup tombstones do not consume either capacity. |
+| List results | Inbox and wait return at most 50 messages; snapshot returns the first 1,000 claims ordered by task ID. Node/quota lists are bounded by the 64-node registry. Snapshot does not delete omitted claims. |
+| Claim lease | Omitted or zero `lease_seconds` defaults to 60 seconds; explicit nonzero values must be 1..300 seconds. |
+| Accepted artifact | Nonempty `artifact_ref` of at most 2,048 bytes; `artifact_sha256` exactly 64 ASCII hexadecimal characters (upper or lower case). |
+| Wait | `timeout_ms` 0..60,000; pending messages are checked immediately, then polled every 100 ms until a message, timeout, or cancellation. |
+| Filesystem modes | Newly created ledger directory 0700; database 0600. Mode assertions are skipped on Windows, where ACL semantics differ. Existing directories are not chmod-normalized by `Open`. |
+
+Boundary and durability evidence: `TestMeshPayloadAndInputSizeLimits`, `TestMeshPendingInboxCapacity`, `TestMeshTotalMessageCapacity`, `TestMeshSnapshotClaimListBound`, `TestMeshPrivateDirectoryAndDatabaseModes`, and `TestMeshInboxDurableReopen`. CLI admission and transport evidence: `TestCoordinatorMeshCLIF0Gate`, `TestCoordinatorMeshCLIMeshDirFailClosed`, and `TestCoordinatorMeshCLIAndMCPAllOperationsParity` (the original ten operations plus AM2 `prune`). Reopen checks preserve quota ownership, provenance, timestamps, observed percentages and unknown/null values alongside the inbox.
+
 ## Verification scenarios
 
 - Real SQLite tests: register/incarnation replacement; quota range/unknown/source/ownership; duplicate identical/different messages; wrong-recipient ACK; inbox restart recovery; concurrent overlapping claims (exactly one winner); disjoint claims; stale revision; fake-clock lease expiry; accepted-artifact idempotence; old-incarnation rejection; bounded wait/cancellation.
