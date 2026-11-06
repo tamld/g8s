@@ -400,10 +400,13 @@ func determineNextState(task *Task, params FinishAttemptParams) string {
 }
 
 // FinishAttempt applies the worker verdict for a RUNNING lease with strict
-// ownership enforcement. Transitions follow the baseline priority table:
-// cancel_requested -> CANCELLED, success -> SUCCEEDED, retryable within
-// budget -> QUEUED (prompt retained), otherwise FAILED. Final states get
-// prompt redaction and an unsigned receipt hash.
+// ownership enforcement. The row always moves to WORKER_COMPLETED (supervisor
+// gate): cooperative cancellation is not terminal here — if cancel_requested
+// was set while RUNNING, the worker finishes with ok=false, result status
+// "cancelled", and cancel_requested stays true until an explicit
+// CancelTask seals terminal CANCELLED on the non-running task (#771).
+// Non-retryable outcomes redact prompt and seal receipt_hash; retryable
+// outcomes keep the prompt for another attempt.
 func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params FinishAttemptParams) (*Task, error) {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {

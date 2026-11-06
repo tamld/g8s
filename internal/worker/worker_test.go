@@ -368,6 +368,102 @@ func TestRunOnceCancelWhileRunningTerminatesAndMarksCancelled(t *testing.T) {
 	}
 }
 
+// TestRunOnceCancelAfterRunningStartsDocumentsWorkerCompletedSequence asserts the
+// post–StartTask path (#771): cancel while the task row is RUNNING yields
+// WORKER_COMPLETED with cancel_requested and a cancelled result envelope; a
+// second CancelTask on the non-running row seals CANCELLED without changing
+// request/result hashes or attempt count.
+func TestRunOnceCancelAfterRunningStartsDocumentsWorkerCompletedSequence(t *testing.T) {
+	env := newWorkerEnv(t, nil)
+	task := submitTask(t, env, "cancel-poststart-1", 3, nil)
+	hang := newHangChild()
+	env.runner.factory = func(SpawnOptions) Child { return hang }
+
+	pollCtx, stopPoll := context.WithCancel(context.Background())
+	defer stopPoll()
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		tick := time.NewTicker(2 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-tick.C:
+				tk, err := env.store.GetTask(context.Background(), task.TaskID)
+				if err != nil || tk == nil {
+					continue
+				}
+				if tk.State == controlplane.StateRunning {
+					_ = env.store.CancelTask(context.Background(), task.TaskID, "cancel while RUNNING")
+					return
+				}
+			}
+		}
+	}()
+
+	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-poststart", LeaseSeconds: 60})
+	stopPoll()
+	<-pollDone
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if final.State != controlplane.StateWorkerCompleted {
+		t.Fatalf("after cooperative cancel, state = %q, want WORKER_COMPLETED", final.State)
+	}
+	if !final.CancelRequested {
+		t.Fatal("cancel_requested = false, want true after cancel while RUNNING")
+	}
+	if final.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", final.Attempts)
+	}
+
+	var envelope map[string]any
+	if err := json.Unmarshal(final.Result, &envelope); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if ok, _ := envelope["ok"].(bool); ok {
+		t.Fatal(`result "ok" = true, want false`)
+	}
+	if got, _ := envelope["status"].(string); got != "cancelled" {
+		t.Fatalf(`result "status" = %q, want "cancelled"`, got)
+	}
+	if final.LastError == nil || *final.LastError != "cancelled by orchestrator" {
+		t.Fatalf("last_error = %v, want \"cancelled by orchestrator\"", final.LastError)
+	}
+
+	reqHashAfterWorker := final.RequestHash
+	var resHashAfterWorker string
+	if final.ResultHash != nil {
+		resHashAfterWorker = *final.ResultHash
+	}
+	if reqHashAfterWorker == "" || resHashAfterWorker == "" {
+		t.Fatalf("expected non-empty request_hash and result_hash after FinishAttempt, got req=%q res=%q",
+			reqHashAfterWorker, resHashAfterWorker)
+	}
+
+	if err := env.store.CancelTask(context.Background(), task.TaskID, "seal terminal CANCELLED"); err != nil {
+		t.Fatalf("second CancelTask: %v", err)
+	}
+	sealed, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask after seal: %v", err)
+	}
+	if sealed.State != controlplane.StateCancelled {
+		t.Fatalf("state = %q, want CANCELLED", sealed.State)
+	}
+	if sealed.Attempts != 1 {
+		t.Fatalf("attempts after seal = %d, want 1", sealed.Attempts)
+	}
+	if sealed.RequestHash != reqHashAfterWorker {
+		t.Fatalf("request_hash changed after seal: %q -> %q", reqHashAfterWorker, sealed.RequestHash)
+	}
+	if sealed.ResultHash == nil || *sealed.ResultHash != resHashAfterWorker {
+		t.Fatalf("result_hash changed after seal: %v -> %v", resHashAfterWorker, sealed.ResultHash)
+	}
+}
+
 func TestRunOnceTimeoutFailsRetryable(t *testing.T) {
 	env := newWorkerEnv(t, newAutoAdvanceClock().Now)
 	submitTask(t, env, "slow-1", 1, map[string]any{"timeout": "100ms"})
