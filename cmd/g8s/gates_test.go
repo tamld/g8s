@@ -23,7 +23,10 @@ func TestGatesRecordListRoundTrip(t *testing.T) {
 		t.Fatalf("record exit %d stderr=%s", code, stderr1.String())
 	}
 	ledger := filepath.Join(tmp, "gate_ci_run_events.jsonl")
-	if !strings.Contains(stdout1.String(), ledger) {
+	// Windows: filepath.Join yields backslashes that the JSON envelope escapes as \\ —
+	// compare against the JSON-escaped form so the assertion is platform-fair (caught by windows-latest CI).
+	jsonEscapedLedger := strings.ReplaceAll(ledger, `\`, `\\`)
+	if !strings.Contains(stdout1.String(), jsonEscapedLedger) {
 		t.Fatalf("expected stdout to mention ledger path, got %q", stdout1.String())
 	}
 
