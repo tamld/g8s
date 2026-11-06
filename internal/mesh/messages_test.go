@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -169,7 +170,19 @@ func TestMeshInboxDurableReopen(t *testing.T) {
 		"node_id": "s", "incarnation": "s1", "message_id": "m1", "to_node": "r", "to_incarnation": "r1", "kind": "k",
 		"payload": map[string]any{"x": 1},
 	})
-	s1.Close()
+	used, remaining := 25.0, 75.0
+	reset := "2026-11-07T00:00:00Z"
+	observation := QuotaObservation{
+		Source: "native-telemetry", ObservedAt: "2026-11-06T00:00:00Z",
+		Windows: []QuotaWindow{
+			{Name: "daily", WindowMinutes: 1440, UsedPercent: &used, RemainingPercent: &remaining, ResetsAt: &reset, Status: "observed"},
+			{Name: "weekly", Status: "unknown"},
+		},
+	}
+	msgMustExec(t, s1, "quota-publish", map[string]any{"node_id": "s", "incarnation": "s1", "observation": observation})
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	s2, err := Open(dir)
 	if err != nil {
@@ -187,6 +200,10 @@ func TestMeshInboxDurableReopen(t *testing.T) {
 	var snap msgSnapResp
 	if err := json.Unmarshal(msgMustExec(t, s2, "snapshot", map[string]any{}), &snap); err != nil || len(snap.Nodes) != 2 {
 		t.Fatalf("snapshot failed: %+v", snap)
+	}
+	wantQuota := []msgSnapQuota{{NodeID: "s", Incarnation: "s1", Observation: observation}}
+	if !reflect.DeepEqual(snap.Quotas, wantQuota) {
+		t.Fatalf("quota lost/changed across reopen: got %+v want %+v", snap.Quotas, wantQuota)
 	}
 }
 
