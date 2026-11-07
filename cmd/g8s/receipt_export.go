@@ -112,6 +112,7 @@ func runReceiptExport(args []string) {
 		status = *task.ReceiptExport
 		status.UpdatedAt = now
 	}
+	status.ClaimFence = controlplane.TaskClaimFenceVerdict(task)
 
 	// Resolve local run directory if not explicitly provided
 	runDir := *runDirFlag
@@ -273,6 +274,9 @@ func runReceiptExport(args []string) {
 		}
 	} else {
 		fmt.Printf("Receipt export status for task %s:\n", task.TaskID)
+		if status.ClaimFence != nil {
+			fmt.Printf("  Claim fence: %s (claim=%s task=%s receipt=%s code=%s)\n", status.ClaimFence.Verdict, status.ClaimFence.ClaimTaskID, status.ClaimFence.TaskID, status.ClaimFence.ReceiptID, status.ClaimFence.Code)
+		}
 		fmt.Printf("  Local:   %s", status.Local.Status)
 		if status.Local.Digest != "" {
 			fmt.Printf(" (digest: %s...)", status.Local.Digest[:12])

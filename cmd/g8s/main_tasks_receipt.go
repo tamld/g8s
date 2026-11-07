@@ -18,6 +18,7 @@ import (
 
 	"github.com/tamld/g8s/internal/initwiz"
 
+	"github.com/tamld/g8s/internal/mesh"
 	"github.com/tamld/g8s/internal/receipt"
 )
 
@@ -340,6 +341,10 @@ func runReceipt(args []string) {
 		_ = jsonMode
 		issuer := fs.String("issuer", "", "identity recorded on the receipt (defaults to --actor)")
 		ttlSeconds := fs.Int("ttl", 600, "time-to-live in seconds (1..3600)")
+		claimTask := fs.String("claim-task", "", "existing mesh claim task identity (claim must precede receipt)")
+		claimNode := fs.String("claim-node", "", "mesh claim owner")
+		claimInc := fs.String("claim-incarnation", "", "mesh claim owner incarnation")
+		meshDir := fs.String("mesh-dir", os.Getenv("G8S_MESH_DIR"), "coordinator mesh directory")
 		var paths pathFlags
 		fs.Var(&paths, "path", "allowed path glob (repeatable)")
 		fs.Var(&paths, "allow", "allowed path glob (alias for --path)")
@@ -354,7 +359,29 @@ func runReceipt(args []string) {
 		if effectiveIssuer == "" {
 			effectiveIssuer = *actor
 		}
+		var binding *receipt.ClaimBinding
+		if *claimTask != "" {
+			if tier := strings.ToUpper(os.Getenv("G8S_TIER")); tier == "F1" || tier == "F2" {
+				exitRuntime("receipt", "issue", *traceID, "E_CLAIM_FENCE_STALE", receipt.ErrClaimFenceStale, "Claim binding requires coordinator authority", *jsonl)
+			}
+			ledger, err := mesh.Open(*meshDir)
+			if err != nil {
+				exitRuntime("receipt", "issue", *traceID, "E_CLAIM_FENCE_STALE", err, "Claim must exist before receipt issuance", *jsonl)
+			}
+			defer ledger.Close()
+			claim, err := ledger.ActiveClaim(context.Background(), *claimTask, *claimNode, *claimInc)
+			if err != nil {
+				exitRuntime("receipt", "issue", *traceID, "E_CLAIM_FENCE_STALE", err, "Claim must be live and owned by this actor", *jsonl)
+			}
+			binding = receipt.BindingFromClaim(*claim)
+			clipped, err := binding.ClipPaths(paths)
+			if err != nil {
+				exitRuntime("receipt", "issue", *traceID, "E_CLAIM_FENCE_OUT_OF_SCOPE", err, "Receipt and claim must intersect", *jsonl)
+			}
+			paths = clipped
+		}
 		rc, err := receipts.IssueReceipt(effectiveIssuer, paths, time.Duration(*ttlSeconds)*time.Second,
+			receipt.WithClaimBinding(binding),
 			receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
 				SchemaURI:      "g8s://envelope/write-receipt/v1",
 				FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},

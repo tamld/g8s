@@ -16,7 +16,9 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/featuremap"
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/verifier"
+	"github.com/tamld/g8s/internal/worker"
 )
 
 // runVerify runs verifier-class checks on a task (issue #515).
@@ -29,6 +31,7 @@ func runVerify(args []string) {
 
 // runVerifyWithIO executes the verify command and writes output to stdout/stderr.
 func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride string, verifierOpts ...verifier.Option) int {
+	var claimFenceCheck func() error
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
@@ -142,10 +145,12 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 
 		// Extract receipt_id and allowed_paths from task payload/request
 		var reqPayload struct {
-			ReceiptID    string   `json:"receipt_id"`
-			AllowedPaths []string `json:"allowed_paths"`
-			ScopeRoot    string   `json:"scope_root"`
-			AddDirs      []string `json:"add_dirs"`
+			ClaimBinding *receipt.ClaimBinding `json:"claim_binding"`
+			Permission   string                `json:"permission"`
+			ReceiptID    string                `json:"receipt_id"`
+			AllowedPaths []string              `json:"allowed_paths"`
+			ScopeRoot    string                `json:"scope_root"`
+			AddDirs      []string              `json:"add_dirs"`
 		}
 		if len(task.Request) > 0 {
 			_ = json.Unmarshal(task.Request, &reqPayload)
@@ -158,7 +163,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		// the sibling receipts.db — the canonical receipt ledger (the receipt CLI and the
 		// controlplane both write receipts.db next to g8s.db; round-1 of issue #516 caught
 		// verify reading g8s.db, where the table does not exist, and landing unregistered).
-		if target.ReceiptID != "" && len(target.AllowedPaths) == 0 {
+		if target.ReceiptID != "" {
 			rcDbPath := filepath.Join(filepath.Dir(dbPath), "receipts.db")
 			db, err := sql.Open("sqlite", pathutil.SQLiteURI(rcDbPath, "mode=ro"))
 			if err == nil {
@@ -169,6 +174,15 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 					if err := json.Unmarshal([]byte(pathsJSON), &paths); err == nil {
 						target.AllowedPaths = paths
 					}
+				}
+				var bindingJSON sql.NullString
+				if err := db.QueryRowContext(ctx, "SELECT claim_binding_json FROM write_receipts WHERE receipt_id = ?", target.ReceiptID).Scan(&bindingJSON); err == nil && bindingJSON.Valid {
+					var binding receipt.ClaimBinding
+					if err := json.Unmarshal([]byte(bindingJSON.String), &binding); err != nil {
+						exitRuntimeWithWriter(stderr, "verify", "claim-fence", *traceID, "E_CLAIM_FENCE_STALE", receipt.ErrClaimFenceStale, "Corrupt claim projection", *jsonl)
+						return 1
+					}
+					reqPayload.ClaimBinding = &binding
 				}
 			}
 		}
@@ -200,6 +214,20 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 			}
 		}
 
+		claimFenceCheck = func() error {
+			if reqPayload.ClaimBinding == nil {
+				return nil
+			}
+			if tier := strings.ToUpper(os.Getenv("G8S_TIER")); tier == "F1" || tier == "F2" {
+				return receipt.ErrClaimFenceStale
+			}
+			binding, err := worker.LoadClaimFence(ctx, filepath.Join(filepath.Dir(dbPath), "receipts.db"), target.ReceiptID)
+			if err != nil {
+				return err
+			}
+			_, err = worker.VerifyWorktreeDiffScope(target.WorktreeDir, reqPayload.Permission, target.AllowedPaths, binding)
+			return err
+		}
 		if *briefFlag != "" {
 			b, err := store.GetBrief(ctx, *briefFlag)
 			if err != nil {
@@ -228,8 +256,15 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		if target.WorktreeDir == "" {
 			target.WorktreeDir = targetRepoDir
 		}
+
 	}
 
+	if claimFenceCheck != nil {
+		if err := claimFenceCheck(); err != nil {
+			exitRuntimeWithWriter(stderr, "verify", "claim-fence", *traceID, cli.CodeDenied, err, "Claim fence rejected harvest", *jsonl)
+			return 1
+		}
+	}
 	if featureFlagVal := strings.TrimSpace(*featureFlag); featureFlagVal != "" {
 		fmRoot := targetRepoDir
 		if fmRoot == "" {
