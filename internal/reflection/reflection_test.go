@@ -38,7 +38,31 @@ func goldenDoc(t *testing.T) map[string]any {
 }
 
 func verdictDoc(doc map[string]any) map[string]any {
-	return doc["verdicts"].([]any)[0].(map[string]any)
+	verdicts, ok := doc["verdicts"].([]any)
+	if !ok || len(verdicts) == 0 {
+		return map[string]any{}
+	}
+	first, ok := verdicts[0].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return first
+}
+
+func setNestedString(doc map[string]any, key string, field string, value string) {
+	node, ok := doc[key].(map[string]any)
+	if !ok {
+		return
+	}
+	node[field] = value
+}
+
+func setNested(doc map[string]any, key string, field string) {
+	node, ok := doc[key].(map[string]any)
+	if !ok {
+		return
+	}
+	node[field] = true
 }
 
 func TestReceiptSchemaSelfConformance(t *testing.T) {
@@ -91,11 +115,11 @@ func TestReceiptSchemaSelfConformance(t *testing.T) {
 func TestReceiptHostileFields(t *testing.T) {
 	mutations := map[string]func(map[string]any){
 		"unknown root":       func(d map[string]any) { d["execute"] = true },
-		"unknown cycle":      func(d map[string]any) { d["cycle"].(map[string]any)["execute"] = true },
-		"unknown judge":      func(d map[string]any) { d["judge"].(map[string]any)["execute"] = true },
+		"unknown cycle":      func(d map[string]any) { setNested(d, "cycle", "execute") },
+		"unknown judge":      func(d map[string]any) { setNested(d, "judge", "execute") },
 		"unknown verdict":    func(d map[string]any) { verdictDoc(d)["execute"] = true },
-		"bad trigger":        func(d map[string]any) { d["cycle"].(map[string]any)["trigger"] = "autopilot" },
-		"bad timestamp":      func(d map[string]any) { d["cycle"].(map[string]any)["timestamp"] = "yesterday" },
+		"bad trigger":        func(d map[string]any) { setNestedString(d, "cycle", "trigger", "autopilot") },
+		"bad timestamp":      func(d map[string]any) { setNestedString(d, "cycle", "timestamp", "yesterday") },
 		"bad dimension":      func(d map[string]any) { verdictDoc(d)["dimension"] = "confidence" },
 		"bad verdict":        func(d map[string]any) { verdictDoc(d)["verdict"] = "approved" },
 		"null verdicts":      func(d map[string]any) { d["verdicts"] = nil },
