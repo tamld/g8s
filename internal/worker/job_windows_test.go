@@ -7,9 +7,12 @@ package worker
 // operator's Windows machine); they are skipped on every other OS.
 
 import (
+	"encoding/csv"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +22,11 @@ import (
 // survive the Job Object close: taskkill /T cannot always reach detached
 // grandchildren, KILL_ON_JOB_CLOSE can.
 func TestJobObjectKillsDetachedGrandchild(t *testing.T) {
+	baseline := pingPIDs(t)
+	settle, shutdown := 500*time.Millisecond, 10*time.Second
+	if jobTestRaceEnabled {
+		settle, shutdown = time.Second, 20*time.Second
+	}
 	dir := t.TempDir()
 	runner := processRunner{}
 	child, err := runner.Spawn(SpawnOptions{
@@ -34,9 +42,13 @@ func TestJobObjectKillsDetachedGrandchild(t *testing.T) {
 		t.Fatalf("spawn: %v", err)
 	}
 	<-child.Done() // child exited; the detached ping is still running
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(settle)
 
-	if !pingRunning() {
+	observed := pingPIDs(t)
+	for pid := range baseline {
+		delete(observed, pid)
+	}
+	if len(observed) == 0 {
 		t.Skip("could not observe the detached ping (fixture did not reproduce); re-run to confirm")
 	}
 
@@ -46,21 +58,58 @@ func TestJobObjectKillsDetachedGrandchild(t *testing.T) {
 	}
 	pc.closeJob() // KILL_ON_JOB_CLOSE: kernel kills the whole tree
 
-	deadline := time.Now().Add(10 * time.Second)
-	for pingRunning() && time.Now().Before(deadline) {
+	deadline := time.Now().Add(shutdown)
+	for {
+		running := pingPIDs(t)
+		// Once an observed PID disappears, forget it permanently. New ping
+		// processes (including later reuse of that PID) are not our tree.
+		for pid := range observed {
+			if _, ok := running[pid]; !ok {
+				delete(observed, pid)
+			}
+		}
+		if len(observed) == 0 {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("detached grandchild survived the Job Object close — containment gap (#415): PIDs %v", observed)
+		}
 		time.Sleep(200 * time.Millisecond)
-	}
-	if pingRunning() {
-		t.Fatal("detached grandchild survived the Job Object close — containment gap (#415)")
 	}
 }
 
-func pingRunning() bool {
+func pingPIDs(t *testing.T) map[int]struct{} {
+	t.Helper()
 	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq ping.exe", "/FO", "CSV").Output()
 	if err != nil {
-		return false
+		t.Fatalf("enumerate ping PIDs: %v", err)
 	}
-	return strings.Contains(strings.ToLower(string(out)), "ping.exe")
+	pids := make(map[int]struct{})
+	reader := csv.NewReader(strings.NewReader(string(out)))
+	// tasklist may emit a localized one-column message when no process
+	// matches. Headers and messages are ignored by image-name column.
+	reader.FieldsPerRecord = -1
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("parse tasklist CSV: %v", err)
+		}
+		if len(record) == 0 || !strings.EqualFold(record[0], "ping.exe") {
+			continue
+		}
+		if len(record) < 2 {
+			t.Fatal("tasklist ping row has no PID column")
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(record[1]))
+		if err != nil || pid <= 0 {
+			t.Fatalf("invalid tasklist ping PID %q", record[1])
+		}
+		pids[pid] = struct{}{}
+	}
+	return pids
 }
 
 // The job handle must survive the child's normal runtime (assignment while
