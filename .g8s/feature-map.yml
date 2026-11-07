@@ -619,6 +619,7 @@ features:
         - "FEAT-LLMCALL-01"
       direct_consumers:
         - "FEAT-PLATFORM-CLI-01"
+        - "FEAT-REFLECTION-01"
 
   - id: "FEAT-VERIFY-01"
     title: "Worktree-Targeted Verification & Mechanical DoD Receipts"
@@ -1006,6 +1007,7 @@ features:
         - "FEAT-CONTROLPLANE-01"
       direct_consumers:
         - "FEAT-PLATFORM-CLI-01"
+        - "FEAT-REFLECTION-01"
 
   - id: "FEAT-PLATFORM-CLI-01"
     title: "Core Operator CLI Surface & Onboarding Wizard"
@@ -1119,6 +1121,36 @@ features:
         - "FEAT-DOCTOR-DIAG-01"
       direct_consumers:
         - "FEAT-FEATUREMAP-01"
+
+  - id: "FEAT-REFLECTION-01"
+    title: "Evidence-bound Process Reflection JUDGE"
+    persona_story: "As a process supervisor, I need strict reflection receipts and ledger-bound verdicts so that unsupported process judgments are rejected before ACT or PRUNE."
+    srs_reqs:
+      - "FR-8"
+    openspec_deltas:
+      - "DELTA-45"
+    code_paths:
+      - "internal/reflection/**"
+    collision_domain: "process-reflection"
+    owned_paths:
+      - "internal/reflection/**"
+    shared_paths: []
+    interfaces:
+      go_packages:
+        - "internal/reflection"
+    invariants:
+      - "Every verdict has nonempty mechanically shaped evidence_refs; absent evidence returns E_REFLEX_VERDICT_UNEVIDENCED"
+      - "Draft 2020-12 schema rejects unknown fields at every object level"
+      - "JUDGE reads S1 ledgers without mutating artifacts or applying ACT/PRUNE policy"
+      - "Versioned prompt manifest pins every Markdown prompt SHA-256"
+    visible_tests:
+      - "internal/reflection/reflection_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on:
+        - "FEAT-ROUTING-LANE-01"
+        - "FEAT-DOCTOR-DIAG-01"
+      direct_consumers: []
 
   - id: "FEAT-FEATUREMAP-01"
     title: "Declarative Feature Map & Blast Radius Routing"
