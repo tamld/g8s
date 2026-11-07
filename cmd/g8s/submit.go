@@ -360,6 +360,7 @@ func runSubmit(args []string) {
 	// #567: When no explicit --add-dir was passed, fall back to receipt allowed_paths
 	// for workspace_write tasks so repo-root dispatches with bounded receipts resolve class.
 	var (
+		claimBinding *receipt.ClaimBinding
 		receiptTTL   time.Duration
 		receiptBound bool
 	)
@@ -378,6 +379,7 @@ func runSubmit(args []string) {
 			exitUsage("submit", "receipt-id", *traceID, fmt.Sprintf("invalid --receipt-id %q: %v", *receiptID, vErr), "Verify receipt is active and not expired", *jsonl)
 		}
 		receiptBound = true
+		claimBinding = rc.ClaimBinding
 		receiptTTL = rc.ExpiresAt.Sub(rc.CreatedAt)
 
 		if len(classPaths) == 0 {
@@ -499,7 +501,8 @@ func runSubmit(args []string) {
 	// proceeding to task database persistence or worker dispatch.
 	var clocks *controlplane.TaskClocks
 	if receiptBound {
-		if err := cli.ValidateClocks(timeoutDuration, receiptTTL); err != nil {
+		// Claim-bound receipts are renewed by the harness heartbeat, within each lease.
+		if err := cli.ValidateClocks(timeoutDuration, receiptTTL); err != nil && claimBinding == nil {
 			exitUsage("submit", "timeout", *traceID,
 				fmt.Sprintf("invalid --timeout %s: timeout must be strictly less than receipt TTL %s (%s >= %s)", *timeout, receiptTTL, timeoutDuration, receiptTTL),
 				fmt.Sprintf("Specify a --timeout shorter than receipt TTL of %s", receiptTTL),
@@ -610,6 +613,9 @@ func runSubmit(args []string) {
 	}
 	if *receiptID != "" {
 		payloadMap["receipt_id"] = *receiptID
+		if claimBinding != nil {
+			payloadMap["claim_binding"] = claimBinding
+		}
 	}
 	if *skipPermissions {
 		payloadMap["skip_permissions"] = true
