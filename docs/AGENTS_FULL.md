@@ -116,7 +116,7 @@ Incoming Task:
 | **DELTA-22** | [`22-brief-dor-floor-spec.md`](../spec/openspec/22-brief-dor-floor-spec.md) | `internal/brief` | APPLIED |
 | **DELTA-23** | [`23-native-agent-io-spec.md`](../spec/openspec/23-native-agent-io-spec.md) | `internal/fsops`, `internal/search` | APPLIED |
 | **DELTA-24** | [`24-differential-governance-hitl-spec.md`](../spec/openspec/24-differential-governance-hitl-spec.md) | `internal/vault`, `internal/verifier`, `internal/telemetry` | APPLIED |
-| **DELTA-25** | [`25-config-driven-llm-consumer-spec.md`](../spec/openspec/25-config-driven-llm-consumer-spec.md) | `internal/config`, `internal/provider`, `cmd/g8s` | IMPLEMENTED |
+| **DELTA-25** | [`25-config-driven-llm-consumer-spec.md`](../spec/openspec/25-config-driven-llm-consumer-spec.md) | `internal/config`, `internal/provider`, `cmd/g8s` | APPLIED |
 | **DELTA-26** | [`26-worker-isolation-fail-closed-spec.md`](../spec/openspec/26-worker-isolation-fail-closed-spec.md) | `internal/worker` | APPLIED |
 | **DELTA-27** | [`27-server-bind-auth-spec.md`](../spec/openspec/27-server-bind-auth-spec.md) | `internal/server` | APPLIED |
 | **DELTA-28** | [`28-dod-mechanical-binding-spec.md`](../spec/openspec/28-dod-mechanical-binding-spec.md) | `internal/verifier`, `cmd/g8s` | APPLIED |
@@ -135,6 +135,7 @@ Incoming Task:
 | **DELTA-41** | [`41-feature-map-v2-collision-domains-spec.md`](../spec/openspec/41-feature-map-v2-collision-domains-spec.md) | `internal/featuremap`, `cmd/g8s` | APPLIED |
 | **DELTA-42** | [`42-premise-challenge-and-sycophancy-gate-spec.md`](../spec/openspec/42-premise-challenge-and-sycophancy-gate-spec.md) | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | APPLIED |
 | **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
+| **DELTA-44** | — | — | skipped (numbering gap, reserved) |
 | **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
 | **DELTA-46** | [`46-peer-coordinator-ledger-spec.md`](../spec/openspec/46-peer-coordinator-ledger-spec.md) | `internal/mesh`, `internal/mcp`, `cmd/g8s` | APPLIED |
 | **DELTA-47** | [`47-reach-layer-spec.md`](../spec/openspec/47-reach-layer-spec.md) | `internal/reach`, `cmd/g8s` | APPLIED |
