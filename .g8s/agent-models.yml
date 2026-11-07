@@ -195,7 +195,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/anthropic/claude-sonnet-4.6, cl/anthropic/claude-haiku-4.5, cl/openai/gpt-4.1-mini, cl/google/gemini-2.5-flash)"
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* upstream base-path defect tracked operator-side (Go-404 regardless of id)"
     models:
       - id: reasoning-free
         supported_efforts: [low, medium, high]
@@ -212,6 +212,15 @@ providers:
       - id: docs-retriever
         supported_efforts: [low, medium, high]
         default_effort: medium
+      - id: butler-free-sre
+        supported_efforts: [low, medium]
+        default_effort: low
+      - id: xoai-reflex
+        supported_efforts: [low]
+        default_effort: low
+      - id: xoai-reasoning
+        supported_efforts: [high]
+        default_effort: high
 
   opencode:
     effort_style: named

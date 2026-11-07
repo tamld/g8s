@@ -176,8 +176,8 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	for _, prov := range cat.Providers {
 		totalModels += len(prov.Models)
 	}
-	if totalModels != 61 {
-		t.Fatalf("got %d total models across providers, want 61", totalModels)
+	if totalModels != 64 {
+		t.Fatalf("got %d total models across providers, want 64", totalModels)
 	}
 
 	// Spot-check 9router
