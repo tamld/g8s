@@ -869,6 +869,322 @@ g8s coordinator mastery --json
 
 ---
 
+### 39. `g8s resubmit`
+Resubmits a `FAILED` task with a supervisor receipt boundary (new attempt; does not bypass harness checks).
+
+```sh
+g8s resubmit --task <task-id>
+g8s resubmit --task <task-id> --receipt-id <write-receipt-id> --reason "operator retry"
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--task`, `--task-id` | `string` | `""` | Task ID to resubmit. |
+| `--receipt-id` | `string` | `""` | Fresh write receipt ID (required if the original task used `workspace_write`). |
+| `--reason` | `string` | `""` | Reason for resubmission. |
+| `--db` | `string` | `""` | Path to control-plane database. |
+
+---
+
+### 40. `g8s update` / `g8s uninstall`
+Self-update from GitHub releases with SHA-256 verification, and controlled removal of the binary, MCP entries, and optional state purge.
+
+```sh
+g8s update --check
+g8s update --version v0.21.0
+g8s uninstall --dry-run
+g8s uninstall --yes --purge-state
+```
+
+#### `g8s update` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--check` | `bool` | `false` | Only report whether an update is available; make no changes. |
+| `--force` | `bool` | `false` | Reinstall even when the target version is already running. |
+| `--version` | `string` | `""` | Install this release tag (e.g. `v0.21.0`) instead of the latest. |
+| `--timeout` | `duration` | `2m` | Overall network timeout for release resolution and download. |
+
+#### `g8s uninstall` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--dry-run` | `bool` | `true` | List what would be removed without removing anything (default unless `--yes`). |
+| `--yes` | `bool` | `false` | Apply the uninstall plan. |
+| `--purge-state` | `bool` | `false` | Also remove g8s state, config, cache and log directories. |
+
+---
+
+### 41. `g8s offer`
+Scaffold and audit repository offer profiles (embedded `knowledge`, `security`, `infra`, `utility` bundles).
+
+```sh
+g8s offer init --profile knowledge --dir ./sibling-repo
+g8s offer check --dir ./sibling-repo --gates spec,structure,links
+g8s offer version
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `init` | Scaffold `.g8s/` plus gate scripts from the embedded profile (`--profile`, `--dir`, `--force`, `--gates-only`, `--gates-dir`). |
+| `check` | Run copied gates in the target tree (`--gates`, `--gates-dir`). |
+| `version` | Print the offer bundle version. |
+
+#### `g8s offer init` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--profile` | `string` | `""` | Profile: `knowledge` \| `security` \| `infra` \| `utility` (required unless `--gates-only`). |
+| `--dir` | `string` | `"."` | Target project directory. |
+| `--force` | `bool` | `false` | Overwrite an existing scaffold. |
+| `--gates-only` | `bool` | `false` | Install/refresh `tools/ci_*.sh` gate scripts without modifying `.g8s/` registries. |
+| `--gates-dir` | `string` | `"tools"` | Relative directory to install gate scripts. |
+
+#### `g8s offer check` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--dir` | `string` | `"."` | Target project directory. |
+| `--gates` | `string` | `"spec,structure,links"` | Comma list: `spec`, `structure`, `links`. |
+| `--gates-dir` | `string` | `""` | Relative directory containing gate scripts. |
+
+---
+
+### 42. `g8s reach`
+Read-only platform data acquisition with ordered fallback (`read` is GET-only).
+
+```sh
+g8s reach read https://example.com/doc --json
+g8s reach github read --url https://api.github.com/repos/tamld/g8s --json
+```
+
+**Channels (S1):** `web`, `github`. **Actions:** `read` (GET-only, read-only).
+
+---
+
+### 43. `g8s lesson`
+Record and verify operational lessons in the lessons ledger (`docs/lessons/ledger.jsonl` by default).
+
+```sh
+g8s lesson create --file lesson-draft.json
+g8s lesson verify --file lesson-draft.json
+g8s lesson list --status ratified
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `create` | Verify and append a lesson draft to the ledger (`--file` required). |
+| `verify` | Verify a lesson draft without appending (dry-run). |
+| `list` | List lessons in the ledger (`--status`, `--ledger`, `--passthrough`). |
+
+#### Shared Flags (`create` / `verify`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--file` | `string` | `""` | Path to lesson draft JSON file (required). |
+| `--ledger` | `string` | `docs/lessons/ledger.jsonl` | Path to lessons ledger file. |
+| `--round-cap` | `int` | `3` | Round lesson budget cap. |
+| `--db` | `string` | `""` | Path to state-dir telemetry database. |
+
+#### `g8s lesson list` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--status` | `string` | `""` | Filter by lesson status (`proposed`, `ratified`, `rejected`). |
+| `--ledger` | `string` | `docs/lessons/ledger.jsonl` | Path to lessons ledger file. |
+| `--passthrough` | `bool` | `false` | Output raw JSONL lines without envelope. |
+
+---
+
+### 44. `g8s feedback`
+Record supervisor feedback, HITL ground truth, overrides, and governance hypothesis reports.
+
+```sh
+g8s feedback record --rule reflex.triage --verdict tp --note "confirmed false positive"
+g8s feedback override --rule reflex.triage --task <task-id> --reason "supervisor waiver"
+g8s feedback report --json
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `record` | Record a Sovereign HITL Ground Truth verdict (`tp`, `fp`, `veto`) for a rule (`--rule`, `--verdict` required). |
+| `override` | Record an F0 Supervisor OverrideReceipt for an advisory signal. |
+| `report` | Evaluate falsifiable governance hypotheses (H1, H2, H3) and rule weights. |
+
+#### `g8s feedback record` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--rule` | `string` | `""` | Rule ID to calibrate (required). |
+| `--verdict` | `string` | `""` | HITL verdict: `tp`, `fp`, or `veto` (required). |
+| `--note` | `string` | `""` | Optional human operator rationale. |
+| `--package` | `string` | `""` | Optional package name. |
+| `--task` | `string` | `""` | Optional task ID. |
+| `--db` | `string` | `""` | Optional telemetry database path override. |
+
+---
+
+### 45. `g8s context-pack`
+Build bounded pre-mutation context packets (token-budget knapsack over workspace paths).
+
+```sh
+g8s context-pack --paths internal/harness,spec/constitution.md --focus "write receipt" --out pack.md --json
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--root` | `string` | `"."` | Workspace root directory to scan and compress. |
+| `--paths` | `string` | `""` | Comma-separated file or directory paths. |
+| `--allowed-paths` | `string` | `""` | Optional comma-separated pinned `allowed_paths` patterns. |
+| `--focus` | `string` | `""` | Focus query for BM25F and Personalized PageRank scoring. |
+| `--budget` | `int` | `8000` | Token budget for Multiple-Choice Knapsack solver. |
+| `--out` | `string` | `""` | Optional file path to write rendered Markdown bundle. |
+
+---
+
+### 46. `g8s qa-report`
+Generate mechanical QA verification reports from a BA/QA specification.
+
+```sh
+g8s qa-report --spec spec/openspec/delta-45.md --holdout-paths internal/foo_test.go --json
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--spec` | `string` | `""` | Path to BA/QA specification markdown file. |
+| `--task` | `string` | `""` | Optional task ID. |
+| `--holdout-paths` | `string` | `""` | Comma-separated holdout test paths. |
+| `--allowed-paths` | `string` | `""` | Comma-separated worker allowed write paths. |
+| `--ac-bindings` | `string` | `""` | Comma-separated `AC=TestName` pairs (e.g. `AC-01=TestFoo,AC-02=TestBar`). |
+| `--checks-passed` | `bool` | `true` | Whether mechanical test execution passed. |
+
+---
+
+### 47. `g8s claim`
+Verify documentation claims against executable anchors (deterministic repo probes; optional LLM decomposition).
+
+```sh
+g8s claim check --text "All CLI commands are documented in cli-reference.md" --repo . --json
+g8s claim check --file brief.md --run-tests --llm --provider 9router --model reasoning-free
+```
+
+Classifies every atomic claim as `MECHANICAL_VERIFIED`, `OBSERVATIONAL`, `UNVERIFIED`, or `CONTRADICTED`. Exit code `1` (`E_PREMISE_CONTRADICTED`) when any claim is refuted by a deterministic repo probe.
+
+#### `g8s claim check` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--text` | `string` | `""` | Operator request or brief to check. |
+| `--file` | `string` | `""` | Read the request or brief from a file. |
+| `--repo` | `string` | `"."` | Repository root used for deterministic probes. |
+| `--run-tests` | `string` | `""` | Execute `go test -run ^Name$` for test pass/fail claims. |
+| `--test-timeout` | `duration` | `2m` | Per-test execution timeout for `--run-tests`. |
+| `--llm` | `bool` | `false` | Add candidate claims from an LLM decomposer (statuses stay deterministic). |
+| `--provider` | `string` | `"9router"` | API-call provider for `--llm`. |
+| `--model` | `string` | `"reasoning-free"` | Model/combo for `--llm`. |
+| `--llm-timeout` | `duration` | `1m` | Timeout for the `--llm` decomposition call. |
+
+---
+
+### 48. `g8s f0`
+F0 supervisor commitment-point gate and repository status checks.
+
+```sh
+g8s f0 gate check --repo . --action merge --pr 787 --json
+g8s f0 status --repo . --json
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `gate check` | Evaluate commitment-point gates before merge, close, or publish (`--action`, `--repo`, `--pr`, `--base`, `--head-sha`). |
+| `status` | Print F0 gate status for a repository (`--repo`). |
+
+#### `g8s f0 gate check` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--action` | `string` | `"merge"` | Commitment action (`merge`, `close`, `publish`). |
+| `--repo` | `string` | `"."` | Target repository path. |
+| `--base` | `string` | `"main"` | Base branch. |
+| `--pr` | `int` | `0` | Optional PR number. |
+| `--head-sha` | `string` | `""` | Optional head commit SHA. |
+
+---
+
+### 49. `g8s scorecard`
+DELTA-45 five-axis cross-evaluation and Kaizen engine over rolling model windows.
+
+```sh
+g8s scorecard status --window 20 --json
+g8s scorecard audit --provider 9router --json
+g8s scorecard kaizen --json
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `status` | Print current scorecard axes and gauges. |
+| `audit` | Run scorecard audit pass. |
+| `kaizen` | Emit Kaizen improvement recommendations. |
+
+#### Shared Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--provider` | `string` | `""` | Filter model axis by provider name. |
+| `--window` | `int` | `20` | Rolling observation window per model. |
+
+---
+
+### 50. `g8s gates`
+Ingest and list CI workflow run history for the reflex scorecard (`gate_ci_run_events.jsonl`).
+
+```sh
+cat runs.json | g8s gates record --json
+g8s gates record --file runs.json
+g8s gates list --json
+```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `record` | Append workflow run rows from JSON (stdin or `--file`) to the ledger. |
+| `list` | Print all recorded CI gate run rows from the ledger. |
+
+#### Shared Flags (`record` / `list`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--state-dir` | `string` | `""` | State directory root (default: `G8S_STATE_DIR` or platform default). |
+| `--file` | `string` | `""` | (`record` only) Read JSON from file instead of stdin. |
+
+---
+
+### 51. `g8s audit`
+Query transactional enterprise access-audit log (#441).
+
+```sh
+g8s audit list --actor operator --limit 50 --json
+g8s audit list --action task.submit --since 2026-01-01T00:00:00Z
+```
+
+#### `g8s audit list` Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--actor` | `string` | `""` | Filter by actor identity. |
+| `--action` | `string` | `""` | Filter by audit action (e.g. `task.submit`, `task.claim`, `receipt.issue`). |
+| `--subject` | `string` | `""` | Filter by subject ID (`task_id` or `receipt_id`). |
+| `--since` | `string` | `""` | Filter by RFC3339 timestamp lower bound. |
+| `--limit` | `int` | `50` | Maximum audit records to return (`1..500`). |
+
+---
+
+### 52. `g8s help`
+Prints the root command list and short descriptions (same surface as `g8s --help`).
+
+```sh
+g8s help
+g8s help submit
+```
+
+---
+
 ## Standalone 1-Liner Installation
 
 Install or upgrade `g8s` directly via curl:
