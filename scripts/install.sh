@@ -101,6 +101,9 @@ main() {
         error "Failed to download ${download_url}"
     fi
 
+    # Optional stronger verification (not enforced by this installer):
+    #   gh attestation verify <asset> -R tamld/g8s --owner tamld
+    #   cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt
     # Verify Checksum (Fail-Closed Supply Chain Enforcement - Issue #639)
     if ! curl -fsSL "$checksum_url" -o "${tmp_dir}/checksums.txt" 2>/dev/null; then
         error "Failed to download ${checksum_url}; refusing unverified binary installation"
