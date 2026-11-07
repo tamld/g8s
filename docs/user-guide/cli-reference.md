@@ -354,7 +354,22 @@ g8s autopilot stop
 
 # Show configuration
 g8s autopilot config --show
+
+# Run one maintenance tick (doctor, retention, hygiene) or reflection-receipt packets
+g8s autopilot tick
+g8s autopilot tick --reflection-receipt path/to/receipt.json --dry-run
 ```
+
+#### Flags (`g8s autopilot tick`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--jobs` | `string` | `doctor,retention,hygiene` | Comma-separated list of maintenance jobs to run (ignored when `--reflection-receipt` is set). |
+| `--reflection-receipt` | `string` | `""` | Path to an S2 reflection receipt; submit bounded add-list packets instead of maintenance jobs. |
+| `--dry-run` | `bool` | `false` | Print reflection packet specs without opening the queue. |
+| `--provider` | `string` | `""` | Target reflection worker provider (queue default when empty). |
+| `--model` | `string` | `gemini-3.8-flash-high` | Target reflection worker model. |
+| `--effort` | `string` | `""` | Reflection worker effort (queue default when empty). |
+| `--json` / `--jsonl` | `bool` | `false` | Emit machine-readable envelope. |
 
 ---
 
@@ -526,7 +541,9 @@ g8s receipt-export --task "task-123" --json
 | `--evidence-dir` | `string` | `""` | Path to evidence lake directory (defaults to `G8S_EVIDENCE_DIR`). |
 | `--require-local` | `bool` | `true` | Require attempt-local export to succeed for overall acceptance. |
 | `--require-central` | `bool` | `false` | Require centralized Evidence Lake export to succeed for overall acceptance. |
-| `--json` | `bool` | `false` | Output structured JSON result envelope. |
+| `--json` / `--jsonl` | `bool` | `true` / `false` | Output structured JSON result envelope (`kind: receipt`, `verb: export`). |
+
+> JSON `data` includes export `local`/`central` status, digests, and optional `claim_fence` (verdict, `task_id`, `claim_task_id`, `receipt_id`, `code`) when harvest fencing was recorded on the task.
 
 ---
 
