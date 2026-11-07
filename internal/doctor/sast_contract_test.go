@@ -73,14 +73,20 @@ func TestSASTTriadConfigContract(t *testing.T) {
 	if strings.Contains(codeqlText, "github/codeql-action/") && strings.Contains(codeqlText, "@v3") {
 		t.Errorf(".github/workflows/codeql.yml still uses deprecated CodeQL Action @v3; must use @v4")
 	}
+	// Actions may be tag-pinned (@v4) or SHA-pinned (@<sha> # v4 — the
+	// Scorecard Pinned-Dependencies convention); assert the action name and
+	// the major version comment, not a literal pin form.
 	for _, action := range []string{
-		"github/codeql-action/init@v4",
-		"github/codeql-action/autobuild@v4",
-		"github/codeql-action/analyze@v4",
+		"github/codeql-action/init",
+		"github/codeql-action/autobuild",
+		"github/codeql-action/analyze",
 	} {
 		if !strings.Contains(codeqlText, action) {
 			t.Errorf(".github/workflows/codeql.yml missing required action %q", action)
 		}
+	}
+	if !strings.Contains(codeqlText, "# v4") && !strings.Contains(codeqlText, "@v4") {
+		t.Errorf(".github/workflows/codeql.yml must pin codeql-action to v4 (tag or SHA-pinned with a # v4 comment)")
 	}
 
 	// 3. Verify Lane S (security) in .g8s/lane-bundles.yml includes sast-triad
