@@ -31,6 +31,19 @@ func NewOpenCodeProvider() *OpenCodeProvider {
 	}
 }
 
+// cliProbeTimeout bounds external CLI probes: a hung binary (observed live with
+// a wedged bun-installed opencode that stalled a full pre-push suite) must fail
+// the availability check loudly, not stall gates and test suites.
+const cliProbeTimeout = 10 * time.Second
+
+// boundedProbe runs name with args under a hard deadline. Fail-loud: the probe
+// error carries the timeout so callers report "probe timed out", never hang.
+func boundedProbe(ctx context.Context, name string, args ...string) ([]byte, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, cliProbeTimeout)
+	defer cancel()
+	return exec.CommandContext(probeCtx, name, args...).CombinedOutput()
+}
+
 // WithLookPath overrides the binary lookup function for testing.
 func (o *OpenCodeProvider) WithLookPath(lp func(string) (string, error)) *OpenCodeProvider {
 	o.lookPath = lp
@@ -63,8 +76,7 @@ func (o *OpenCodeProvider) Available(ctx context.Context) error {
 		bin = p
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	out, err := cmd.CombinedOutput()
+	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
 		return fmt.Errorf("opencode --version: %w", err)
 	}
@@ -176,8 +188,7 @@ func (c *CommandCodeProvider) Available(ctx context.Context) error {
 		bin = p
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	out, err := cmd.CombinedOutput()
+	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
 		return fmt.Errorf("commandcode --version: %w", err)
 	}
@@ -295,8 +306,7 @@ func (q *QwenProvider) Available(ctx context.Context) error {
 		bin = p
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	out, err := cmd.CombinedOutput()
+	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
 		return fmt.Errorf("qwen --version: %w", err)
 	}
@@ -485,8 +495,7 @@ func (c *CursorProvider) Available(ctx context.Context) error {
 		bin = p
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	out, err := cmd.CombinedOutput()
+	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
 		return fmt.Errorf("cursor-agent --version: %w", err)
 	}
@@ -567,7 +576,9 @@ func (c *CursorProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		c.mu.RLock()
 		bin := c.binary
 		c.mu.RUnlock()
-		cmd := exec.CommandContext(ctx, bin, "--list-models")
+		modelsCtx, modelsCancel := context.WithTimeout(ctx, cliProbeTimeout)
+		defer modelsCancel()
+		cmd := exec.CommandContext(modelsCtx, bin, "--list-models")
 		if apiKey != "" && os.Getenv("CURSOR_API_KEY") == "" {
 			cmd.Env = append(os.Environ(), "CURSOR_API_KEY="+apiKey)
 		}

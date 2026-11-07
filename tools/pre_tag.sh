@@ -158,6 +158,20 @@ check_go_version() {
     return 0
 }
 
+check_surface_inventory() {
+    log_info "Running fresh surface inventory (D-09 CLOCK: no tag cut without a current docs-claims-vs-wiring receipt)..."
+    if [ ! -f "tools/ci_surface_inventory.sh" ]; then
+        log_error "tools/ci_surface_inventory.sh missing — cannot attest CI surface claims"
+        return 1
+    fi
+    if ! bash tools/ci_surface_inventory.sh; then
+        log_error "Surface inventory found STALE-CLAIM or BROKEN-WIRE — reconcile docs before tagging"
+        return 1
+    fi
+    log_info "Surface inventory clean"
+    return 0
+}
+
 check_ci_passes() {
     log_info "Checking recent CI status (last completed run per workflow)..."
     if ! command -v gh >/dev/null 2>&1; then
@@ -201,6 +215,7 @@ main() {
     check_tag_not_exists || FAILED=1
     check_go_version || FAILED=1
     check_ci_passes || FAILED=1
+    check_surface_inventory || FAILED=1
     
     echo "========================================"
     if [ "$FAILED" -eq 0 ]; then
