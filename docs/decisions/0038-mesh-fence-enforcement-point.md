@@ -1,6 +1,6 @@
 # ADR-0038: Mesh Fence Enforcement Point — Claim-Scoped Mutation Gating at the Worker Edit Path
 
-- **Status**: Accepted (2026-11-07) — operator-ratified; implementation issues 1-2 this PR, red-tests follow.
+- **Status**: Accepted (2026-11-07) — operator-ratified. **Implemented 2026-11-07**: issue 1 → #801, issue 2 → #805 (worker harvest) + #806 (CLI wiring), red tests R1-R5+R7 → #807 + this PR; R8 = probe **P9** (`ConformanceProbeP9FenceExternalCLI` — the ADR's original "P7" id was already taken by the output-schema conformance probe, and P8 by usage/token accounting; the fence probe is P9, registered in the conformance matrix as dispatch-required for CLI agents).
 - **Depends on**: ADR-0032 (containment invariant `F2 ⊆ F1 ⊆ F0`), ADR-0035 (epoch-fenced
   charter engine, Kleppmann fencing tokens), DELTA-46 ([`spec/openspec/46-peer-coordinator-ledger-spec.md`](../../spec/openspec/46-peer-coordinator-ledger-spec.md)),
   #776/#777 (fail-loud `read_only` precedent).
@@ -163,7 +163,7 @@ matrices (`TestReadOnlyEnforcementDecision`,
 | R5 | `TestDiffFirewallDetectsExternalCLIViolation` | direct `os.WriteFile` (simulating an external CLI) inside the worktree, outside claim paths, then sweep-collect | `E_DIFF_FIREWALL_OUT_OF_SCOPE` at harvest; artifact not accepted | (b) |
 | R6 | `TestDiffFirewallFailsClosedOnGitError` | unreadable `.git` / corrupt worktree → diff firewall must error, never silently pass (kills the diff_firewall.go:56-64 fail-open) | typed error → attempt FAILED | (b) |
 | R7 | `TestFenceStaleAfterAcceptRevisionBump` | claim accepted (revision+1, claims.go:273), late write attempt against the old revision binding | `E_CLAIM_FENCE_STALE`; acceptance stays idempotent (pattern: `TestClaimRevisionFence`, drills_test.go:94; `TestMeshAcceptRevisionAndIdempotence`, claims_test.go:95) | (a) |
-| R8 | `ConformanceProbeP7FenceExternalCLI` | end-to-end: external-CLI template writes outside claim scope under `workspace_write` (extends probes P5/P6, [`internal/provider/conformance/cli.go:567,599`](../../internal/provider/conformance/cli.go)) | claim refused or diff firewall blocks; no out-of-tree write ever reaches the main checkout | (a)+(b)+(c) |
+| R8 | `ConformanceProbeP9FenceExternalCLI` | end-to-end: external-CLI template writes outside claim scope under `workspace_write` (extends probes P5/P6, [`internal/provider/conformance/cli.go:567,599`](../../internal/provider/conformance/cli.go)) | claim refused or diff firewall blocks; no out-of-tree write ever reaches the main checkout | (a)+(b)+(c) |
 
 ## Implementation issues (proposed, NOT filed)
 
