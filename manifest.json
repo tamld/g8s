@@ -7,8 +7,8 @@
   "go_version": "1.26.10",
   "latest_release": {
     "tag": "v0.22.0",
-    "commit": "32020e8",
-    "date": "2026-10-27"
+    "commit": "e7e11c7",
+    "date": "2026-11-02"
   },
   "license": "MIT",
   "repository": "https://github.com/tamld/g8s",
