@@ -497,6 +497,37 @@ func matchesFeatureMemory(feat featuremap.FeatureNode, e *memory.MemoryEntry) bo
 	return false
 }
 
+// ⚡ Bolt Optimization: Zero-allocation case-insensitive string containment check.
+// Replaces strings.Contains(strings.ToLower(A), strings.ToLower(B)) to avoid massive memory allocations
+// caused by ToLower which are especially harmful in critical path evaluation loops.
+func containsFold(s, substr string) bool {
+	n := len(substr)
+	if n == 0 {
+		return true
+	}
+	if len(s) < n {
+		return false
+	}
+	// Optimized for typical case where first char must match (case-insensitively)
+	// before we do a full EqualFold
+	first := substr[0]
+	firstUpper := first
+	firstLower := first
+	if first >= 'a' && first <= 'z' {
+		firstUpper -= 'a' - 'A'
+	} else if first >= 'A' && first <= 'Z' {
+		firstLower += 'a' - 'A'
+	}
+
+	for i := 0; i <= len(s)-n; i++ {
+		c := s[i]
+		if (c == firstUpper || c == firstLower) && strings.EqualFold(s[i:i+n], substr) {
+			return true
+		}
+	}
+	return false
+}
+
 func matchesFeatureIntake(feat featuremap.FeatureNode, goal string, targetFiles []string, activeCtx map[string]string) bool {
 	if activeCtx != nil {
 		if strings.EqualFold(activeCtx["feature"], feat.ID) || strings.EqualFold(activeCtx["domain"], feat.CollisionDomain) {
@@ -519,14 +550,12 @@ func matchesFeatureIntake(feat featuremap.FeatureNode, goal string, targetFiles 
 			}
 		}
 	}
-	lowerGoal := strings.ToLower(goal)
-	if strings.Contains(lowerGoal, strings.ToLower(feat.ID)) ||
-		(feat.CollisionDomain != "" && strings.Contains(lowerGoal, strings.ToLower(feat.CollisionDomain))) {
+	if containsFold(goal, feat.ID) || (feat.CollisionDomain != "" && containsFold(goal, feat.CollisionDomain)) {
 		return true
 	}
 	if feat.Interfaces != nil {
 		for _, gp := range feat.Interfaces.GoPackages {
-			if strings.Contains(lowerGoal, strings.ToLower(gp)) {
+			if containsFold(goal, gp) {
 				return true
 			}
 		}
