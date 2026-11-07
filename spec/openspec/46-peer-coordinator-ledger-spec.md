@@ -180,3 +180,30 @@ Send replays report current gating without duplicating a delivery. Surfaced mean
 the ledger permits the recipient surface to consume the message, not proof that
 a model turn started or work was accepted. Existing accepted artifact claims and
 revision semantics remain unchanged. No CLI subcommand or flag is added.
+
+### Live interop drill — v1.1 (2026-11-07, recorded)
+
+Two-platform live drill on a fresh drill ledger (`zcode` direct CLI × `agy` F0
+peer coordinator; drill-ledger sha256
+`8909208903d80565049624c7d8fd719dd6cb6614fa9295e7f134ab8e0ea982ff`):
+
+- **A2 flow window**: registered transport `window_size:3` — sends 1-3 accepted,
+  send 4 refused typed `FLOW_WINDOW_FULL: peer agy max 3 pending messages reached`.
+- **A1 cumulative ack**: recipient-side `ack {seq:3}` watermark; the previously
+  refused send then succeeded as `seq 4` (window slid by the acked prefix).
+- **A3 retry budget**: window-refusals consumed the budget (3) — subsequent sends
+  returned `PEER_DEGRADED: peer agy retry at <fixed deadline>` with no counter
+  growth while suspended; after the 10s cool-off the suspension lifted and the
+  next send hit the ordinary `FLOW_WINDOW_FULL` capacity check (fresh budget,
+  per the A3 spec).
+- **A5 screen-state gate**: peer registered `surface_state:modal` — snapshot
+  showed the new messages `gated:true` and the inbox hid them; after the peer
+  cleared to `ready`, the same rows surfaced (`gated:false`).
+- **A4 keepalive**: red-tested in-process (fake clocks, `keepalive_test.go`);
+  live idle-interval drill deferred — requires a long-idle two-platform window.
+- **Co-sign**: `agy` F0 peer coordinator sent a `peer-response` co-sign
+  (`cosign-v11-261108`, durable ledger seq 3,
+  `~/.local/state/g8s-mesh-ledger/ledger.db`, verdict `accepted`). The same
+  operation attempted from an F1 worker context was refused
+  (`E_DENIED: coordinator protocol is F0-only`) — the stratum firewall holds on
+  the mesh surface itself.
