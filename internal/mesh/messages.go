@@ -44,9 +44,10 @@ func actorTx(ctx context.Context, tx *sql.Tx, node, inc string) error {
 
 type (
 	msgRegReq struct {
-		NodeID       string         `json:"node_id"`
-		Incarnation  string         `json:"incarnation"`
-		Capabilities map[string]any `json:"capabilities"`
+		NodeID       string           `json:"node_id"`
+		Incarnation  string           `json:"incarnation"`
+		Capabilities map[string]any   `json:"capabilities"`
+		Transport    *TransportConfig `json:"transport"`
 	}
 	msgQuotaReq struct {
 		NodeID      string           `json:"node_id"`
@@ -71,6 +72,7 @@ type (
 		NodeID      string `json:"node_id"`
 		Incarnation string `json:"incarnation"`
 		MessageID   string `json:"message_id"`
+		Seq         *int64 `json:"seq"`
 	}
 	msgSnapshotReq struct{}
 	msgSnapQuota   struct {
@@ -103,12 +105,26 @@ func msgRegister(ctx context.Context, s *Store, input json.RawMessage) (any, err
 	if !validID(r.NodeID) || !validID(r.Incarnation) {
 		return nil, errors.New("invalid id")
 	}
+	if r.Transport != nil {
+		if err := r.Transport.validate(); err != nil {
+			return nil, err
+		}
+	}
 	capB, _ := json.Marshal(r.Capabilities)
 	if r.Capabilities == nil {
 		capB = []byte("{}")
 	}
 	obsAt := s.now().UTC().Format(time.RFC3339)
 	return map[string]any{}, s.withTx(ctx, func(tx *sql.Tx) error {
+		if r.Transport != nil {
+			b, err := json.Marshal(r.Transport)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO transport_policy(node_id, incarnation, config) VALUES(?,?,?) ON CONFLICT(node_id, incarnation) DO UPDATE SET config=excluded.config", r.NodeID, r.Incarnation, string(b)); err != nil {
+				return err
+			}
+		}
 		var cur string
 		err := tx.QueryRowContext(ctx, "SELECT incarnation FROM nodes WHERE node_id = ?", r.NodeID).Scan(&cur)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -217,6 +233,7 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 	digest := hex.EncodeToString(h.Sum(nil))
 
 	var seq int64
+	var refusal error
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := actorTx(ctx, tx, r.NodeID, r.Incarnation); err != nil {
 			return err
@@ -253,18 +270,42 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		policy, err := peerPolicyTx(ctx, tx, r.ToNode, r.ToIncarnation)
+		if err != nil {
+			return err
+		}
+		if err := retryGateTx(ctx, tx, r, s.now()); err != nil {
+			var degraded *PeerDegradedError
+			if !errors.As(err, &degraded) {
+				return err
+			}
+			refusal = err
+			return nil
+		}
+		refuse := func(cause error) error {
+			var err error
+			refusal, err = refuseSendTx(ctx, tx, r, policy, s.now(), cause)
+			return err
+		}
 		var total, pending int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages").Scan(&total); err != nil {
 			return err
 		}
 		if total >= 10000 {
-			return errors.New("max 10000 total messages reached")
+			return refuse(errors.New("max 10000 total messages reached"))
 		}
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE recipient = ? AND recipient_inc = ? AND acked = 0", r.ToNode, r.ToIncarnation).Scan(&pending); err != nil {
 			return err
 		}
+		var inFlight int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND acked=0", r.NodeID, r.Incarnation, r.ToNode, r.ToIncarnation).Scan(&inFlight); err != nil {
+			return err
+		}
+		if inFlight >= policy.WindowSize {
+			return refuse(&FlowWindowError{Peer: r.ToNode, Window: policy.WindowSize})
+		}
 		if pending >= 1000 {
-			return errors.New("max 1000 pending messages reached")
+			return refuse(errors.New("max 1000 pending messages reached"))
 		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO messages(message_id, sender, sender_inc, recipient, recipient_inc, kind, payload, digest, acked, created_at)
 			VALUES(?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, r.MessageID, r.NodeID, r.Incarnation, r.ToNode, r.ToIncarnation, r.Kind, string(canonP), digest, s.now().UTC().Format(time.RFC3339))
@@ -276,6 +317,9 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if refusal != nil {
+		return nil, refusal
 	}
 	return map[string]any{"seq": seq}, nil
 }
@@ -337,16 +381,43 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 	if err := decode(input, &r); err != nil {
 		return nil, err
 	}
-	if !validID(r.NodeID) || !validID(r.Incarnation) || !validID(r.MessageID) {
+	if !validID(r.NodeID) || !validID(r.Incarnation) {
 		return nil, errors.New("invalid id")
+	}
+	if r.Seq == nil && !validID(r.MessageID) {
+		return nil, errors.New("invalid id")
+	}
+	if r.Seq != nil && (*r.Seq <= 0 || (r.MessageID != "" && !validID(r.MessageID))) {
+		return nil, errors.New("invalid watermark or message_id")
 	}
 	return map[string]any{}, s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := actorTx(ctx, tx, r.NodeID, r.Incarnation); err != nil {
 			return err
 		}
-		var rec, recInc string
+		if r.Seq != nil {
+			var sender, senderInc, messageID string
+			if err := tx.QueryRowContext(ctx, "SELECT sender, sender_inc, message_id FROM messages WHERE seq=? AND recipient=? AND recipient_inc=?", *r.Seq, r.NodeID, r.Incarnation).Scan(&sender, &senderInc, &messageID); err != nil {
+				return fmt.Errorf("unknown recipient watermark: %w", err)
+			}
+			if r.MessageID != "" && r.MessageID != messageID {
+				return errors.New("watermark and message_id mismatch")
+			}
+			res, err := tx.ExecContext(ctx, "UPDATE messages SET acked=1 WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND seq<=? AND acked=0", sender, senderInc, r.NodeID, r.Incarnation, *r.Seq)
+			if err != nil {
+				return err
+			}
+			changed, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if changed > 0 {
+				return ackProgressTx(ctx, tx, sender, senderInc, r.NodeID, r.Incarnation)
+			}
+			return nil
+		}
+		var rec, recInc, sender, senderInc string
 		var acked int
-		if err := tx.QueryRowContext(ctx, "SELECT recipient, recipient_inc, acked FROM messages WHERE message_id = ?", r.MessageID).Scan(&rec, &recInc, &acked); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT recipient, recipient_inc, acked, sender, sender_inc FROM messages WHERE message_id = ?", r.MessageID).Scan(&rec, &recInc, &acked, &sender, &senderInc); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("message %q not found", r.MessageID)
 			}
@@ -359,7 +430,10 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 			return nil
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE messages SET acked = 1 WHERE message_id = ?", r.MessageID)
-		return err
+		if err != nil {
+			return err
+		}
+		return ackProgressTx(ctx, tx, sender, senderInc, r.NodeID, r.Incarnation)
 	})
 }
 
