@@ -10,19 +10,32 @@ import (
 )
 
 const (
-	DefaultFlowWindow     = 1000
-	DefaultRetryBudget    = 3
-	DefaultCoolOffSeconds = 30
+	DefaultFlowWindow         = 1000
+	DefaultRetryBudget        = 3
+	DefaultCoolOffSeconds     = 30
+	DefaultKeepaliveSeconds   = 30
+	DefaultKeepaliveThreshold = 3
 )
 
 // TransportConfig is a recipient's per-sender transport policy.
 type TransportConfig struct {
-	WindowSize     int `json:"window_size"`
-	RetryBudget    int `json:"retry_budget"`
-	CoolOffSeconds int `json:"cool_off_seconds"`
+	WindowSize         int `json:"window_size"`
+	RetryBudget        int `json:"retry_budget"`
+	CoolOffSeconds     int `json:"cool_off_seconds"`
+	KeepaliveSeconds   int `json:"keepalive_seconds"`
+	KeepaliveThreshold int `json:"keepalive_threshold"`
 }
 
 func (p *TransportConfig) validate() error {
+	if p.KeepaliveSeconds == 0 {
+		p.KeepaliveSeconds = DefaultKeepaliveSeconds
+	}
+	if p.KeepaliveThreshold == 0 {
+		p.KeepaliveThreshold = DefaultKeepaliveThreshold
+	}
+	if p.KeepaliveSeconds < 1 || p.KeepaliveSeconds > 3600 || p.KeepaliveThreshold < 1 || p.KeepaliveThreshold > 100 {
+		return errors.New("invalid keepalive interval or threshold")
+	}
 	if p.WindowSize == 0 {
 		p.WindowSize = DefaultFlowWindow
 	}

@@ -235,8 +235,14 @@ func TestMeshRetentionPruneTombstoneDedup(t *testing.T) {
 	if len(retentionPendingInbox(t, s)) != 0 {
 		t.Fatal("tombstone idempotent resend must not redeliver to inbox")
 	}
-	if retentionMessageCount(t, s) != 0 {
-		t.Fatalf("idempotent resend must not insert message row, got %d", retentionMessageCount(t, s))
+	// Inbox now pumps idle keepalive probes. They are independent of replay;
+	// the pruned delivery must still have no physical message row.
+	var replayRows int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages WHERE kind NOT IN ('ping','pong')").Scan(&replayRows); err != nil {
+		t.Fatal(err)
+	}
+	if replayRows != 0 {
+		t.Fatalf("idempotent resend inserted delivery rows: %d", replayRows)
 	}
 
 	if err := msgExecErr(t, s, "send", map[string]any{

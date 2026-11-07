@@ -2,7 +2,7 @@
 
 * **Specification ID**: `DELTA-46`
 * **Status**: `APPLIED` — merged in PR #700 and AM2 retention PR #760; blind spec-vs-code review (`ae3a8020`, issue #751) mapped 37 normative requirements; non-blocking verification/doc deltas tracked in issue #758.
-* **Implementation Status**: `APPLIED` (RT-MESH v1 core PR #700 + AM2 retention PR #760; v1.1 A1–A3 implemented 2026-11-07 for #754; A4–A5 deferred; verification/doc deltas tracked in issue #758)
+* **Implementation Status**: `APPLIED` (RT-MESH v1 core PR #700 + AM2 retention PR #760; v1.1 A1–A5 implemented 2026-11-07 for #754; verification/doc deltas tracked in issue #758)
 * **Target Packages**: `internal/mesh`, `internal/mcp`, `cmd/g8s`
 * **Milestone**: `M6 (LLM Consumer & Fleet)`
 * **domain_href**: `spec/domains/05-stratum-federation/spec.md#R2-peer-coordinator-ledger`
@@ -20,15 +20,15 @@ The pure-Go core lives in internal/mesh. Its public seam is Open(dir string) (*S
 
 All requests and results are JSON objects. Unknown operations and malformed/unknown fields fail. Actor-bound operations carry node_id and incarnation; they must match the current registered node. Registration of a fresh incarnation invalidates old-incarnation requests without automatically transferring its tasks.
 
-- register: node_id, incarnation, capabilities (optional JSON object), transport (optional policy object; see A2–A3). Idempotent for the same identity and explicit policy. Stores observation time.
+- register: node_id, incarnation, capabilities (optional JSON object), transport (optional policy object; see A2–A4), surface_state (optional declaration; see A5). Idempotent for the same identity and explicit policy. Stores observation time.
 - quota-publish: node_id, incarnation, observation with source, observed_at (RFC3339), windows array. Each window has name, window_minutes, used_percent and/or remaining_percent (nullable), resets_at (nullable RFC3339), status observed|unknown. Percentages are finite 0..100 and complementary when both given. Unknown contains no numeric assertion. No tokens or credentials accepted. Records are node-owned, with provenance; never inferred from quality scores.
 - send: node_id, incarnation, message_id, to_node, to_incarnation, kind, payload (JSON object). Recipient must currently match. Same id plus identical semantic content is idempotent; same id plus different content fails ID_CONFLICT. Payload capped at 16 KiB; pending inbox capacity is bounded. No input command is executed.
-- inbox: node_id, incarnation, limit (1..50). Returns pending recipient-bound messages in stable sequence order. Reading does not acknowledge.
+- inbox: node_id, incarnation, limit (1..50). Returns pending surfaced recipient-bound messages in stable sequence order (A5); drives idle probes (A4). Reading does not acknowledge.
 - ack: node_id, incarnation, message_id (legacy per-message) or seq (A1 cumulative watermark; optional message_id must match its anchor). Only its recipient can ACK; repeat ACK is idempotent. ACK is not work acceptance.
 - claim: node_id, incarnation, task_id, resource, paths (nonempty normalized relative literal file/directory paths, no wildcards/traversal), context_revision, lease_seconds (1..300). Uses one immediate SQLite transaction to check current context revision and overlapping unexpired claims on the same resource. Same owner/task/content may retry idempotently; conflicting scope/owner fails. All peers follow identical rules.
 - release: node_id, incarnation, task_id. Only the unexpired current owner may release its claim; no forced reassignment.
 - accept: node_id, incarnation, task_id, context_revision, artifact_ref, artifact_sha256. Atomic in-store acceptance checks current claim owner/incarnation, unexpired lease and current ledger revision, binds artifact digest, increments revision once. Repeated identical acceptance is idempotent; a changed artifact or stale owner/revision fails. This is ledger acceptance only, not permission to mutate a Git ref.
-- snapshot: returns current revision, registered nodes, their quota observations and task/artifact records. No raw credentials or host topology.
+- snapshot: returns current revision, registered nodes (including A4 stale and A5 surface state), message delivery states (A5), their quota observations and task/artifact records. No raw credentials or host topology.
 - wait: node_id, incarnation, timeout_ms (0..60000). Bounded context-cancellable machine wait for a pending inbox message; returns pending messages or an empty timed-out result. No model call inside the wait.
 - prune: older_than (Go duration string, default `168h`, minimum `1h`), dry_run (boolean, default false). In one transaction, deletes only ACKed messages whose `created_at` (no separate ack timestamp column) is before `now - older_than`; before delete, pruned messages leave a dedup tombstone (`message_id`, digest, seq) that is never removed by prune. Retried sends of a pruned id with the same semantic content stay idempotent (same seq, no redelivery); reuse with a different digest still fails ID_CONFLICT. Tombstones do not count toward message capacity limits. Dry run creates no tombstones. Never deletes pending (unACKed) messages, claims, nodes, or quota rows. Returns `pruned`, `dry_run`, and `cutoff` (RFC3339). Invalid or sub-hour `older_than` fails with a typed error.
 
@@ -127,4 +127,56 @@ repeated/old ACKs with no progress do not. Legacy and cumulative ACKs both obey
 this rule. Each failure update commits even though send returns an error; budget
 state survives reopen. Policies and counters never leak between peers or
 incarnations. Cool-off uses the Store clock (fake-clock tests), never test sleeps.
-A4 keepalive and A5 screen-state gating remain deferred.
+
+### A4 — ping/pong keepalive
+
+Status: implemented 2026-11-07. Red tests: `TestMeshKeepaliveStaleAndPong`,
+`TestMeshKeepaliveBypassesWindowAndBudget`.
+
+Registration transport policy adds `keepalive_seconds` (default 30, 1..3600)
+and `keepalive_threshold` (default 3, 1..100); zero uses defaults. Inbox/wait
+polls drive idle checks with the Store clock, without a background goroutine.
+After a recipient's observed_at is idle for its interval, a polling peer sends
+one outstanding `ping` per directed current-incarnation pair. It uses the same
+message envelope with an empty object payload. A `pong` is an explicit send
+whose payload contains `ping_id` identifying the reverse-direction pending ping.
+It acknowledges that ping; pong rows are immediately ACKed. New outbound messages
+and registration refresh the actor's observed_at and retire probes addressed to
+that incarnation. Exact send replays do not prove fresh liveness.
+
+Snapshot nodes expose `stale: true` when an unanswered current-incarnation ping
+is at least threshold intervals old. This reuses registered node incarnations,
+observed_at and pending messages: it does not replace identities, transfer claims,
+or grant takeover. A fresh incarnation ignores old probes, as other mesh identity
+checks already do. Probe age, policies and responses survive reopen.
+Ping/pong bypass delivery flow windows, recipient pending delivery counts, retry
+suspension and retry attempts. They never reset retry budgets, including via ACK.
+The 10000-row storage cap still applies: explicit probes fail without retry
+charges and automatic polling skips generation when storage is full.
+Automatic outstanding probes are bounded by the 64-node registry; duplicate
+automatic polls cannot enqueue repeated pending probes. Operators must continue
+polling for idle probes to be issued; snapshot observes without generating probes.
+
+### A5 — screen-state gate
+
+Status: implemented 2026-11-07. Red tests: `TestMeshScreenStateGate`,
+`TestMeshScreenStateAckAndDurability`.
+
+Registration additionally accepts optional `surface_state`: `ready` (default),
+`modal`, or `busy`. Empty explicitly clears to ready; omission preserves the
+current incarnation's declaration. A new incarnation defaults to ready. The
+declaration is durable and owned by the registered recipient incarnation.
+Modal and busy gate delivery: sends are accepted into the same message ledger,
+consume ordinary pending/window capacity, and return `gated: true` and
+`surfaced: false`. Inbox/wait omit gated deliveries; probes remain visible and
+exempt from this gate. A ready/empty declaration surfaces all pending messages;
+recipient ACK also clears gating for its acknowledged messages without declaring
+the whole surface ready. ACK retains A1 stream scope and A3 recovery semantics.
+
+Snapshot nodes include `surface_state`, and snapshot `messages` exposes the first
+1000 ledger messages in sequence order with `gated` and `surfaced` booleans.
+ACKed rows are surfaced; pruning may remove them under existing retention rules.
+Send replays report current gating without duplicating a delivery. Surfaced means
+the ledger permits the recipient surface to consume the message, not proof that
+a model turn started or work was accepted. Existing accepted artifact claims and
+revision semantics remain unchanged. No CLI subcommand or flag is added.
