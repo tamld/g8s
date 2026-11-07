@@ -29,6 +29,8 @@ jobs:
           persist-credentials: false
       - name: surface-inventory
         run: bash tools/ci_surface_inventory.sh
+      - name: cli-reference vs --help
+        run: bash tools/ci_cli_reference_check.sh
 
   nightly-battery:
     name: Nightly Full Battery
