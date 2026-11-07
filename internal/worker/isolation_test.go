@@ -62,10 +62,10 @@ func newIsolationEnv(t *testing.T, iso *fakeWorktreeIsolator) *workerEnv {
 // worktree must be released with keep=true after the attempt (deliverable
 // survival is the point of #427).
 func TestWorkspaceWriteAttemptGetsWorktreeIsolation(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "wt-task")
+	dir := initGitRepoForDiffFirewall(t)
 	iso := &fakeWorktreeIsolator{dir: dir}
 	env := newIsolationEnv(t, iso)
-	task := submitTask(t, env, "iso-write-1", 1, map[string]any{"permission": "workspace_write"})
+	task := submitTask(t, env, "iso-write-1", 1, map[string]any{"permission": "workspace_write", "receipt_id": issueDiffFirewallTestReceipt(t, env)})
 	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-iso", LeaseSeconds: 60}); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}

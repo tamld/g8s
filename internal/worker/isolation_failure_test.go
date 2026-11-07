@@ -223,7 +223,7 @@ func TestIsolationFailureEmptyDir(t *testing.T) {
 
 // TestIsolationRepoWorktreeIsolatorSuccess tests successful cross-repo isolated execution.
 func TestIsolationRepoWorktreeIsolatorSuccess(t *testing.T) {
-	wtDir := filepath.Join(t.TempDir(), "wt-cross-repo")
+	wtDir := initGitRepoForDiffFirewall(t)
 	repoDir := filepath.Join(t.TempDir(), "external-repo")
 	iso := &fakeRepoWorktreeIsolator{
 		repoReturnDir: wtDir,
@@ -231,6 +231,7 @@ func TestIsolationRepoWorktreeIsolatorSuccess(t *testing.T) {
 	env := newWorkerEnv(t, nil, WithWorktreeIsolator(iso))
 	task := submitTask(t, env, "succ-cross-repo", 1, map[string]any{
 		"permission": "workspace_write",
+		"receipt_id": issueDiffFirewallTestReceipt(t, env),
 		"add_dirs":   []string{repoDir},
 	})
 

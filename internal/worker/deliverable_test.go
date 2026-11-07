@@ -15,11 +15,11 @@ import (
 // and deliverable.dir == fake worktree dir.
 // Also verifies requirement 5 (regression): other result keys like ok remain intact.
 func TestDeliverablePointerRecordedOnPreservedWorktreeWrite(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "wt-deliv")
+	dir := initGitRepoForDiffFirewall(t)
 	iso := &fakeWorktreeIsolator{dir: dir}
 	env := newIsolationEnv(t, iso)
 
-	task := submitTask(t, env, "deliv-success", 1, map[string]any{"permission": "workspace_write"})
+	task := submitTask(t, env, "deliv-success", 1, map[string]any{"permission": "workspace_write", "receipt_id": issueDiffFirewallTestReceipt(t, env)})
 	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-deliv", LeaseSeconds: 60})
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
