@@ -82,3 +82,5 @@ Campaign tracker [#699](https://github.com/tamld/g8s/issues/699) is **closed**; 
 - [ ] fence-at-mutation enforcement ADR — [#755](https://github.com/tamld/g8s/issues/755)
 - [x] Promote OpenSpec DELTA-46 from PROPOSED to APPLIED — [#751](https://github.com/tamld/g8s/issues/751) (blind review `ae3a8020`; verification deltas in [#758](https://github.com/tamld/g8s/issues/758))
 - [x] Roadmap v0.22.x interop row + this plan status — [#750](https://github.com/tamld/g8s/issues/750) (this edit)
+
+Final ledger seq claims diverge across handoffs (34/54/55); the original ledger was host-restart-wiped 2026-10-31 and is unrecoverable — treat all three as unverified reconstructions.

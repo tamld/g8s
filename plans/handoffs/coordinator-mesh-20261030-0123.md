@@ -28,7 +28,7 @@ Primary checkout of `github.com/tamld/g8s` is clean at the same HEAD. All experi
 Modified tracked files: `cmd/g8s/coordinator.go`, `internal/cli/registry.go`, `internal/mcp/server.go`.
 New files: `cmd/g8s/coordinator_mesh.go`, `internal/mcp/mesh.go`, `internal/mcp/mesh_test.go`, `internal/mesh/{types,store,messages,messages_test,claims,claims_test}.go`, `spec/openspec/46-peer-coordinator-ledger-spec.md`, `plans/261030-coordinator-interoperation/`, this continuation contract.
 
-Runtime root: `/private/tmp/g8s-mesh-20261030` (P). Built executable: `P/g8s-experiment` (includes core, CLI, MCP). Shared same-host ledger: `P/shared-ledger`. Codex worker queue: `P/runtime-codex`; do not reuse it concurrently. AGY should use `P/runtime-agy` for its own bounded workers.
+Runtime root: `/private/tmp/g8s-mesh-20261030` (P). Built executable: `P/g8s-experiment` (includes core, CLI, MCP). Shared same-host ledger: SQLite at `P/shared-ledger/ledger.db` (`internal/mesh` DDL; durable path `~/.local/state/g8s-mesh-ledger/ledger.db`). Codex worker queue: `P/runtime-codex`; do not reuse it concurrently. AGY should use `P/runtime-agy` for its own bounded workers.
 
 There are no live source workers. Declarations task `8192ff7b-e222-46bb-b0c2-bf74cafbe225` reached WORKER_COMPLETED with `ok=false`, timeout 300 seconds; its worker checkout was removed, so do not assume declarations were delivered. Existing delivered source worker checkouts remain under `P/runtime-codex/worktrees`.
 

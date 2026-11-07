@@ -63,7 +63,7 @@ head: 5eed521 (verify latest — nightly/A6/bot squashes may have advanced it)
 ## Source pointers
 
 - Memory (platform): `MEMORY.md` index → `g8s-reach-campaign-20261031.md`, `g8s-mesh-experiment-20261030.md`, `feedback-ci-resolution-peer-review.md`, `g8s-session-ops-gotchas.md`, `g8s-dispatch-mechanics-v012.md`.
-- Experiment runtime: `$P/` (binary `g8s-experiment`, ledger `shared-ledger/`, briefs `briefs/`, worktree `portable-worktree` @ branch codex/coordinator-mesh-experiment).
+- Experiment runtime: `$P/` (binary `g8s-experiment`, mesh ledger SQLite at `shared-ledger/ledger.db` (internal/mesh DDL); durable reboot-safe path `~/.local/state/g8s-mesh-ledger/ledger.db`, briefs `briefs/`, worktree `portable-worktree` @ branch codex/coordinator-mesh-experiment).
 - Ledger trail: seq 1-54 (native 3-platform exchange, zero human relay in steady state).
 - Round receipts: `portable-worktree/plans/261030-coordinator-interoperation/round-receipt.md` (D1 + R-FIN-01), `realtime-protocol.md` (RT-MESH v1, ratified).
 - GitHub: #700-#703 merged, #706 open (ADR), #704/#699 open (contracts/trackers).

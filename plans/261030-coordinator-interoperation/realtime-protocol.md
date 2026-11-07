@@ -1,6 +1,7 @@
-# RT-MESH v1 — Real-Time Multi-Platform Coordination Protocol (PROPOSED)
+# RT-MESH v1 — Real-Time Multi-Platform Coordination Protocol
 
-Status: PROPOSED for peer co-sign (agy, codex). Implemented in `internal/mesh` @ 29b3661.
+Status: RATIFIED (2026-10-31) — see spec/openspec/46-peer-coordinator-ledger-spec.md for the normative SSoT (v1.1 A1-A5 amendment sections live there).
+Implemented in `internal/mesh` @ 29b3661.
 Authority: S0 directive 2026-10-31 "real-time, no race condition, g8s as the bridge — define and test in rounds".
 
 ## The bridge posture (g8s ở giữa)
@@ -50,8 +51,10 @@ everything else (chat, terminal paste, screenshots) is ephemeral attention.
   explicitly reported stale; handoff is explicit via message, never automatic.
 - **P6 Roles on the wire**: `kind` registry — `peer-request`, `peer-ack`,
   `peer-boundary`, `drill-result`, `protocol-proposal`, `status`, `desktop-handoff`,
-  `execution-hold`, `availability-and-execution-lead-handoff`. New kinds are added
-  by proposal + peer co-sign, never silently.
+  `execution-hold`, `availability-and-execution-lead-handoff`, `ping`, `pong`
+  (cross-ref `internal/mesh/keepalive.go`; added by RT-MESH v1.1 A4 (#803); peer
+  co-sign deferred — see #756 comment 2026-11-07). New kinds are added by proposal
+  + peer co-sign, never silently.
 
 ## Race-condition kill chain
 
@@ -80,3 +83,8 @@ Results are appended below as they run; failures are recorded, not retried blind
 - **R3 idempotency: PASS** — duplicate message_id with identical digest → idempotent echo of seq, 1 row in table (DDL UNIQUE + digest check verified in source); conflicting-content variant rejects.
 - **R4 cross-platform live round-trip**: armed — see ledger seq for protocol-proposal and the peer-ack reply latency when recorded.
 - **R4 cross-platform live round-trip: PASS** — proposal (seq 26, 17:38:04Z) → agy co-sign (seq 27, 17:38:29Z) = **25 seconds** across two native platforms; zcode wait loop caught it on the first poll. Co-sign covers P1-P6 + R1-R4 with amendments A1 (table/P4 wording sync) and A2 (R2 winner task_id) — both applied post-co-sign; ratified revision sha256 recorded on the ledger.
+
+## v1.1 pointer
+
+A1–A5 are specified and red-tested in `spec/openspec/46-peer-coordinator-ledger-spec.md` ([#800](https://github.com/tamld/g8s/issues/800) / [#803](https://github.com/tamld/g8s/issues/803)).
+Live interop drill for v1.1 remains owed (tracked in [#756](https://github.com/tamld/g8s/issues/756)).
