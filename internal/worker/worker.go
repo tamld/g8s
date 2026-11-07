@@ -23,6 +23,7 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/telemetry"
 )
@@ -82,7 +83,8 @@ type taskRequest struct {
 
 	// ReceiptID carries the delegated-write receipt for workspace_write
 	// tasks; consumed exactly once on a successful attempt (#346).
-	ReceiptID string `json:"receipt_id,omitempty"`
+	ReceiptID    string                `json:"receipt_id,omitempty"`
+	ClaimBinding *receipt.ClaimBinding `json:"claim_binding,omitempty"`
 
 	// ToolPolicy configures model tool use ("" | "default" | "none") (#616/#635/#653).
 	ToolPolicy            string `json:"tool_policy,omitempty"`
@@ -354,14 +356,15 @@ type RunOptions struct {
 
 // workerResult is the JSON contract a worker writes to result.json.
 type workerResult struct {
-	OK                      bool            `json:"ok"`
-	Status                  string          `json:"status"`
-	Reason                  string          `json:"reason,omitempty"`
-	Summary                 string          `json:"summary,omitempty"`
-	Response                string          `json:"response,omitempty"`
-	ContractViolation       json.RawMessage `json:"contract_violation,omitempty"`
-	Usage                   *agyUsage       `json:"usage,omitempty"`
-	ProviderDurationSeconds float64         `json:"provider_duration_seconds,omitempty"`
+	ClaimFence              *controlplane.ClaimFenceVerdict `json:"claim_fence,omitempty"`
+	OK                      bool                            `json:"ok"`
+	Status                  string                          `json:"status"`
+	Reason                  string                          `json:"reason,omitempty"`
+	Summary                 string                          `json:"summary,omitempty"`
+	Response                string                          `json:"response,omitempty"`
+	ContractViolation       json.RawMessage                 `json:"contract_violation,omitempty"`
+	Usage                   *agyUsage                       `json:"usage,omitempty"`
+	ProviderDurationSeconds float64                         `json:"provider_duration_seconds,omitempty"`
 }
 
 // maxResultFileBytes caps the worker-written result file — a cheap worker-side
@@ -458,6 +461,24 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			}),
 			Success: false, Retryable: false, Err: err.Error(),
 		})
+	}
+	canonicalBinding, bindingErr := receiptClaimBinding(req.ReceiptID)
+	if canonicalBinding != nil {
+		req.ClaimBinding = canonicalBinding
+	}
+	if req.ClaimBinding != nil || bindingErr != nil {
+		if bindingErr == nil {
+			bindingErr = renewClaimFence(ctx, req.ReceiptID, false)
+		}
+		if err := bindingErr; err != nil {
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.cp.GetTask(ctx, task.TaskID)
+			}
+			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result:  mustJSON(map[string]any{"ok": false, "status": "claim_refused_fence", "code": "E_CLAIM_FENCE_STALE", "error": err.Error()}),
+				Success: false, Retryable: false, Err: err.Error(),
+			})
+		}
 	}
 	if req.Permission == "supplied_text" && req.ToolPolicy == "" {
 		req.ToolPolicy = "none"
