@@ -78,7 +78,7 @@ head: c926f0e (S2 squash — verify latest)
 - The audit dir is UNTRACKED — commit it (docs PR) before or with the release.
 
 **MESH / MULTI-COORDINATOR:**
-- Ledger: `~/.local/state/g8s-mesh-ledger` (REBOOT-SAFE; rev 0, only zcode node
+- Ledger: SQLite (`internal/mesh` DDL) `~/.local/state/g8s-mesh-ledger/ledger.db` (REBOOT-SAFE; rev 0, only zcode node
   `zcode` / incarnation `zcode-native-20261101-cu`). agy has NOT re-registered
   since the 2026-10-31 reboot. All watchers died with this session — re-arm as needed.
 - **On agy return (entry ritual)**: (1) read this handoff + memory; (2) register on

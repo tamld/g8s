@@ -31,8 +31,8 @@ Capability observations bind source, observation time, expiry and status: config
 | Owner | Responsibility | Ownership boundary |
 |---|---|---|
 | Codex | Initial contract preparation, independent review and integration when holding that task role | Plan/decision files; temporary role only, no permanent exclusive privilege |
-| AGY | Native runtime adapters, capability observations, connected experiment | Four new files: internal/supervisor/mesh_awareness.go, mesh_awareness_test.go, peer_adapter.go, peer_adapter_test.go; no CLI/MCP edits |
-| Zcode | Protocol/store state transitions and negative controls | Six new files: internal/mesh/message.go, message_test.go, store.go, store_test.go, fsm.go, fsm_test.go; no CLI/README edits |
+| AGY | Native runtime adapters, capability observations, connected experiment | Four new files: internal/supervisor/mesh_awareness.go (never shipped — superseded by D2), mesh_awareness_test.go, peer_adapter.go, peer_adapter_test.go; no CLI/MCP edits |
+| Zcode | Protocol/store state transitions and negative controls | Six new files: internal/mesh/message.go (never shipped — superseded by D2), message_test.go, store.go, store_test.go, fsm.go (never shipped — superseded by D2), fsm_test.go; no CLI/README edits |
 | g8s workers | Mechanical implementation, bounded checks, diagnostic extraction | One packet per worker, narrow owned paths, receipts for writes |
 
 Assignments are initial task-fit proposals, not a peer hierarchy or permanent platform roles. A peer must explicitly accept its scope before work is attributed to it. Each coordinator supervises its own g8s worker, supplies a narrow receipt for writes, validates root/scope/result and returns a compact evidence receipt. Shared CLI registration, manifest, feature-map, README and OpenSpec glue belongs to a separate integration packet whose temporary holder may be any peer. Public declarations and spec lineage precede source implementation; do not leave a new package orphaned in the feature map.
