@@ -195,7 +195,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* upstream base-path defect tracked operator-side (Go-404 regardless of id)"
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* ROUTING IDS are DOUBLE-PREFIX nvidia/nvidia/<model> — the single-prefix ids shown in /v1/models do not route (catalog display mismatch, cosmetic)"
     models:
       - id: reasoning-free
         supported_efforts: [low, medium, high]
@@ -221,6 +221,22 @@ providers:
       - id: xoai-reasoning
         supported_efforts: [high]
         default_effort: high
+      - id: nvidia/nvidia/nemotron-3-ultra-550b-a55b
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "NIM flagship 550B/55B MoE 1M ctx — routing id is DOUBLE-PREFIX nvidia/nvidia/<model>; verified live 2026-11-07"
+      - id: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
+        supported_efforts: [low, medium, high]
+        default_effort: low
+        notes: "NIM fast lane — verified live + worker-dispatch proven 2026-11-07"
+      - id: nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "NIM mid tier — verified live 2026-11-07"
+      - id: nvidia/mistralai/mistral-large-4-1t-a52b
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        notes: "NIM mistral-large — verified live 2026-11-07"
 
   opencode:
     effort_style: named
