@@ -2,7 +2,7 @@
 
 * **Specification ID**: `DELTA-46`
 * **Status**: `APPLIED` — merged in PR #700 and AM2 retention PR #760; blind spec-vs-code review (`ae3a8020`, issue #751) mapped 37 normative requirements; non-blocking verification/doc deltas tracked in issue #758.
-* **Implementation Status**: `APPLIED` (RT-MESH v1 core PR #700 + AM2 retention PR #760; verification/doc deltas tracked in issue #758)
+* **Implementation Status**: `APPLIED` (RT-MESH v1 core PR #700 + AM2 retention PR #760; v1.1 A1–A3 implemented 2026-11-07 for #754; A4–A5 deferred; verification/doc deltas tracked in issue #758)
 * **Target Packages**: `internal/mesh`, `internal/mcp`, `cmd/g8s`
 * **Milestone**: `M6 (LLM Consumer & Fleet)`
 * **domain_href**: `spec/domains/05-stratum-federation/spec.md#R2-peer-coordinator-ledger`
@@ -20,11 +20,11 @@ The pure-Go core lives in internal/mesh. Its public seam is Open(dir string) (*S
 
 All requests and results are JSON objects. Unknown operations and malformed/unknown fields fail. Actor-bound operations carry node_id and incarnation; they must match the current registered node. Registration of a fresh incarnation invalidates old-incarnation requests without automatically transferring its tasks.
 
-- register: node_id, incarnation, capabilities (optional JSON object). Idempotent for the same identity. Stores observation time.
+- register: node_id, incarnation, capabilities (optional JSON object), transport (optional policy object; see A2–A3). Idempotent for the same identity and explicit policy. Stores observation time.
 - quota-publish: node_id, incarnation, observation with source, observed_at (RFC3339), windows array. Each window has name, window_minutes, used_percent and/or remaining_percent (nullable), resets_at (nullable RFC3339), status observed|unknown. Percentages are finite 0..100 and complementary when both given. Unknown contains no numeric assertion. No tokens or credentials accepted. Records are node-owned, with provenance; never inferred from quality scores.
 - send: node_id, incarnation, message_id, to_node, to_incarnation, kind, payload (JSON object). Recipient must currently match. Same id plus identical semantic content is idempotent; same id plus different content fails ID_CONFLICT. Payload capped at 16 KiB; pending inbox capacity is bounded. No input command is executed.
 - inbox: node_id, incarnation, limit (1..50). Returns pending recipient-bound messages in stable sequence order. Reading does not acknowledge.
-- ack: node_id, incarnation, message_id. Only its recipient can ACK; repeat ACK is idempotent. ACK is not work acceptance.
+- ack: node_id, incarnation, message_id (legacy per-message) or seq (A1 cumulative watermark; optional message_id must match its anchor). Only its recipient can ACK; repeat ACK is idempotent. ACK is not work acceptance.
 - claim: node_id, incarnation, task_id, resource, paths (nonempty normalized relative literal file/directory paths, no wildcards/traversal), context_revision, lease_seconds (1..300). Uses one immediate SQLite transaction to check current context revision and overlapping unexpired claims on the same resource. Same owner/task/content may retry idempotently; conflicting scope/owner fails. All peers follow identical rules.
 - release: node_id, incarnation, task_id. Only the unexpired current owner may release its claim; no forced reassignment.
 - accept: node_id, incarnation, task_id, context_revision, artifact_ref, artifact_sha256. Atomic in-store acceptance checks current claim owner/incarnation, unexpired lease and current ledger revision, binds artifact digest, increments revision once. Repeated identical acceptance is idempotent; a changed artifact or stale owner/revision fails. This is ledger acceptance only, not permission to mutate a Git ref.
@@ -68,3 +68,63 @@ Boundary and durability evidence: `TestMeshPayloadAndInputSizeLimits`, `TestMesh
 - **THEN** all invariants for single-winner overlapping claims, disjoint claims, revisioned artifact acceptance, message deduplication, recipient-only ACK, quota ownership, durable reopen, and worker-tier rejection hold
 
 Unit tests cannot certify platform quota availability, native wakeup, model quality, Git fencing or reduction in consumed account quota. Those require separate current evidence.
+
+## RT-MESH v1.1 amendments (#754)
+
+### A1 — cumulative acknowledgement
+
+Status: implemented 2026-11-07. Red tests: `TestMeshCumulativeAckPrefixAndReplay`,
+`TestMeshCumulativeAckPeerIsolation`.
+
+The send envelope remains node_id/incarnation/message_id/to_node/to_incarnation/kind/payload.
+An ACK may carry a positive `seq` watermark instead of `message_id`. The sequence
+must identify a message addressed to the current recipient incarnation. It ACKs
+all messages through that sequence from the anchor's sender incarnation to that
+recipient incarnation, including an intermediate message omitted by the consumer.
+It never acknowledges another peer's stream. An optional message_id with seq must
+identify the same anchor. Legacy message_id-only ACKs retain their per-message
+meaning. Repeated or lower watermarks cannot undo progress. ACKs and replayed sends
+have no duplicate delivery effects; existing digests/tombstones retain their meaning.
+An unknown sequence is refused (including a pruned anchor); replaying its send still
+returns the tombstoned sequence without redelivery. ACK is not work acceptance.
+
+### A2 — per-peer flow window
+
+Status: implemented 2026-11-07. Red test: `TestMeshFlowWindowSlides`.
+
+`register` accepts optional `transport: {window_size: N}` (1..1000; omitted/zero
+uses default 1000). This recipient-owned policy limits each directed sender and
+recipient incarnation pair independently. Explicit registration policy updates
+are idempotent; omitted policy preserves it. Policies survive reopen and do not
+transfer across recipient incarnations. New sends at N pending messages fail
+with typed `*FlowWindowError` (`FLOW_WINDOW_FULL`); no message or queue is added.
+Existing global/recipient caps remain. Identical send replays bypass admission
+and return the original seq even with a full window. ACKs free pending slots;
+A1 cumulative ACKs slide the window by the whole acknowledged prefix. Admission
+and insertion share one immediate transaction, including across Store handles.
+
+### A3 — per-peer retry budget
+
+Status: implemented 2026-11-07. Red tests: `TestMeshRetryBudgetAckRecovery`,
+`TestMeshRetryCoolOffAndDurability`.
+
+Recipient registration transport policy additionally accepts `retry_budget`
+(default 3, 1..100) and `cool_off_seconds` (default 30, 1..3600). Zero/omitted
+fields use defaults. Each sender/recipient incarnation pair has a durable failure
+counter. The shared-ledger transport has no network delivery attempt: a failed
+new-send admission due to a flow, recipient, or total capacity limit consumes
+one attempt. Invalid envelopes, wrong identities, digest conflicts, and exact
+idempotent replays do not consume attempts. Successful enqueue alone does not
+reset failures. On the budget-th failure the pair is degraded/suspended until
+cool-off expiry, returning typed `*PeerDegradedError` (`PEER_DEGRADED`, deadline).
+Further new sends during suspension fail without growing counters or inboxes.
+After expiry a fresh budget is available on the next new send; if capacity is
+still exhausted, that retry consumes the first attempt of the new budget.
+
+ACKs remain allowed while suspended. A successful ACK that changes at least one
+pending row to ACKed resets that stream's failures and suspension immediately;
+repeated/old ACKs with no progress do not. Legacy and cumulative ACKs both obey
+this rule. Each failure update commits even though send returns an error; budget
+state survives reopen. Policies and counters never leak between peers or
+incarnations. Cool-off uses the Store clock (fake-clock tests), never test sleeps.
+A4 keepalive and A5 screen-state gating remain deferred.
