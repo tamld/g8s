@@ -35,13 +35,22 @@ func verifyDelegatedClaim(filePath, scopeRoot string) error {
 	if err := r.ClaimBinding.Validate(time.Now()); err != nil {
 		return err
 	}
+	// Canonicalize both sides through symlinks: macOS temp/state dirs sit
+	// behind /var -> /private/var, and the scope root may already be
+	// resolved elsewhere — an unresolved target would read as "../.."
+	// against the resolved root and falsely refuse in-scope writes.
 	root, err := filepath.Abs(scopeRoot)
 	if err != nil {
 		return err
 	}
+	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
+		root = resolved
+	}
 	target := filePath
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(root, target)
+	} else if resolved, resolveErr := filepath.EvalSymlinks(target); resolveErr == nil {
+		target = resolved
 	}
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
