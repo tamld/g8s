@@ -2,18 +2,11 @@
 #
 # tools/pre_push.sh — Local Pre-Push CI/CD Quality Gate Harness
 #
-# Runs the exact same validation checks enforced by GitHub Actions CI:
-#   1. Git Hygiene Gate (hygiene-guard.yml: untracked files, coverage artifacts)
-#   2. Formatting Gate (ci.yml & quality.yml: gofmt & gofumpt)
-#   3. Layer-Ownership Gate (DEBT-34: ci_layer_check.sh & self-test)
-#   4. AI Anti-Pattern Gate (DEBT-21: ai_lint.sh & self-test)
-#   5. Brief Anti-Pattern Gate (DEBT-51: brief_lint.sh & self-test)
-#   6. Doc-Code Contract Gate (Issue #208: ci_doc_contract_check.sh)
-#   7. Pure-Go Go Vet Gate (ci.yml: CGO_ENABLED=0 go vet)
-#   8. GolangCI-Lint Gate (quality.yml: staticcheck, errcheck, ineffassign, unused)
-#   9. Dual-Pass Test Suite (ci.yml: Zero-CGO test + CGO_ENABLED=1 -race)
-#  10. Dogfooding Roundtrip Gate (quality.yml: brief issue/consume & orchestrate)
-#  11. Cross-Platform Build Gate (quality.yml: Linux, macOS, Windows)
+# Local pre-push parity with .github/workflows/quality.yml (ADR-0031 two lanes).
+# Docs lane: hygiene, AI/brief lint, doc-contract, claims, version sync, link integrity.
+# Build lane: above doc gates + format, layer, vet, golangci (gosec/staticcheck), semgrep,
+#   tests/coverage (80%), optional -race, dogfood, optional cross-platform.
+# CI-only (not claimed here): gitleaks, govulncheck, CodeQL, coverage ratchet, D-09 reflection.
 #
 # Usage:
 #   ./tools/pre_push.sh           # Run full suite before push
@@ -36,6 +29,8 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 
 FAST_MODE=0
 AUTO_FIX=0
+# Build-lane step count (--fast skips race + cross-platform sub-steps only).
+BUILD_STEPS=15
 
 for arg in "$@"; do
     case "$arg" in
@@ -163,7 +158,7 @@ echo -e "${BOLD}       g8s Pre-Push Verification Harness (BUILD)      ${NC}"
 echo -e "${BOLD}======================================================${NC}"
 
 # 1. Git Hygiene Gate
-step "1/11" "Verifying Git Hygiene..."
+step "1/${BUILD_STEPS}" "Verifying Git Hygiene..."
 for f in coverage.out cover.out *.cover; do
     if git diff --cached --name-only | grep -q "^$f\$"; then
         fail "Test artifact $f is staged for commit. Remove it and add to .gitignore."
@@ -176,7 +171,7 @@ fi
 pass "Git hygiene clean"
 
 # 2. Formatting Gate
-step "2/11" "Verifying Code Formatting (gofmt & gofumpt)..."
+step "2/${BUILD_STEPS}" "Verifying Code Formatting (gofmt & gofumpt)..."
 if [ "$AUTO_FIX" -eq 1 ]; then
     gofmt -w .
     if command -v gofumpt >/dev/null 2>&1; then
@@ -200,7 +195,7 @@ fi
 pass "gofmt and gofumpt formatting clean"
 
 # 3. Layer Ownership Gate
-step "3/11" "Running Layer Ownership Gate (DEBT-34)..."
+step "3/${BUILD_STEPS}" "Running Layer Ownership Gate (DEBT-34)..."
 bash tools/ci_layer_check_test.sh >/dev/null
 pass "Layer check self-tests passed"
 if ! bash tools/ci_layer_check.sh; then
@@ -209,7 +204,7 @@ fi
 pass "Layer ownership verified"
 
 # 4. AI Anti-Pattern Gate
-step "4/11" "Running AI Anti-Pattern Gate (DEBT-21)..."
+step "4/${BUILD_STEPS}" "Running AI Anti-Pattern Gate (DEBT-21)..."
 bash tools/ai_lint_test.sh >/dev/null
 pass "AI lint self-tests passed"
 if ! bash tools/ai_lint.sh; then
@@ -217,15 +212,8 @@ if ! bash tools/ai_lint.sh; then
 fi
 pass "AI anti-pattern checks clean"
 
-# Claims Check Gate (#447)
-step "Claims" "Running Quantitative Claims Gate (#447)..."
-if ! bash tools/claims_check.sh; then
-    fail "Quantitative claims check failed."
-fi
-pass "Quantitative claims verified"
-
 # 5. Brief Anti-Pattern Gate
-step "5/11" "Running Brief Anti-Pattern Gate (DEBT-51)..."
+step "5/${BUILD_STEPS}" "Running Brief Anti-Pattern Gate (DEBT-51)..."
 bash tools/brief_lint_test.sh >/dev/null
 pass "Brief lint self-tests passed"
 if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ skills/; then
@@ -233,29 +221,43 @@ if ! bash tools/brief_lint.sh docs/ spec/ docs/decisions/ skills/; then
 fi
 pass "Brief anti-pattern checks clean"
 
-# 6. Documentation ↔ Code Contract Gate
-step "6/11" "Running Doc ↔ Code Contract Gate (Issue #208)..."
+# 6. Quantitative Claims Gate (#447) — quality.yml blocking step
+step "6/${BUILD_STEPS}" "Running Quantitative Claims Gate (#447)..."
+if ! bash tools/claims_check.sh; then
+    fail "Quantitative claims check failed."
+fi
+pass "Quantitative claims verified"
+
+# 7. Documentation ↔ Code Contract Gate
+step "7/${BUILD_STEPS}" "Running Doc ↔ Code Contract Gate (Issue #208)..."
 if ! bash tools/ci_doc_contract_check.sh; then
     fail "Documentation and code contracts are out of sync."
 fi
 pass "Doc-code contracts synchronized"
 
-# 7. Version Sync Gate
-step "7/11" "Running Version Sync Check..."
+# 8. Version Sync Gate
+step "8/${BUILD_STEPS}" "Running Version Sync Check..."
 if ! bash tools/ci_version_sync_check.sh; then
     fail "Version sync check failed."
 fi
 pass "Version sync verified"
 
-# 8. Pure-Go Vet Gate
-step "8/12" "Running Pure-Go Vet Gate (CGO_ENABLED=0)..."
+# 9. Link Integrity Gate (quality.yml — all lanes)
+step "9/${BUILD_STEPS}" "Running Link Integrity Gate..."
+if ! bash tools/ci_link_integrity.sh; then
+    fail "Link integrity check failed."
+fi
+pass "Link integrity verified"
+
+# 10. Pure-Go Vet Gate
+step "10/${BUILD_STEPS}" "Running Pure-Go Vet Gate (CGO_ENABLED=0)..."
 if ! CGO_ENABLED=0 go vet ./...; then
     fail "go vet reported errors."
 fi
 pass "go vet clean"
 
-# 9. GolangCI-Lint & Gosec SAST Quality Gate
-step "9/12" "Running GolangCI-Lint & Gosec SAST Quality Gate..."
+# 11. GolangCI-Lint & Gosec SAST Quality Gate
+step "11/${BUILD_STEPS}" "Running GolangCI-Lint & Gosec SAST Quality Gate..."
 LINTER_BIN=""
 if [ -x "$GOPATH_BIN/golangci-lint" ]; then
     LINTER_BIN="$GOPATH_BIN/golangci-lint"
@@ -270,11 +272,11 @@ if [ -n "$LINTER_BIN" ]; then
     fi
     pass "golangci-lint + gosec clean (zero issues)"
 else
-    echo -e "  ${YELLOW}⚠ golangci-lint not installed, skipping staticcheck/errcheck/gosec linter pass${NC}"
+    fail "golangci-lint not found (install to $GOPATH_BIN or PATH). quality.yml requires gosec/staticcheck/errcheck."
 fi
 
-# 9b. Semgrep Offline AST SAST Gate
-step "SAST" "Running Semgrep AST Security Policy Gate (.semgrep/g8s-rules.yml)..."
+# 12. Semgrep Offline AST SAST Gate
+step "12/${BUILD_STEPS}" "Running Semgrep AST Security Policy Gate (.semgrep/g8s-rules.yml)..."
 bash tools/ci_semgrep_check_test.sh >/dev/null
 pass "Semgrep SAST self-tests passed"
 if ! bash tools/ci_semgrep_check.sh; then
@@ -282,8 +284,8 @@ if ! bash tools/ci_semgrep_check.sh; then
 fi
 pass "Semgrep AST security policy clean"
 
-# 10. Dual-Pass Test Suite & Coverage Verification
-step "10/12" "Running Dual-Pass Test Suite & Coverage Verification..."
+# 13. Dual-Pass Test Suite & Coverage Verification
+step "13/${BUILD_STEPS}" "Running Dual-Pass Test Suite & Coverage Verification..."
 echo "  -> Pass 1: Pure-Go (Zero-CGO) with coverage..."
 COV_FILE=$(mktemp)
 trap 'rm -f "$COV_FILE"' EXIT
@@ -341,15 +343,15 @@ else
     echo "  -> Pass 2: Skipped (fast mode)"
 fi
 
-# 11. Dogfooding CI Roundtrip
-step "11/12" "Running Dogfooding Roundtrip Gate..."
+# 14. Dogfooding CI Roundtrip
+step "14/${BUILD_STEPS}" "Running Dogfooding Roundtrip Gate..."
 if ! make dogfood; then
     fail "Dogfooding roundtrip failed."
 fi
 pass "Dogfooding roundtrip verified"
 
-# 12. Cross-Platform Compilation Gate
-step "12/12" "Running Cross-Platform Build Gate..."
+# 15. Cross-Platform Compilation Gate
+step "15/${BUILD_STEPS}" "Running Cross-Platform Build Gate..."
 if [ "$FAST_MODE" -eq 0 ]; then
     if ! make verify-cross-platform; then
         fail "Cross-platform build failed."
