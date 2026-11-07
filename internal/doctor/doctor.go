@@ -336,6 +336,7 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 	report.Checks = append(report.Checks, checkProvidersFile())
 	report.Checks = append(report.Checks, checkHarnessProfiles())
 	report.Checks = append(report.Checks, checkStaleBinary())
+	report.Checks = append(report.Checks, checkBinaryVsHead())
 
 	for _, check := range report.Checks {
 		if check.Status == "FAIL" {
