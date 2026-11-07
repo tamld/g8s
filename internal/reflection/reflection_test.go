@@ -239,7 +239,10 @@ func TestPromptManifestCoverage(t *testing.T) {
 		if !bytes.Equal(raw, disk) {
 			t.Fatal("embedded prompt differs from disk")
 		}
-		sum := sha256.Sum256(raw)
+		// Windows checkouts may carry CRLF (runner autocrlf) — hash the LF-normalized
+		// content so prompt versioning is checkout-independent.
+		normalized := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+		sum := sha256.Sum256(normalized)
 		if got := hex.EncodeToString(sum[:]); manifest[name] != got {
 			t.Fatalf("manifest %s=%q, want %s", name, manifest[name], got)
 		}
