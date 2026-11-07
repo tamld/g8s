@@ -198,7 +198,17 @@ func providerRefusalDetected(stdoutText string) bool {
 	return false
 }
 
-func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResult {
+// ensureFailureReason is the backstop for provider-controlled and dynamically
+// constructed failures. Keep the verdict; explicitly identify missing evidence.
+func ensureFailureReason(wr workerResult) workerResult {
+	if !wr.OK && strings.TrimSpace(wr.Reason) == "" {
+		wr.Reason = fmt.Sprintf("E_WORKER_FAILURE_REASON_MISSING: worker reported ok=false (status=%q) without a reason", wr.Status)
+	}
+	return wr
+}
+
+func readWorkerResult(rawResult []byte, stdoutText string, code int) (wrResult workerResult) {
+	defer func() { wrResult = ensureFailureReason(wrResult) }()
 	if envErr := dispatch.ParseWorkerEnvelope([]byte(stdoutText)); envErr != nil {
 		var envE *dispatch.WorkerEnvelopeError
 		reason := envErr.Error()
@@ -225,7 +235,7 @@ func readWorkerResult(rawResult []byte, stdoutText string, code int) workerResul
 			res := workerResult{
 				OK:      false,
 				Status:  "failed",
-				Reason:  agyRes.Result.Error,
+				Reason:  firstNonEmpty(strings.TrimSpace(agyRes.Result.Error), "E_PROVIDER_ERROR_REASON_MISSING: AGY returned ERROR without error details"),
 				Summary: fmt.Sprintf("AGY returned error result: %s", agyRes.Result.Error),
 				Usage:   usage,
 			}

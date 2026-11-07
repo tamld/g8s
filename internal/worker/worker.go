@@ -457,7 +457,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "claim_refused_read_only",
-				"code": "E_READ_ONLY_UNENFORCEABLE", "error": err.Error(),
+				"code": "E_READ_ONLY_UNENFORCEABLE", "error": err.Error(), "reason": err.Error(),
 			}),
 			Success: false, Retryable: false, Err: err.Error(),
 		})
@@ -475,7 +475,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 				return s.cp.GetTask(ctx, task.TaskID)
 			}
 			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-				Result:  mustJSON(map[string]any{"ok": false, "status": "claim_refused_fence", "code": "E_CLAIM_FENCE_STALE", "error": err.Error()}),
+				Result:  mustJSON(map[string]any{"ok": false, "status": "claim_refused_fence", "code": "E_CLAIM_FENCE_STALE", "error": err.Error(), "reason": err.Error()}),
 				Success: false, Retryable: false, Err: err.Error(),
 			})
 		}
@@ -537,7 +537,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
 			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-				Result:    mustJSON(map[string]any{"ok": false, "status": "resolution_failed"}),
+				Result:    mustJSON(map[string]any{"ok": false, "status": "resolution_failed", "reason": firstNonEmpty(errMsg, "E_PROVIDER_RESOLUTION: provider resolution failed")}),
 				Success:   false,
 				Retryable: false,
 				Err:       errMsg,
@@ -577,6 +577,9 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	var releaseWorktree func(keep bool)
 	var isolatedWorktreeDir string
 	if req.Permission == "workspace_write" {
+		if err := cleanupFailedWorktree(filepath.Dir(runDir)); err != nil {
+			return nil, err
+		}
 		if s.isolator == nil {
 			outWriter.Close()
 			errWriter.Close()
@@ -617,7 +620,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		}
 		if err != nil || strings.TrimSpace(wt) == "" {
 			if release != nil {
-				release(false)
+				releaseFailedWorktree(filepath.Dir(runDir), wt, release)
 			}
 			outWriter.Close()
 			errWriter.Close()
@@ -670,7 +673,13 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	keepWorktree := false
 	if releaseWorktree != nil {
-		defer func() { releaseWorktree(keepWorktree) }()
+		defer func() {
+			if !keepWorktree {
+				releaseFailedWorktree(filepath.Dir(runDir), isolatedWorktreeDir, releaseWorktree)
+				return
+			}
+			releaseWorktree(keepWorktree)
+		}()
 	}
 
 	marker := attemptMarker(task.TaskID, task.Attempts)
@@ -730,7 +739,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(map[string]any{"ok": false, "status": status}),
+			Result:    mustJSON(map[string]any{"ok": false, "status": status, "reason": firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed")}),
 			Success:   false,
 			Retryable: retryable,
 			Err:       errMsg,
