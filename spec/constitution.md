@@ -9,7 +9,7 @@
 ## 1. Foundational Axioms
 
 1. **Axiom of Two-Tier Governance**:
-   - High-tier reasoning models (**Brain**: Claude 3.7 Sonnet / Opus, GPT-4o, DeepSeek R1) hold exclusive authority over system architecture, git commits, permanent state promotion, and write receipt issuance.
+   - High-tier reasoning models (**Brain**: `claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) hold exclusive authority over system architecture, git commits, permanent state promotion, and write receipt issuance.
    - Low-tier mechanical models (**Worker**: Gemini Flash, Claude Haiku, Ollama) execute strictly inside bounded sandboxes with explicit role contracts and time-limited receipts.
 
 2. **Axiom of Zero-Trust Capability (Capability Receipts)**:

@@ -39,7 +39,7 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 
 | Term | Architectural Definition |
 | :--- | :--- |
-| **Brain (`F0`)** | High-tier orchestrator (Claude 3.7 Sonnet / Opus, GPT-4o, Codex) holding strategic reasoning and commit authority. |
+| **Brain (`F0`)** | High-tier orchestrator (`claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) holding strategic reasoning and commit authority. |
 | **Worker (`F1`)** | Bounded CLI worker process (`agy`, `claude`, `gemini`, `ollama`) or HTTP gateway consumer executing one scoped packet. |
 | **Subagent (`F2`)** | Ephemeral subagent spawned recursively by F1 within F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`). |
 | **Task** | An atomic, durable work item queued in the SQLite WAL store with an idempotency key and attempt budget. |
