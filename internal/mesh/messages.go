@@ -48,6 +48,7 @@ type (
 		Incarnation  string           `json:"incarnation"`
 		Capabilities map[string]any   `json:"capabilities"`
 		Transport    *TransportConfig `json:"transport"`
+		SurfaceState *string          `json:"surface_state"`
 	}
 	msgQuotaReq struct {
 		NodeID      string           `json:"node_id"`
@@ -85,6 +86,7 @@ type (
 		Nodes    []Node         `json:"nodes"`
 		Quotas   []msgSnapQuota `json:"quotas"`
 		Claims   []Claim        `json:"claims"`
+		Messages []Message      `json:"messages"`
 	}
 	msgWaitReq struct {
 		NodeID      string `json:"node_id"`
@@ -110,12 +112,25 @@ func msgRegister(ctx context.Context, s *Store, input json.RawMessage) (any, err
 			return nil, err
 		}
 	}
+	if r.SurfaceState != nil {
+		if *r.SurfaceState == "" {
+			*r.SurfaceState = "ready"
+		}
+		if *r.SurfaceState != "ready" && *r.SurfaceState != "modal" && *r.SurfaceState != "busy" {
+			return nil, errors.New("invalid surface_state")
+		}
+	}
 	capB, _ := json.Marshal(r.Capabilities)
 	if r.Capabilities == nil {
 		capB = []byte("{}")
 	}
 	obsAt := s.now().UTC().Format(time.RFC3339)
 	return map[string]any{}, s.withTx(ctx, func(tx *sql.Tx) error {
+		if r.SurfaceState != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO transport_surface(node_id,incarnation,state) VALUES(?,?,?) ON CONFLICT(node_id,incarnation) DO UPDATE SET state=excluded.state`, r.NodeID, r.Incarnation, *r.SurfaceState); err != nil {
+				return err
+			}
+		}
 		if r.Transport != nil {
 			b, err := json.Marshal(r.Transport)
 			if err != nil {
@@ -138,7 +153,10 @@ func msgRegister(ctx context.Context, s *Store, input json.RawMessage) (any, err
 			_, err = tx.ExecContext(ctx, "INSERT INTO nodes(node_id, incarnation, capabilities, observed_at) VALUES(?, ?, ?, ?)", r.NodeID, r.Incarnation, string(capB), obsAt)
 			return err
 		}
-		if err != nil || cur == r.Incarnation {
+		if err == nil && cur == r.Incarnation {
+			return touchPeerTx(ctx, tx, r.NodeID, r.Incarnation, s.now())
+		}
+		if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE nodes SET incarnation=?, capabilities=?, observed_at=? WHERE node_id=?", r.Incarnation, string(capB), obsAt, r.NodeID); err != nil {
@@ -234,7 +252,7 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 
 	var seq int64
 	var refusal error
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	sendTx := func(tx *sql.Tx) error {
 		if err := actorTx(ctx, tx, r.NodeID, r.Incarnation); err != nil {
 			return err
 		}
@@ -274,6 +292,44 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 		if err != nil {
 			return err
 		}
+		if isProbe(r.Kind) {
+			var total int
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages").Scan(&total); err != nil {
+				return err
+			}
+			if total >= 10000 {
+				return errors.New("max 10000 total messages reached")
+			}
+			if r.Kind == "pong" {
+				var p struct {
+					PingID string `json:"ping_id"`
+				}
+				if err := decode(canonP, &p); err != nil {
+					return err
+				}
+				res, err := tx.ExecContext(ctx, `UPDATE messages SET acked=1 WHERE message_id=? AND kind='ping' AND sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND acked=0`, p.PingID, r.ToNode, r.ToIncarnation, r.NodeID, r.Incarnation)
+				if err != nil {
+					return err
+				}
+				n, err := res.RowsAffected()
+				if err != nil {
+					return err
+				}
+				if n == 0 {
+					return errors.New("pong must answer a pending reverse ping")
+				}
+			}
+			acked := r.Kind == "pong"
+			res, err := tx.ExecContext(ctx, `INSERT INTO messages(message_id,sender,sender_inc,recipient,recipient_inc,kind,payload,digest,acked,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, r.MessageID, r.NodeID, r.Incarnation, r.ToNode, r.ToIncarnation, r.Kind, string(canonP), digest, acked, s.now().UTC().Format(time.RFC3339))
+			if err != nil {
+				return err
+			}
+			seq, err = res.LastInsertId()
+			if err != nil {
+				return err
+			}
+			return touchPeerTx(ctx, tx, r.NodeID, r.Incarnation, s.now())
+		}
 		if err := retryGateTx(ctx, tx, r, s.now()); err != nil {
 			var degraded *PeerDegradedError
 			if !errors.As(err, &degraded) {
@@ -294,11 +350,11 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 		if total >= 10000 {
 			return refuse(errors.New("max 10000 total messages reached"))
 		}
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE recipient = ? AND recipient_inc = ? AND acked = 0", r.ToNode, r.ToIncarnation).Scan(&pending); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE recipient = ? AND recipient_inc = ? AND acked = 0 AND kind NOT IN ('ping','pong')", r.ToNode, r.ToIncarnation).Scan(&pending); err != nil {
 			return err
 		}
 		var inFlight int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND acked=0", r.NodeID, r.Incarnation, r.ToNode, r.ToIncarnation).Scan(&inFlight); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND acked=0 AND kind NOT IN ('ping','pong')", r.NodeID, r.Incarnation, r.ToNode, r.ToIncarnation).Scan(&inFlight); err != nil {
 			return err
 		}
 		if inFlight >= policy.WindowSize {
@@ -313,7 +369,33 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 			return err
 		}
 		seq, err = res.LastInsertId()
-		return err
+		if err != nil {
+			return err
+		}
+		return touchPeerTx(ctx, tx, r.NodeID, r.Incarnation, s.now())
+	}
+	var gated bool
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		if err := sendTx(tx); err != nil {
+			return err
+		}
+		if refusal != nil {
+			return nil
+		}
+		state, err := peerSurfaceTx(ctx, tx, r.ToNode, r.ToIncarnation)
+		if err != nil {
+			return err
+		}
+		var acked int
+		err = tx.QueryRowContext(ctx, `SELECT acked FROM messages WHERE seq=?`, seq).Scan(&acked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		gated = state != "ready" && acked == 0 && !isProbe(r.Kind)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -321,7 +403,7 @@ func msgSend(ctx context.Context, s *Store, input json.RawMessage) (any, error) 
 	if refusal != nil {
 		return nil, refusal
 	}
-	return map[string]any{"seq": seq}, nil
+	return map[string]any{"seq": seq, "gated": gated, "surfaced": !gated}, err
 }
 
 func msgGetPending(ctx context.Context, s *Store, node, inc string, limit int) ([]Message, error) {
@@ -330,8 +412,15 @@ func msgGetPending(ctx context.Context, s *Store, node, inc string, limit int) (
 		if err := actorTx(ctx, tx, node, inc); err != nil {
 			return err
 		}
+		if err := keepaliveTx(ctx, tx, node, inc, s.now()); err != nil {
+			return err
+		}
+		state, err := peerSurfaceTx(ctx, tx, node, inc)
+		if err != nil {
+			return err
+		}
 		rows, err := tx.QueryContext(ctx, `SELECT seq, message_id, sender, sender_inc, recipient, recipient_inc, kind, payload, acked, created_at
-			FROM messages WHERE recipient = ? AND recipient_inc = ? AND acked = 0 ORDER BY seq ASC LIMIT ?`, node, inc, limit)
+			FROM messages WHERE recipient = ? AND recipient_inc = ? AND acked = 0 AND (?='ready' OR kind IN ('ping','pong')) ORDER BY seq ASC LIMIT ?`, node, inc, state, limit)
 		if err != nil {
 			return err
 		}
@@ -344,6 +433,7 @@ func msgGetPending(ctx context.Context, s *Store, node, inc string, limit int) (
 				return err
 			}
 			m.Payload, m.Acked = json.RawMessage(pStr), acked != 0
+			m.Surfaced = true
 			msgs = append(msgs, m)
 		}
 		return rows.Err()
@@ -402,7 +492,7 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 			if r.MessageID != "" && r.MessageID != messageID {
 				return errors.New("watermark and message_id mismatch")
 			}
-			res, err := tx.ExecContext(ctx, "UPDATE messages SET acked=1 WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND seq<=? AND acked=0", sender, senderInc, r.NodeID, r.Incarnation, *r.Seq)
+			res, err := tx.ExecContext(ctx, "UPDATE messages SET acked=1 WHERE sender=? AND sender_inc=? AND recipient=? AND recipient_inc=? AND seq<=? AND acked=0 AND kind NOT IN ('ping','pong')", sender, senderInc, r.NodeID, r.Incarnation, *r.Seq)
 			if err != nil {
 				return err
 			}
@@ -415,9 +505,9 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 			}
 			return nil
 		}
-		var rec, recInc, sender, senderInc string
+		var rec, recInc, sender, senderInc, kind string
 		var acked int
-		if err := tx.QueryRowContext(ctx, "SELECT recipient, recipient_inc, acked, sender, sender_inc FROM messages WHERE message_id = ?", r.MessageID).Scan(&rec, &recInc, &acked, &sender, &senderInc); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT recipient, recipient_inc, acked, sender, sender_inc, kind FROM messages WHERE message_id = ?", r.MessageID).Scan(&rec, &recInc, &acked, &sender, &senderInc, &kind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("message %q not found", r.MessageID)
 			}
@@ -432,6 +522,9 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 		_, err := tx.ExecContext(ctx, "UPDATE messages SET acked = 1 WHERE message_id = ?", r.MessageID)
 		if err != nil {
 			return err
+		}
+		if isProbe(kind) {
+			return nil
 		}
 		return ackProgressTx(ctx, tx, sender, senderInc, r.NodeID, r.Incarnation)
 	})
@@ -474,6 +567,18 @@ func msgSnapshot(ctx context.Context, s *Store, input json.RawMessage) (any, err
 		return nil, err
 	}
 	nR.Close()
+	for i := range nodes {
+		stale, err := peerStaleTx(ctx, tx, nodes[i], s.now())
+		if err != nil {
+			return nil, err
+		}
+		nodes[i].Stale = stale
+		state, err := peerSurfaceTx(ctx, tx, nodes[i].NodeID, nodes[i].Incarnation)
+		if err != nil {
+			return nil, err
+		}
+		nodes[i].SurfaceState = state
+	}
 
 	quotas := []msgSnapQuota{}
 	qR, err := tx.QueryContext(ctx, "SELECT node_id, incarnation, observation FROM quotas ORDER BY node_id ASC")
@@ -520,7 +625,11 @@ func msgSnapshot(ctx context.Context, s *Store, input json.RawMessage) (any, err
 	}
 	cR.Close()
 
-	return msgSnapResp{Revision: rev, Nodes: nodes, Quotas: quotas, Claims: claims}, nil
+	messages, err := snapshotMessagesTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	return msgSnapResp{Revision: rev, Nodes: nodes, Quotas: quotas, Claims: claims, Messages: messages}, nil
 }
 
 func msgWait(ctx context.Context, s *Store, input json.RawMessage) (any, error) {

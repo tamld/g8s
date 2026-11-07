@@ -12,6 +12,8 @@ type Node struct {
 	Incarnation  string         `json:"incarnation"`
 	Capabilities map[string]any `json:"capabilities"`
 	ObservedAt   string         `json:"observed_at"`
+	Stale        bool           `json:"stale"`
+	SurfaceState string         `json:"surface_state"`
 }
 
 type QuotaWindow struct {
@@ -40,6 +42,8 @@ type Message struct {
 	Payload      json.RawMessage `json:"payload"`
 	Acked        bool            `json:"acked"`
 	CreatedAt    string          `json:"created_at"`
+	Gated        bool            `json:"gated"`
+	Surfaced     bool            `json:"surfaced"`
 }
 
 type Claim struct {
