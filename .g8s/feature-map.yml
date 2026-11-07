@@ -1152,6 +1152,34 @@ features:
         - "FEAT-DOCTOR-DIAG-01"
       direct_consumers: []
 
+  - id: "FEAT-DOGFOOD-LEDGER-01"
+    title: "Dogfooding Provenance Honesty Ledger"
+    persona_story: "As a supervisor, I need classified main landings and a separate honesty gap so that missing delegation provenance is visible."
+    srs_reqs:
+      - "FR-8"
+    openspec_deltas: []
+    code_paths:
+      - "internal/dogfood/**"
+      - "tools/dogfood_provenance/**"
+    collision_domain: "dogfood-provenance"
+    owned_paths:
+      - "internal/dogfood/**"
+      - "tools/dogfood_provenance/**"
+    shared_paths: []
+    interfaces:
+      go_packages:
+        - "internal/dogfood"
+    invariants:
+      - "Ratio denominator includes only classified main landings; unclassified history remains visible"
+      - "Pre-convention history is excluded without retro-tagging; windows below 20 landings do not fail"
+    visible_tests:
+      - "internal/dogfood/ledger_test.go"
+      - "tools/dogfood_provenance/main_test.go"
+    verifier_class: "test"
+    blast_radius:
+      depends_on: []
+      direct_consumers: []
+
   - id: "FEAT-FEATUREMAP-01"
     title: "Declarative Feature Map & Blast Radius Routing"
     persona_story: "As a verification and routing harness, I need a declarative feature map and blast radius DAG so that task write scopes and test impacts are derived deterministically with zero package orphans."
