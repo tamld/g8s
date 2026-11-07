@@ -50,6 +50,10 @@ func (s *Store) RenewClaim(ctx context.Context, c Claim) (*Claim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrClaimFenceStale, err)
 	}
-	result := out.(claimResponse).Claim
+	response, ok := out.(claimResponse)
+	if !ok {
+		return nil, fmt.Errorf("%w: unexpected claim response type %T", ErrClaimFenceStale, out)
+	}
+	result := response.Claim
 	return &result, nil
 }
