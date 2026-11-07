@@ -207,9 +207,13 @@ fi
 if command -v jq >/dev/null 2>&1; then
     MANIFEST_VERSION=$(jq -r '.version // empty' manifest.json)
     MANIFEST_TAG=$(jq -r '.latest_release.tag // empty' manifest.json)
+    MANIFEST_COMMIT=$(jq -r '.latest_release.commit // empty' manifest.json)
+    MANIFEST_DATE=$(jq -r '.latest_release.date // empty' manifest.json)
 else
     MANIFEST_VERSION=$(grep -E '^[[:space:]]*"version":' manifest.json | head -1 | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
     MANIFEST_TAG=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' manifest.json | grep -E '"tag":' | head -1 | sed -E 's/.*"tag":[[:space:]]*"([^"]+)".*/\1/')
+    MANIFEST_COMMIT=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' manifest.json | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
+    MANIFEST_DATE=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' manifest.json | grep -E '"date":' | head -1 | sed -E 's/.*"date":[[:space:]]*"([^"]+)".*/\1/')
 fi
 
 if [ -z "$MANIFEST_VERSION" ]; then
@@ -226,6 +230,29 @@ fi
 
 if [ "$MANIFEST_TAG" != "v$LATEST_TAG" ]; then
     fail "manifest.json latest_release.tag mismatch: field 'latest_release.tag' ($MANIFEST_TAG) does not match latest git tag (v$LATEST_TAG)"
+fi
+
+TAG_COMMIT=$(git rev-list -n1 "v$LATEST_TAG" 2>/dev/null || true)
+TAG_DATE=$(git show -s --format=%cs "v$LATEST_TAG^{commit}" 2>/dev/null || true)
+if [ -z "$TAG_COMMIT" ] || [ -z "$TAG_DATE" ]; then
+    warn "tag v$LATEST_TAG not resolvable in this checkout (shallow?)"
+else
+    TAG_COMMIT_SHORT="${TAG_COMMIT:0:7}"
+    if [ -z "$MANIFEST_COMMIT" ]; then
+        fail "Could not extract latest_release.commit from manifest.json"
+    fi
+    if [ "$MANIFEST_COMMIT" != "$TAG_COMMIT_SHORT" ]; then
+        fail "manifest.json latest_release.commit mismatch: field 'latest_release.commit' ($MANIFEST_COMMIT) does not match v$LATEST_TAG commit ($TAG_COMMIT_SHORT)"
+    fi
+    pass "manifest.json latest_release.commit ($MANIFEST_COMMIT) matches v$LATEST_TAG commit ($TAG_COMMIT_SHORT)"
+
+    if [ -z "$MANIFEST_DATE" ]; then
+        fail "Could not extract latest_release.date from manifest.json"
+    fi
+    if [ "$MANIFEST_DATE" != "$TAG_DATE" ]; then
+        fail "manifest.json latest_release.date mismatch: field 'latest_release.date' ($MANIFEST_DATE) does not match v$LATEST_TAG date ($TAG_DATE)"
+    fi
+    pass "manifest.json latest_release.date ($MANIFEST_DATE) matches v$LATEST_TAG date ($TAG_DATE)"
 fi
 
 pass "manifest.json version ($MANIFEST_VERSION) and latest_release.tag ($MANIFEST_TAG) match codebase and git tag"
