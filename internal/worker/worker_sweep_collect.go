@@ -594,14 +594,24 @@ func (s *Supervisor) collect(
 		// #346: consume the delegated-write receipt exactly once when the
 		// scoped write attempt succeeded — before the attempt is finished.
 		// A replay by a different task is a hard, non-retryable failure.
-		if success && deliverableDir != "" {
-			allowedPaths := resolveReceiptAllowedPaths(receiptID)
-			if violations, dfErr := VerifyWorktreeDiffScope(deliverableDir, permission, allowedPaths); dfErr != nil {
+		if success {
+			var allowedPaths, violations []string
+			var dfErr error
+			if !isDiffFirewallReadPermission(permission) {
+				allowedPaths, dfErr = resolveReceiptAllowedPaths(receiptID)
+				if dfErr != nil {
+					s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &exitCode, dfErr.Error())
+				}
+			}
+			if dfErr == nil {
+				violations, dfErr = VerifyWorktreeDiffScope(deliverableDir, permission, allowedPaths)
+			}
+			if dfErr != nil {
 				wr = workerResult{
 					OK:      false,
 					Status:  "contract_violation",
 					Reason:  dfErr.Error(),
-					Summary: "post-run worktree diff firewall rejected out-of-scope file mutations",
+					Summary: "post-run worktree diff firewall could not attest file mutations",
 					ContractViolation: mustJSON(map[string]any{
 						"policy":          "worktree_diff_firewall",
 						"path_violations": violations,

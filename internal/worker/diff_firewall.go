@@ -51,16 +51,22 @@ func resolveDefaultCLITemplate(provider, prompt, model, timeout string) ([]strin
 func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []string) ([]string, error) {
 	dir := strings.TrimSpace(worktreeDir)
 	if dir == "" {
-		return nil, nil
+		if isDiffFirewallReadPermission(permission) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: no worktree dir provided; cannot attest diff scope")
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		return nil, nil
+		if isDiffFirewallReadPermission(permission) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: worktree dir missing or not a git worktree (%s): %w", dir, err)
 	}
 
 	cmd := exec.Command("git", "-C", dir, "status", "--porcelain", "--untracked-files=all")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: git status failed: %w", err)
 	}
 
 	var touched []string
@@ -94,14 +100,13 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 		return nil, nil
 	}
 
-	perm := strings.ToLower(strings.TrimSpace(permission))
-	if perm == "read_only" || perm == "automation_read" || perm == "supplied_text" {
+	if isDiffFirewallReadPermission(permission) {
 		return touched, fmt.Errorf("E_DIFF_FIREWALL_READ_ONLY_MUTATION: %d files modified under %s permission: %s",
 			len(touched), permission, strings.Join(touched, ", "))
 	}
 
 	if len(allowedPaths) == 0 {
-		return nil, nil
+		return touched, fmt.Errorf("E_DIFF_FIREWALL_UNSCOPED: %d files modified but no allowed-paths scope available", len(touched))
 	}
 
 	var violations []string
@@ -117,28 +122,40 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 	return nil, nil
 }
 
-func resolveReceiptAllowedPaths(receiptID string) []string {
+func isDiffFirewallReadPermission(permission string) bool {
+	switch strings.ToLower(strings.TrimSpace(permission)) {
+	case "read_only", "automation_read", "supplied_text":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveReceiptAllowedPaths(receiptID string) ([]string, error) {
 	if strings.TrimSpace(receiptID) == "" {
-		return nil
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_RECEIPT_LOOKUP: no receipt ID provided")
 	}
 	dbPath := filepath.Join(pathutil.DefaultStateDir(), "receipts.db")
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_RECEIPT_LOOKUP: stat receipts database: %w", err)
 	}
 	mgr, err := receipt.NewReceiptManager(dbPath, nil)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("E_DIFF_FIREWALL_RECEIPT_LOOKUP: open receipts database: %w", err)
 	}
 	defer mgr.Close()
-	if rc, err := mgr.VerifyReceipt(receiptID); err == nil && rc != nil {
-		return rc.AllowedPaths
+	rc, verifyErr := mgr.VerifyReceipt(receiptID)
+	if verifyErr == nil && rc != nil {
+		return rc.AllowedPaths, nil
 	}
-	if list, err := mgr.ListReceipts("", time.Time{}, ""); err == nil {
+	// Consumed receipts still attest the scope of the completed attempt.
+	list, listErr := mgr.ListReceipts("", time.Time{}, "")
+	if listErr == nil {
 		for i := len(list) - 1; i >= 0; i-- {
 			if list[i].ReceiptID == receiptID {
-				return list[i].AllowedPaths
+				return list[i].AllowedPaths, nil
 			}
 		}
 	}
-	return nil
+	return nil, fmt.Errorf("E_DIFF_FIREWALL_RECEIPT_LOOKUP: receipt %q unavailable (verify: %v; list: %v)", receiptID, verifyErr, listErr)
 }
