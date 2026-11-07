@@ -24,6 +24,7 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/doctor"
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/reflection"
 	"github.com/tamld/g8s/internal/settings"
 )
 
@@ -400,8 +401,57 @@ func runAutopilotTick(args []string) {
 	fs := flag.NewFlagSet("autopilot tick", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	jobsFlag := fs.String("jobs", "", "comma-separated list of jobs to run (default: doctor,retention,hygiene)")
+	reflectionReceipt := fs.String("reflection-receipt", "", "path to an S2 reflection receipt; submit bounded add-list packets instead of maintenance jobs")
+	dryRun := fs.Bool("dry-run", false, "print reflection packet specs without opening the queue")
+	packetModel := fs.String("model", "gemini-3.8-flash-high", "target reflection worker model")
+	packetProvider := fs.String("provider", "", "target reflection worker provider (queue default when empty)")
+	packetEffort := fs.String("effort", "", "reflection worker effort (queue default when empty)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("autopilot", "tick", *traceID, err.Error(), "", *jsonl)
+	}
+	if *reflectionReceipt != "" {
+		raw, err := os.ReadFile(*reflectionReceipt)
+		if err != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeIO, err, "Failed to read reflection receipt", *jsonl)
+		}
+		rcpt, err := reflection.ValidateProcessReflectionReceipt(raw)
+		if err != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeRuntime, err, "Provide a valid S2 reflection receipt", *jsonl)
+		}
+		packets, err := reflection.BuildWorkPackets(rcpt, reflection.PacketOptions{Model: *packetModel, Provider: *packetProvider, Effort: *packetEffort})
+		if err != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeRuntime, err, "Failed to build reflection packets", *jsonl)
+		}
+		if *dryRun {
+			for _, packet := range packets {
+				env := cli.NewEnvelope("reflection_packet", "autopilot", "tick", packet)
+				env.TraceID = *traceID
+				_ = cli.WriteResponse(os.Stdout, env, *jsonl || !*jsonMode)
+			}
+			return
+		}
+		dbPath, err := databasePath()
+		if err != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeIO, err, "Failed to resolve database path", *jsonl)
+		}
+		store, err := controlplane.NewControlPlane(dbPath, nil)
+		if err != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeRuntime, err, "Failed to open control plane database", *jsonl)
+		}
+		ids, submitErr := reflection.SubmitPackets(context.Background(), store, packets)
+		_ = store.Close()
+		for _, id := range ids {
+			env := cli.NewEnvelope("reflection_task", "autopilot", "tick", map[string]any{"task_id": id})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl || !*jsonMode)
+		}
+		if submitErr != nil {
+			exitRuntime("autopilot", "tick", *traceID, cli.CodeRuntime, submitErr, "Previously printed task IDs remain queued; retry with the same receipt for idempotency", *jsonl)
+		}
+		return
+	}
+	if *dryRun {
+		exitUsage("autopilot", "tick", *traceID, "-dry-run requires -reflection-receipt", "Provide a reflection receipt path", *jsonl)
 	}
 
 	var jobs []string
