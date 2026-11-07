@@ -243,6 +243,27 @@ func TestCoordinatorMeshNativeRegistrationAndParity(t *testing.T) {
 	if err := json.Unmarshal(corePruneRaw, &corePrune); err != nil {
 		t.Fatalf("unmarshal core prune: %v", err)
 	}
+	// MCP opens its own mesh.Store, whose clock is private to package mesh.
+	// The two dry-runs sample time.Now separately and format to whole seconds;
+	// allow only that cutoff drift, keeping every other field exactly equal.
+	parseCutoff := func(label string, result map[string]any) time.Time {
+		t.Helper()
+		cutoff, ok := result["cutoff"].(string)
+		if !ok {
+			t.Fatalf("%s prune cutoff must be a string, got %v", label, result["cutoff"])
+		}
+		parsed, err := time.Parse(time.RFC3339, cutoff)
+		if err != nil {
+			t.Fatalf("parse %s prune cutoff: %v", label, err)
+		}
+		return parsed
+	}
+	mcpCutoff := parseCutoff("MCP", mcpPrune)
+	coreCutoff := parseCutoff("core", corePrune)
+	if drift := coreCutoff.Sub(mcpCutoff); drift < -time.Second || drift > time.Second {
+		t.Fatalf("prune cutoff drift exceeds 1s: MCP=%s core=%s", mcpPrune["cutoff"], corePrune["cutoff"])
+	}
+	corePrune["cutoff"] = mcpPrune["cutoff"]
 	if !reflect.DeepEqual(mcpPrune, corePrune) {
 		t.Fatalf("prune dry-run mismatch MCP=%s core=%s", string(pruneRaw), string(corePruneRaw))
 	}
