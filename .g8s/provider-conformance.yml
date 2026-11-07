@@ -137,6 +137,12 @@ providers:
             duration_ms: 4732
             provider_version: openai-compatible-v1
             observed_at: "2026-10-26T16:42:10Z"
+        - id: P9
+          name: claim_fence_external_cli
+          required: false
+          mode: static
+          status: UNSUPPORTED
+          reason: HTTP LLM has no filesystem access; the claim fence gates g8s-applied edits (ADR-0038)
         - id: H2
           name: tool_calling
           required: false
@@ -274,6 +280,19 @@ providers:
           mode: static
           status: UNVERIFIED
           reason: advertised in --help (--json-schema); runtime behavior requires --live
+          evidence:
+            command: agy --help
+            exit_code: 0
+            stdout_sha256: a12355e8fc064b330eeb25ba52de596406582752442e293083bcda6388a63b78
+            duration_ms: 55
+            provider_version: 1.4.7
+            observed_at: "2026-10-26T16:42:01Z"
+        - id: P9
+          name: claim_fence_external_cli
+          required: true
+          mode: static
+          status: UNVERIFIED
+          reason: runtime-only behavior; requires --live (ADR-0038 R8, enforced at harvest)
           evidence:
             command: agy --help
             exit_code: 0
