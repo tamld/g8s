@@ -62,6 +62,7 @@ const (
 	ProbeP6 ProbeID = "P6" // file edit lands in worktree
 	ProbeP7 ProbeID = "P7" // respects output schema
 	ProbeP8 ProbeID = "P8" // usage / token accounting reported
+	ProbeP9 ProbeID = "P9" // claim fence refuses out-of-claim writes (ADR-0038)
 	ProbeH1 ProbeID = "H1" // HTTP model listing
 	ProbeH2 ProbeID = "H2" // HTTP tool-calling support
 	ProbeH3 ProbeID = "H3" // HTTP max context claim vs observed
@@ -78,6 +79,7 @@ var probeNames = map[ProbeID]string{
 	ProbeP6: "file_edit_lands",
 	ProbeP7: "output_schema_respected",
 	ProbeP8: "usage_token_accounting",
+	ProbeP9: "claim_fence_external_cli",
 	ProbeH1: "model_listing",
 	ProbeH2: "tool_calling",
 	ProbeH3: "context_window_claim_vs_observed",
@@ -87,13 +89,13 @@ var probeNames = map[ProbeID]string{
 func ProbeName(id ProbeID) string { return probeNames[id] }
 
 // CLIProbeOrder is the canonical probe order for CLI agents.
-var CLIProbeOrder = []ProbeID{ProbeP0, ProbeP1, ProbeP2, ProbeP3, ProbeP4, ProbeP5, ProbeP6, ProbeP7, ProbeP8}
+var CLIProbeOrder = []ProbeID{ProbeP0, ProbeP1, ProbeP2, ProbeP3, ProbeP4, ProbeP5, ProbeP6, ProbeP7, ProbeP8, ProbeP9}
 
 // HTTPProbeOrder is the canonical probe order for HTTP LLM providers.
-var HTTPProbeOrder = []ProbeID{ProbeP0, ProbeH1, ProbeP1, ProbeP2, ProbeP3, ProbeP4, ProbeP5, ProbeP6, ProbeP7, ProbeP8, ProbeH2, ProbeH3}
+var HTTPProbeOrder = []ProbeID{ProbeP0, ProbeH1, ProbeP1, ProbeP2, ProbeP3, ProbeP4, ProbeP5, ProbeP6, ProbeP7, ProbeP8, ProbeP9, ProbeH2, ProbeH3}
 
 // requiredCLI lists probes whose FAIL makes a CLI agent unsafe to dispatch.
-var requiredCLI = map[ProbeID]bool{ProbeP0: true, ProbeP1: true, ProbeP3: true, ProbeP4: true, ProbeP5: true, ProbeP6: true}
+var requiredCLI = map[ProbeID]bool{ProbeP0: true, ProbeP1: true, ProbeP3: true, ProbeP4: true, ProbeP5: true, ProbeP6: true, ProbeP9: true}
 
 // requiredHTTP lists probes whose FAIL makes an HTTP provider unsafe to dispatch.
 var requiredHTTP = map[ProbeID]bool{ProbeP0: true, ProbeP1: true, ProbeP3: true}

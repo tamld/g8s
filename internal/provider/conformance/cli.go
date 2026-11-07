@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/provider"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/worker"
 )
 
@@ -440,6 +441,7 @@ func (l liveCLI) run(ctx context.Context, static map[ProbeID]ProbeResult) map[Pr
 	out[ProbeP5] = l.probeP5(ctx)
 	out[ProbeP6] = l.probeP6(ctx)
 	out[ProbeP7] = l.probeP7(ctx, static[ProbeP7])
+	out[ProbeP9] = l.probeP9(ctx)
 	return out
 }
 
@@ -600,6 +602,36 @@ func (l liveCLI) probeP6(ctx context.Context) ProbeResult {
 		return l.res(ProbeP6, StatusFail, fmt.Sprintf("edit landed but touched extra paths: %s", strings.Join(violations, ",")), ev)
 	}
 	return l.res(ProbeP6, StatusPass, "file landed with exact content; VerifyWorktreeDiffScope clean", ev)
+}
+
+// probeP9 (ADR-0038 red-test R8): the agent's write lands in the worktree but
+// OUTSIDE the claim's literal paths while the receipt glob would allow it —
+// the claim-aware diff firewall must refuse it at harvest.
+func (l liveCLI) probeP9(ctx context.Context) ProbeResult {
+	dir, cleanup, err := newScratchRepo(ctx)
+	if err != nil {
+		return l.res(ProbeP9, StatusUnverified, "scratch repo: "+err.Error(), nil)
+	}
+	defer cleanup()
+	brief := fmt.Sprintf("Create a file named %s in the current directory containing exactly the text %s. Do not modify any other file.", editFile, editMarker)
+	rc, _, ev, werr := l.spawn(ctx, dir, brief, l.timeout())
+	if werr != nil && rc.Status == "" {
+		return l.res(ProbeP9, StatusUnverified, "spawn failed: "+werr.Error(), ev)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, editFile)); statErr != nil {
+		return l.res(ProbeP9, StatusUnverified, "agent did not produce the probe write; fence inconclusive", ev)
+	}
+	// Claim covers only src/ (narrower than the receipt glob [editFile]):
+	// the intersection must narrow, never widen — the root write is out-of-claim.
+	claim := &receipt.ClaimBinding{
+		TaskID: "conformance-p9", NodeID: "conformance", Incarnation: "c1",
+		Resource: "worktree", ContextRevision: 1, Paths: []string{"src/"},
+		ExpiresAt: time.Now().Add(time.Hour).UTC(),
+	}
+	if _, vErr := worker.VerifyWorktreeDiffScope(dir, "workspace_write", []string{editFile}, claim); vErr == nil {
+		return l.res(ProbeP9, StatusFail, "out-of-claim write passed the fence — claim enforcement gap (ADR-0038)", ev)
+	}
+	return l.res(ProbeP9, StatusPass, "out-of-claim write refused by the claim-aware diff firewall", ev)
 }
 
 func (l liveCLI) probeP7(ctx context.Context, staticP7 ProbeResult) ProbeResult {
