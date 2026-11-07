@@ -649,6 +649,7 @@ func TestFreshDatabaseSchemaColumnTypesExact(t *testing.T) {
 		"trace_id":                      "TEXT",
 		"actor_chain_json":              "TEXT",
 		"source_commit":                 "TEXT",
+		"claim_binding_json":            "TEXT",
 	}
 
 	raw := openRawDB(t, dbPath)

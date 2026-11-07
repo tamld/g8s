@@ -145,6 +145,13 @@ func claimHandler(ctx context.Context, s *Store, input json.RawMessage) (any, er
 				return err
 			}
 			if exNode == req.NodeID && exInc == req.Incarnation && exRes == req.Resource && exRev == req.ContextRevision && claimPathsEqual(exPaths, normPaths) {
+				// A same-content retry renews, but never shortens, the live lease.
+				if renewed := nowSec + int64(req.LeaseSeconds); renewed > exExp {
+					exExp = renewed
+					if _, err := tx.ExecContext(ctx, "UPDATE claims SET expires_at = ? WHERE task_id = ?", exExp, req.TaskID); err != nil {
+						return err
+					}
+				}
 				out = Claim{TaskID: req.TaskID, NodeID: exNode, Incarnation: exInc, Resource: exRes, Paths: exPaths, ContextRevision: exRev, ExpiresAt: exExp, State: exState, ArtifactRef: exRef, ArtifactSHA256: exSHA}
 				return nil
 			}
