@@ -438,8 +438,8 @@ func runAutopilotTick(args []string) {
 		if err != nil {
 			exitRuntime("autopilot", "tick", *traceID, cli.CodeRuntime, err, "Failed to open control plane database", *jsonl)
 		}
+		defer store.Close()
 		ids, submitErr := reflection.SubmitPackets(context.Background(), store, packets)
-		_ = store.Close()
 		for _, id := range ids {
 			env := cli.NewEnvelope("reflection_task", "autopilot", "tick", map[string]any{"task_id": id})
 			env.TraceID = *traceID
