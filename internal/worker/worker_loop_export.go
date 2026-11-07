@@ -237,6 +237,7 @@ func (s *Supervisor) ExportReceiptDetailed(ctx context.Context, taskID, runDir s
 		return exportStatus
 	}
 
+	exportStatus.ClaimFence = controlplane.TaskClaimFenceVerdict(snap)
 	snapData, err := controlplane.CanonicalReceiptSnapshot(snap)
 	if err != nil {
 		exportStatus.Local = controlplane.ExportDestinationStatus{
@@ -670,6 +671,9 @@ func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
 	envelope := map[string]any{
 		"ok":     wr.OK,
 		"status": wr.Status,
+	}
+	if wr.ClaimFence != nil {
+		envelope["claim_fence"] = wr.ClaimFence
 	}
 	if wr.Reason != "" {
 		envelope["reason"] = wr.Reason

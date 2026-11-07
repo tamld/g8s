@@ -242,6 +242,11 @@ func (s *Supervisor) awaitOutcome(
 		}
 
 		if !now.Before(nextBeat) {
+			if req.ClaimBinding != nil {
+				if err := renewClaimFence(ctx, req.ReceiptID, true); err != nil {
+					return "claim_refused_fence: " + err.Error()
+				}
+			}
 			if herr := s.cp.RenewHeartbeat(ctx, taskID, workerID, leaseSeconds); herr != nil {
 				consecutiveErrors++
 

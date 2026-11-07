@@ -22,6 +22,7 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/routing"
 	"github.com/tamld/g8s/internal/telemetry"
@@ -439,6 +440,8 @@ func (s *Supervisor) collect(
 	default:
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResult(rawResult, stdoutText, code)
+		// A worker cannot attest its own fence verdict.
+		wr.ClaimFence = nil
 		success := code == 0 && wr.OK
 		if success && strings.TrimSpace(stdoutText) == "" {
 			if apiErr := extractWorkerAPIErrorLine(stderrText); apiErr != "" {
@@ -594,8 +597,9 @@ func (s *Supervisor) collect(
 		// #346: consume the delegated-write receipt exactly once when the
 		// scoped write attempt succeeded — before the attempt is finished.
 		// A replay by a different task is a hard, non-retryable failure.
-		if success {
+		if success && (deliverableDir != "" || req.ClaimBinding != nil) {
 			var allowedPaths, violations []string
+			var claim *receipt.ClaimBinding
 			var dfErr error
 			if !isDiffFirewallReadPermission(permission) {
 				allowedPaths, dfErr = resolveReceiptAllowedPaths(receiptID)
@@ -603,8 +607,11 @@ func (s *Supervisor) collect(
 					s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &exitCode, dfErr.Error())
 				}
 			}
+			if dfErr == nil && req.ClaimBinding != nil {
+				claim, dfErr = LoadClaimFence(ctx, filepath.Join(filepath.Dir(pathutil.DefaultDatabasePath()), "receipts.db"), receiptID)
+			}
 			if dfErr == nil {
-				violations, dfErr = VerifyWorktreeDiffScope(deliverableDir, permission, allowedPaths)
+				violations, dfErr = VerifyWorktreeDiffScope(deliverableDir, permission, allowedPaths, claim)
 			}
 			if dfErr != nil {
 				wr = workerResult{
@@ -619,6 +626,18 @@ func (s *Supervisor) collect(
 				}
 				success = false
 				finishErr = firstNonEmpty(finishErr, wr.Reason)
+			}
+			if req.ClaimBinding != nil {
+				verdict := "allowed"
+				code := ""
+				if dfErr != nil {
+					verdict = "rejected"
+					code = "E_CLAIM_FENCE_STALE"
+					if errors.Is(dfErr, receipt.ErrClaimFenceOutOfScope) {
+						code = "E_CLAIM_FENCE_OUT_OF_SCOPE"
+					}
+				}
+				wr.ClaimFence = &controlplane.ClaimFenceVerdict{TaskID: taskID, ClaimTaskID: req.ClaimBinding.TaskID, ReceiptID: receiptID, ContextRevision: req.ClaimBinding.ContextRevision, Verdict: verdict, Code: code}
 			}
 		}
 		if success && permission == "workspace_write" && receiptID != "" {
