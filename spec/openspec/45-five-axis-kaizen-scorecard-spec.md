@@ -35,3 +35,45 @@ Evaluating worker models in isolation masks systemic friction caused by over-bro
 - **GIVEN** a worker task executed via `Supervisor.RunOnce` and a verification run evaluated via `Verifier.Verify`
 - **WHEN** the attempt finishes and verification checks complete
 - **THEN** `model_quality_events.jsonl` records one `ModelOutcomeRecord` per attempt (without duplicate CLI wrapper rows) and `gate_outcome_events.jsonl` records per-check outcomes and flake transitions
+
+## D9-S2 — Evidence-bound telemetry JUDGE (#714)
+
+`internal/reflection` defines a separate telemetry JUDGE contract from the older
+Jev-specific `internal/reflex` receipt. It does not change that receipt or wire
+ACT, PRUNE, scheduling, or workflows.
+
+The strict Draft 2020-12 receipt requires `receipt_id`, `cycle` (RFC3339 timestamp
+and nightly/release/manual trigger), `judge` (name/version), `verdicts`, path-only
+`add_list` and `prune_list`, computed `prune_ratio`, and positive integer
+`self_tombstone_after`. Every verdict requires a portable repo-relative
+`artifact_path`, a staleness/drift/theater dimension, healthy/stale/drift/theater
+verdict, and nonempty `evidence_refs`. Unknown fields fail at every object level.
+The ratio is prune count divided by add count, or prune count with no additions;
+the Go validator rejects a supplied ratio that differs from this computation.
+
+References are shape-checked offline: `file:<repo-relative-path>@<sha-prefix>`,
+`run:<gate-history-id>`, or `event:<model-quality-row-id>`. Ledger citations also
+accept `file:<ledger>@<row-offset>`, where the offset is a zero-based decimal
+byte offset in the physical JSONL file, including CRLF and blank-line bytes.
+Shape acceptance does not claim the referenced evidence exists.
+
+`TelemetryJudge` uses routing's resolved S1 model-quality and CI-gate paths and
+record types, read through `telemetry.ReadLedger`. Both paths must be beneath
+the supplied repository root. Missing ledgers yield no verdicts; malformed rows,
+invalid observation timestamps, external paths, and I/O failures return errors.
+Each observation gets staleness (default 30 days) and drift verdicts; model rows
+with verifier results also get a theater verdict when claimed success conflicts
+with failed verification. Healthy means no corresponding signal in that row,
+not a claim about unobserved artifacts or overall system health.
+
+#### Scenario: Strict telemetry reflection receipt rejects unsupported judgments
+<!-- tests: TestReceiptSchemaSelfConformance, TestReceiptHostileFields, TestEvidenceRefShapes, TestComputedPruneRatio -->
+- **GIVEN** the embedded schema and a golden receipt
+- **WHEN** a receipt is validated
+- **THEN** golden passes; absent, null, or empty evidence returns typed `E_REFLEX_VERDICT_UNEVIDENCED`; malformed refs, unknown fields, and incorrect ratios fail
+
+#### Scenario: Telemetry JUDGE preserves ledger evidence and prompt provenance
+<!-- tests: TestTelemetryJudgeEvidencedVerdicts, TestLedgerOffsetsAndFailureBoundaries, TestTelemetryJudgeEmptyAndOutsideRoot, TestPromptManifestCoverage -->
+- **GIVEN** synthetic S1 model and CI-gate rows and the versioned prompt directory
+- **WHEN** JUDGE runs and the manifest is audited
+- **THEN** verdict refs identify actual ledger row offsets, corruption fails closed, and pinned hashes cover every Markdown prompt without stale entries

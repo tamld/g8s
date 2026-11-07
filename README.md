@@ -337,6 +337,7 @@ g8s/
 │   ├── provider/ — implements native discovery and concurrency governance for external AI worker binaries, per DELTA-05 (spec/openspec/05-provider-and-resource-pool-spec.md)
 │   ├── reach/ — implements read-only platform data acquisition: an in-code channel registry, ordered fallback dispatch, and error classification for external research fetches
 │   ├── receipt/ — implements zero-trust write receipts for delegated workspace mutations
+│   ├── reflection/ — defines the evidence-bound D-09 JUDGE contract
 │   ├── reflex/ — implements a System 1 non-autoregressive decision gate for g8s subagent mutation triage, write receipt fast-pathing, and instant circuit-breaking on sandbox escapes
 │   ├── registry/ — provides a cross-platform wrapper around Windows registry operations for installer detection, path validation, and system environment checks
 │   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
