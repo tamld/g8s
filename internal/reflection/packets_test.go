@@ -159,7 +159,8 @@ func TestSubmitPacketsOrderedRequestsAndStopAtFirstError(t *testing.T) {
 				if err := json.Unmarshal(req.Payload, &payload); err != nil {
 					t.Fatal(err)
 				}
-				if payload["receipt_id"] != p.ReceiptID || payload["artifact"] != p.Artifact || payload["verdict"] != p.Verdict || payload["instruction"] != p.Prompt || len(payload["evidence_refs"].([]any)) == 0 {
+				refs, hasRefs := payload["evidence_refs"].([]any)
+				if payload["receipt_id"] != p.ReceiptID || payload["artifact"] != p.Artifact || payload["verdict"] != p.Verdict || payload["instruction"] != p.Prompt || !hasRefs || len(refs) == 0 {
 					t.Fatalf("payload: %s", req.Payload)
 				}
 			}
@@ -254,7 +255,8 @@ func TestIssue714AcceptanceTickQueuesRealTask(t *testing.T) {
 				if err := json.Unmarshal(task.Request, &payload); err != nil {
 					t.Fatal(err)
 				}
-				if payload["permission"] != "workspace_write" || payload["receipt_id"] != r.ReceiptID || len(payload["allowed_paths"].([]any)) == 0 {
+				paths, hasPaths := payload["allowed_paths"].([]any)
+				if payload["permission"] != "workspace_write" || payload["receipt_id"] != r.ReceiptID || !hasPaths || len(paths) == 0 {
 					t.Fatalf("invalid payload: %v", payload)
 				}
 			}
