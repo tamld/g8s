@@ -312,6 +312,24 @@ if [ "$NO_PUSH" -eq 1 ]; then
 else
     echo -e "${BLUE}Pushing to origin...${NC}"
     git push --atomic origin main "v${NEW_VERSION}"
+
+    # Release-metadata amendment: latest_release.commit/date now have their
+    # final values (the tag exists), so a follow-up commit records them.
+    # The sync checker compares manifest.commit against the TAG's commit —
+    # not HEAD — so this amendment keeps both green.
+    if [ -f "manifest.json" ]; then
+        RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}")
+        RELEASE_DATE=$(date +%Y-%m-%d)
+        sed -i.bak -E "s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
+        sed -i.bak -E "s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
+        rm -f manifest.json.bak
+        git add manifest.json
+        if ! git diff --staged --quiet; then
+            git commit -m "chore(release): record v${NEW_VERSION} commit/date in manifest latest_release"
+            git push origin main
+            echo -e "${GREEN}✓ manifest latest_release amended to ${RELEASE_SHA} / ${RELEASE_DATE}${NC}"
+        fi
+    fi
 fi
 
 echo -e "${GREEN}✓ Release ${NEW_VERSION} created and pushed!${NC}"
