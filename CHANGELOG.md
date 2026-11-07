@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Mesh Fence Enforcement (`ADR-0038`, `#780`, `#801`, `#805`, `#806`, `#807`, `#809`)**:
+  - Claim-bound receipt projection with validate/clip/renew, `fsops` pre-mutation gate, and lease-aligned TTL; `submit` relaxes timeout-vs-TTL only for claim-bound receipts with heartbeat renewal.
+  - Claim-aware fail-closed harvest firewall on the worker layer (`LoadClaimFence`, `E_CLAIM_FENCE_OUT_OF_SCOPE` / `E_CLAIM_FENCE_STALE`, stale-claim fail-fast before dispatch); `verify` and `receipt-export` surface fence verdicts per the `#658` recovery pattern.
+  - Red-test matrix R1–R4+R7 (claim scope, expired lease, cross-claim write, receipt∩claim intersection, stale-after-revision bump) plus `fsops` symlink-canonical fix for macOS `/var` ↔ `/private/var` scope resolution; R5 external-CLI detection and conformance probe **P9** `claim_fence_external_cli` (dispatch-required; P7/P8 ids taken by existing probes).
+- **RT-MESH v1.1 A1–A5 (`DELTA-46`, `#754`, `#800`, `#803`, `#814`)**:
+  - A1–A3 (`#800`): cumulative ack watermark (prefix acked per peer), per-recipient flow window (`FLOW_WINDOW_FULL`), durable retry budget (`PEER_DEGRADED` + cool-off; capacity refusals consume attempts; ACK resets retry state).
+  - A4–A5 (`#803`): ping/pong keepalive (flow window, pending caps, and retry budget exempt; durable across reopen), screen-state gate (`ready|modal|busy`; `accepted` ≠ `surfaced` inbox ordering).
+  - AM2 ACKed-message prune with dedup tombstones (`#760`); spec 46 verification gap closure (`#778`).
+- **D-09 REFLEX-CYCLE (`#714`, `#718`, `#733`, `#783`, `#784`, `#790`, `#794`, `#797`, `#781`, `#798`)**:
+  - S1: gate-outcome history ledger + default worker completion → scorecard row (`#718`, `#783`, `#784`).
+  - S2: `ProcessReflectionReceipt` schema + evidence-ref-or-reject judge (`#733`, `#790`).
+  - S3: autopilot stage-2 — receipt-derived work-packet submitter via control-plane queue (`#794`).
+  - S4: prune-law gate + nightly reflection cycle + 3-cycle tombstone (`#797`).
+  - S5 / CLOCK: mechanized `ci_surface_inventory.sh` and release pre-tag surface-inventory gate with bounded CLI provider probes (`#781`, `#798`).
+- **Provenance Honesty Ledger (`ADR-0039`, `#813`)**:
+  - `Receipt:` and `Provenance: F0-direct — <reason>` commit trailers, `internal/dogfood` classification + ratio ledger, weekly CI ratio step (`tools/dogfood_provenance`) with `<=30%` unclassified budget after the convention window and `>=70%` receipt-backed target for substantive Go/CI changes.
+- **Gates & Operator Hygiene (stage 3)**:
+  - `g8s doctor` binary-vs-HEAD staleness check via `debug.ReadBuildInfo` vs `git rev-parse HEAD` (`#812` ref, commit `3cbd263`).
+- **CLI & Routing**:
+  - `submit --profile` dispatch presets from `.g8s/agent-models.yml` (`#747`); workspace-write opt-in surface (`#731`); parse-time timeout validation + three-clock cross-check + submit scope warning (`#727`).
+  - Jev v2 Wave 1–2: `ProcessReflectionReceipt` judge integration, joint `route_target`, retry backoff, and noul memory gate (`#733`, `#736`).
+  - Fail-loud `read_only` enforcement for external platform CLI providers (`#777`).
+- **9router Catalog Ground Truth (`#786`)**: align registry combos with probed reality (2026-11-07 audit).
+- **Product Site (`#735`, `#741`, `#775`, `#768`–`#770`)**: g8s Steel & Signal product page, Aegis covenant page with Canvas2D hero, INSPECT-hardened composed sections and banned-tell cleanup.
+
+### Changed
+
+- **g8s Reform Quick-Wins (`#787`, `#791`–`#796`)**:
+  - Registry refresh (`#795`): model exemplars, DELTA-25 status sync, `catalog_version: 2`, tombstone stubs for 12 missing ADR numbers.
+  - `docs/cli-reference.md` brought current (+14 commands) with help-vs-reference CI parity (`#796`).
+- **OpenSpec & Roadmap**: promote DELTA-46 to APPLIED with review evidence (`#767`); v0.22.x interop debt wave and plan status rows (`#759`); supervisor debt-sweep closeout + hard lesson 24 (`#749`).
+
+### Fixed
+
+- **Diff Firewall Fail-Loud (reform I1, `#793`)**: typed `E_*_UNVERIFIABLE` replaces silent skips when claim-aware or diff scope cannot be verified.
+- **Manifest Release Ground Truth (reform I3, `#792`)**: repair `latest_release` to 0.22.0; `tools/ci_version_sync_check.sh` validates commit SHA and date alignment.
+- **Worker & Control Plane**:
+  - JobObject grandchild PID-set matching + race-scaled test budgets (`#802`).
+  - MCP retention-prune parity: freeze shared clock to kill ±1s cutoff-drift flake (`#811`, `#810`).
+  - Actionable isolation-failure hint when cwd is not a git repository (`#728`); workspace-write rejection hint names `--allow-workspace-write` (`#746`); probe `sa-008` hermetic against inherited `G8S_RECEIPT_ID` + bounded MCP stdio reads (`#745`).
+  - Scorecard-filtered routing candidates computed once per `Route()` (`#743`); injectable ancestor PIDs for ghost-detection tests (`#763`).
+- **Docs hygiene**: strip local machine paths from research citations (`#737`); research 29 file citations as code-text for link integrity (`#739`).
+
+### CI
+
+- **Coverage ratchet monotonicity (reform I2, `#791`)**: commit baseline only when average coverage rises above it.
+- **Version-sync concurrency + Windows E2E docs-lane job gate (`#799`)**: `cancel-in-progress` on version-sync workflow; docs-lane gate on Windows runners.
+- **Pre-push audit (`#808`)**: missing `golangci-lint` fails loud (was warn+skip); wire link-integrity into the local suite; honest header naming CI-only gates (gitleaks, govulncheck, CodeQL, coverage ratchet, D-09 reflection).
+- **Windows gate assertion (`#785`)**: JSON-escape ledger path in envelope assertions for backslash filepaths.
+- **Ambient delegation env scrub** in `cmd/g8s` and package `TestMain` hooks (`#744`, `#748`, `#764`, `#765`, `#774`).
+
+### Docs
+
+- **Research**: reform review top-10 findings + structural reforms inventory (`#788`); Aegis/g8s product-site research (`#734`, `#740`).
+- **Worker**: running-task cancellation acknowledgement + post-`StartTask` test (`#779`).
+- **Mesh trail hygiene (`#814`, `#756` item 2)**: protocol status, kind registry, seq reconciliation, ledger-format corrections.
+
+Known gaps: harness `ok=false` without evidence plus failed-worktree reap (`#812`, fix in flight); RT-MESH v1.1 live interop drill + peer co-sign pending (`#756`).
+
 ## [0.22.0] - 2026-11-01
 
 ### Added
