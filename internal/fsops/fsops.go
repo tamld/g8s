@@ -347,6 +347,9 @@ func hasExplicitPrefixGrant(prefix string, allowedPaths []string) bool {
 // operating under a receipt/wildcard scope or delegated F1/F2 tier unless
 // allowedPaths contains an explicit .g8s/** pattern.
 func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string, error) {
+	if err := verifyDelegatedClaim(filePath, scopeRoot); err != nil {
+		return "", err
+	}
 	if err := charter.VerifyMutationAllowed(charter.CurrentStratum(), filePath); err != nil {
 		return "", err
 	}

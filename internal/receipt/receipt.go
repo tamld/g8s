@@ -39,7 +39,9 @@ const (
 // Version 3: additive Concern B columns for provenance-and-replay context
 //
 //	(canonical_envelope, rule_graph_snapshot, provenance_lineage).
-const SchemaVersion = 3
+//
+// Version 4: persisted mesh claim projection (ADR-0038).
+const SchemaVersion = 4
 
 // Sentinel errors returned wrapped by typed errors below.
 var (
@@ -125,6 +127,7 @@ type ProvenanceLineage struct {
 
 // WriteReceipt is the durable proof-of-authorization for one bounded write.
 type WriteReceipt struct {
+	ClaimBinding      *ClaimBinding      `json:"claim_binding,omitempty"`
 	ReceiptID         string             `json:"receipt_id"`
 	Issuer            string             `json:"issuer"`
 	AllowedPaths      []string           `json:"allowed_paths"`
@@ -142,6 +145,7 @@ type WriteReceipt struct {
 type IssueOption func(*issueOptions)
 
 type issueOptions struct {
+	claimBinding      *ClaimBinding
 	supervisorMeta    *SupervisorMeta
 	canonicalEnvelope *CanonicalEnvelope
 	ruleGraph         *RuleGraphSnapshot
@@ -330,7 +334,7 @@ func checkSchemaVersion(conn *sql.Conn) error {
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version < 0 || (version > 2 && version != SchemaVersion) {
+	if version < 0 || version > SchemaVersion {
 		return fmt.Errorf("unsupported receipt schema version %d; expected %d", version, SchemaVersion)
 	}
 	return nil
@@ -399,6 +403,7 @@ func migrateConcernBSchema(conn *sql.Conn) error {
 		"trace_id":                      "TEXT",
 		"actor_chain_json":              "TEXT",
 		"source_commit":                 "TEXT",
+		"claim_binding_json":            "TEXT",
 	}
 	present := map[string]struct{}{}
 	rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(write_receipts)")
@@ -472,6 +477,17 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 	defer m.mu.Unlock()
 
 	now := m.clock()
+	if b := options.claimBinding; b != nil {
+		if err := b.Validate(now); err != nil {
+			return nil, err
+		}
+		if err := b.ValidatePaths(allowedPaths); err != nil {
+			return nil, err
+		}
+		if remaining := b.ExpiresAt.Sub(now); ttl > remaining {
+			ttl = remaining
+		}
+	}
 	id := uuid.NewString()
 	r := &WriteReceipt{
 		ReceiptID:    id,
@@ -481,6 +497,7 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 		CreatedAt:    now,
 	}
 
+	r.ClaimBinding = options.claimBinding
 	var (
 		approachIdx   sql.NullInt64
 		attemptIdx    sql.NullInt64
@@ -512,7 +529,15 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 		traceID              sql.NullString
 		actorChainJSON       sql.NullString
 		sourceCommit         sql.NullString
+		claimBindingJSON     sql.NullString
 	)
+	if r.ClaimBinding != nil {
+		data, err := json.Marshal(r.ClaimBinding)
+		if err != nil {
+			return nil, err
+		}
+		claimBindingJSON = sql.NullString{String: string(data), Valid: true}
+	}
 	if env := options.canonicalEnvelope; env != nil {
 		envelopeSchemaURI = sql.NullString{String: env.SchemaURI, Valid: true}
 		if fo, ferr := json.Marshal(env.FieldOrder); ferr == nil {
@@ -566,16 +591,16 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 			 approach_idx, attempt_idx, rca_confidence, adr_path,
 			 envelope_schema_uri, envelope_field_order_json, envelope_required_fields_json,
 			 ruleset_version, pipeline_digest, adr_ref,
-			 issued_by, tool_version, trace_id, actor_chain_json, source_commit)
+			 issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json)
 		 VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?,
 		 ?, ?, ?,
 		 ?, ?, ?,
-		 ?, ?, ?, ?, ?)`,
+		 ?, ?, ?, ?, ?, ?)`,
 		r.ReceiptID, r.Issuer, string(pathsJSON), timeToUnix(r.ExpiresAt), timeToUnix(r.CreatedAt),
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrder, envelopeRequiredFlds,
 		rulesetVersion, pipelineDigest, adrRefVal,
-		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
 	); err != nil {
 		return nil, fmt.Errorf("insert receipt %q: %w", r.ReceiptID, err)
 	}
@@ -637,12 +662,13 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 		traceID                sql.NullString
 		actorChainJSON         sql.NullString
 		sourceCommit           sql.NullString
+		claimBindingJSON       sql.NullString
 	)
 	scanErr := row.Scan(&issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 		&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 		&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 		&rulesetVersion, &pipelineDigest, &adrRefVal,
-		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit,
+		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
 	)
 	switch {
 	case errors.Is(scanErr, sql.ErrNoRows):
@@ -671,12 +697,17 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 		rulesetVersion, pipelineDigest, adrRefVal,
-		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	if r.ClaimBinding != nil {
+		if err := r.ClaimBinding.Validate(now); err != nil {
+			return nil, err
+		}
+	}
 	res, err := tx.Exec(
 		`UPDATE write_receipts SET consumed = 1, consumer_task_id = ?
 		 WHERE receipt_id = ? AND consumed = 0`,
@@ -759,12 +790,13 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 			traceID                sql.NullString
 			actorChainJSON         sql.NullString
 			sourceCommit           sql.NullString
+			claimBindingJSON       sql.NullString
 		)
 		if err := rows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 			&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 			&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 			&rulesetVersion, &pipelineDigest, &adrRefVal,
-			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit,
+			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan active receipt: %w", err)
 		}
@@ -772,7 +804,7 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 			approachIdx, attemptIdx, rcaConfidence, adrPath,
 			envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 			rulesetVersion, pipelineDigest, adrRefVal,
-			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -842,12 +874,13 @@ func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) (
 			traceID                sql.NullString
 			actorChainJSON         sql.NullString
 			sourceCommit           sql.NullString
+			claimBindingJSON       sql.NullString
 		)
 		if err := rows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 			&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 			&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 			&rulesetVersion, &pipelineDigest, &adrRefVal,
-			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit,
+			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan receipt: %w", err)
 		}
@@ -855,7 +888,7 @@ func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) (
 			approachIdx, attemptIdx, rcaConfidence, adrPath,
 			envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 			rulesetVersion, pipelineDigest, adrRefVal,
-			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -905,12 +938,13 @@ func (m *Manager) VerifyReceipt(receiptID string) (*WriteReceipt, error) {
 		traceID                sql.NullString
 		actorChainJSON         sql.NullString
 		sourceCommit           sql.NullString
+		claimBindingJSON       sql.NullString
 	)
 	scanErr := row.Scan(&issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 		&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 		&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 		&rulesetVersion, &pipelineDigest, &adrRefVal,
-		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit,
+		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
 	)
 	switch {
 	case errors.Is(scanErr, sql.ErrNoRows):
@@ -929,12 +963,17 @@ func (m *Manager) VerifyReceipt(receiptID string) (*WriteReceipt, error) {
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrderJSON, envelopeRequiredJSON,
 		rulesetVersion, pipelineDigest, adrRefVal,
-		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit,
+		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 	r.Issuer = issuer
+	if r.ClaimBinding != nil {
+		if err := r.ClaimBinding.Validate(m.clock()); err != nil {
+			return nil, err
+		}
+	}
 	return r, nil
 }
 
@@ -957,7 +996,7 @@ const receiptSelectColumns = `issuer, allowed_paths_json, expires_at, consumed, 
 		approach_idx, attempt_idx, rca_confidence, adr_path,
 		envelope_schema_uri, envelope_field_order_json, envelope_required_fields_json,
 		ruleset_version, pipeline_digest, adr_ref,
-		issued_by, tool_version, trace_id, actor_chain_json, source_commit`
+		issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json`
 
 // scanIntoReceipt hydrates a WriteReceipt from the already-scanned column
 // values. Caller is responsible for executing the SELECT and passing the
@@ -985,7 +1024,19 @@ func scanIntoReceipt(
 	traceID sql.NullString,
 	actorChainJSON sql.NullString,
 	sourceCommit sql.NullString,
+	claimBindings ...sql.NullString,
 ) (*WriteReceipt, error) {
+	var claimBindingJSON sql.NullString
+	if len(claimBindings) > 0 {
+		claimBindingJSON = claimBindings[0]
+	}
+	var binding *ClaimBinding
+	if claimBindingJSON.Valid {
+		binding = new(ClaimBinding)
+		if err := json.Unmarshal([]byte(claimBindingJSON.String), binding); err != nil {
+			return nil, fmt.Errorf("%w: corrupt receipt claim binding", ErrClaimFenceStale)
+		}
+	}
 	var paths []string
 	if err := json.Unmarshal([]byte(pathsJSON), &paths); err != nil {
 		return nil, fmt.Errorf("deserialize allowed_paths of %q: %w", receiptID, err)
@@ -993,6 +1044,7 @@ func scanIntoReceipt(
 
 	r := &WriteReceipt{
 		ReceiptID:    receiptID,
+		ClaimBinding: binding,
 		AllowedPaths: paths,
 		ExpiresAt:    unixToTime(expiresAt),
 		Consumed:     consumed == 1,

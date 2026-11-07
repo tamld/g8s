@@ -1,6 +1,6 @@
 # ADR-0038: Mesh Fence Enforcement Point — Claim-Scoped Mutation Gating at the Worker Edit Path
 
-- **Status**: Proposed (2026-11-06) — F0-coordinator draft for g8s #755, awaiting operator ratification.
+- **Status**: Accepted (2026-11-07) — operator-ratified; implementation issues 1-2 this PR, red-tests follow.
 - **Depends on**: ADR-0032 (containment invariant `F2 ⊆ F1 ⊆ F0`), ADR-0035 (epoch-fenced
   charter engine, Kleppmann fencing tokens), DELTA-46 ([`spec/openspec/46-peer-coordinator-ledger-spec.md`](../../spec/openspec/46-peer-coordinator-ledger-spec.md)),
   #776/#777 (fail-loud `read_only` precedent).

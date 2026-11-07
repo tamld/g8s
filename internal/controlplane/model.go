@@ -258,11 +258,55 @@ type ExportDestinationStatus struct {
 
 // ReceiptExportStatus captures the per-destination receipt export outcome.
 type ReceiptExportStatus struct {
+	ClaimFence     *ClaimFenceVerdict      `json:"claim_fence,omitempty"`
 	Local          ExportDestinationStatus `json:"local"`                // attempt-local receipt destination
 	Central        ExportDestinationStatus `json:"central"`              // centralized Evidence Lake destination
 	UpdatedAt      float64                 `json:"updated_at,omitempty"` // last updated timestamp
 	Success        bool                    `json:"success"`              // true if all non-disabled/required destinations succeeded
 	FullyEvidenced bool                    `json:"fully_evidenced"`      // true if required evidence policy is met
+}
+
+// ClaimFenceVerdict is the harness's harvest verdict, bound to both identities.
+// Export recovery preserves it; it does not infer success from an export copy.
+type ClaimFenceVerdict struct {
+	TaskID          string `json:"task_id"`
+	ClaimTaskID     string `json:"claim_task_id"`
+	ReceiptID       string `json:"receipt_id"`
+	ContextRevision int64  `json:"context_revision"`
+	Verdict         string `json:"verdict"`
+	Code            string `json:"code,omitempty"`
+}
+
+func TaskClaimFenceVerdict(task *Task) *ClaimFenceVerdict {
+	var result struct {
+		ClaimFence *ClaimFenceVerdict `json:"claim_fence"`
+	}
+	if task != nil {
+		_ = json.Unmarshal(task.Result, &result)
+	}
+	if result.ClaimFence != nil || task == nil {
+		return result.ClaimFence
+	}
+	var req struct {
+		ReceiptID    string `json:"receipt_id"`
+		ClaimBinding *struct {
+			TaskID          string `json:"task_id"`
+			ContextRevision int64  `json:"context_revision"`
+		} `json:"claim_binding"`
+	}
+	if json.Unmarshal(task.Request, &req) != nil || req.ClaimBinding == nil {
+		return nil
+	}
+	v := &ClaimFenceVerdict{TaskID: task.TaskID, ClaimTaskID: req.ClaimBinding.TaskID, ContextRevision: req.ClaimBinding.ContextRevision, ReceiptID: req.ReceiptID, Verdict: "unverified"}
+	if strings.Contains(string(task.Result), "E_CLAIM_FENCE_STALE") {
+		v.Verdict = "rejected"
+		v.Code = "E_CLAIM_FENCE_STALE"
+	}
+	if strings.Contains(string(task.Result), "E_CLAIM_FENCE_OUT_OF_SCOPE") {
+		v.Verdict = "rejected"
+		v.Code = "E_CLAIM_FENCE_OUT_OF_SCOPE"
+	}
+	return v
 }
 
 // ExportPolicy configures which receipt export destinations are required.
