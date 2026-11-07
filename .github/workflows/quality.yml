@@ -284,19 +284,36 @@ jobs:
           BASELINE_FILE=".g8s/coverage-baseline"
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
             mkdir -p .g8s
-            echo "$avg" > "$BASELINE_FILE"
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            # .g8s/ is the gitignored runtime dir; the baseline is a tracked
-            # artifact maintained by this bot, so force-add is required.
-            git add -f "$BASELINE_FILE"
-            if ! git diff --staged --quiet; then
-              # [skip ci] is intentional loop prevention: without it this bot
-              # commit triggers Quality again, the ratchet writes a new
-              # baseline, and commits forever. The skipped commit changes
-              # exactly one tracked file (.g8s/coverage-baseline) — no code.
-              git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
-              git push origin main || echo "::warning::Failed to push coverage baseline"
+            should_write=0
+            if [ -f "$BASELINE_FILE" ]; then
+              baseline=$(awk '/^[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}' "$BASELINE_FILE")
+              if [ -n "$baseline" ]; then
+                if awk -v avg="$avg" -v base="$baseline" 'BEGIN { exit (avg + 0 > base + 0) ? 0 : 1 }'; then
+                  should_write=1
+                else
+                  echo "coverage ${avg}% <= baseline ${baseline}%; baseline kept"
+                fi
+              else
+                should_write=1
+              fi
+            else
+              should_write=1
+            fi
+            if [ "$should_write" -eq 1 ]; then
+              echo "$avg" > "$BASELINE_FILE"
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              # .g8s/ is the gitignored runtime dir; the baseline is a tracked
+              # artifact maintained by this bot, so force-add is required.
+              git add -f "$BASELINE_FILE"
+              if ! git diff --staged --quiet; then
+                # [skip ci] is intentional loop prevention: without it this bot
+                # commit triggers Quality again, the ratchet writes a new
+                # baseline, and commits forever. The skipped commit changes
+                # exactly one tracked file (.g8s/coverage-baseline) — no code.
+                git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
+                git push origin main || echo "::warning::Failed to push coverage baseline"
+              fi
             fi
           else
             if [ -f "$BASELINE_FILE" ]; then
