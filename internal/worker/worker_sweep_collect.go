@@ -548,7 +548,7 @@ func (s *Supervisor) collect(
 						wr = workerResult{
 							OK:      false,
 							Status:  "blocked",
-							Reason:  verdict.Reason,
+							Reason:  firstNonEmpty(strings.TrimSpace(verdict.Reason), "E_L3_REJECT_REASON_MISSING: quality gate rejected output without a reason"),
 							Summary: "L3 post-run quality gate: output failed Jev assessment",
 						}
 						success = false
@@ -662,6 +662,7 @@ func (s *Supervisor) collect(
 			}
 		}
 
+		wr = ensureFailureReason(wr)
 		// Perform result validation before finishing attempt
 		resultJSON := mustResultJSON(wr, stdoutText, stderrText)
 		task, _ := s.cp.GetTask(ctx, taskID)

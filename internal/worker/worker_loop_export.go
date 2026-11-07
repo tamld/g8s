@@ -629,7 +629,7 @@ func stdbuf(raw []byte) []byte {
 func mustJSON(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return json.RawMessage(`{"ok":false,"status":"marshal_error"}`)
+		return json.RawMessage(`{"ok":false,"status":"marshal_error","reason":"E_RESULT_MARSHAL: could not serialize worker result"}`)
 	}
 	return data
 }
@@ -652,6 +652,9 @@ func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
 		"stdout": sanStdout,
 		"stderr": sanStderr,
 	}
+	if !ok {
+		env["reason"] = "E_WORKER_OUTCOME: " + status
+	}
 	if len(altered) > 0 {
 		env["artifact_altered"] = true
 		env["altered_fields"] = altered
@@ -668,6 +671,7 @@ func verifyExecutableIdentity(path string) error {
 }
 
 func mustResultJSON(wr workerResult, stdout, stderr string) json.RawMessage {
+	wr = ensureFailureReason(wr)
 	envelope := map[string]any{
 		"ok":     wr.OK,
 		"status": wr.Status,
