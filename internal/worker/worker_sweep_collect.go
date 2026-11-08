@@ -437,6 +437,32 @@ func (s *Supervisor) collect(
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
 		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "task requested an invalid execution timeout")
+	case reason == "claim_refused_fence" || strings.HasPrefix(reason, "claim_refused_fence:"):
+		fenceErr := strings.TrimSpace(strings.TrimPrefix(reason, "claim_refused_fence:"))
+		if fenceErr == "" {
+			fenceErr = "claim fence renewal refused"
+		}
+		result := mustJSON(map[string]any{
+			"ok":     false,
+			"status": "claim_refused_fence",
+			"code":   "E_CLAIM_FENCE_STALE",
+			"error":  fenceErr,
+			"reason": fenceErr,
+		})
+		s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &code, fenceErr, map[string]any{
+			"code": "E_CLAIM_FENCE_STALE",
+		})
+		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+			Result:    result,
+			Success:   false,
+			Retryable: false,
+			Err:       fenceErr,
+		})
+		if ferr != nil {
+			return nil, fmt.Errorf("finish claim_refused_fence attempt: %w", ferr)
+		}
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, fenceErr)
+		return s.snapshot(ctx, taskID, runDir, promptPath)
 	default:
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResultWithMarkers(rawResult, stdoutText, code, productivityEchoMarkers(promptPath))

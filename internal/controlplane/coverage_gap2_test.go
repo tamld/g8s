@@ -846,36 +846,10 @@ func TestRedactPayload_AllCases(t *testing.T) {
 	}
 }
 
-// #481: TestDetermineNextState_AllCases verifies transition outcomes.
-func TestDetermineNextState_AllCases(t *testing.T) {
-	// Cancel requested overrides all
-	cancelTask := &Task{CancelRequested: true}
-	if got := determineNextState(cancelTask, FinishAttemptParams{Success: true}); got != StateCancelled {
-		t.Fatalf("got %s, want CANCELLED", got)
-	}
-
-	// Success
-	normalTask := &Task{Attempts: 1, MaxAttempts: 3}
-	if got := determineNextState(normalTask, FinishAttemptParams{Success: true}); got != StateSucceeded {
-		t.Fatalf("got %s, want SUCCEEDED", got)
-	}
-
-	// Retryable with attempts < max_attempts
-	if got := determineNextState(normalTask, FinishAttemptParams{Success: false, Retryable: true}); got != StateQueued {
-		t.Fatalf("got %s, want QUEUED", got)
-	}
-
-	// Retryable with budget exhausted
-	exhaustedTask := &Task{Attempts: 3, MaxAttempts: 3}
-	if got := determineNextState(exhaustedTask, FinishAttemptParams{Success: false, Retryable: true}); got != StateFailed {
-		t.Fatalf("got %s, want FAILED", got)
-	}
-
-	// Non-retryable failure
-	if got := determineNextState(normalTask, FinishAttemptParams{Success: false, Retryable: false}); got != StateFailed {
-		t.Fatalf("got %s, want FAILED", got)
-	}
-}
+// #481/#844: determineNextState was deleted — the transition outcomes it
+// duplicated live in their real owners: AcceptResult (supervisor gate) and
+// the lease-expiry reconcile branches in store_claims.go, both covered by
+// their own suites.
 
 // #481: TestErrSubmitRateLimited_IsCases tests pointer, value, and unrelated error matching.
 func TestErrSubmitRateLimited_IsCases(t *testing.T) {
