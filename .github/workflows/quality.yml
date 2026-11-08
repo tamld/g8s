@@ -170,7 +170,12 @@ jobs:
         if: env.CI_LANE != 'docs'
         shell: bash
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks
+          # shellcheck source=tools/ci_fetch.sh
+          source tools/ci_fetch.sh
+          gitleaks_tgz="$(mktemp)"
+          trap 'rm -f "$gitleaks_tgz"' EXIT
+          ci_fetch "https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz" "$gitleaks_tgz"
+          tar -xz -C /usr/local/bin -f "$gitleaks_tgz" gitleaks
           gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
 
       - name: AI anti-pattern self-test
