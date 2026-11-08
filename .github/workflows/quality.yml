@@ -206,6 +206,10 @@ jobs:
         shell: bash
         run: bash tools/ci_feature_map_sync.sh
 
+      - name: Platform matrix check (ADR-0040, #832)
+        shell: bash
+        run: bash tools/ci_platform_matrix_check.sh
+
       - name: Quantitative claims check (#447)
         shell: bash
         run: bash tools/claims_check.sh
