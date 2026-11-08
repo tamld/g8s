@@ -367,7 +367,11 @@ func (s *Store) extendLease(ctx context.Context, taskID, workerID, leaseToken st
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("heartbeat (instance %s): %w", pathutil.InstanceID(), err)
+		attempts := busyRetryAttempts
+		if attempts < 1 {
+			attempts = 1
+		}
+		return fmt.Errorf("%w: E_HEARTBEAT_TRANSIENT: %d exhausted (instance %s): %w", ErrHeartbeatTransient, attempts, pathutil.InstanceID(), err)
 	}
 	if affected != 1 {
 		return fmt.Errorf("%w: task %s (instance %s)", ErrLeaseLost, taskID, pathutil.InstanceID())

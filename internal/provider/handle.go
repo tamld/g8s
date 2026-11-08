@@ -62,18 +62,28 @@ func (h *execHandle) PID() int {
 // Wait blocks until the process exits or ctx is cancelled.
 func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 	select {
-	case <-ctx.Done():
-		_ = h.Cancel(context.Background())
-		<-h.done
-		return Receipt{
-			Provider:   h.provider,
-			Status:     "TIMEOUT",
-			Stdout:     h.stdout.String(),
-			Stderr:     h.stderr.String(),
-			ExitCode:   -1,
-			DurationMs: time.Since(h.start).Milliseconds(),
-		}, ctx.Err()
 	case <-h.done:
+		// fall through to the normal receipt path
+	default:
+		select {
+		case <-ctx.Done():
+			select {
+			case <-h.done:
+				// exited between the two selects — real receipt wins (#859)
+			default:
+				_ = h.Cancel(context.Background())
+				<-h.done
+				return Receipt{
+					Provider:   h.provider,
+					Status:     "TIMEOUT",
+					Stdout:     h.stdout.String(),
+					Stderr:     h.stderr.String(),
+					ExitCode:   -1,
+					DurationMs: time.Since(h.start).Milliseconds(),
+				}, ctx.Err()
+			}
+		case <-h.done:
+		}
 	}
 
 	duration := time.Since(h.start).Milliseconds()

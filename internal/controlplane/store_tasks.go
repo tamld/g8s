@@ -418,6 +418,10 @@ var ErrLeaseLost = errors.New("lease lost")
 // ErrBusy indicates that a database operation timed out due to transient locking or SQLite busy state (#465).
 var ErrBusy = errors.New("database busy")
 
+// ErrHeartbeatTransient reports that a heartbeat lease extension failed after the
+// in-function DB retry budget was exhausted (#858). Distinct from ErrLeaseLost.
+var ErrHeartbeatTransient = errors.New("heartbeat transient DB failure")
+
 // ErrNonCanonicalDerivedKey is returned when a derived idempotency key does not match the canonical shape.
 var ErrNonCanonicalDerivedKey = errors.New("non-canonical derived idempotency key")
 

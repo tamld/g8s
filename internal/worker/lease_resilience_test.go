@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -160,7 +161,7 @@ func TestAwaitOutcome_RenewHeartbeatTransientFailure_AttemptSurvives(t *testing.
 						close(child.done)
 					}
 				}()
-				return errors.New("sqlite_busy: database is locked")
+				return fmt.Errorf("%w: E_HEARTBEAT_TRANSIENT: 3 exhausted: sqlite_busy", controlplane.ErrHeartbeatTransient)
 			}
 			return nil
 		},
@@ -179,6 +180,54 @@ func TestAwaitOutcome_RenewHeartbeatTransientFailure_AttemptSurvives(t *testing.
 	}
 	if got := atomic.LoadInt32(&renewCalls); got < 1 {
 		t.Fatalf("expected at least 1 renew call, got %d", got)
+	}
+}
+
+// TestAwaitOutcome_RenewHeartbeatLeaseLost_AbandonsImmediately verifies that a
+// typed ErrLeaseLost from RenewHeartbeat abandons without the transient grace path (#858).
+func TestAwaitOutcome_RenewHeartbeatLeaseLost_AbandonsImmediately(t *testing.T) {
+	token := "tok-lost"
+	owner := "worker-lost"
+	now := time.Now()
+	expiry := float64(now.Add(30*time.Second).UnixNano()) / 1e9
+
+	child := newFakeChild(0)
+
+	cp := &stubWorkerControlPlane{
+		getTaskFunc: func(ctx context.Context, taskID string) (*controlplane.Task, error) {
+			return &controlplane.Task{
+				TaskID:         taskID,
+				State:          controlplane.StateRunning,
+				LeaseOwner:     &owner,
+				LeaseToken:     &token,
+				LeaseExpiresAt: &expiry,
+			}, nil
+		},
+		renewHeartbeatFunc: func(ctx context.Context, taskID, workerID string, extensionSeconds int) error {
+			go func() {
+				time.Sleep(200 * time.Millisecond)
+				select {
+				case <-child.Done():
+				default:
+					close(child.done)
+				}
+			}()
+			return fmt.Errorf("%w: task %s", controlplane.ErrLeaseLost, taskID)
+		},
+	}
+
+	sup := &Supervisor{
+		cp:           cp,
+		clock:        time.Now,
+		pollInterval: 10 * time.Millisecond,
+	}
+
+	reason := sup.awaitOutcome(context.Background(), child, "t-lost", "worker-lost", token, taskRequest{Timeout: "10s"}, 1)
+	if reason == "" {
+		t.Fatal("expected immediate abandon on ErrLeaseLost, got empty reason")
+	}
+	if !strings.Contains(reason, "lease_lost") {
+		t.Fatalf("expected lease_lost reason, got %q", reason)
 	}
 }
 
