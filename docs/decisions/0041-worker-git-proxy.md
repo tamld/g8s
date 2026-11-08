@@ -13,7 +13,7 @@ Platform-dispatch workers (codex) run inside a narrow sandbox whose write-jail c
 The **harness** (the unsandboxed `g8s worker` parent process) becomes a narrow git-commit proxy:
 
 1. **Transport = workdir request markers.** Workers (inside the jail) write `.g8s-git-requests/<uuid>.json` requests; the harness polls (2s, Windows-safe loop) while the provider runs, plus a final sweep after exit.
-2. **Validation fail-closed in the harness**: workspace_write permission, per-task opt-in (`allow_worker_commit` in request_json — set by a future submit flag), receipt `AllowedPaths` union via the same `resolveReceiptAllowedPaths` as the fence, path-escape rejection. The jail itself never widens — ADR-0038's enforcement points are untouched; the proxy is a new controlled op THROUGH them.
+2. **Validation fail-closed in the harness**: workspace_write permission, per-task opt-in (`allow_worker_commit` in request_json — set by `g8s submit --allow-worker-commit`), receipt `AllowedPaths` union via the same `resolveReceiptAllowedPaths` as the fence, path-escape rejection. The jail itself never widens — ADR-0038's enforcement points are untouched; the proxy is a new controlled op THROUGH them.
 3. **Commit-only**: fetch/push remain F0-owned (harvest flow unchanged). Committer/author = `g8s-worker <task-id> <actor>` with a mandatory `Receipt: <task-id>` trailer — ADR-0039 provenance is built-in, not bolted on.
 4. **Result markers** (`<uuid>.result.json`) answer the worker in its own jail: ok+sha or typed `E_*` reason. Requests persist as the audit trail.
 5. **Windows**: `E_COMMIT_REQUEST_UNSUPPORTED_OS` — fail-loud, dirty-tree doctrine unchanged there.

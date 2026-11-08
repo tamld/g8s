@@ -43,6 +43,7 @@ g8s submit \
 | `--receipt-id` | `string` | `""` | Write Receipt ID (mandatory when `--permission workspace_write`). |
 | `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
 | `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
+| `--allow-worker-commit` | `bool` | `false` | Opt in to the ADR-0041 worker git-commit proxy (`allow_worker_commit` in task payload). Commit-only: `git fetch`/`git push` remain supervisor-owned. Requires `--permission workspace_write` (rejected for `read_only` and other profiles). |
 | `--provider` | `string` | `""` | Target provider name (`agy`, `codex`, etc.). Stored durably in task payload for worker claim affinity. Falls back to `default_provider` setting if omitted. Precedence: CLI flag > settings default > absent (legacy). |
 | `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |

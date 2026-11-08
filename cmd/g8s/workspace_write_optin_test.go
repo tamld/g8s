@@ -84,4 +84,15 @@ func TestWorkspaceWriteOptIn_FlagHelp(t *testing.T) {
 			t.Errorf("%s --help output missing allow-workspace-write flag:\n%s", sub, string(out))
 		}
 	}
+	out, err := exec.Command(bin, "submit", "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("submit --help: %v\n%s", err, string(out))
+	}
+	help := string(out)
+	if !strings.Contains(help, "allow-worker-commit") {
+		t.Errorf("submit --help missing allow-worker-commit flag:\n%s", help)
+	}
+	if !strings.Contains(help, "ADR-0041") {
+		t.Errorf("submit --help missing ADR-0041 mention for allow-worker-commit:\n%s", help)
+	}
 }

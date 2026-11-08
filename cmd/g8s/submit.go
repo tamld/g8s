@@ -45,6 +45,7 @@ func runSubmit(args []string) {
 	role := fs.String("role", "collector", "worker role contract (collector, scout, mcp-mapper, summarizer, verifier, test-runner, researcher, implementer, sec-auditor, analyst)")
 	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text; use --allow-workspace-write to opt in)")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
+	allowWorkerCommit := fs.Bool("allow-worker-commit", false, "opt in to the ADR-0041 worker git-commit proxy for this task (commit-only; git fetch/push stay supervisor-owned; requires --permission workspace_write)")
 	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
 	timeout := fs.String("timeout", "30s", "execution window for the worker (e.g. 900s, 15m; bare integer is treated as seconds)")
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
@@ -555,6 +556,18 @@ func runSubmit(args []string) {
 		}
 	}
 
+	if *allowWorkerCommit && *permission != "workspace_write" {
+		exitRuntime(
+			"submit",
+			"allow-worker-commit",
+			*traceID,
+			"E_COMMIT_REQUEST_FORBIDDEN_READ_ONLY",
+			errors.New("E_COMMIT_REQUEST_FORBIDDEN_READ_ONLY: --allow-worker-commit requires workspace_write permission"),
+			"Use --permission workspace_write with a valid --receipt-id, or omit --allow-worker-commit",
+			*jsonl,
+		)
+	}
+
 	// Validate request against security harness gatekeeper
 	if err := harness.ValidateRequest(prompt, effectiveRole, *permission, dirs, *skipPermissions, *receiptID); err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
@@ -619,6 +632,9 @@ func runSubmit(args []string) {
 	}
 	if *skipPermissions {
 		payloadMap["skip_permissions"] = true
+	}
+	if *allowWorkerCommit {
+		payloadMap["allow_worker_commit"] = true
 	}
 	if routeDecision != nil {
 		payloadMap["provider"] = routeDecision.Provider
