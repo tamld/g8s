@@ -104,9 +104,26 @@ irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
 
 The installers detect your CPU architecture, download the matching release asset, and **fail closed** on integrity: they require SHA-256 verification against `checksums.txt` from the release (via `sha256sum` / `shasum` on Unix, or `Get-FileHash` on Windows) and refuse to install if no checksum tool is available or verification fails. For Windows-specific notes, see [Windows installation guide](docs/WINDOWS_INSTALL.md).
 
-### Package managers / packages (Linux, from the release page)
+### Package managers
 
-There is no hosted `apt`/`yum`/`apk` repository yet—download the package for your architecture from the [release page](https://github.com/tamld/g8s/releases) and install locally:
+**macOS / Linux (Homebrew):**
+
+```bash
+brew install tamld/g8s/g8s
+```
+
+The [tamld/g8s tap](https://github.com/tamld/homebrew-g8s) ships the prebuilt binary (universal on macOS; amd64/arm64 on Linux) and auto-updates within an hour of each release, pulling checksums from the release's own `checksums.txt`.
+
+**Windows (Scoop):**
+
+```powershell
+scoop bucket add tamld https://github.com/tamld/scoop-bucket
+scoop install tamld/g8s
+```
+
+The [tamld scoop bucket](https://github.com/tamld/scoop-bucket) ships amd64/arm64 Windows binaries with hashes from the release's `checksums.txt` and the same hourly auto-update cadence.
+
+**Linux packages (from the release page):** there is no hosted `apt`/`yum`/`apk` repository yet—download the package for your architecture from the [release page](https://github.com/tamld/g8s/releases) and install locally:
 
 | Architecture | `.deb` | `.rpm` | `.apk` |
 | :--- | :--- | :--- | :--- |
