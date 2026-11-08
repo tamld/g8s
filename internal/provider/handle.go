@@ -96,6 +96,9 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 		status = "FAILED"
 		waitErr = fmt.Errorf("cli agent reported API error with empty output: %s", apiErr)
 	}
+	if h.provider == "codex" {
+		exitCode, status, waitErr = codexFinalizeReceipt(exitCode, status, waitErr, stderrStr)
+	}
 
 	return Receipt{
 		Provider:   h.provider,

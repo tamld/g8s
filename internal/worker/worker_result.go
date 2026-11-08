@@ -10,6 +10,7 @@ import (
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/provider"
 )
 
 // agyUsage carries token usage metrics reported by the agy tool wrapper.
@@ -196,6 +197,20 @@ func providerRefusalDetected(stdoutText string) bool {
 		}
 	}
 	return false
+}
+
+// applyProviderStderrRefusal maps provider CLI refusals on stderr to ok=false (#825).
+func applyProviderStderrRefusal(wr workerResult, stderr string) workerResult {
+	refusal, ok := provider.ClassifyProviderStderrRefusal(stderr)
+	if !ok {
+		return wr
+	}
+	wr.OK = false
+	wr.Status = "failed"
+	wr.Reason = refusal.Reason()
+	wr.Summary = "provider refused the dispatch (typed refusal on stderr)"
+	wr.Response = ""
+	return wr
 }
 
 // ensureFailureReason is the backstop for provider-controlled and dynamically
