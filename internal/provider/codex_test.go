@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -115,9 +116,24 @@ func TestCodexFinalizeReceipt_ExitZeroRefusal(t *testing.T) {
 	}
 }
 
-func TestCodexSpawn_UsageLimitExitZeroFailsClosed(t *testing.T) {
-	tmpDir := t.TempDir()
-	bin := filepath.Join(tmpDir, "codex-quota")
+// writeCodexQuotaFixture writes a platform-executable fake codex that answers
+// --version then prints the 2026-11-08 usage-limit refusal to stderr (twice,
+// as observed live) and exits 0 — the fail-closed classification input.
+func writeCodexQuotaFixture(t *testing.T, dir string) (string, func()) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		bin := filepath.Join(dir, "codex-quota.cmd")
+		script := "@echo off\r\n" +
+			"if \"%~1\" == \"--version\" (echo codex 1.0\r\nexit /b 0)\r\n" +
+			"echo You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM. 1>&2\r\n" +
+			"echo You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM. 1>&2\r\n" +
+			"exit /b 0\r\n"
+		if err := os.WriteFile(bin, []byte(script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return bin, func() {}
+	}
+	bin := filepath.Join(dir, "codex-quota")
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"--version\" ]; then echo 'codex 1.0'; exit 0; fi\n" +
 		"printf '%s\\n' \"You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM.\" \"You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM.\" >&2\n" +
@@ -125,6 +141,13 @@ func TestCodexSpawn_UsageLimitExitZeroFailsClosed(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return bin, func() {}
+}
+
+func TestCodexSpawn_UsageLimitExitZeroFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	bin, cleanup := writeCodexQuotaFixture(t, tmpDir)
+	defer cleanup()
 	t.Setenv("CODEX_BIN", bin)
 	p := NewCodexProvider()
 	handle, err := p.Spawn(context.Background(), Spec{Model: "gpt-test", Brief: "task"})
