@@ -109,6 +109,11 @@ func run() error {
 		return err
 	}
 	text, failed := render(report, label, *baseline)
+	metrics, metricsErr := renderMetricsSections(*ref, *baseline, git)
+	if metricsErr != nil {
+		return metricsErr
+	}
+	text += metrics
 	if _, err := fmt.Print(text); err != nil {
 		return err
 	}
