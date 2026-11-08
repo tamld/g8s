@@ -10,6 +10,7 @@
 #   6. check_tdd_trap_fabricated_symbol: No test referencing fabricated/undefined symbols (DEBT-49).
 #   7. check_tdd_trap_impl_detail: No test asserting on private implementation details (DEBT-49).
 #   8. check_no_local_path_leak: No local filesystem paths in tracked files (DEBT-61).
+#   9. check_worker_result_ok_false_reason: workerResult ok=false must carry E_* Reason (doctrine #828).
 #
 
 set -euo pipefail
@@ -191,6 +192,61 @@ check_test_locks_impl_detail() {
     check_tdd_trap_impl_detail "$@"
 }
 
+check_worker_result_ok_false_reason() {
+    local target="${1:-.}"
+    local worker_dir="${REPO_ROOT}/internal/worker"
+    if [ -d "${target}/internal/worker" ]; then
+        worker_dir="${target}/internal/worker"
+    fi
+    if [ ! -d "$worker_dir" ]; then
+        return 0
+    fi
+
+    local hits
+    hits=$(python3 - "$worker_dir" <<'PY' 2>/dev/null || true
+import re, sys
+from pathlib import Path
+
+worker_dir = Path(sys.argv[1])
+issues = []
+lit_re = re.compile(r"workerResult\s*\{", re.MULTILINE)
+ok_re = re.compile(r"\bOK:\s*false\b")
+reason_re = re.compile(r"\bReason:\s*")
+coded_lit_re = re.compile(r'\bReason:\s*"([^"]*)"')
+for path in sorted(worker_dir.glob("*.go")):
+    if path.name.endswith("_test.go"):
+        continue
+    text = path.read_text(encoding="utf-8")
+    for m in lit_re.finditer(text):
+        snippet = text[m.start():]
+        end = snippet.find("}")
+        if end < 0:
+            continue
+        block = snippet[: end + 1]
+        if not ok_re.search(block):
+            continue
+        if not reason_re.search(block):
+            line = text[: m.start()].count("\n") + 1
+            issues.append(f"{path}:{line}: workerResult ok=false without Reason")
+            continue
+        for rm in coded_lit_re.finditer(block):
+            literal = rm.group(1).strip()
+            if literal and not literal.startswith("E_"):
+                line = text[: m.start() + rm.start()].count("\n") + 1
+                issues.append(f"{path}:{line}: workerResult Reason literal missing E_ code: {literal!r}")
+if issues:
+    print("\n".join(issues))
+PY
+)
+    if [ -n "$hits" ]; then
+        echo "::error::[check_worker_result_ok_false_reason] workerResult ok=false construction lacks Reason or E_* code:"
+        echo "$hits"
+        echo "  Hint: Prefix failure reasons with typed E_* codes, e.g. \"E_WORKER_*: ...\"."
+        return 1
+    fi
+    return 0
+}
+
 check_no_local_path_leak() {
     local target="$1"
     local files
@@ -252,12 +308,16 @@ run_linter() {
         failed=$((failed + 1))
     fi
 
+    if ! check_worker_result_ok_false_reason "$target"; then
+        failed=$((failed + 1))
+    fi
+
     if [ "$failed" -gt 0 ]; then
         echo ""
         echo "[AI-LINT] FAILED: $failed check(s) found violations."
         return 1
     else
-        echo "[AI-LINT] PASSED: All 8 AI anti-pattern checks clean."
+        echo "[AI-LINT] PASSED: All 9 AI anti-pattern checks clean."
         return 0
     fi
 }

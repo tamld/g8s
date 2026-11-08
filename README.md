@@ -86,14 +86,65 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 
 ## 4. Installation
 
-`g8s` is distributed as a single static, self-contained binary (<25MB) with zero external runtime dependencies.
+`g8s` is distributed as a single static, self-contained binary (<25MB) with zero external runtime dependencies. Pick an install path below; release assets also ship `checksums.txt`, `checksums.txt.sigstore.json`, and SPDX SBOM files alongside each archive ([GitHub Releases](https://github.com/tamld/g8s/releases)).
 
-### Pre-built Binaries (GitHub Releases)
+### One-line installer (recommended)
 
-Download pre-compiled binaries for your architecture from [GitHub Releases](https://github.com/tamld/g8s/releases):
-- macOS (Apple Silicon `arm64` / Intel `amd64`)
-- Linux (`amd64` / `arm64`)
-- Windows (`amd64`)
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
+```
+
+The installers detect your CPU architecture, download the matching release asset, and **fail closed** on integrity: they require SHA-256 verification against `checksums.txt` from the release (via `sha256sum` / `shasum` on Unix, or `Get-FileHash` on Windows) and refuse to install if no checksum tool is available or verification fails. For Windows-specific notes, see [Windows installation guide](docs/WINDOWS_INSTALL.md).
+
+### Package managers
+
+**macOS / Linux (Homebrew):**
+
+```bash
+brew install tamld/g8s/g8s
+```
+
+The [tamld/g8s tap](https://github.com/tamld/homebrew-g8s) ships the prebuilt binary (universal on macOS; amd64/arm64 on Linux) and auto-updates within an hour of each release, pulling checksums from the release's own `checksums.txt`.
+
+**Windows (Scoop):**
+
+```powershell
+scoop bucket add tamld https://github.com/tamld/scoop-bucket
+scoop install tamld/g8s
+```
+
+The [tamld scoop bucket](https://github.com/tamld/scoop-bucket) ships amd64/arm64 Windows binaries with hashes from the release's `checksums.txt` and the same hourly auto-update cadence.
+
+**Linux packages (from the release page):** there is no hosted `apt`/`yum`/`apk` repository yet—download the package for your architecture from the [release page](https://github.com/tamld/g8s/releases) and install locally:
+
+| Architecture | `.deb` | `.rpm` | `.apk` |
+| :--- | :--- | :--- | :--- |
+| `linux/amd64` | `g8s_<version>_linux_amd64.deb` | `g8s_<version>_linux_amd64.rpm` | `g8s_<version>_linux_amd64.apk` |
+| `linux/arm64` | `g8s_<version>_linux_arm64.deb` | `g8s_<version>_linux_arm64.rpm` | `g8s_<version>_linux_arm64.apk` |
+
+```bash
+sudo dpkg -i g8s_*_linux_amd64.deb          # Debian/Ubuntu
+sudo rpm -i g8s_*_linux_amd64.rpm             # RHEL/Fedora
+sudo apk add --allow-untrusted ./g8s_*_linux_amd64.apk   # Alpine
+```
+
+### Archives (all platforms)
+
+| Platform | Release asset pattern |
+| :--- | :--- |
+| macOS (universal) | `g8s_<version>_darwin_all.tar.gz` |
+| Linux | `g8s_<version>_linux_{amd64,arm64}.tar.gz` (plus packages above) |
+| Windows | `g8s_<version>_windows_{amd64,arm64}.zip` |
+
+Extract the archive and place `g8s` on your `PATH`, or use the one-line installer instead.
 
 ### Via Go Toolchain (`go1.26.10`+)
 
@@ -109,6 +160,23 @@ cd g8s
 make local
 ./bin/g8s doctor --json
 ```
+
+### Verify your download
+
+1. **SHA-256 (required):** Compare the archive hash to the line for your filename in `checksums.txt` on the release. The one-line installers perform this step automatically.
+2. **GitHub attestations (optional):** `gh attestation verify <asset> -R tamld/g8s --owner tamld` proves the release artifact is cryptographically linked to this repository’s build provenance.
+3. **Sigstore bundle (optional):** `cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt` proves the checksum manifest itself was signed in the release’s Sigstore bundle.
+
+If an install fails or you need to revert binaries, see [Release rollback](docs/release/ROLLBACK.md).
+
+### After install
+
+- **`g8s init`** — interactive or headless first-time setup (paths, MCP hints).
+- **`g8s doctor`** — sanity-check binary, config, and environment.
+- **`g8s update`** — upgrade to a newer release with verified replacement of the binary.
+- **`g8s uninstall`** — remove the installed binary (optional state purge).
+
+Other lifecycle surfaces include `g8s service install|start|status` and `g8s version`.
 
 ---
 
@@ -254,6 +322,8 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | Guide / Specification | Scope & Focus |
 | :--- | :--- |
 | [Quickstart Guide](docs/quickstart.md) | Step-by-step introduction from first install to delegated execution. |
+| [Windows Installation](docs/WINDOWS_INSTALL.md) | PowerShell installer, `PATH`, and Windows-specific install troubleshooting. |
+| [Release Rollback](docs/release/ROLLBACK.md) | Revert to a prior release binary when an upgrade fails or must be undone. |
 | [CLI Reference](docs/user-guide/cli-reference.md) | Exhaustive manual of all subcommands, flags, and exit codes. |
 | [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 21 MCP tools. |
 | [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Fast pure-Go searching, slicing, editing, and dot-path extraction. |

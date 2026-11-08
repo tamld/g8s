@@ -89,6 +89,9 @@ type taskRequest struct {
 	// ToolPolicy configures model tool use ("" | "default" | "none") (#616/#635/#653).
 	ToolPolicy            string `json:"tool_policy,omitempty"`
 	ToolPolicyEvidenceLog string `json:"-"`
+
+	// AllowWorkerCommit opts in to harness-side git commit proxy (#822 option 3).
+	AllowWorkerCommit bool `json:"allow_worker_commit,omitempty"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -761,7 +764,16 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	// layer-2 marker-based walk for any setsid grandchild escapes (#439).
 	defer s.sweepAttemptGroup(child, task.TaskID, marker)
 
+	watcherCtx, stopCommitWatcher := context.WithCancel(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		s.superviseGitCommitRequests(watcherCtx, spawnDir, task.TaskID, req, child.Done())
+	}()
+
 	reason := s.awaitOutcome(ctx, child, task.TaskID, opts.WorkerID, token, req, opts.LeaseSeconds)
+	stopCommitWatcher()
+	<-watcherDone
 	// Close capture handles before collect reads and removes the files; on
 	// Windows an open handle makes os.Remove fail with a sharing violation.
 	outWriter.Close()
