@@ -387,26 +387,18 @@ func checkLeaseOwnership(task *Task, workerID, leaseToken string) error {
 	return nil
 }
 
-func determineNextState(task *Task, params FinishAttemptParams) string {
-	switch {
-	case task.CancelRequested:
-		return StateCancelled
-	case params.Success:
-		return StateSucceeded
-	case params.Retryable && task.Attempts < task.MaxAttempts:
-		return StateQueued
-	}
-	return StateFailed
-}
-
 // FinishAttempt applies the worker verdict for a RUNNING lease with strict
 // ownership enforcement. The row always moves to WORKER_COMPLETED (supervisor
 // gate): cooperative cancellation is not terminal here — if cancel_requested
 // was set while RUNNING, the worker finishes with ok=false, result status
 // "cancelled", and cancel_requested stays true until an explicit
 // CancelTask seals terminal CANCELLED on the non-running task (#771).
-// Non-retryable outcomes redact prompt and seal receipt_hash; retryable
-// outcomes keep the prompt for another attempt.
+// The state machine past WORKER_COMPLETED is owned elsewhere, by design:
+// AcceptResult seals SUPERVISOR_ACCEPTED (and its rejection path seals the
+// rejected verdicts), while lease-expiry branches (CANCELLED / FAILED on
+// exhausted budget / QUEUED for another retry) live in the claims reconcile
+// path. Non-retryable outcomes redact prompt and seal receipt_hash;
+// retryable outcomes keep the prompt for another attempt.
 func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params FinishAttemptParams) (*Task, error) {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -427,7 +419,6 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 	}
 
 	now := float64(s.clock().UnixNano()) / 1e9
-	_ = determineNextState(task, params) // kept for documentation of original logic
 	nextState := StateWorkerCompleted
 
 	resultCanonical, err := canonicalJSON(params.Result)
