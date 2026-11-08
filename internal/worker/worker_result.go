@@ -183,6 +183,148 @@ func init() {
 	for i, phrase := range providerRefusalPhrases {
 		providerRefusalPhrases[i] = strings.ToLower(phrase)
 	}
+	for i, phrase := range unproductiveHelpPhrases {
+		unproductiveHelpPhrases[i] = strings.ToLower(phrase)
+	}
+}
+
+const (
+	unproductiveMaxLines = 6
+	unproductiveMaxBytes = 400
+)
+
+var unproductiveHelpPhrases = []string{
+	"i don't have",
+	"please paste",
+	"i can't",
+	"i'm unable",
+	"cannot access",
+}
+
+// unproductiveSuccessResponse reports whether a non-empty SUCCESS response is
+// ask-for-help or prompt echo without task evidence (#840). Deliberately
+// conservative: above the line/byte floor, or without matching patterns, passes.
+func unproductiveSuccessResponse(response string, markers []string) bool {
+	response = strings.TrimSpace(response)
+	if response == "" {
+		return false
+	}
+	if responseLineCount(response) >= unproductiveMaxLines || len(response) >= unproductiveMaxBytes {
+		return false
+	}
+	lower := strings.ToLower(response)
+	for _, phrase := range unproductiveHelpPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	for _, marker := range markers {
+		marker = strings.TrimSpace(marker)
+		if marker == "" {
+			continue
+		}
+		if responseDominantEcho(response, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func responseLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+// responseDominantEcho is true when the marker verbatim dominates the payload
+// (exact-line echo of brief path / prompt marker), allowing one trailing
+// "brief:" / "scout:" status line without the path (#840 live fixture).
+func responseDominantEcho(response, marker string) bool {
+	if !strings.Contains(response, marker) {
+		return false
+	}
+	var lines []string
+	for _, line := range strings.Split(response, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	if len(lines) == 0 {
+		return false
+	}
+	withMarker := 0
+	for _, line := range lines {
+		if strings.Contains(line, marker) {
+			withMarker++
+		}
+	}
+	if withMarker == len(lines) {
+		return true
+	}
+	if withMarker < len(lines)-1 {
+		return false
+	}
+	for _, line := range lines {
+		if strings.Contains(line, marker) {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "brief:") || strings.HasPrefix(lower, "scout:") {
+			continue
+		}
+		return false
+	}
+	return len(lines) <= 5
+}
+
+// productivityEchoMarkers returns prompt-path hints for echo detection (#840).
+func productivityEchoMarkers(promptPath string) []string {
+	var markers []string
+	if p := strings.TrimSpace(promptPath); p != "" {
+		markers = append(markers, p)
+	}
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		return markers
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "/briefs/") || strings.HasSuffix(line, ".md") {
+			markers = append(markers, line)
+		}
+	}
+	return markers
+}
+
+// applyUnproductiveSuccessGate maps tiny ask-for-help/echo SUCCESS payloads to
+// ok=false (#840).
+func applyUnproductiveSuccessGate(wr workerResult, markers ...string) workerResult {
+	if !wr.OK {
+		return wr
+	}
+	resp := strings.TrimSpace(wr.Response)
+	if resp == "" {
+		return wr
+	}
+	if !unproductiveSuccessResponse(resp, markers) {
+		return wr
+	}
+	wr.OK = false
+	wr.Status = "failed"
+	wr.Reason = "E_WORKER_UNPRODUCTIVE_SUCCESS: worker reported SUCCESS with ask-for-help or echo response (no task evidence)"
+	wr.Summary = "worker response is unproductive (no task evidence produced)"
+	return wr
+}
+
+func finalizeSuccessWorkerResult(wr workerResult, markers []string) workerResult {
+	if wr.OK {
+		wr = applyUnproductiveSuccessGate(wr, markers...)
+	}
+	return ensureFailureReason(wr)
 }
 
 // providerRefusalDetected reports whether the captured output is a provider
@@ -223,7 +365,11 @@ func ensureFailureReason(wr workerResult) workerResult {
 }
 
 func readWorkerResult(rawResult []byte, stdoutText string, code int) (wrResult workerResult) {
-	defer func() { wrResult = ensureFailureReason(wrResult) }()
+	return readWorkerResultWithMarkers(rawResult, stdoutText, code, nil)
+}
+
+func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, markers []string) (wrResult workerResult) {
+	defer func() { wrResult = finalizeSuccessWorkerResult(wrResult, markers) }()
 	if envErr := dispatch.ParseWorkerEnvelope([]byte(stdoutText)); envErr != nil {
 		var envE *dispatch.WorkerEnvelopeError
 		reason := envErr.Error()

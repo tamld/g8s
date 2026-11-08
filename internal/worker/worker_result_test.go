@@ -219,6 +219,78 @@ func TestExtractAGYUsageSumsStepUpdatesWhenResultMissing(t *testing.T) {
 	}
 }
 
+func TestUnproductiveSuccessGate(t *testing.T) {
+	const briefPath = "/Users/tamld/.local/state/fxv5-ws/briefs/I840-scout.md"
+
+	cases := []struct {
+		name       string
+		response   string
+		markers    []string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name: "live ask-for-help (#840 acbf1f08)",
+			response: "I don't have filesystem access to " + briefPath + ".\n" +
+				"Please paste the file's contents so I can complete the scout.",
+			wantOK:     false,
+			wantReason: "E_WORKER_UNPRODUCTIVE_SUCCESS",
+		},
+		{
+			name: "live brief echo (#840 2179fd65)",
+			response: strings.Join([]string{
+				"brief: " + briefPath,
+				"scout: read brief at " + briefPath,
+				"scout: complete",
+			}, "\n"),
+			markers:    []string{briefPath},
+			wantOK:     false,
+			wantReason: "E_WORKER_UNPRODUCTIVE_SUCCESS",
+		},
+		{
+			name: "terse legit success",
+			response: strings.Join([]string{
+				"ok: reconciled 3 packages",
+				"ok: no drift in internal/worker",
+				"ok: scout complete",
+			}, "\n"),
+			wantOK: true,
+		},
+		{
+			name: "normal multi-line report",
+			response: strings.Join([]string{
+				"## scout summary",
+				"- found worker_result.go evaluate path",
+				"- ok-ness set in collect after readWorkerResult",
+				"- empty responses gated by #827",
+				"- refusal stderr gated by #825",
+				"- recommend productivity gate here",
+				"- fixtures added",
+			}, "\n"),
+			wantOK: true,
+		},
+		{
+			name:       "empty object still empty gate not unproductive",
+			response:   "{}",
+			wantOK:     false,
+			wantReason: "E_WORKER_EMPTY_SUCCESS_RESPONSE",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout := agyStream(tc.response)
+			wr := readWorkerResultWithMarkers(nil, stdout, 0, tc.markers)
+			if wr.OK != tc.wantOK {
+				t.Fatalf("ok=%v, want %v; wr=%+v", wr.OK, tc.wantOK, wr)
+			}
+			if tc.wantReason != "" && !strings.Contains(wr.Reason, tc.wantReason) {
+				t.Fatalf("reason=%q, want substring %q", wr.Reason, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestApplyProviderStderrRefusalOnCLIExitZero(t *testing.T) {
 	const stderr = "You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM.\n"
 	wr := readWorkerResult(nil, "", 0)

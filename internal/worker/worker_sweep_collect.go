@@ -439,7 +439,7 @@ func (s *Supervisor) collect(
 		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "task requested an invalid execution timeout")
 	default:
 		rawResult, oversize := readResultFile(resultPath)
-		wr := readWorkerResult(rawResult, stdoutText, code)
+		wr := readWorkerResultWithMarkers(rawResult, stdoutText, code, productivityEchoMarkers(promptPath))
 		wr = applyProviderStderrRefusal(wr, stderrText)
 		// A worker cannot attest its own fence verdict.
 		wr.ClaimFence = nil
