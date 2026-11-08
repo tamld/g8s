@@ -11,6 +11,16 @@ import (
 	"github.com/tamld/g8s/internal/featuremap"
 )
 
+func loadRegistryFeatures(t *testing.T) *featuremap.FeatureMap {
+	t.Helper()
+	root := findRepoRoot(t)
+	fm, err := featuremap.Load(filepath.Join(root, featuremap.DefaultFeatureMapPath))
+	if err != nil {
+		t.Fatalf("load feature map: %v", err)
+	}
+	return fm
+}
+
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -62,8 +72,12 @@ func TestFeatureVerify_JSON(t *testing.T) {
 	if !report.Valid {
 		t.Errorf("expected report.Valid == true, got false. Errors: %v", report.Errors)
 	}
-	if report.FeatureCount != 19 {
-		t.Errorf("expected 19 features, got %d", report.FeatureCount)
+	registry := loadRegistryFeatures(t)
+	if report.FeatureCount != len(registry.Features) {
+		t.Errorf("expected %d features from registry, got %d", len(registry.Features), report.FeatureCount)
+	}
+	if len(registry.Features) == 0 {
+		t.Fatal("registry must contain at least one feature")
 	}
 }
 
@@ -136,8 +150,9 @@ func TestFeatureList_TextAndJSON(t *testing.T) {
 	if err := json.Unmarshal(outJSON, &features); err != nil {
 		t.Fatalf("failed to parse list JSON: %v\nOutput: %s", err, string(outJSON))
 	}
-	if len(features) != 19 {
-		t.Errorf("expected 19 features, got %d", len(features))
+	registry := loadRegistryFeatures(t)
+	if len(features) != len(registry.Features) {
+		t.Errorf("expected %d features from registry, got %d", len(registry.Features), len(features))
 	}
 }
 
