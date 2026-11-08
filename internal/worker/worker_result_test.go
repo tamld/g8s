@@ -218,3 +218,19 @@ func TestExtractAGYUsageSumsStepUpdatesWhenResultMissing(t *testing.T) {
 		t.Fatalf("expected terminal result usage 3400, got %+v", gotCompleted)
 	}
 }
+
+func TestApplyProviderStderrRefusalOnCLIExitZero(t *testing.T) {
+	const stderr = "You've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM.\n"
+	wr := readWorkerResult(nil, "", 0)
+	if !wr.OK {
+		t.Fatalf("exit-0 empty stdout should read as ok before stderr hook: %+v", wr)
+	}
+	wr = applyProviderStderrRefusal(wr, stderr)
+	if wr.OK || !strings.Contains(wr.Reason, "E_PROVIDER_QUOTA_EXHAUSTED") {
+		t.Fatalf("refusal not applied: %+v", wr)
+	}
+	wr = applyProviderStderrRefusal(readWorkerResult(nil, "done", 0), "warning: noisy log only\n")
+	if !wr.OK {
+		t.Fatalf("non-refusal stderr with normal stdout must stay ok: %+v", wr)
+	}
+}

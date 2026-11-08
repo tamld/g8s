@@ -440,6 +440,7 @@ func (s *Supervisor) collect(
 	default:
 		rawResult, oversize := readResultFile(resultPath)
 		wr := readWorkerResult(rawResult, stdoutText, code)
+		wr = applyProviderStderrRefusal(wr, stderrText)
 		// A worker cannot attest its own fence verdict.
 		wr.ClaimFence = nil
 		success := code == 0 && wr.OK
