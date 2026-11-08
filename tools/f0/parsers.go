@@ -221,7 +221,7 @@ func parseDeliver(args []string, stdout []byte, repoRoot string, extra map[strin
 			if len(env.Data.Applied) > 0 && repoRoot != "" {
 				blobs := make(map[string]string)
 				for _, f := range env.Data.Applied {
-					cmd := exec.Command("git", "-C", repoRoot, "hash-object", f)
+					cmd := exec.Command("git", "-C", repoRoot, "hash-object", "--", f)
 					out, err := cmd.Output()
 					if err == nil {
 						blobHash := strings.TrimSpace(string(out))
