@@ -416,7 +416,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 				return workerResult{
 					OK:      false,
 					Status:  "blocked",
-					Reason:  "provider content filter refused the prompt (no task evidence produced)",
+					Reason:  "E_WORKER_PROVIDER_REFUSAL: provider content filter refused the prompt (no task evidence produced)",
 					Summary: "worker response is a provider refusal, not a result",
 				}
 			}
@@ -427,7 +427,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 				return workerResult{
 					OK:      false,
 					Status:  "failed",
-					Reason:  "worker stream reported SUCCESS without deliverable content (empty response)",
+					Reason:  "E_WORKER_EMPTY_SUCCESS_RESPONSE: worker stream reported SUCCESS without deliverable content (empty response)",
 					Summary: "no task evidence produced by the worker response",
 				}
 			}
@@ -456,7 +456,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 		return workerResult{
 			OK:      false,
 			Status:  "blocked",
-			Reason:  "provider content filter refused the prompt (no task evidence produced)",
+			Reason:  "E_WORKER_PROVIDER_REFUSAL: provider content filter refused the prompt (no task evidence produced)",
 			Summary: "worker response is a provider refusal, not a result",
 		}
 	}
@@ -490,7 +490,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 			return workerResult{
 				OK:      false,
 				Status:  "failed",
-				Reason:  "agent stream ended in error_message without a result event",
+				Reason:  "E_WORKER_STREAM_ERROR_TAIL: agent stream ended in error_message without a result event",
 				Summary: "worker stream terminated mid-task before producing a result (likely context/step ceiling)",
 				Usage:   extractAGYUsage(stdoutText),
 			}
@@ -507,7 +507,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 		return workerResult{
 			OK:      false,
 			Status:  "failed",
-			Reason:  fmt.Sprintf("worker stream ended in error_message (exit code %d)", code),
+			Reason:  fmt.Sprintf("E_WORKER_STREAM_ERROR_EXIT: worker stream ended in error_message (exit code %d)", code),
 			Summary: "worker terminated mid-task before producing a result",
 			Usage:   extractAGYUsage(stdoutText),
 		}
@@ -515,7 +515,7 @@ func readWorkerResultWithMarkers(rawResult []byte, stdoutText string, code int, 
 	return workerResult{
 		OK:     false,
 		Status: "failed",
-		Reason: fmt.Sprintf("worker process exited with code %d", code),
+		Reason: fmt.Sprintf("E_WORKER_PROCESS_EXIT: worker process exited with code %d", code),
 		Usage:  extractAGYUsage(stdoutText),
 	}
 }

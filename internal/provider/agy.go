@@ -53,7 +53,7 @@ func (a *AgyProvider) Available(ctx context.Context) error {
 	if bin == "" {
 		p, err := a.lookPath("agy")
 		if err != nil {
-			return fmt.Errorf("not found in PATH")
+			return codedError(codeBinaryNotFound, "not found in PATH")
 		}
 		bin = p
 	}
@@ -61,7 +61,7 @@ func (a *AgyProvider) Available(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, bin, "--version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("agy --version: %w", err)
+		return codedError(codeProbeFailed, "agy --version: %w", err)
 	}
 
 	a.mu.Lock()
@@ -121,7 +121,7 @@ func (a *AgyProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start agy process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start agy process: %w", err)
 	}
 
 	return newProcessHandle("agy", cmd, start, &stdoutBuf, &stderrBuf), nil

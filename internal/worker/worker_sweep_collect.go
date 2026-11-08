@@ -647,14 +647,14 @@ func (s *Supervisor) collect(
 					wr = workerResult{
 						OK:      false,
 						Status:  "failed",
-						Reason:  "write receipt already consumed by another task (replay suspected)",
+						Reason:  "E_WORKER_WRITE_RECEIPT_REPLAY: write receipt already consumed by another task (replay suspected)",
 						Summary: "delegated-write receipt replay detected",
 					}
 				} else {
 					wr = workerResult{
 						OK:      false,
 						Status:  "failed",
-						Reason:  "receipt consume failed: " + cerr.Error(),
+						Reason:  "E_WORKER_RECEIPT_CONSUME_FAILED: receipt consume failed: " + cerr.Error(),
 						Summary: "delegated-write receipt could not be consumed",
 					}
 				}

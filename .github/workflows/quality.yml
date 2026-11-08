@@ -193,9 +193,22 @@ jobs:
         shell: bash
         run: bash tools/ci_doc_contract_check.sh
 
+      - name: Provenance ratio (per-PR visibility, ADR-0039)
+        shell: bash
+        # VISIBILITY ONLY: the report (incl. the honesty gap) lands in
+        # $GITHUB_STEP_SUMMARY on every PR; enforcement lives on the weekly
+        # clock in dogfood.yml per ADR-0039 — a PR is not the enforcement
+        # point for the aggregate commit-stream ratio.
+        continue-on-error: true
+        run: go run ./tools/dogfood_provenance --ref HEAD
+
       - name: Feature-map sync gate (#649)
         shell: bash
         run: bash tools/ci_feature_map_sync.sh
+
+      - name: Platform matrix check (ADR-0040, #832)
+        shell: bash
+        run: bash tools/ci_platform_matrix_check.sh
 
       - name: Quantitative claims check (#447)
         shell: bash

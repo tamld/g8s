@@ -196,7 +196,58 @@ if [ "$test_exempt_exit" -ne 0 ]; then
 fi
 echo "  [PASS] Test file exemptions honored"
 
-echo "==> Test 4: Assert check_no_local_path_leak catches brief/PR path leaks in markdown & YAML..."
+mkdir -p "$TMP_DIR/internal/worker"
+cat << 'EOF' > "$TMP_DIR/internal/worker/bad_reason.go"
+package worker
+
+type workerResult struct {
+	OK      bool
+	Status  string
+	Reason  string
+}
+
+func BadLiteral() workerResult {
+	return workerResult{
+		OK:     false,
+		Status: "failed",
+		Reason: "plain sentence without code",
+	}
+}
+EOF
+
+cat << 'EOF' > "$TMP_DIR/internal/worker/bad_missing.go"
+package worker
+
+type workerResult struct {
+	OK     bool
+	Status string
+}
+
+func BadMissing() workerResult {
+	return workerResult{
+		OK:     false,
+		Status: "failed",
+	}
+}
+EOF
+
+echo "==> Test 4: Assert check_worker_result_ok_false_reason fails on seeded violations..."
+worker_reason_output=""
+worker_reason_exit=0
+worker_reason_output=$(bash "$LINT_SCRIPT" "$TMP_DIR" 2>&1) || worker_reason_exit=$?
+if [ "$worker_reason_exit" -eq 0 ]; then
+    echo "FAIL: expected check_worker_result_ok_false_reason to fail on fixtures"
+    echo "$worker_reason_output"
+    exit 1
+fi
+if ! echo "$worker_reason_output" | grep -q "check_worker_result_ok_false_reason"; then
+    echo "FAIL: expected check_worker_result_ok_false_reason in output"
+    echo "$worker_reason_output"
+    exit 1
+fi
+echo "  [PASS] check_worker_result_ok_false_reason detected seeded fixtures"
+
+echo "==> Test 5: Assert check_no_local_path_leak catches brief/PR path leaks in markdown & YAML..."
 mkdir -p "$TMP_DIR/internal/leakpkg"
 cat << 'EOF' > "$TMP_DIR/internal/leakpkg/brief.md"
 github.com/tamld/g8s (local: /Users/tamld/Documents/github/g8s, branch=main, head=1f5fa6a)

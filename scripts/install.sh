@@ -39,6 +39,51 @@ error() {
     exit 1
 }
 
+resolve_release_asset_id() {
+    local version="$1"
+    local filename="$2"
+    local release_json asset_id
+
+    release_json="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${REPO}/releases/tags/${version}")" || return 1
+
+    asset_id="$(printf '%s' "$release_json" | python3 -c '
+import json, sys
+
+name = sys.argv[1]
+data = json.load(sys.stdin)
+for asset in data.get("assets", []):
+    if asset.get("name") == name:
+        print(asset["id"])
+        sys.exit(0)
+sys.exit(1)
+' "$filename")" || return 1
+
+    printf '%s' "$asset_id"
+}
+
+# Download a release asset: GitHub web URL first, GitHub API asset endpoint on failure (#838).
+fetch_asset() {
+    local version="$1"
+    local filename="$2"
+    local dest="$3"
+    local fail_message="$4"
+    local web_url asset_id api_url
+
+    web_url="${GITHUB_URL}/releases/download/${version}/${filename}"
+    if curl -fsSL "$web_url" -o "$dest"; then
+        return 0
+    fi
+
+    asset_id="$(resolve_release_asset_id "$version" "$filename")" || {
+        error "$fail_message"
+    }
+    api_url="https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
+    if ! curl -fsSL -H "Accept: application/octet-stream" "$api_url" -o "$dest"; then
+        error "$fail_message"
+    fi
+}
+
 # 1. Detect OS
 detect_os() {
     local os
@@ -97,17 +142,14 @@ main() {
     trap 'rm -rf "$tmp_dir"' EXIT
 
     info "Downloading ${asset_name}..."
-    if ! curl -fsSL "$download_url" -o "${tmp_dir}/${asset_name}"; then
-        error "Failed to download ${download_url}"
-    fi
+    fetch_asset "$version" "$asset_name" "${tmp_dir}/${asset_name}" "Failed to download ${download_url}"
 
     # Optional stronger verification (not enforced by this installer):
     #   gh attestation verify <asset> -R tamld/g8s --owner tamld
     #   cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt
     # Verify Checksum (Fail-Closed Supply Chain Enforcement - Issue #639)
-    if ! curl -fsSL "$checksum_url" -o "${tmp_dir}/checksums.txt" 2>/dev/null; then
-        error "Failed to download ${checksum_url}; refusing unverified binary installation"
-    fi
+    fetch_asset "$version" "checksums.txt" "${tmp_dir}/checksums.txt" \
+        "Failed to download ${checksum_url}; refusing unverified binary installation"
     info "Verifying SHA-256 checksum..."
     (
         cd "$tmp_dir"
@@ -163,4 +205,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
