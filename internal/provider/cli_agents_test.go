@@ -59,8 +59,8 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 			return "", os.ErrNotExist
 		})
 		t.Setenv("OPENCODE_BIN", "")
-		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
-			t.Fatal("expected error when opencode binary is missing")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected E_PROVIDER_* spawn failure when opencode binary is missing, got: %v", err)
 		}
 	})
 
@@ -94,8 +94,8 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 			return "", os.ErrNotExist
 		})
 		t.Setenv("COMMANDCODE_BIN", "")
-		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
-			t.Fatal("expected error when commandcode binary is missing")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected E_PROVIDER_* spawn failure when commandcode binary is missing, got: %v", err)
 		}
 	})
 
@@ -130,8 +130,8 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 			return "", os.ErrNotExist
 		})
 		t.Setenv("QWEN_BIN", "")
-		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
-			t.Fatal("expected error when qwen binary is missing")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected E_PROVIDER_* spawn failure when qwen binary is missing, got: %v", err)
 		}
 
 		// #678: qwen exiting 0 with "[API Error: ...]" on stderr and empty stdout must fail closed.
@@ -147,13 +147,21 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 			t.Fatalf("Spawn failed: %v", err)
 		}
 		rcErr, wErr := hErr.Wait(context.Background())
-		if wErr == nil || rcErr.Status != "FAILED" || rcErr.ExitCode == 0 {
-			t.Fatalf("expected silent [API Error:] exit-0 to fail closed, got status=%q code=%d err=%v", rcErr.Status, rcErr.ExitCode, wErr)
+		if wErr == nil || rcErr.Status != "FAILED" || rcErr.ExitCode == 0 || !strings.Contains(wErr.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected silent [API Error:] exit-0 to fail closed with typed code, got status=%q code=%d err=%v", rcErr.Status, rcErr.ExitCode, wErr)
 		}
 	})
 
 	t.Run("codex exec adapter", func(t *testing.T) {
 		p := NewCodexProvider()
+		t.Setenv("CODEX_BIN", codexBin)
+		pMissing := NewCodexProvider().WithLookPath(func(string) (string, error) {
+			return "", os.ErrNotExist
+		})
+		t.Setenv("CODEX_BIN", "")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected E_PROVIDER_* spawn failure when codex binary is missing, got: %v", err)
+		}
 		t.Setenv("CODEX_BIN", codexBin)
 		handle, err := p.Spawn(context.Background(), Spec{
 			Model:       "gpt-5-codex",
@@ -220,8 +228,8 @@ func TestUniversalCLIAgentAdapters(t *testing.T) {
 			return "", os.ErrNotExist
 		})
 		t.Setenv("CURSOR_BIN", "")
-		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil {
-			t.Fatal("expected error when cursor-agent binary is missing")
+		if _, err := pMissing.Spawn(context.Background(), Spec{Brief: "scan"}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_") {
+			t.Fatalf("expected E_PROVIDER_* spawn failure when cursor-agent binary is missing, got: %v", err)
 		}
 	})
 }

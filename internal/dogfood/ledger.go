@@ -1,7 +1,15 @@
 // Package dogfood classifies commit provenance without performing Git I/O.
 package dogfood
 
-import "strings"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// E_PROVENANCE_TAG_EMPTY_REASON is returned in provenance Ref when an F0-direct
+// tag omits its required reason line.
+const E_PROVENANCE_TAG_EMPTY_REASON = "E_PROVENANCE_TAG_EMPTY_REASON"
 
 // Provenance records a receipt task ID or the reason for an F0-direct landing.
 type Provenance struct {
@@ -41,8 +49,11 @@ func ClassifyCommit(msg string) Provenance {
 			candidate = Provenance{Kind: "receipt", Ref: value}
 		case "provenance":
 			kind, reason, found := strings.Cut(value, "—")
-			if !found || !strings.EqualFold(strings.TrimSpace(kind), "F0-direct") || strings.TrimSpace(reason) == "" {
+			if !found || !strings.EqualFold(strings.TrimSpace(kind), "F0-direct") {
 				return unknown
+			}
+			if strings.TrimSpace(reason) == "" {
+				return Provenance{Kind: "classification_error", Ref: E_PROVENANCE_TAG_EMPTY_REASON}
 			}
 			candidate = Provenance{Kind: "f0_direct", Ref: strings.TrimSpace(reason)}
 		default:
@@ -66,6 +77,8 @@ func Ratio(report []Provenance) (receipts int, f0Direct int, unclassified int, t
 			receipts++
 		case "f0_direct":
 			f0Direct++
+		case "unclassified", "classification_error":
+			unclassified++
 		default:
 			unclassified++
 		}
@@ -75,4 +88,42 @@ func Ratio(report []Provenance) (receipts int, f0Direct int, unclassified int, t
 		dogfoodRatio = float64(receipts) / float64(classified)
 	}
 	return
+}
+
+// UnclassifiedBreakdown tallies honesty-gap landings by issue label for visibility reports.
+func UnclassifiedBreakdown(report []Provenance) map[string]int {
+	counts := make(map[string]int)
+	for _, p := range report {
+		switch p.Kind {
+		case "unclassified":
+			counts["subject-without-trailer"]++
+		case "classification_error":
+			code := strings.TrimSpace(p.Ref)
+			if code == "" {
+				code = "unknown-classification-error"
+			}
+			counts[code]++
+		}
+	}
+	return counts
+}
+
+// FormatUnclassifiedBreakdown renders a stable markdown section for CI logs.
+func FormatUnclassifiedBreakdown(report []Provenance) string {
+	breakdown := UnclassifiedBreakdown(report)
+	if len(breakdown) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(breakdown))
+	for k := range breakdown {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("### Unclassified breakdown\n\n| Issue | Count |\n| --- | ---: |\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "| %s | %d |\n", k, breakdown[k])
+	}
+	b.WriteString("\n")
+	return b.String()
 }
