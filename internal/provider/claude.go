@@ -53,7 +53,7 @@ func (c *ClaudeProvider) Available(ctx context.Context) error {
 	if bin == "" {
 		p, err := c.lookPath("claude")
 		if err != nil {
-			return fmt.Errorf("not found in PATH")
+			return codedError(codeBinaryNotFound, "not found in PATH")
 		}
 		bin = p
 	}
@@ -61,7 +61,7 @@ func (c *ClaudeProvider) Available(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, bin, "--version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("claude --version: %w", err)
+		return codedError(codeProbeFailed, "claude --version: %w", err)
 	}
 
 	c.mu.Lock()
@@ -115,7 +115,7 @@ func (c *ClaudeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start claude process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start claude process: %w", err)
 	}
 
 	return newProcessHandle("claude", cmd, start, &stdoutBuf, &stderrBuf), nil

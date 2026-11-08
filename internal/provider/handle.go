@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -94,7 +93,7 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 	} else if apiErr := extractCLIAPIErrorLine(stderrStr + "\n" + stdoutStr); apiErr != "" && strings.TrimSpace(stdoutStr) == "" {
 		exitCode = 1
 		status = "FAILED"
-		waitErr = fmt.Errorf("cli agent reported API error with empty output: %s", apiErr)
+		waitErr = codedError(codeCLIAPIError, "cli agent reported API error with empty output: %s", apiErr)
 	}
 	if h.provider == "codex" {
 		exitCode, status, waitErr = codexFinalizeReceipt(exitCode, status, waitErr, stderrStr)

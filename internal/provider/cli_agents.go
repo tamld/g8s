@@ -71,14 +71,14 @@ func (o *OpenCodeProvider) Available(ctx context.Context) error {
 	if bin == "" {
 		p, err := o.lookPath("opencode")
 		if err != nil {
-			return fmt.Errorf("not found in PATH")
+			return codedError(codeBinaryNotFound, "not found in PATH")
 		}
 		bin = p
 	}
 
 	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
-		return fmt.Errorf("opencode --version: %w", err)
+		return codedError(codeProbeFailed, "opencode --version: %w", err)
 	}
 
 	o.mu.Lock()
@@ -135,7 +135,7 @@ func (o *OpenCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error)
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start opencode process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start opencode process: %w", err)
 	}
 
 	return newProcessHandle("opencode", cmd, start, &stdoutBuf, &stderrBuf), nil
@@ -183,14 +183,14 @@ func (c *CommandCodeProvider) Available(ctx context.Context) error {
 	if bin == "" {
 		p, err := c.lookPath("commandcode")
 		if err != nil {
-			return fmt.Errorf("not found in PATH")
+			return codedError(codeBinaryNotFound, "not found in PATH")
 		}
 		bin = p
 	}
 
 	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
-		return fmt.Errorf("commandcode --version: %w", err)
+		return codedError(codeProbeFailed, "commandcode --version: %w", err)
 	}
 
 	c.mu.Lock()
@@ -253,7 +253,7 @@ func (c *CommandCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, err
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start commandcode process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start commandcode process: %w", err)
 	}
 
 	return newProcessHandle("commandcode", cmd, start, &stdoutBuf, &stderrBuf), nil
@@ -301,14 +301,14 @@ func (q *QwenProvider) Available(ctx context.Context) error {
 	if bin == "" {
 		p, err := q.lookPath("qwen")
 		if err != nil {
-			return fmt.Errorf("not found in PATH")
+			return codedError(codeBinaryNotFound, "not found in PATH")
 		}
 		bin = p
 	}
 
 	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
-		return fmt.Errorf("qwen --version: %w", err)
+		return codedError(codeProbeFailed, "qwen --version: %w", err)
 	}
 
 	q.mu.Lock()
@@ -370,7 +370,7 @@ func (q *QwenProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start qwen process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start qwen process: %w", err)
 	}
 
 	return newProcessHandle("qwen", cmd, start, &stdoutBuf, &stderrBuf), nil
@@ -489,7 +489,7 @@ func (c *CursorProvider) Available(ctx context.Context) error {
 				}
 			}
 			if err != nil {
-				return fmt.Errorf("not found in PATH")
+				return codedError(codeBinaryNotFound, "not found in PATH")
 			}
 		}
 		bin = p
@@ -497,7 +497,7 @@ func (c *CursorProvider) Available(ctx context.Context) error {
 
 	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
-		return fmt.Errorf("cursor-agent --version: %w", err)
+		return codedError(codeProbeFailed, "cursor-agent --version: %w", err)
 	}
 
 	c.mu.Lock()
@@ -604,7 +604,7 @@ func (c *CursorProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		if lastErr != nil {
 			return nil, lastErr
 		}
-		return nil, fmt.Errorf("no models discovered for cursor provider")
+		return nil, codedError("E_PROVIDER_MODELS_EMPTY", "no models discovered for cursor provider")
 	}
 	sort.Strings(models)
 	return models, nil
@@ -666,7 +666,7 @@ func (c *CursorProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start cursor process: %w", err)
+		return nil, codedError(codeSpawnFailed, "failed to start cursor process: %w", err)
 	}
 
 	return newProcessHandle("cursor", cmd, start, &stdoutBuf, &stderrBuf), nil
