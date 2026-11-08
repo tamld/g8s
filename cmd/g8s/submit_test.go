@@ -485,3 +485,88 @@ func TestSubmitClocks_CrossValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestSubmitAllowWorkerCommit_PayloadPlumbing(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "allow_worker_commit.db")
+	rcDBPath := filepath.Join(tempDir, "receipts.db")
+	rc := createTestReceipt(t, rcDBPath, 10*time.Minute, []string{"*"})
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"AGY_MCP_ALLOW_WORKSPACE_WRITE=1",
+	}
+
+	t.Run("flag set on workspace_write", func(t *testing.T) {
+		env, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "ww-allow-commit",
+			"--prompt", "Task with worker commit proxy",
+			"--permission", "workspace_write",
+			"--receipt-id", rc.ReceiptID,
+			"--allow-worker-commit",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "ww-allow-commit")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		v, ok := payload["allow_worker_commit"]
+		if !ok {
+			t.Fatal("allow_worker_commit missing from payload")
+		}
+		b, ok := v.(bool)
+		if !ok || !b {
+			t.Errorf("allow_worker_commit = %v, want true", v)
+		}
+	})
+
+	t.Run("flag unset on read_only", func(t *testing.T) {
+		_, code, raw := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "ro-no-commit-flag",
+			"--prompt", "Read-only without commit flag",
+			"--permission", "read_only",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d raw=%s", code, raw)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "ro-no-commit-flag")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if _, ok := payload["allow_worker_commit"]; ok {
+			t.Errorf("allow_worker_commit should be absent when flag unset, got: %v", payload["allow_worker_commit"])
+		}
+	})
+}
+
+func TestSubmitAllowWorkerCommit_ForbiddenReadOnly(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "allow_worker_commit_guard.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+	}
+
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "ro-allow-commit-rejected",
+		"--prompt", "read_only with commit opt-in",
+		"--permission", "read_only",
+		"--allow-worker-commit",
+	)
+	if code == 0 {
+		t.Fatal("expected submit rejection for read_only + --allow-worker-commit")
+	}
+	if env.Error == nil {
+		t.Fatalf("expected error envelope, got nil; raw: %s", raw)
+	}
+	if env.Error.Code != "E_COMMIT_REQUEST_FORBIDDEN_READ_ONLY" {
+		t.Errorf("error.code = %q, want E_COMMIT_REQUEST_FORBIDDEN_READ_ONLY", env.Error.Code)
+	}
+	if !strings.Contains(env.Error.Message, "E_COMMIT_REQUEST_FORBIDDEN_READ_ONLY") {
+		t.Errorf("unexpected error message: %q", env.Error.Message)
+	}
+}
