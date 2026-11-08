@@ -248,9 +248,15 @@ func (s *Supervisor) awaitOutcome(
 				}
 			}
 			if herr := s.cp.RenewHeartbeat(ctx, taskID, workerID, leaseSeconds); herr != nil {
+				if errors.Is(herr, controlplane.ErrLeaseLost) {
+					return fmt.Sprintf("lease_lost: heartbeat renewal: %v", herr)
+				}
+				if !errors.Is(herr, controlplane.ErrHeartbeatTransient) {
+					return fmt.Sprintf("lease_lost: heartbeat renewal: %v", herr)
+				}
 				consecutiveErrors++
 
-				// Renewal error triggers a second authoritative check after one heartbeat interval of grace
+				// Transient DB exhaustion: authoritative re-check after one heartbeat interval of grace
 				select {
 				case <-ctx.Done():
 					return "cancelled"

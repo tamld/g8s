@@ -49,8 +49,92 @@ func TestRenewHeartbeat_BusyRetrySuccess(t *testing.T) {
 	}
 }
 
+// TestRenewHeartbeat_HeartbeatErrorPaths is a table test that heartbeat failures
+// are typed distinctly for callers (#858).
+func TestRenewHeartbeat_HeartbeatErrorPaths(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, s *Store, ctx context.Context) (taskID, workerID string)
+		wantIs     error
+		wantNotIs  error
+		wantSubstr string
+	}{
+		{
+			name:       "transient_db_exhaustion",
+			wantIs:     ErrHeartbeatTransient,
+			wantNotIs:  ErrLeaseLost,
+			wantSubstr: "E_HEARTBEAT_TRANSIENT",
+			setup: func(t *testing.T, s *Store, ctx context.Context) (string, string) {
+				t.Helper()
+				origAttempts := busyRetryAttempts
+				origBackoff := busyBackoff
+				t.Cleanup(func() {
+					busyRetryAttempts = origAttempts
+					busyBackoff = origBackoff
+				})
+				busyRetryAttempts = 3
+				busyBackoff = func(int) time.Duration { return 0 }
+
+				task := mustSubmit(t, s, submitReq("hb-table-busy"))
+				claimed, err := s.ClaimTask(ctx, "worker-busy", 10)
+				if err != nil || claimed == nil {
+					t.Fatalf("ClaimTask: %v", err)
+				}
+				s.leaseExecOverride = func(ctx context.Context, query string, args ...any) (sql.Result, error) {
+					return nil, errors.New("sqlite_busy: database table is locked")
+				}
+				return task.TaskID, "worker-busy"
+			},
+		},
+	}
+	t.Run("genuine_lease_lost", func(t *testing.T) {
+		fc := newFakeClock()
+		s, _ := newTestStoreWithClock(t, fc)
+		ctx := context.Background()
+		task := mustSubmit(t, s, submitReq("hb-table-exp"))
+		claimed, err := s.ClaimTask(ctx, "worker-exp", 10)
+		if err != nil || claimed == nil {
+			t.Fatalf("ClaimTask: %v", err)
+		}
+		fc.Advance(15 * time.Second)
+		err = s.RenewHeartbeat(ctx, task.TaskID, "worker-exp", 15)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("errors.Is(err, ErrLeaseLost) = false, got %v", err)
+		}
+		if errors.Is(err, ErrHeartbeatTransient) {
+			t.Fatalf("genuine expiry must not be ErrHeartbeatTransient, got %v", err)
+		}
+	})
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTestStore(t)
+			ctx := context.Background()
+			taskID, workerID := tc.setup(t, s, ctx)
+			err := s.RenewHeartbeat(ctx, taskID, workerID, 15)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !errors.Is(err, tc.wantIs) {
+				t.Fatalf("errors.Is(err, %v) = false, got %v", tc.wantIs, err)
+			}
+			if errors.Is(err, tc.wantNotIs) {
+				t.Fatalf("errors.Is(err, %v) must be false, got %v", tc.wantNotIs, err)
+			}
+			if tc.wantSubstr != "" && !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("error %q should contain %q", err.Error(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
 // TestRenewHeartbeat_BusyExhaustion verifies that when busy retries are exhausted,
-// the returned error wraps ErrBusy and is distinguishable from ErrLeaseLost (#465).
+// the returned error wraps ErrHeartbeatTransient and is distinguishable from ErrLeaseLost (#858, #465).
 func TestRenewHeartbeat_BusyExhaustion(t *testing.T) {
 	origAttempts := busyRetryAttempts
 	origBackoff := busyBackoff
@@ -79,11 +163,14 @@ func TestRenewHeartbeat_BusyExhaustion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on busy exhaustion, got nil")
 	}
-	if !errors.Is(err, ErrBusy) {
-		t.Fatalf("expected errors.Is(err, ErrBusy) = true, got err: %v", err)
+	if !errors.Is(err, ErrHeartbeatTransient) {
+		t.Fatalf("expected errors.Is(err, ErrHeartbeatTransient) = true, got err: %v", err)
 	}
 	if errors.Is(err, ErrLeaseLost) {
-		t.Fatalf("busy error must NOT wrap ErrLeaseLost, got err: %v", err)
+		t.Fatalf("transient error must NOT wrap ErrLeaseLost, got err: %v", err)
+	}
+	if !strings.Contains(err.Error(), "E_HEARTBEAT_TRANSIENT") {
+		t.Fatalf("error %q should contain E_HEARTBEAT_TRANSIENT", err.Error())
 	}
 
 	instID := pathutil.InstanceID()
