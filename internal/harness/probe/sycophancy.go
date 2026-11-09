@@ -186,10 +186,19 @@ func NewSycophancyProbes() []*Probe {
 	return probes
 }
 
+// ⚡ Bolt Optimization: Use zero-allocation `for range` over the string to find the exact byte index
+// for the nth rune. This avoids casting the entire string to `[]rune` which causes
+// expensive O(N) heap allocations and GC pressure for large strings.
 func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
+	if len(s) <= n {
 		return s
 	}
-	return string(r[:n]) + "…"
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i] + "…"
+		}
+		count++
+	}
+	return s
 }
