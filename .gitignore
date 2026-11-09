@@ -140,3 +140,8 @@ go.work.bak
 g8s.exe
 supervisor.test
 ~/
+
+# g8s site: local build/deploy artifacts
+sites/home/reel/node_modules/
+sites/home/reel/out/
+sites/home/reel/.zcode-site/
