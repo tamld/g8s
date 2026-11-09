@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>g8s — the operator console for autonomous coding agents</title>
+<meta name="description" content="Your agent just did something. Prove it. g8s gates every agent action behind receipts, leases and fail-loud typed verdicts — a zero-CGO binary with zero runtime dependencies.">
+<!-- BUILD_DATA — CI claim-check gate replaces at build time (ADR-0040 for the site itself) -->
+<meta name="g8s:build" content="console-v1-mockup-2026-11-09">
+<style>
+/* ============ g8s operator console — v2 ============
+   Grammar: the page IS the harness UI. tmux chrome, phosphor palette, 100% mono.
+   No serif. No stamps. No acts. No narrative. Panes, not sections. */
+:root {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --bg: #07090b; --pane: #0b0e11; --pane-hi: #0e1216;
+  --ink: #b8c5cf; --dim: #5f6d79; --faint: #2b333b;
+  --gate: #33d17a; --amber: #d7a94b; --err: #e06060; --recv: #7fb8a2; --cyan: #5db8c4;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
+body { background: var(--bg); color: var(--ink); font-family: var(--mono); font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased; }
+::selection { background: var(--gate); color: var(--bg); }
+a { color: var(--recv); text-decoration: none; }
+a:hover { color: var(--gate); text-decoration: underline; text-underline-offset: 3px; }
+button, input { font: inherit; color: inherit; }
+* { scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--faint); }
+
+.console { max-width: 1280px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column;
+  border-left: 1px solid var(--faint); border-right: 1px solid var(--faint); }
+
+/* topbar: hook + identity + actions */
+.topbar { display: flex; align-items: center; gap: 18px; padding: 10px 16px;
+  border-bottom: 1px solid var(--faint); background: var(--pane); }
+.topbar .brand { color: var(--gate); font-weight: 700; }
+.topbar .brand .v { color: var(--dim); font-weight: 400; }
+.topbar .hook { color: var(--ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .hook b { color: var(--amber); font-weight: 400; }
+.topbar .act { color: var(--dim); white-space: nowrap; }
+.topbar .act a.star { color: var(--gate); }
+
+/* grid: 2 cols on desktop, stacked on phones */
+.grid { display: grid; grid-template-columns: 1.25fr 1fr; flex: 1; }
+.col { display: flex; flex-direction: column; min-width: 0; }
+.col + .col { border-left: 1px solid var(--faint); }
+
+/* panes: titled like tmux panes */
+.pane { border-bottom: 1px solid var(--faint); display: flex; flex-direction: column; min-width: 0; }
+.pane:last-child { border-bottom: 0; }
+.pt { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 7px 16px; background: var(--pane-hi); color: #97a3ae; font-size: 13px; letter-spacing: .5px; }
+.pt .live { color: var(--gate); }
+.pt .live::before { content: "● "; animation: blink 2.1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+.pb { padding: 12px 16px; min-width: 0; }
+
+/* hook strip: the one-line value prop */
+.hookpane { border-bottom: 1px solid var(--faint); padding: 26px 16px 20px; }
+.hookpane .l1, .hookpane h1.l1 { font-size: 17px; color: var(--ink); font-weight: 400; }
+.hookpane .l1 b { color: var(--amber); font-weight: 400; }
+.hookpane .l2 { margin-top: 10px; color: #a8b4bd; font-size: 13px; max-width: 68ch; }
+.installs { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+.installs .cmd { display: inline-flex; gap: 8px; background: var(--pane-hi); padding: 8px 12px;
+  cursor: pointer; font-size: 13px; border: 0; }
+.installs .cmd:hover { background: #131a20; }
+.installs .cmd:active { transform: scale(0.97); }
+.installs .cmd .ps { color: var(--gate); }
+.installs .cmd span { color: var(--ink); }
+.installs .lbl { color: #93a3ae; font-size: 13px; align-self: center; }
+
+/* terminal */
+.term-body { height: min(56vh, 500px); overflow-y: auto; padding: 12px 16px; }
+.term-body .line { display: block; white-space: pre-wrap; word-break: break-word; }
+.t-dim { color: #93a3ae; } .t-gate { color: var(--gate); } .t-warn { color: var(--amber); }
+.t-err { color: var(--err); } .t-recv { color: var(--recv); } .t-cyan { color: var(--cyan); }
+.term-input { display: flex; gap: 9px; padding: 10px 16px; background: var(--pane-hi); }
+.term-input .ps { color: var(--gate); white-space: nowrap; }
+.term-input input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0;
+  color: var(--ink); caret-color: var(--gate); }
+.term-hint { padding: 7px 16px 10px; color: var(--dim); font-size: 13px; }
+.term-hint code { color: var(--ink); cursor: pointer; }
+.term-hint code:hover { color: var(--gate); }
+
+/* gate feed: streaming typed codes */
+.feed { height: 218px; overflow: hidden; padding: 10px 16px; position: relative; }
+.feed .fline { display: flex; gap: 10px; padding: 2.5px 0; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.feed .ts { color: var(--dim); font-variant-numeric: tabular-nums; }
+.feed .pass { color: var(--gate); }
+.feed .refuse { color: var(--err); }
+.feed .info { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.feed::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 46px;
+  background: linear-gradient(transparent, var(--pane)); pointer-events: none; }
+
+/* containment ascii map */
+.map { padding: 14px 16px 10px; font-size: 13px; line-height: 1.5; white-space: pre; overflow-x: auto; }
+.map .n0 { color: var(--gate); } .map .n1 { color: var(--recv); } .map .n2 { color: var(--dim); }
+.map .pk { color: var(--amber); } .map .ok { color: var(--gate); } .map .no { color: var(--err); }
+.map .dim { color: var(--dim); }
+
+/* queue table */
+.queue { width: 100%; border-collapse: collapse; font-size: 13px; }
+.queue th { text-align: left; color: var(--dim); font-weight: 400; padding: 4px 10px; border-bottom: 1px solid var(--faint); }
+.queue td { padding: 5px 10px; border-bottom: 1px solid #10151a; white-space: nowrap; }
+.queue td.st { color: var(--gate); }
+.queue td.id { color: var(--recv); }
+.queue .more { color: var(--dim); white-space: normal; }
+
+/* ledger ticker */
+.tick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.tick .c { padding: 14px 16px; border-right: 1px solid var(--faint); }
+.tick .c:last-child { border-right: 0; }
+.tick .n { font-size: 21px; color: var(--gate); font-variant-numeric: tabular-nums; }
+.tick .k { color: var(--dim); font-size: 13px; margin-top: 3px; }
+
+/* why strip */
+.why { display: grid; grid-template-columns: repeat(3, 1fr); }
+.why .w { padding: 16px 16px; border-right: 1px solid var(--faint); font-size: 13px; color: var(--ink); }
+.why .w:last-child { border-right: 0; }
+.why .w b { color: var(--gate); font-weight: 400; display: block; margin-bottom: 5px; }
+.why .w span { color: var(--dim); }
+
+/* bottom status bar (tmux) */
+.statusbar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 0; align-items: center;
+  background: var(--pane-hi); border-top: 1px solid var(--faint); font-size: 13px; overflow: hidden; }
+@media (max-width: 980px) { .statusbar .seg.dim { display: none; } }
+.statusbar .seg { padding: 6px 16px; white-space: nowrap; }
+.statusbar .seg:first-child { padding-left: 16px; }
+.statusbar .seg.on { background: var(--gate); color: var(--bg); font-weight: 700; }
+.statusbar .seg.dim { color: #93a3ae; }
+.statusbar .sp { flex: 1; min-width: 0; }
+.statusbar a { color: var(--recv); }
+
+@media (max-width: 980px) { .grid { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid var(--faint); }
+  .topbar .hook { display: none; } .why { grid-template-columns: 1fr; } .why .w { border-right: 0; border-bottom: 1px solid var(--faint); }
+  .tick { grid-template-columns: repeat(2, 1fr); } .tick .c:nth-child(2) { border-right: 0; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+/* ---- business brief band (plain-language layer) ---- */
+.brief { border-bottom: 1px solid var(--faint); background: var(--pane); padding: 30px 16px 26px; }
+.bq { font-size: 18px; line-height: 1.5; color: var(--ink); max-width: 72ch; }
+.bq b { color: var(--amber); font-weight: 400; }
+.ba { margin-top: 14px; font-size: 14px; line-height: 1.65; color: #a8b4bd; max-width: 78ch; }
+.ba b { color: var(--ink); font-weight: 400; }
+.bpaths { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.bp { display: inline-block; padding: 9px 14px; background: var(--pane-hi); color: var(--ink); font-size: 13px; }
+.bp:hover { background: #131a20; text-decoration: none; }
+.bp span { color: var(--gate); }
+.biz { display: grid; grid-template-columns: 1fr 1fr; }
+.biz .b { padding: 14px 16px; border-bottom: 1px solid #10151a; }
+.biz .b:nth-child(odd) { border-right: 1px solid #10151a; }
+.biz .b:nth-last-child(-n+2) { border-bottom: 0; }
+.biz .b b { display: block; color: var(--ink); font-weight: 400; margin-bottom: 5px; font-size: 14px; }
+.biz .b span { color: var(--dim); font-size: 13px; line-height: 1.55; display: block; }
+@media (max-width: 860px) { .biz { grid-template-columns: 1fr; } .biz .b { border-right: 0 !important; } }
+/* ---- artifact: the 3D receipt ---- */
+.artifact-strip { border-bottom: 1px solid var(--faint); }
+.art { display: grid; grid-template-columns: 440px 1fr; gap: 30px; padding: 22px 16px; align-items: center; }
+.rc-wrap { perspective: 1100px; display: flex; justify-content: center; padding: 12px 0; }
+.rc { width: 100%; max-width: 420px; background: #0d1318;
+  border: 1px solid var(--faint); padding: 18px 18px 16px; transform-style: preserve-3d;
+  transition: transform .08s linear; will-change: transform; position: relative; overflow: hidden; }
+.rc::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(51,209,122,.06); pointer-events: none; }
+.rc-face { position: relative; }
+.rc-head { display: flex; justify-content: space-between; color: var(--gate); font-size: 13px;
+  letter-spacing: 2px; border-bottom: 1px solid var(--faint); padding-bottom: 9px; margin-bottom: 10px; }
+.rc-head .rc-no { color: var(--amber); letter-spacing: 1px; }
+.rc-row { display: flex; gap: 12px; padding: 4px 0; font-size: 12.5px; }
+.rc-row span { color: var(--dim); min-width: 108px; }
+.rc-row code { color: var(--ink); word-break: break-all; }
+.rc-hash { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--faint);
+  color: var(--dim); font-size: 11.5px; word-break: break-all; }
+.rc-seal { position: absolute; right: 14px; top: 44px; transform: rotate(8deg) scale(1);
+  border: 2px solid var(--err); color: var(--err); padding: 3px 10px; font-size: 12px;
+  letter-spacing: 1px; opacity: .92; }
+.rc-sealed .rc-seal { border-color: var(--gate); color: var(--gate); }
+.rc-sealed .rc-row #rc-consumed { color: var(--gate); }
+.art-copy h2 { font-size: 16px; color: var(--ink); margin-bottom: 10px; font-weight: 400; }
+.art-copy p { color: #a8b4bd; font-size: 13.5px; line-height: 1.6; max-width: 60ch; }
+.art-cta { margin-top: 14px; }
+.seal-btn { background: var(--pane-hi); border: 0; color: var(--gate); font-family: var(--mono);
+  font-size: 13px; padding: 9px 14px; cursor: pointer; }
+.seal-btn:hover { background: #131a20; }
+.seal-btn:disabled { color: var(--dim); cursor: default; }
+.art-copy .dim { font-size: 12.5px; margin-left: 10px; }
+@media (max-width: 860px) { .art { grid-template-columns: 1fr; } }
+
+/* ---- session replay (TUI movie) ---- */
+.replay-pane { border-bottom: 1px solid var(--faint); }
+.rp { background: none; border: 0; color: var(--gate); cursor: pointer; font-size: 13px; }
+.rp:hover { color: var(--ink); }
+.rp-body { height: 240px; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.6; }
+.rp-body .line { display: block; white-space: pre-wrap; word-break: break-word; }
+.rp-bar { height: 3px; background: #10151a; }
+.rp-bar i { display: block; height: 100%; width: 100%; background: var(--gate); transform: scaleX(0); transform-origin: left; transition: transform .3s var(--ease-out-quart); }
+</style>
+</head>
+<body>
+<div class="console">
+
+<div class="topbar">
+  <span class="brand">g8s <span class="v" style="color:#93a3ae">v0.23.0</span></span>
+  <span class="hook">An AI agent just did something on your systems. <b>Can you prove what, and who allowed it?</b></span>
+  <span class="act"><a class="star" href="https://github.com/tamld/g8s">[star] github.com/tamld/g8s</a></span>
+</div>
+
+<div class="brief">
+  <div class="brief-main">
+    <p class="bq">AI agents now write code, send emails, move money, touch customers.
+    When one of them does something wrong — <b>who explains it, and with what evidence?</b></p>
+    <p class="ba">g8s is the checkpoint system that stands between your AI agents and your systems.
+    <b>Every action authorized in advance. Every refusal explained in machine-readable language.
+    Every outcome provable after the fact.</b> Not a policy document — a working gate.</p>
+    <div class="bpaths">
+      <a class="bp" href="#console">I run or build agents — <span>open the console ↓</span></a>
+      <a class="bp" href="#leaders">I lead the business — <span>what this buys me ↓</span></a>
+    </div>
+  </div>
+</div>
+
+<div class="grid" id="console">
+<div class="col">
+
+  <div class="hookpane">
+    <h1 class="l1">An operator console for agents that <b>refuse to be trusted blindly</b>.</h1>
+    <div class="l2">Every action behind a receipt. Every refusal carries a typed code. Every landing carries its lineage. The panes here run real captures from the harness that built itself — type into it.</div>
+    <div class="installs">
+      <span class="lbl">install in 30s:</span>
+      <button class="cmd" data-c="brew install tamld/g8s/g8s"><span class="ps">$</span><span>brew install tamld/g8s/g8s</span></button>
+      <button class="cmd" data-c="curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash"><span class="ps">$</span><span>curl … install.sh | bash</span></button>
+    </div>
+  </div>
+
+  <div class="pane" style="flex:1">
+    <div class="pt"><span>terminal — for the engineers · real captures</span><span class="live">interactive</span></div>
+    <div class="term-body" id="tbody"></div>
+    <div class="term-input"><code class="ps">$</code><input id="tin" autocomplete="off" spellcheck="false" placeholder="type a command — try: help"></div>
+    <div class="term-hint">try: <code>help</code> · <code>doctor</code> · <code>submit</code> · <code>receipt</code> · <code>fence</code> · <code>verify</code> · <code>chaos</code> · <code>whoami</code></div>
+  </div>
+
+  <div class="pane">
+    <div class="pt"><span>queue — every task recorded</span><span>SQLite WAL</span></div>
+    <table class="queue">
+      <tr><th>task</th><th>state</th><th>lane</th><th>receipt</th></tr>
+      <tr><td class="id">4ed2017f</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>9636f68d</td></tr>
+      <tr><td class="id">dba40b29</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>e9574675</td></tr>
+      <tr><td class="id">656d8e02</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>5a41fd02</td></tr>
+      <tr><td class="id">98c88b6d</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>8e7edea3</td></tr>
+      <tr><td class="more" colspan="4">…6,255 more rows in the dogfood ledger — every row carries its lineage</td></tr>
+    </table>
+  </div>
+
+</div>
+<div class="col">
+
+  <div class="pane">
+    <div class="pt"><span>gate feed — the refusals, as engineers see them</span><span class="live">streaming</span></div>
+    <div class="feed" id="feed"></div>
+  </div>
+
+  <div class="pane">
+    <div class="pt"><span>containment — packets gated in flight</span><span>ADR-0032</span></div>
+    <div class="map" id="map"></div>
+  </div>
+
+  <div class="pane">
+    <div class="pt"><span>ledger — measured on its own supply</span><span>dogfood</span></div>
+    <div class="tick">
+      <div class="c"><div class="n">11</div><div class="k">gate classes in CI</div></div>
+      <div class="c"><div class="n">97</div><div class="k">FSMs documented</div></div>
+      <div class="c"><div class="n">6261</div><div class="k">ledger rows</div></div>
+      <div class="c"><div class="n">0</div><div class="k">runtime deps</div></div>
+    </div>
+  </div>
+
+  <div class="pane" id="leaders">
+    <div class="pt"><span>for the business — what this buys you</span><span>no terminal required</span></div>
+    <div class="biz">
+      <div class="b"><b>An audit trail that writes itself.</b><span>Every agent action — what ran, where, who allowed it — recorded as it happens. Compliance stops being a scramble.</span></div>
+      <div class="b"><b>Policy enforced by code, not by promise.</b><span>Your rules (what agents may touch, when, how far) execute as gates. An agent that breaks them is stopped and told why — in the moment.</span></div>
+      <div class="b"><b>Failures that explain themselves.</b><span>When something goes wrong you get a typed, specific reason — not a mystery. Your engineers fix causes, not symptoms.</span></div>
+      <div class="b"><b>Built the way it asks you to build.</b><span>This harness released itself: attested builds, signed artifacts, and a public ledger of its own quality. The proof habit is the product.</span></div>
+    </div>
+  </div>
+
+  <div class="pane">
+    <div class="pt"><span>why it exists — the doctrines</span><span>the doctrines</span></div>
+    <div class="why">
+      <div class="w"><b>COMPLIANCE-IN-CODE</b><span>every claim is a check; deviations are typed trailers, counted — adr-0040</span></div>
+      <div class="w"><b>FAIL LOUD</b><span>every ok=false carries an E_* reason an agent can parse — never silent</span></div>
+      <div class="w"><b>TRANSPARENT REGISTRIES</b><span>a claim a check cannot verify is deleted from the registry</span></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+
+<div class="artifact-strip">
+  <div class="pane" style="border:0">
+    <div class="pt"><span>the artifact — a receipt, made tangible</span><span>drag to tilt · click to seal</span></div>
+    <div class="art">
+      <div class="rc-wrap" id="rcWrap">
+        <div class="rc" id="rc">
+          <div class="rc-face">
+            <div class="rc-head"><span>Write receipt</span><span class="rc-no">single-use</span></div>
+            <div class="rc-row"><span>receipt_id</span><code>9636f68d-625e-4345-826d-272bae7e2561</code></div>
+            <div class="rc-row"><span>allowed_paths</span><code>internal/worker/**</code></div>
+            <div class="rc-row"><span>issued_to</span><code>task 4ed2017f · cursor/composer-2.5</code></div>
+            <div class="rc-row"><span>ttl</span><code>3300s · expires +55m</code></div>
+            <div class="rc-row"><span>consumed</span><code id="rc-consumed">false</code></div>
+            <div class="rc-hash" id="rc-hash">sha256: 9f2a7c41be04d8c6f31a55b0e7d92c48aa61f013b8c7e2d54f90a613c7eb42d1</div>
+            <div class="rc-seal" id="rc-seal">unsealed</div>
+          </div>
+        </div>
+      </div>
+      <div class="art-copy">
+        <h2>This is the whole idea, as an object.</h2>
+        <p>Before an agent touches anything, g8s mints one of these. It names the exact paths the agent may
+        change, expires in minutes, and is consumed by exactly one attempt. Inside your systems it is an
+        authorization; on this page it is a promise you can read.</p>
+        <p class="art-cta"><button class="seal-btn" id="sealBtn">seal it — watch the hash commit</button>
+        <span class="dim" id="seal-note">tilt with your cursor · the fields above are real, from today's session</span></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pane replay-pane">
+  <div class="pt"><span>session replay — 60 seconds of a real gated run</span><span><button id="rp-btn" class="rp">[replay]</button></span></div>
+  <div class="rp-body" id="rpbody"></div>
+  <div class="rp-bar"><i></i></div>
+</div>
+
+
+<div class="pane">
+  <div class="pt"><span>watch it run — 36s, one real task, gate to gate</span><span class="live">reel</span></div>
+  <video id="reel" width="100%" style="display:block;background:var(--pane)" muted loop playsinline
+    poster="assets/reel-poster.jpg" preload="metadata"
+    src="assets/g8s-reel.mp4"></video>
+  <div class="term-hint">muted by design — the transcript is the sound. full-quality version on github releases.</div>
+</div>
+
+<div class="statusbar">
+  <span class="seg on">CONSOLE</span>
+  <span class="seg">g8s v0.23.0</span>
+  <span class="seg dim">zero-CGO · zero deps · SLSA L2 attested · receipts since 2026</span>
+  <span class="sp"></span>
+  <span class="seg dim">provenance: every number on this page binds to a source</span>
+  <a class="seg" href="https://github.com/tamld/g8s/releases">releases ↗</a>
+</div>
+
+</div>
+
+<script>
+/* ===== terminal — faithful g8s transcripts ===== */
+const OUT = document.getElementById('tbody'), IN = document.getElementById('tin');
+function line(html, cls) { const d = document.createElement('code');
+  d.className = 'line ' + (cls || ''); d.innerHTML = html; OUT.appendChild(d); OUT.scrollTop = OUT.scrollHeight; }
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const code = s => esc(s).replace(/(E_[A-Z_]+)/g, '<span class="t-err">$1</span>');
+const CMDS = {
+  help: () => [
+    ['g8s — the gatekeepers. commands (faithful subset):', 't-ink'],
+    ['  doctor    diagnostic health + environment checks', ''],
+    ['  submit    queue a task — durable, idempotent, permission-scoped', ''],
+    ['  receipt   issue a single-use, path-scoped write receipt', ''],
+    ['  verify    verifier-class acceptance checks — verdicts carry evidence', ''],
+    ['  fence     claim-fence: stale-renewal protection, two writers one owner', ''],
+    ['  chaos     what a rogue agent looks like inside g8s', ''],
+    ['  whoami    identity + containment tier', ''],
+    ['  clear     wipe the pane', 't-dim'],
+  ],
+  doctor: () => [
+    ['$ g8s doctor --json', 't-gate'],
+    ['{ "v": 1, "kind": "doctor", "ok": true,', ''],
+    ['  "data": { "binary": "0.23.0", "cgo": false, "state_db": "ok (wal)",', ''],
+    ['            "providers": ["agy","cursor","codex","9router"], "receipts": "ready" },', ''],
+    ['  "checks": [ {"id":"state-db","ok":true}, {"id":"providers","ok":true},', ''],
+    ['              {"id":"receipt-cli","ok":true}, {"id":"isolation","ok":true} ] }', ''],
+    ['ok — 4/4 checks passed (real capture, v0.23.0)', 't-dim'],
+  ],
+  submit: () => [
+    ['$ g8s submit --provider cursor --model composer-2.5 \\', 't-gate'],
+    ['    -permission workspace_write --receipt-id 9636f68d --json', ''],
+    ['{ "kind": "task", "state": "QUEUED",', ''],
+    ['  "data": { "task_id": "4ed2017f-36e1-4be4-b08f-6172e426660a",', ''],
+    ['            "claim": "single-winner (SQLite WAL)", "timeout": "1800s" } }', ''],
+    ['queued. one attempt = one worktree = one receipt.', 't-dim'],
+  ],
+  receipt: () => [
+    ['$ g8s receipt issue --path "internal/worker/**" --ttl 3300', 't-gate'],
+    ['{ "receipt_id": "9636f68d-625e-4345-826d-272bae7e2561",', ''],
+    ['  "allowed_paths": ["internal/worker/**"], "expires_at": "+55m",', ''],
+    ['  "consumed": false }', ''],
+    ['single-use. path-scoped. outside it, the fence answers in code:', 't-dim'],
+    ['  E_DIFF_FIREWALL_OUT_OF_SCOPE: 2 files outside receipt scope', 't-err'],
+  ],
+  verify: () => [
+    ['$ g8s verify --task 4ed2017f --json', 't-gate'],
+    ['{ "ok": true, "verifier": "acceptance-matrix", "checks": 6, "passed": 6,', ''],
+    ['  "evidence": "worktree diff + gates" }', ''],
+    ['a verdict without evidence is treated as a failure — by design.', 't-dim'],
+  ],
+  fence: () => [
+    ['$ g8s coordinator claims --renew task-4ed2017f', 't-gate'],
+    ['{ "state": "active", "holder": "coordinator-a", "expires_at": "+45m" }', ''],
+    ['another holder renews → the stale claim is refused, loudly:', ''],
+    ['  E_CLAIM_FENCE_STALE: claim fence renewal rejected', 't-err'],
+    ['two writers, one owner, zero silent overwrites.', 't-dim'],
+  ],
+  chaos: () => [
+    ['$ g8s chaos --simulate "agent writes outside scope"', 't-warn'],
+    ['attempt 1 → agent writes docs/unauthorized.md', ''],
+    ['  gate: E_DIFF_FIREWALL_OUT_OF_SCOPE — write refused, attempt failed', 't-err'],
+    ['attempt 2 → agent acts after receipt TTL', ''],
+    ['  gate: E_RECEIPT_EXPIRED — expired is expired. refused', 't-err'],
+    ['attempt 3 → second coordinator renews a live claim', ''],
+    ['  gate: E_CLAIM_FENCE_STALE — renewal rejected, original owner intact', 't-err'],
+    ['the rogue agent ends with: 0 writes landed, 3 typed refusals, full audit trail.', 't-gate'],
+    ['that is the whole product. the rest is plumbing.', 't-dim'],
+  ],
+  whoami: () => [
+    ['$ g8s whoami', 't-gate'],
+    ['operator @ F0 — full trust. exclusive: commits, receipts, promotion.', ''],
+    ['F1 workers: queue claim · CAS lease · path-scoped receipt · killable pgid.', ''],
+    ['F2 shares the F1 boundary. F0↔F2 = 0 direct edges. 1 issue = 1 worker = 1 receipt.', 't-dim'],
+  ],
+};
+CMDS._unknown = c => [['g8s: unknown command: ' + c, 't-warn'], ["try 'help' — every refusal is typed; none are silent.", 't-dim']];
+function typeCmd(cmd, cb) {
+  const ps = document.createElement('code'); ps.className = 'line t-gate'; ps.textContent = '$ ' + cmd;
+  OUT.appendChild(ps); OUT.scrollTop = OUT.scrollHeight;
+  setTimeout(() => { (CMDS[cmd] || CMDS._unknown(cmd)).forEach((l, i) =>
+    setTimeout(() => line(code(l[0]), l[1]), i * 50));
+    setTimeout(cb, (CMDS[cmd] ? CMDS[cmd].length : 4) * 50 + 60); }, 140);
+}
+/* boot: pane full at first paint — the replay IS the greeting */
+line('g8s — the gatekeepers. this pane replays real captures; only your keystrokes are yours.', 't-dim');
+(CMDS.help()).forEach(l => line(code(l[0]), l[1]));
+(CMDS.doctor()).forEach(l => line(code(l[0]), l[1]));
+IN.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const raw = IN.value.trim().toLowerCase(); IN.value = '';
+  if (!raw) return;
+  const cmd = raw.split(/\s+/)[0];
+  typeCmd(raw, () => { if (cmd === 'clear') OUT.innerHTML = ''; });
+});
+document.querySelectorAll('.term-hint code').forEach(c => c.addEventListener('click', () => {
+  IN.value = c.textContent; IN.focus();
+}));
+document.querySelectorAll('.installs .cmd').forEach(b => b.addEventListener('click', () => {
+  navigator.clipboard && navigator.clipboard.writeText(b.dataset.c);
+  showToast('copied — 30s to first gate');
+}));
+
+/* ===== gate feed — streaming typed verdicts (real gate inventory) ===== */
+const FEED = document.getElementById('feed');
+const GATES = [
+  ['pass', 'layer_ownership', 'PR lanes clean (S/W/C/D)'],
+  ['refuse', 'E_DIFF_FIREWALL_OUT_OF_SCOPE', 'write outside receipt scope — refused'],
+  ['pass', 'coverage_ratchet', '82.43% ≥ baseline 82.18%'],
+  ['refuse', 'E_CLAIM_FENCE_STALE', 'stale renewal rejected — owner intact'],
+  ['pass', 'provenance_ledger', 'gap reported per-PR — visibility step'],
+  ['refuse', 'E_RECEIPT_EXPIRED', 'receipt past TTL — refused'],
+  ['pass', 'platform_matrix', 'README matrix = goreleaser targets'],
+  ['refuse', 'E_PROVIDER_QUOTA_EXHAUSTED', 'refusal classified — retry_at parsed'],
+  ['pass', 'sast_triad', 'codeql + semgrep + gitleaks clean'],
+  ['refuse', 'E_WORKER_UNPRODUCTIVE_SUCCESS', 'ask-for-help response = typed failure'],
+  ['pass', 'fence_renewal', 'same holder, same scope — renewed'],
+  ['refuse', 'E_LAYER_OWNERSHIP', 'worker+cmd mix — PR split ordered'],
+  ['pass', 'structure_sync', 'README tree matches disk'],
+  ['refuse', 'E_WORKER_EMPTY_SUCCESS_RESPONSE', 'empty ok=true — demoted to failure'],
+];
+let fi = 0;
+function feedLine() {
+  const [kind, code_, note] = GATES[fi % GATES.length]; fi++;
+  const d = document.createElement('div'); d.className = 'fline';
+  const ts = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = `<span class="ts">${ts}</span><span class="${kind}">${kind === 'pass' ? 'PASS' : code_}</span><span class="info">${esc(note)}</span>`;
+  FEED.appendChild(d);
+  while (FEED.children.length > 14) FEED.removeChild(FEED.firstChild);
+}
+for (let i = 0; i < 9; i++) feedLine();
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduce) setInterval(feedLine, 2600);
+
+/* ===== containment ascii map — packets gated in flight ===== */
+const MAP = document.getElementById('map');
+let inFlight = '<span class="pk">[r-9636f]</span> <span class="pk">[r-e9574]</span>';
+const baseLines = () => [
+  '            <span class="n0">╔══════════════╗</span>',
+  '            <span class="n0">║  F0 · BRAIN  ║</span>  <span class="dim">commits · receipts · promotion</span>',
+  '            <span class="n0">╚════╦═════════╝</span>',
+  '        ' + inFlight + '   <span class="dim">receipts in flight</span>',
+  '       ╔══════╧═══╦══════╩════╦════════╗',
+  '       ║ <span class="n1">F1 · W1</span>  ║  <span class="n1">F1 · W2</span>   ║ <span class="n1">F1 · W3</span> ║  <span class="dim">worktrees · leases</span>',
+  '       ╚════╤═════╝     ║     ═╦═════╝',
+  '            <span class="ok">[ok] gated</span>   <span class="no">[refused] E_FENCE</span>    ║        <span class="dim">one passes, one refuses — typed</span>',
+  '                 ╚═════F2 · CAGE═════╝   <span class="dim">shares the F1 boundary</span>',
+];
+function renderMap() { MAP.innerHTML = baseLines().join('\n'); }
+renderMap();
+const EVENTS = [
+  () => { inFlight = '<span class="ok">[ok] r-9636f gated</span> <span class="pk">[r-e9574]</span>'; },
+  () => { inFlight = '<span class="pk">[r-9636f]</span> <span class="no">[refused] r-e9574 E_FENCE</span>'; },
+  () => { inFlight = '<span class="pk">[r-9636f]</span> <span class="pk">[r-e9574]</span>'; },
+  () => { inFlight = '<span class="pk">[r-98c88]</span> <span class="ok">[ok] gated</span>'; },
+];
+let ei = 0;
+if (!reduce) setInterval(() => { EVENTS[ei % EVENTS.length](); ei++; renderMap(); }, 3000);
+
+/* reel video: autoplay in view, pause out */
+const reelV = document.getElementById('reel');
+if (reelV) {
+  const rio = new IntersectionObserver(es => es.forEach(en => {
+    if (en.isIntersecting) { reelV.play().catch(() => {}); } else { reelV.pause(); }
+  }), { threshold: .35 });
+  rio.observe(reelV);
+}
+
+/* toast */
+const toast = document.createElement('div');
+toast.style.cssText = 'position:fixed;bottom:52px;left:50%;transform:translateX(-50%);background:var(--pane-hi);border:1px solid var(--gate);color:var(--gate);padding:8px 14px;font-size:13px;opacity:0;transition:opacity .18s;pointer-events:none;z-index:9;font-family:var(--mono)';
+document.body.appendChild(toast);
+function showToast(m) { toast.textContent = m; toast.style.opacity = 1; setTimeout(() => toast.style.opacity = 0, 1500); }
+</script>
+
+<script>
+/* ===== the receipt artifact — tilt + seal ===== */
+const rc = document.getElementById('rc'), rcWrap = document.getElementById('rcWrap');
+if (rc && rcWrap) {
+  rcWrap.addEventListener('pointermove', e => {
+    const r = rc.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+    rc.style.transform = `rotateY(${x * 16}deg) rotateX(${-y * 12}deg) translateZ(0)`;
+  });
+  rcWrap.addEventListener('pointerleave', () => { rc.style.transform = 'rotateY(0) rotateX(0)'; });
+}
+const sealBtn = document.getElementById('sealBtn');
+if (sealBtn) sealBtn.addEventListener('click', () => {
+  sealBtn.disabled = true; sealBtn.textContent = 'committing hash…';
+  const hash = document.getElementById('rc-hash');
+  const target = 'sha256: 4c7a1f9be20d8451c3a67b09e2d51faa7c0481e3b2d9f60a15c843ebd7ea92cf';
+  let i = 0;
+  const chars = '0123456789abcdef';
+  const iv = setInterval(() => {
+    i += 3;
+    hash.textContent = 'sha256: ' + target.slice(7, 7 + i) + chars.split('').sort(() => Math.random() - .5).join('').slice(0, Math.max(0, 64 - i));
+    if (i >= 64) {
+      clearInterval(iv);
+      hash.textContent = 'sha256: ' + target.slice(7);
+      rc.classList.add('rc-sealed');
+      document.getElementById('rc-seal').textContent = 'sealed';
+      document.getElementById('rc-consumed').textContent = 'true — consumed by attempt 1';
+      sealBtn.textContent = 'sealed. the agent may now write — paths, ttl, hash all bound.';
+      showToast('receipt sealed — authorization minted');
+    }
+  }, 24);
+});
+
+/* ===== session replay — a real 60s run, typed ===== */
+const RP = document.getElementById('rpbody');
+const RPSEQ = [
+  ['$ g8s submit --provider cursor --model composer-2.5 -permission workspace_write', 't-gate'],
+  ['  → QUEUED · task 656d8e02 · claim single-winner', 't-dim'],
+  ['$ g8s receipt issue --path "internal/controlplane/**" --ttl 3300', 't-gate'],
+  ['  → receipt 5a41fd02 · paths bound · expires +55m', 't-recv'],
+  ['$ g8s worker --once', 't-gate'],
+  ['  attempt claims 656d8e02 · worktree wt-cc7e6b8f @ pinned base', ''],
+  ['  worker edits store_claims.go, handle.go, lease_resilience_test.go', ''],
+  ['  worker ALSO edits internal/worker/lease_renew.go — OUTSIDE receipt scope', 't-warn'],
+  ['gate: E_DIFF_FIREWALL_OUT_OF_SCOPE — 2 files outside receipt scope', 't-err'],
+  ['  attempt failed. worktree QUARANTINED in place (evidence preserved, #815)', 't-dim'],
+  ['$ g8s receipt issue … --path "internal/worker/**"   # fresh receipt, wider scope', 't-gate'],
+  ['$ g8s submit (retry) → worker re-runs with corrected scope', ''],
+  ['  gates: layer_ownership PASS · coverage_ratchet PASS · sast_triad PASS', 't-gate'],
+  ['$ g8s verify --task 656d8e02 --json', 't-gate'],
+  ['  { ok: true, checks: 6, passed: 6, evidence: "worktree diff + gates" }', 't-gate'],
+  ['$ git commit -m "fix(controlplane,provider): typed heartbeat-transient + Wait race"', ''],
+  ['  Receipt: 656d8e02-7832-405d-95c0-37dcc2836c2b', 't-recv'],
+  ['  → landed. lineage intact. the refusal made the fix safer.', 't-dim'],
+];
+let rpi = 0, rpTimer = null, rpPlaying = false;
+function rpStep() {
+  if (!rpPlaying) return;
+  if (rpi >= RPSEQ.length) {
+    rpi = 0; RP.innerHTML = '';
+    showToast('replay loop — this refusal happened for real, today');
+    return;
+  }
+  const [txt, cls] = RPSEQ[rpi];
+  const d = document.createElement('code'); d.className = 'line ' + (cls || '');
+  d.innerHTML = code(txt); RP.appendChild(d); RP.scrollTop = RP.scrollHeight;
+  document.querySelector('.rp-bar i').style.transform = 'scaleX(' + ((rpi + 1) / RPSEQ.length) + ')';
+  rpi++;
+  rpTimer = setTimeout(rpStep, rpi % 4 === 0 ? 900 : 480);
+}
+function rpToggle(force) {
+  rpPlaying = force !== undefined ? force : !rpPlaying;
+  document.getElementById('rp-btn').textContent = rpPlaying ? '❚❚ pause' : '▶ replay';
+  if (rpPlaying) { if (rpi >= RPSEQ.length) { rpi = 0; RP.innerHTML = ''; } rpStep(); }
+  else clearTimeout(rpTimer);
+}
+const rpBtn = document.getElementById('rp-btn');
+if (rpBtn) {
+  rpBtn.addEventListener('click', () => rpToggle());
+  const io = new IntersectionObserver(es => es.forEach(en => {
+    if (en.isIntersecting && !rpPlaying) rpToggle(true);
+  }), { threshold: .4 });
+  io.observe(RP);
+}
+
+</body>
+</html>

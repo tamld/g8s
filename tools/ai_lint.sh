@@ -252,7 +252,8 @@ check_no_local_path_leak() {
     local files
     files=$(find "$target" -type f \( -name "*.md" -o \( -name "*.go" ! -name "*_test.go" \) \
         -o -name "*.yaml" -o -name "*.yml" \) \
-        ! -path "*/reference/*" ! -path "*/.git/*" ! -path "*/.opencode/*" ! -path "*/.claude/scratch/*" 2>/dev/null || true)
+        ! -path "*/reference/*" ! -path "*/.git/*" ! -path "*/.opencode/*" ! -path "*/.claude/scratch/*" \
+        ! -path "*/node_modules/*" 2>/dev/null || true)
     if [ -z "$files" ]; then
         return 0
     fi
