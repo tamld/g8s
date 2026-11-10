@@ -260,7 +260,7 @@ check_no_local_path_leak() {
 
     local hits
     hits=$(echo "$files" | xargs grep -rnE \
-        '(/Users/[A-Za-z][A-Za-z0-9_.-]*/|/home/[A-Za-z][A-Za-z0-9_.-]*/|~/Documents/|~/Downloads/|/private/var/folders/|/var/folders/.*/T/|/Users/tamld/|(C:\\\\Users\\\\|[A-Za-z]):\\\\Users\\\\)' 2>/dev/null || true)
+        '(/Users/[A-Za-z][A-Za-z0-9_.-]*/|(^|[^A-Za-z0-9_.-])/home/[A-Za-z][A-Za-z0-9_.-]*/|~/Documents/|~/Downloads/|/private/var/folders/|/var/folders/.*/T/|/Users/tamld/|(C:\\\\Users\\\\|[A-Za-z]):\\\\Users\\\\)' 2>/dev/null || true)
     if [ -n "$hits" ]; then
         echo "::error::[check_no_local_path_leak] Found local filesystem paths in tracked files:"
         echo "$hits"

@@ -1,0 +1,87 @@
+name: Site Deploy (g8s.flowaxon.com)
+
+# Deploys the operator-console site (sites/home) to Cloudflare Pages on every
+# main-landing that touches it. The claim-check gate is ADR-0040 applied to
+# the site itself: numbers baked into the page must match the live sources
+# at deploy time, or the deploy fails loudly.
+
+on:
+  push:
+    branches: [main]
+    paths: ['sites/home/**', '.github/workflows/site-deploy.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Claim-check gate (ADR-0040)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # claim 1: the version the page advertises equals the latest release tag
+          LIVE=$(gh api repos/tamld/g8s/releases/latest --jq .tag_name | sed 's/^v//')
+          PAGE=$(grep -oE '<span class="v">v[0-9.]+' sites/home/index.html | grep -oE '[0-9.]+' | head -1)
+          echo "latest release: ${LIVE} · page claims: ${PAGE}"
+          if [ "${PAGE}" != "${LIVE}" ]; then
+            echo "::error::claim-check FAILED: page version ${PAGE} != latest release ${LIVE} — bump sites/home/index.html or cut the release"
+            exit 1
+          fi
+          # claim 2: the reel asset exists and is non-trivial
+          SIZE=$(stat -c%s sites/home/assets/g8s-reel.mp4)
+          [ "${SIZE}" -gt 1000000 ] || { echo "::error::claim-check FAILED: reel asset missing/too small (${SIZE}B)"; exit 1; }
+          echo "claim-check PASS: version match + reel asset ${SIZE}B"
+
+      - name: Assemble deploy stage (no reel source, no node_modules)
+        run: |
+          set -euo pipefail
+          rm -rf .deploy-stage && mkdir -p .deploy-stage/assets
+          cp sites/home/index.html .deploy-stage/
+          cp sites/home/assets/g8s-reel.mp4 sites/home/assets/reel-poster.jpg .deploy-stage/assets/
+          printf '%s\n' \
+            '/*' \
+            '  X-Frame-Options: DENY' \
+            '  X-Content-Type-Options: nosniff' \
+            '  Strict-Transport-Security: max-age=31536000; includeSubDomains' \
+            '  Referrer-Policy: strict-origin-when-cross-origin' \
+            '  Permissions-Policy: camera=(), microphone=(), geolocation=()' \
+            "  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" \
+            > .deploy-stage/_headers
+          echo "stage: $(du -sh .deploy-stage | cut -f1)"
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@latest pages deploy .deploy-stage \
+            --project-name g8s-flowaxon --branch main --commit-dirty=true
+
+      - name: Post-deploy smoke
+        run: |
+          set -euo pipefail
+          sleep 20
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -s -o /tmp/smoke.html -w '%{http_code}' https://g8s.flowaxon.com/ || echo 000)
+            if [ "$CODE" = "200" ] && grep -q "operator console" /tmp/smoke.html; then
+              echo "smoke PASS: 200 + console marker present"
+              grep -oE '<title>[^<]+</title>' /tmp/smoke.html
+              exit 0
+            fi
+            echo "smoke attempt ${i}: code=${CODE} — retrying"; sleep 15
+          done
+          echo "::error::smoke FAILED after 5 attempts"
+          exit 1
