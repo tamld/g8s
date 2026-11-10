@@ -400,27 +400,6 @@ func checkLeaseOwnership(task *Task, workerID, leaseToken string) error {
 // path. Non-retryable outcomes redact prompt and seal receipt_hash;
 // retryable outcomes keep the prompt for another attempt.
 func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params FinishAttemptParams) (*Task, error) {
-	tx, err := s.db.BeginTx(context.Background(), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
-	task, err := scanTask(row)
-	if err != nil {
-		return nil, err
-	}
-	if task == nil {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
-	}
-	if err := checkLeaseOwnership(task, workerID, leaseToken); err != nil {
-		return nil, err
-	}
-
-	now := float64(s.clock().UnixNano()) / 1e9
-	nextState := StateWorkerCompleted
-
 	resultCanonical, err := canonicalJSON(params.Result)
 	if err != nil {
 		return nil, err
@@ -430,80 +409,105 @@ func (s *Store) FinishAttempt(taskID, workerID, leaseToken string, params Finish
 		return nil, err
 	}
 
-	// Transition to WorkerCompleted instead of directly to final state
-	// Supervisor will then accept/reject the result. result_validation and
-	// error_call_history are written by the supervisor before this call
-	// (#383) — they must survive the finish, not be reset to empty.
-	res, err := tx.Exec(
-		`UPDATE tasks SET state = ?, result_json = ?, result_hash = ?, updated_at = ?,
+	var prevState, nextState string
+	nextState = StateWorkerCompleted
+
+	err = withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
+		task, err := scanTask(row)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+		}
+		if err := checkLeaseOwnership(task, workerID, leaseToken); err != nil {
+			return err
+		}
+		prevState = task.State
+
+		now := float64(s.clock().UnixNano()) / 1e9
+
+		res, err := tx.Exec(
+			`UPDATE tasks SET state = ?, result_json = ?, result_hash = ?, updated_at = ?,
 		 completed_at = ?, last_error = ?, lease_owner = NULL, lease_token = NULL,
 		 lease_expires_at = NULL, receipt_hash = NULL,
 		 supervisor_feedback = NULL
 		 WHERE task_id = ? AND lease_owner = ? AND lease_token = ? AND state = 'RUNNING'`,
-		nextState, resultCanonical, resultHash, now,
-		now, params.Err, // Use now for completed_at
-		taskID, workerID, leaseToken)
+			nextState, resultCanonical, resultHash, now,
+			now, params.Err,
+			taskID, workerID, leaseToken)
+		if err != nil {
+			return err
+		}
+		if affected, err := res.RowsAffected(); err != nil || affected != 1 {
+			return errors.New(finishStaleLeaseMsg)
+		}
+
+		isRetryable := params.Retryable && !params.Success
+		requestJSON := marshalStoredRequest(task.Request)
+
+		fresh := *task
+		fresh.State = nextState
+		fresh.ResultHash = &resultHash
+		fresh.CompletedAt = &now
+
+		if isRetryable {
+			if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
+				"next_state":  nextState,
+				"success":     params.Success,
+				"retryable":   params.Retryable,
+				"result_hash": resultHash,
+			}, now); err != nil {
+				return err
+			}
+		} else {
+			if err := redactPayload(&requestJSON); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE tasks SET request_json = ? WHERE task_id = ?`, requestJSON, taskID); err != nil {
+				return err
+			}
+
+			if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
+				"next_state":  nextState,
+				"success":     params.Success,
+				"retryable":   params.Retryable,
+				"result_hash": resultHash,
+			}, now); err != nil {
+				return err
+			}
+
+			fresh.Request = json.RawMessage(requestJSON)
+			payload, receiptHash, err := buildReceiptTx(tx, &fresh)
+			if err != nil {
+				return err
+			}
+			_ = payload
+			if _, err := tx.Exec(`UPDATE tasks SET receipt_hash = ? WHERE task_id = ?`, receiptHash, taskID); err != nil {
+				return err
+			}
+		}
+
+		return tx.Commit()
+	})
 	if err != nil {
 		return nil, err
 	}
-	if affected, err := res.RowsAffected(); err != nil || affected != 1 {
-		return nil, errors.New(finishStaleLeaseMsg)
-	}
-
-	isRetryable := params.Retryable && !params.Success
-	requestJSON := marshalStoredRequest(task.Request)
-
-	fresh := *task
-	fresh.State = nextState
-	fresh.ResultHash = &resultHash
-	fresh.CompletedAt = &now
-
-	if isRetryable {
-		// Retryable: keep prompt for next attempt, don't seal receipt
-		if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
-			"next_state":  nextState,
-			"success":     params.Success,
-			"retryable":   params.Retryable,
-			"result_hash": resultHash,
-		}, now); err != nil {
-			return nil, err
-		}
-	} else {
-		// Non-retryable (success or permanent failure): redact prompt, seal receipt
-		if err := redactPayload(&requestJSON); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`UPDATE tasks SET request_json = ? WHERE task_id = ?`, requestJSON, taskID); err != nil {
-			return nil, err
-		}
-
-		if err := insertTaskEvent(tx, taskID, "attempt_finished", workerID, map[string]any{
-			"next_state":  nextState,
-			"success":     params.Success,
-			"retryable":   params.Retryable,
-			"result_hash": resultHash,
-		}, now); err != nil {
-			return nil, err
-		}
-
-		// Build receipt for non-retryable WorkerCompleted state
-		// Use the redacted request for receipt
-		fresh.Request = json.RawMessage(requestJSON)
-		payload, receiptHash, err := buildReceiptTx(tx, &fresh)
-		if err != nil {
-			return nil, err
-		}
-		_ = payload
-		if _, err := tx.Exec(`UPDATE tasks SET receipt_hash = ? WHERE task_id = ?`, receiptHash, taskID); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	s.appendTaskSignal(taskID, task.State, nextState, s.clock())
-	return s.GetTask(context.Background(), taskID)
+	s.appendTaskSignal(taskID, prevState, nextState, s.clock())
+	var updated *Task
+	err = withBusyRetry(func() error {
+		var getErr error
+		updated, getErr = s.GetTask(context.Background(), taskID)
+		return getErr
+	})
+	return updated, err
 }
 
 // marshalStoredRequest re-canonicalizes stored request bytes so redaction can
@@ -1155,60 +1159,76 @@ func (s *Store) RequeueResult(ctx context.Context, taskID string, supervisorID s
 
 // AddErrorCall appends an error call record to the task's error history.
 func (s *Store) AddErrorCall(ctx context.Context, taskID string, record ErrorCallRecord) error {
-	task, err := s.GetTask(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if task == nil {
-		return ErrUnknownTask
-	}
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	history := task.ErrorCallHistory
-	if history == nil {
-		history = []ErrorCallRecord{}
-	}
-	history = append(history, record)
+		var raw sql.NullString
+		err = tx.QueryRowContext(ctx, "SELECT error_call_history FROM tasks WHERE task_id = ?", taskID).Scan(&raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUnknownTask
+		}
+		if err != nil {
+			return err
+		}
 
-	historyJSON, err := json.Marshal(history)
-	if err != nil {
-		return err
-	}
+		history := []ErrorCallRecord{}
+		if raw.Valid && raw.String != "" {
+			if err := json.Unmarshal([]byte(raw.String), &history); err != nil {
+				return err
+			}
+		}
+		history = append(history, record)
 
-	now := float64(s.clock().UnixNano()) / 1e9
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE tasks SET error_call_history = ?, updated_at = ? WHERE task_id = ?`,
-		string(historyJSON), now, taskID)
-	return err
+		historyJSON, err := json.Marshal(history)
+		if err != nil {
+			return err
+		}
+
+		now := float64(s.clock().UnixNano()) / 1e9
+		_, err = tx.ExecContext(ctx,
+			`UPDATE tasks SET error_call_history = ?, updated_at = ? WHERE task_id = ?`,
+			string(historyJSON), now, taskID)
+		if err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 // ValidateResult stores the result validation outcome.
 func (s *Store) ValidateResult(ctx context.Context, taskID string, validation ResultValidation) error {
-	validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
-	validationJSON, err := json.Marshal(validation)
-	if err != nil {
+	return withBusyRetry(func() error {
+		validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
+		validationJSON, err := json.Marshal(validation)
+		if err != nil {
+			return err
+		}
+		now := float64(s.clock().UnixNano()) / 1e9
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE tasks SET result_validation = ?, updated_at = ? WHERE task_id = ?`,
+			string(validationJSON), now, taskID)
 		return err
-	}
-
-	now := float64(s.clock().UnixNano()) / 1e9
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE tasks SET result_validation = ?, updated_at = ? WHERE task_id = ?`,
-		string(validationJSON), now, taskID)
-	return err
+	})
 }
 
 // ValidateContract stores the contract validation outcome.
 func (s *Store) ValidateContract(ctx context.Context, taskID string, validation ContractValidation) error {
-	validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
-	validationJSON, err := json.Marshal(validation)
-	if err != nil {
+	return withBusyRetry(func() error {
+		validation.ValidatedAt = float64(s.clock().UnixNano()) / 1e9
+		validationJSON, err := json.Marshal(validation)
+		if err != nil {
+			return err
+		}
+		now := float64(s.clock().UnixNano()) / 1e9
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE tasks SET contract_validation = ?, updated_at = ? WHERE task_id = ?`,
+			string(validationJSON), now, taskID)
 		return err
-	}
-
-	now := float64(s.clock().UnixNano()) / 1e9
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE tasks SET contract_validation = ?, updated_at = ? WHERE task_id = ?`,
-		string(validationJSON), now, taskID)
-	return err
+	})
 }
 
 // Compile-time guarantee that Store satisfies the full DELTA-03 interface

@@ -45,94 +45,109 @@ func (s *Store) claimTaskInternal(ctx context.Context, workerID string, leaseDur
 	if leaseDurationSeconds <= 0 {
 		return nil, errors.New("lease_seconds must be positive")
 	}
-	now := float64(s.clock().UnixNano()) / 1e9
 	leaseSeconds := float64(leaseDurationSeconds)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin claim: %w", err)
-	}
-	defer tx.Rollback()
+	var (
+		reconcileSignals []pendingSignal
+		claimedID        string
+	)
+	err := withBusyRetry(func() error {
+		reconcileSignals = nil
+		claimedID = ""
 
-	var reconcileSignals []pendingSignal
-	if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
-	commitAndSignal := func() error {
-		if err := tx.Commit(); err != nil {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin claim: %w", err)
+		}
+		defer tx.Rollback()
+
+		now := float64(s.clock().UnixNano()) / 1e9
+
+		if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
 			return err
 		}
-		for _, sig := range reconcileSignals {
-			s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
-		}
-		return nil
-	}
-	var expiresAt float64
-	err = tx.QueryRowContext(ctx,
-		"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
-	switch {
-	case err == nil && expiresAt > now:
-		return nil, commitAndSignal()
-	case err == nil:
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
-			return nil, fmt.Errorf("clear stale maintenance: %w", err)
-		}
-	case !errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("read maintenance: %w", err)
-	}
 
-	var query strings.Builder
-	query.WriteString(`SELECT ` + taskColumns + ` FROM tasks
+		var expiresAt float64
+		err = tx.QueryRowContext(ctx,
+			"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
+		switch {
+		case err == nil && expiresAt > now:
+			return tx.Commit()
+		case err == nil:
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
+				return fmt.Errorf("clear stale maintenance: %w", err)
+			}
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("read maintenance: %w", err)
+		}
+
+		var query strings.Builder
+		query.WriteString(`SELECT ` + taskColumns + ` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts`)
-	var queryArgs []any
+		var queryArgs []any
 
-	if filter.Provider != "" {
-		query.WriteString(` AND json_extract(request_json, '$.provider') = ?`)
-		queryArgs = append(queryArgs, filter.Provider)
-	}
-	if filter.Model != "" {
-		query.WriteString(` AND json_extract(request_json, '$.model') = ?`)
-		queryArgs = append(queryArgs, filter.Model)
-	}
+		if filter.Provider != "" {
+			query.WriteString(` AND json_extract(request_json, '$.provider') = ?`)
+			queryArgs = append(queryArgs, filter.Provider)
+		}
+		if filter.Model != "" {
+			query.WriteString(` AND json_extract(request_json, '$.model') = ?`)
+			queryArgs = append(queryArgs, filter.Model)
+		}
 
-	query.WriteString(` AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
+		query.WriteString(` AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
 		ORDER BY priority DESC, created_at ASC
 		LIMIT 1`)
-	queryArgs = append(queryArgs, now)
+		queryArgs = append(queryArgs, now)
 
-	row := tx.QueryRowContext(ctx, query.String(), queryArgs...)
-	candidate, scanErr := scanTask(row)
-	if scanErr != nil {
-		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
-	}
-	if candidate == nil {
-		return nil, commitAndSignal()
-	}
+		row := tx.QueryRowContext(ctx, query.String(), queryArgs...)
+		candidate, scanErr := scanTask(row)
+		if scanErr != nil {
+			return fmt.Errorf("select claim candidate: %w", scanErr)
+		}
+		if candidate == nil {
+			return tx.Commit()
+		}
 
-	leaseToken := uuid.NewString()
-	res, err := tx.ExecContext(ctx, `
+		leaseToken := uuid.NewString()
+		res, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET state = 'LEASED', lease_owner = ?, lease_token = ?,
 		    lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
 		WHERE task_id = ? AND state = 'QUEUED' AND cancel_requested = 0`,
-		workerID, leaseToken, now+leaseSeconds, now, candidate.TaskID)
+			workerID, leaseToken, now+leaseSeconds, now, candidate.TaskID)
+		if err != nil {
+			return fmt.Errorf("claim task: %w", err)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return tx.Commit()
+		}
+		if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
+			"lease_token":   leaseToken,
+			"lease_seconds": leaseSeconds,
+		}, now); err != nil {
+			return err
+		}
+		claimedID = candidate.TaskID
+		return tx.Commit()
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claim task: %w", err)
-	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, commitAndSignal()
-	}
-	if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
-		"lease_token":   leaseToken,
-		"lease_seconds": leaseSeconds,
-	}, now); err != nil {
 		return nil, err
 	}
-	if err := commitAndSignal(); err != nil {
-		return nil, err
+	for _, sig := range reconcileSignals {
+		s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
 	}
-	return s.GetTask(ctx, candidate.TaskID)
+	if claimedID == "" {
+		return nil, nil
+	}
+	var task *Task
+	err = withBusyRetry(func() error {
+		var getErr error
+		task, getErr = s.GetTask(ctx, claimedID)
+		return getErr
+	})
+	return task, err
 }
 
 // ClaimTaskInSession leases the highest-priority QUEUED task in a session to workerID.
@@ -146,107 +161,134 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 	if leaseDurationSeconds <= 0 {
 		return nil, errors.New("lease_seconds must be positive")
 	}
-	now := float64(s.clock().UnixNano()) / 1e9
 	leaseSeconds := float64(leaseDurationSeconds)
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin claim: %w", err)
-	}
-	defer tx.Rollback()
+	var (
+		reconcileSignals []pendingSignal
+		claimedID        string
+	)
+	err := withBusyRetry(func() error {
+		reconcileSignals = nil
+		claimedID = ""
 
-	var reconcileSignals []pendingSignal
-	if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
-	commitAndSignal := func() error {
-		if err := tx.Commit(); err != nil {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin claim: %w", err)
+		}
+		defer tx.Rollback()
+
+		now := float64(s.clock().UnixNano()) / 1e9
+
+		if _, reconcileSignals, err = reconcileExpiredTx(ctx, tx, now); err != nil {
 			return err
 		}
-		for _, sig := range reconcileSignals {
-			s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
-		}
-		return nil
-	}
-	var expiresAt float64
-	err = tx.QueryRowContext(ctx,
-		"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
-	switch {
-	case err == nil && expiresAt > now:
-		return nil, commitAndSignal()
-	case err == nil:
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
-			return nil, fmt.Errorf("clear stale maintenance: %w", err)
-		}
-	case !errors.Is(err, sql.ErrNoRows):
-		return nil, fmt.Errorf("read maintenance: %w", err)
-	}
 
-	row := tx.QueryRowContext(ctx, `
+		var expiresAt float64
+		err = tx.QueryRowContext(ctx,
+			"SELECT expires_at FROM control_plane_maintenance WHERE singleton = 1").Scan(&expiresAt)
+		switch {
+		case err == nil && expiresAt > now:
+			return tx.Commit()
+		case err == nil:
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM control_plane_maintenance WHERE singleton = 1"); err != nil {
+				return fmt.Errorf("clear stale maintenance: %w", err)
+			}
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("read maintenance: %w", err)
+		}
+
+		row := tx.QueryRowContext(ctx, `
 		SELECT `+taskColumns+` FROM tasks
 		WHERE state = 'QUEUED' AND cancel_requested = 0 AND attempts < max_attempts
 		  AND session_id = ?
 		  AND (json_extract(request_json, '$.not_before') IS NULL OR json_extract(request_json, '$.not_before') <= ?)
 		ORDER BY priority DESC, created_at ASC
 		LIMIT 1`, sessionID, now)
-	candidate, scanErr := scanTask(row)
-	if scanErr != nil {
-		return nil, fmt.Errorf("select claim candidate: %w", scanErr)
-	}
-	if candidate == nil {
-		return nil, commitAndSignal()
-	}
+		candidate, scanErr := scanTask(row)
+		if scanErr != nil {
+			return fmt.Errorf("select claim candidate: %w", scanErr)
+		}
+		if candidate == nil {
+			return tx.Commit()
+		}
 
-	leaseToken := uuid.NewString()
-	res, err := tx.ExecContext(ctx, `
+		leaseToken := uuid.NewString()
+		res, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET state = 'LEASED', lease_owner = ?, lease_token = ?,
 		    lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
 		WHERE task_id = ? AND state = 'QUEUED' AND cancel_requested = 0`,
-		workerID, leaseToken, now+leaseSeconds, now, candidate.TaskID)
+			workerID, leaseToken, now+leaseSeconds, now, candidate.TaskID)
+		if err != nil {
+			return fmt.Errorf("claim task: %w", err)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return tx.Commit()
+		}
+		if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
+			"lease_token":   leaseToken,
+			"lease_seconds": leaseSeconds,
+		}, now); err != nil {
+			return err
+		}
+		claimedID = candidate.TaskID
+		return tx.Commit()
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claim task: %w", err)
-	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, commitAndSignal()
-	}
-	if err := insertTaskEvent(tx, candidate.TaskID, "task_claimed", workerID, map[string]any{
-		"lease_token":   leaseToken,
-		"lease_seconds": leaseSeconds,
-	}, now); err != nil {
 		return nil, err
 	}
-	if err := commitAndSignal(); err != nil {
-		return nil, err
+	for _, sig := range reconcileSignals {
+		s.appendTaskSignal(sig.taskID, sig.from, sig.to, s.clock())
 	}
-	return s.GetTask(ctx, candidate.TaskID)
+	if claimedID == "" {
+		return nil, nil
+	}
+	var task *Task
+	err = withBusyRetry(func() error {
+		var getErr error
+		task, getErr = s.GetTask(ctx, claimedID)
+		return getErr
+	})
+	return task, err
 }
 
 // StartTask promotes a LEASED task to RUNNING when the caller presents the
 // matching worker and lease token; it reports false on any mismatch.
 func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
-	now := float64(s.clock().UnixNano()) / 1e9
-	tx, err := s.db.Begin()
-	if err != nil {
-		return false
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`
+	started := false
+	err := withBusyRetry(func() error {
+		started = false
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		now := float64(s.clock().UnixNano()) / 1e9
+		res, err := tx.Exec(`
 		UPDATE tasks SET state = 'RUNNING', updated_at = ?
 		WHERE task_id = ? AND state = 'LEASED'
 		  AND lease_owner = ? AND lease_token = ? AND cancel_requested = 0`,
-		now, taskID, workerID, leaseToken)
+			now, taskID, workerID, leaseToken)
+		if err != nil {
+			return err
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return nil
+		}
+		if err := insertTaskEvent(tx, taskID, "task_started", workerID, map[string]any{}, now); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		started = true
+		return nil
+	})
 	if err != nil {
 		return false
 	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		return false
-	}
-	if err := insertTaskEvent(tx, taskID, "task_started", workerID, map[string]any{}, now); err != nil {
-		return false
-	}
-	return tx.Commit() == nil
+	return started
 }
 
 // RenewHeartbeat extends the lease of a LEASED or RUNNING task held by
@@ -269,7 +311,7 @@ func (s *Store) Heartbeat(ctx context.Context, taskID, workerID, leaseToken stri
 
 // Package-level retry configuration for SQLITE_BUSY handling in controlplane (#465).
 var (
-	busyRetryAttempts = 3
+	busyRetryAttempts = 5
 	busyBackoff       = func(attempt int) time.Duration {
 		return time.Duration(50+rand.IntN(151)) * time.Millisecond
 	}
@@ -285,18 +327,38 @@ func isBusyErr(err error) bool {
 	if errors.Is(err, ErrBusy) {
 		return true
 	}
+	if errors.Is(err, ErrUnknownTask) ||
+		errors.Is(err, ErrLeaseLost) ||
+		errors.Is(err, ErrUnknownState) ||
+		errors.Is(err, ErrLimitBounds) ||
+		errors.Is(err, ErrReceiptAlreadyConsumed) ||
+		errors.Is(err, ErrReceiptUnknownOrExpired) ||
+		errors.Is(err, sql.ErrConnDone) ||
+		errors.Is(err, sql.ErrTxDone) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	var se *sqlite.Error
 	if errors.As(err, &se) {
 		code := se.Code()
 		if code == 5 || (code&0xff) == 5 || code == 6 || (code&0xff) == 6 {
 			return true
 		}
+		return false
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "database is locked") || strings.Contains(msg, "database table is locked") {
-		return true
+	leaf := err
+	for {
+		u := errors.Unwrap(leaf)
+		if u == nil {
+			break
+		}
+		leaf = u
 	}
-	lower := strings.ToLower(msg)
+	lower := strings.ToLower(leaf.Error())
+	if strings.Contains(lower, "database is closed") {
+		return false
+	}
 	return strings.Contains(lower, "database is locked") ||
 		strings.Contains(lower, "database table is locked") ||
 		strings.Contains(lower, "sqlite_busy")
@@ -335,20 +397,20 @@ func withBusyRetry(op func() error) error {
 }
 
 func (s *Store) extendLease(ctx context.Context, taskID, workerID, leaseToken string, extensionSeconds int) error {
-	now := float64(s.clock().UnixNano()) / 1e9
-	query := `
+	var affected int64
+	err := withBusyRetry(func() error {
+		now := float64(s.clock().UnixNano()) / 1e9
+		query := `
 		UPDATE tasks SET lease_expires_at = ?, updated_at = ?
 		WHERE task_id = ? AND state IN ('LEASED', 'RUNNING')
 		  AND lease_owner = ? AND cancel_requested = 0
 		  AND (lease_expires_at IS NULL OR lease_expires_at > ?)`
-	args := []any{now + float64(extensionSeconds), now, taskID, workerID, now}
-	if leaseToken != "" {
-		query += ` AND lease_token = ?`
-		args = append(args, leaseToken)
-	}
+		args := []any{now + float64(extensionSeconds), now, taskID, workerID, now}
+		if leaseToken != "" {
+			query += ` AND lease_token = ?`
+			args = append(args, leaseToken)
+		}
 
-	var affected int64
-	err := withBusyRetry(func() error {
 		var res sql.Result
 		var execErr error
 		if s.leaseExecOverride != nil {
