@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           # claim 1: the version the page advertises equals the latest release tag
           LIVE=$(gh api repos/tamld/g8s/releases/latest --jq .tag_name | sed 's/^v//')
-          PAGE=$(grep -oE '<span class="v">v[0-9.]+' sites/home/index.html | grep -oE '[0-9.]+' | head -1)
+          PAGE=$(grep -oE '<meta name="g8s:version" content="[0-9.]+\"' sites/home/index.html | sed -E 's/.*content="([0-9.]+)"/\1/')
           echo "latest release: ${LIVE} · page claims: ${PAGE}"
           if [ "${PAGE}" != "${LIVE}" ]; then
             echo "::error::claim-check FAILED: page version ${PAGE} != latest release ${LIVE} — bump sites/home/index.html or cut the release"
