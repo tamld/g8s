@@ -1,0 +1,31 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:03.200
+g8s submit — a task enters the queue
+
+00:00:03.200 --> 00:00:06.400
+QUEUED · one attempt = one worktree = one receipt
+
+00:00:06.400 --> 00:00:09.600
+a write receipt is minted — paths bound, 55 minutes to live
+
+00:00:09.600 --> 00:00:14.200
+the worker edits three files in scope — then one outside it
+
+00:00:14.200 --> 00:00:17.400
+E_DIFF_FIREWALL_OUT_OF_SCOPE — the gate refuses, the worktree is quarantined
+
+00:00:17.400 --> 00:00:20.600
+a fresh receipt — the scope widened the right way
+
+00:00:20.600 --> 00:00:25.600
+retry: layer_ownership PASS · coverage_ratchet PASS · sast_triad PASS
+
+00:00:25.600 --> 00:00:28.800
+verify — 6/6 checks, evidence attached
+
+00:00:28.800 --> 00:00:32.400
+commit — with its receipt in the trailer. lineage intact.
+
+00:00:32.400 --> 00:00:36.000
+g8s — gated. receipted. auditable. signed.
