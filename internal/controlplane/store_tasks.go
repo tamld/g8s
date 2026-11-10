@@ -134,32 +134,34 @@ func (s *Store) populateTaskReceiptExport(ctx context.Context, t *Task) {
 // RecordReceiptExport persists the structured receipt export status for a task
 // without modifying its execution state, result, result_hash, receipt_hash, or completed_at.
 func (s *Store) RecordReceiptExport(ctx context.Context, taskID string, status ReceiptExportStatus) error {
-	status.UpdatedAt = float64(s.clock().UnixNano()) / 1e9
-	data, err := json.Marshal(status)
-	if err != nil {
-		return fmt.Errorf("marshal receipt export status: %w", err)
-	}
+	return withBusyRetry(func() error {
+		status.UpdatedAt = float64(s.clock().UnixNano()) / 1e9
+		data, err := json.Marshal(status)
+		if err != nil {
+			return fmt.Errorf("marshal receipt export status: %w", err)
+		}
 
-	var exists int
-	err = s.db.QueryRowContext(ctx, "SELECT 1 FROM tasks WHERE task_id = ?", taskID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
-	}
-	if err != nil {
-		return fmt.Errorf("verify task %s: %w", taskID, err)
-	}
+		var exists int
+		err = s.db.QueryRowContext(ctx, "SELECT 1 FROM tasks WHERE task_id = ?", taskID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+		}
+		if err != nil {
+			return fmt.Errorf("verify task %s: %w", taskID, err)
+		}
 
-	_, err = s.db.ExecContext(ctx, `
+		_, err = s.db.ExecContext(ctx, `
 		INSERT INTO task_receipt_exports (task_id, status_json, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			status_json = excluded.status_json,
 			updated_at = excluded.updated_at`,
-		taskID, string(data), status.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("record receipt export for task %s: %w", taskID, err)
-	}
-	return nil
+			taskID, string(data), status.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("record receipt export for task %s: %w", taskID, err)
+		}
+		return nil
+	})
 }
 
 // ListTasks returns up to filter.Limit newest tasks, optionally narrowed to

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,7 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 		clock = time.Now
 	}
 	dsn := fmt.Sprintf(
-		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
+		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=synchronous(FULL)",
 		sqlitePathEscape(dbPath),
 	)
 	db, err := sql.Open("sqlite", dsn)
@@ -126,6 +127,23 @@ func (s *Store) initialize() error {
 		return fmt.Errorf("pin initialization connection: %w", err)
 	}
 	defer conn.Close()
+
+	var journalMode string
+	if err := conn.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil || !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+		err = withBusyRetry(func() error {
+			var mode string
+			if qerr := conn.QueryRowContext(context.Background(), "PRAGMA journal_mode=WAL").Scan(&mode); qerr != nil {
+				return qerr
+			}
+			if !strings.EqualFold(strings.TrimSpace(mode), "wal") {
+				return fmt.Errorf("set journal_mode=WAL: got %q", mode)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("enable WAL journal mode: %w", err)
+		}
+	}
 
 	// Fast-path: if database already matches current schema version, skip exclusive lock
 	var version int

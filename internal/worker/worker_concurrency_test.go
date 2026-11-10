@@ -29,7 +29,24 @@ func TestRunLoopConcurrentDrainsAtN4(t *testing.T) {
 		task := submitTask(t, env, fmt.Sprintf("conc-%d", i), 1, nil)
 		ids = append(ids, task.TaskID)
 	}
-	code := env.sup.RunLoop(context.Background(), LoopOptions{WorkerID: "w-conc", LeaseSeconds: 60, Concurrency: 4})
+	var (
+		onErrMu sync.Mutex
+		onErrs  []error
+	)
+	code := env.sup.RunLoop(context.Background(), LoopOptions{
+		WorkerID: "w-conc", LeaseSeconds: 60, Concurrency: 4,
+		OnError: func(err error) {
+			onErrMu.Lock()
+			onErrs = append(onErrs, err)
+			onErrMu.Unlock()
+		},
+	})
+	onErrMu.Lock()
+	if len(onErrs) > 0 {
+		onErrMu.Unlock()
+		t.Fatalf("RunLoop reported errors: %v", onErrs)
+	}
+	onErrMu.Unlock()
 	if code != 0 {
 		t.Fatalf("expected drain exit 0, got %d", code)
 	}

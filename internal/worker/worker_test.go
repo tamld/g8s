@@ -113,6 +113,9 @@ type workerEnv struct {
 func newWorkerEnv(t *testing.T, clock func() time.Time, opts ...Option) *workerEnv {
 	t.Helper()
 	root := t.TempDir()
+	if os.Getenv("G8S_STATE_DIR") == "" {
+		t.Setenv("G8S_STATE_DIR", root)
+	}
 	store, err := controlplane.NewControlPlane(filepath.Join(root, "cp.db"), nil)
 	if err != nil {
 		t.Fatalf("open control plane: %v", err)
@@ -122,6 +125,7 @@ func newWorkerEnv(t *testing.T, clock func() time.Time, opts ...Option) *workerE
 	supOpts := []Option{
 		WithRunner(runner),
 		WithPollInterval(2 * time.Millisecond),
+		WithEvidenceDir(filepath.Join(root, "evidence")),
 	}
 	supOpts = append(supOpts, opts...)
 	sup := NewSupervisor(store, filepath.Join(root, "runs"), supOpts...)
