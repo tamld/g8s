@@ -20,6 +20,21 @@ func TestPathutil_TableDrivenOS(t *testing.T) {
 		wantLogs   string
 	}{
 		{
+			name:    "windows UNC user scope",
+			goos:    "windows",
+			scope:   ScopeUser,
+			homeDir: `\\server\share\Users\Alice`,
+			env: map[string]string{
+				"LOCALAPPDATA": `\\server\share\Users\Alice\AppData\Local`,
+				"APPDATA":      `\\server\share\Users\Alice\AppData\Roaming`,
+				"USERPROFILE":  `\\server\share\Users\Alice`,
+			},
+			wantData:   `\\server\share\Users\Alice\AppData\Local\Programs\g8s`,
+			wantConfig: `\\server\share\Users\Alice\AppData\Roaming\g8s`,
+			wantCache:  `\\server\share\Users\Alice\AppData\Local\Programs\g8s\cache`,
+			wantLogs:   `\\server\share\Users\Alice\AppData\Local\Programs\g8s\logs`,
+		},
+		{
 			name:    "windows user scope with LOCALAPPDATA and APPDATA",
 			goos:    "windows",
 			scope:   ScopeUser,
@@ -237,14 +252,44 @@ func TestPathutil_DetectUserProfiles(t *testing.T) {
 }
 
 func TestPathutil_JoinPathForOS(t *testing.T) {
-	winPath := joinPathForOS("windows", `C:\Users\Test`, "AppData", "Local")
-	if winPath != `C:\Users\Test\AppData\Local` {
-		t.Errorf("joinPathForOS(windows) = %s, want C:\\Users\\Test\\AppData\\Local", winPath)
+	tests := []struct {
+		name string
+		goos string
+		elem []string
+		want string
+	}{
+		{
+			name: "windows drive path join",
+			goos: "windows",
+			elem: []string{`C:\Users\Test`, "AppData", "Local"},
+			want: `C:\Users\Test\AppData\Local`,
+		},
+		{
+			name: "windows UNC root join",
+			goos: "windows",
+			elem: []string{`\\server\share`, "dir", "file"},
+			want: `\\server\share\dir\file`,
+		},
+		{
+			name: "windows drive path with double-slash child",
+			goos: "windows",
+			elem: []string{`C:\Users\Alice`, `\\sub`},
+			want: `C:\Users\Alice\sub`,
+		},
+		{
+			name: "linux path join",
+			goos: "linux",
+			elem: []string{"/home/test", ".local", "share"},
+			want: "/home/test/.local/share",
+		},
 	}
-
-	linuxPath := joinPathForOS("linux", "/home/test", ".local", "share")
-	if linuxPath != "/home/test/.local/share" {
-		t.Errorf("joinPathForOS(linux) = %s, want /home/test/.local/share", linuxPath)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinPathForOS(tt.goos, tt.elem...)
+			if got != tt.want {
+				t.Errorf("joinPathForOS(%q, %v) = %q, want %q", tt.goos, tt.elem, got, tt.want)
+			}
+		})
 	}
 }
 

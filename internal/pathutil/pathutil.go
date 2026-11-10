@@ -19,18 +19,30 @@ const (
 func joinPathForOS(goos string, elem ...string) string {
 	if goos == "windows" {
 		var parts []string
+		seenFirst := false
+		isUNC := false
 		for _, e := range elem {
+			if e == "" {
+				continue
+			}
 			normalized := strings.ReplaceAll(e, "/", "\\")
-			for _, p := range strings.Split(normalized, "\\") {
+			if !seenFirst {
+				seenFirst = true
+				isUNC = strings.HasPrefix(normalized, `\\`)
+			}
+			for _, p := range strings.Split(normalized, `\`) {
 				if p != "" {
 					parts = append(parts, p)
 				}
 			}
 		}
 		if len(parts) > 0 && strings.HasSuffix(parts[0], ":") {
-			return parts[0] + "\\" + strings.Join(parts[1:], "\\")
+			return parts[0] + `\` + strings.Join(parts[1:], `\`)
 		}
-		return strings.Join(parts, "\\")
+		if isUNC && len(parts) > 0 {
+			return `\\` + strings.Join(parts, `\`)
+		}
+		return strings.Join(parts, `\`)
 	}
 
 	var parts []string
