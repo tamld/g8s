@@ -70,6 +70,7 @@ section { padding: clamp(72px, 9vw, 150px) 0; }
 .stair .st:nth-child(1) { font-size: var(--step-display); margin-left: 0; }
 .stair .st:nth-child(2) { font-size: var(--step-display); color: var(--muted); margin-left: 8vw; }
 .stair .st:nth-child(3) { font-size: var(--step-display); color: var(--accent); margin-left: 16vw; }
+.stair .st.acc { color: var(--accent); }
 .st-mono { font-size: var(--step-body); color: var(--muted); margin: 20px 0 0 16vw; max-width: 60ch; }
 .st-mono code { color: var(--err); }
 
@@ -114,8 +115,8 @@ section { padding: clamp(72px, 9vw, 150px) 0; }
 .stats .srow { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 34px;
   align-items: baseline; padding: 16px 0; }
 .stats .num { font-weight: 900; font-size: var(--step-head); letter-spacing: -.03em;
-  font-variant-numeric: tabular-nums; text-align: right; line-height: 1; }
-.stats .num em { font-style: normal; color: var(--accent); }
+  font-variant-numeric: tabular-nums; text-align: right; line-height: 1; color: var(--accent); }
+
 .stats .lbl { font-size: var(--step-body); }
 .stats .lbl i { display: block; color: var(--muted); font-style: normal; font-size: var(--step-small); margin-top: 3px; }
 
@@ -142,9 +143,9 @@ section { padding: clamp(72px, 9vw, 150px) 0; }
 .rc-row code { color: var(--ink); word-break: break-all; }
 .rc-hash { margin-top: 10px; padding-top: 9px; border-top: 1px solid #2a2a2a;
   color: var(--muted); font-size: var(--step-small); word-break: break-all; }
-.rc-seal { position: absolute; right: 14px; top: 42px; transform: rotate(8deg);
+.rc-seal { display: none; position: absolute; right: 14px; top: 42px; transform: rotate(8deg);
   border: 2px solid var(--err); color: var(--err); padding: 3px 10px; font-size: var(--step-small); letter-spacing: 1px; }
-.rc.rc-sealed .rc-seal { border-color: var(--accent); color: var(--accent); }
+.rc.rc-sealed .rc-seal { display: block; border-color: var(--accent); color: var(--accent); }
 .rc h2 { font-weight: 900; text-transform: uppercase; font-size: var(--step-lead); letter-spacing: -.02em; margin-bottom: 14px; }
 .art-copy p { max-width: 46ch; }
 .art-copy p + p { margin-top: 12px; color: var(--muted); }
@@ -186,7 +187,8 @@ footer .fine b { color: var(--ink); font-weight: 400; }
   opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease), transform 140ms var(--ease); z-index: 9; }
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-@media (max-width: 820px) { .top { display: none; } html { scrollbar-gutter: auto; }
+@media (max-width: 820px) { .top { display: flex; position: absolute; top: 12px; right: 16px; left: auto; font-size: var(--step-small); }
+  .stair .st { margin-left: 0 !important; font-size: clamp(1.8rem, 6.4vw, 3.6rem); }
   .hero { padding-top: 16vh; } .hero .word { font-size: 15.5vw; }
   .stair .st { font-size: clamp(1.9rem, 5.8vw, 4.2rem); display: block; }
   .rc-wrap { margin-bottom: 12px; } }
@@ -213,7 +215,8 @@ footer .fine b { color: var(--ink); font-weight: 400; }
 
 <section class="stair" id="what">
   <span class="st r">Receipted.</span>
-  <span class="st r">Auditable. Signed.</span>
+  <span class="st r">Auditable.</span>
+  <span class="st r acc">Signed.</span>
   <p class="st-mono r"><code>E_CLAIM_FENCE_STALE</code> — the refusal that taught the fence its manners</p>
 </section>
 
@@ -249,10 +252,10 @@ footer .fine b { color: var(--ink); font-weight: 400; }
 
 <section id="proof">
   <div class="stats">
-    <div class="srow r"><div class="num">1<em>1</em></div><div class="lbl">gates in CI, standing between every change and main<i>layer ownership · coverage ratchet · SAST triad · provenance · matrix</i></div></div>
-    <div class="srow r"><div class="num"><em>9</em>7</div><div class="lbl">implicit state machines documented in one audit<i>the harness knows its own anatomy — docs/research/36</i></div></div>
-    <div class="srow r"><div class="num">626<em>1</em></div><div class="lbl">telemetry rows in the dogfood ledger<i>g8s built g8s — the tool measures its own supply</i></div></div>
-    <div class="srow r"><div class="num"><em>0</em></div><div class="lbl">runtime dependencies<i>one static binary · zero CGO · SLSA L2 attested releases</i></div></div>
+    <div class="srow r"><div class="num">11</div><div class="lbl">gates in CI, standing between every change and main<i>layer ownership · coverage ratchet · SAST triad · provenance · matrix</i></div></div>
+    <div class="srow r"><div class="num">97</div><div class="lbl">implicit state machines documented in one audit<i>the harness knows its own anatomy — docs/research/36</i></div></div>
+    <div class="srow r"><div class="num">6261</div><div class="lbl">telemetry rows in the dogfood ledger<i>g8s built g8s — the tool measures its own supply</i></div></div>
+    <div class="srow r"><div class="num">0</div><div class="lbl">runtime dependencies<i>one static binary · zero CGO · SLSA L2 attested releases</i></div></div>
   </div>
   <div class="terminal r" data-ui style="margin-top: 26px">
     <div class="bar"><span>queue — every task recorded · SQLite WAL</span><span>real rows</span></div>
@@ -303,7 +306,7 @@ footer .fine b { color: var(--ink); font-weight: 400; }
   <figure style="margin:0">
     <img src="https://picsum.photos/id/172/2400/1000" alt="A stone jetty stretching into still water and dense grey fog — the quiet before a verdict" width="2400" height="1000"
       style="width:100%;display:block;filter:grayscale(1) contrast(1.05)" loading="lazy">
-    <figcaption style="font-size:var(--step-small);color:var(--muted);padding-top:10px">the run is quiet until it isn’t — every silent second was gated · photo: Aleksi Tappura (Openverse, CC-compatible licence)</figcaption>
+    <figcaption style="font-size:var(--step-small);color:var(--muted);padding-top:10px">the run is quiet until it isn’t — every silent second was gated · photo: Aleksi Tappura — via Lorem Picsum (origin Unsplash)</figcaption>
   </figure>
 </section>
 
