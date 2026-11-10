@@ -3,365 +3,339 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>g8s — the operator console for autonomous coding agents</title>
-<meta name="description" content="Your agent just did something. Prove it. g8s gates every agent action behind receipts, leases and fail-loud typed verdicts — a zero-CGO binary with zero runtime dependencies.">
-<!-- BUILD_DATA — CI claim-check gate replaces at build time (ADR-0040 for the site itself) -->
-<meta name="g8s:build" content="console-v1-2026-11-09">
+<title>g8s — the gatekeepers</title>
+<meta name="description" content="g8s gates every action your AI agents take. Receipts. Leases. Typed refusals. A zero-CGO binary with zero runtime dependencies.">
+<meta name="g8s:build" content="type-only-redesign-2026-11-11">
 <meta name="g8s:version" content="0.23.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
-/* ============ g8s operator console — v2 ============
-   Grammar: the page IS the harness UI. tmux chrome, phosphor palette, 100% mono.
-   No serif. No stamps. No acts. No narrative. Panes, not sections. */
+/* ===== direction: type-only-statement · seed 1372392224 =====
+   Chivo 900 uppercase · lunar black · one accent (gate green — brand constraint,
+   replaces dealt bronze; recorded in the report) · five size steps ·
+   no pictures on the first screen; interface fragments arrive large and few. */
 :root {
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --bg: #07090b; --pane: #0b0e11; --pane-hi: #0e1216;
-  --ink: #b8c5cf; --dim: #5f6d79; --faint: #2b333b;
-  --gate: #33d17a; --amber: #d7a94b; --err: #e06060; --recv: #7fb8a2; --cyan: #5db8c4;
+  --bg: #111111; --surface: #1c1c1c; --ink: #f2f2f2; --muted: #8f8f8f;
+  --accent: #33d17a; --accent-ink: #111111; --err: #e06060; --amber: #d7a94b;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --step-small: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
+  --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
+  --step-lead: clamp(1.25rem, 1.1rem + 0.7vw, 1.625rem);
+  --step-head: clamp(2.5rem, 1.2rem + 5vw, 5.5rem);
+  --step-display: clamp(4.2rem, 2rem + 12vw, 13rem);
+  --ease: cubic-bezier(0, 0, 0.2, 1);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { scrollbar-gutter: stable; }
-body { background: var(--bg); color: var(--ink); font-family: var(--mono); font-size: 14px; line-height: 1.55;
-  -webkit-font-smoothing: antialiased; }
-::selection { background: var(--gate); color: var(--bg); }
-a { color: var(--recv); text-decoration: none; }
-a:hover { color: var(--gate); text-decoration: underline; text-underline-offset: 3px; }
+html { scroll-behavior: smooth; }
+@media (max-width: 760px) { html { scrollbar-gutter: auto; } }
+body { background: var(--bg); color: var(--ink); font-family: "Chivo", system-ui, sans-serif;
+  font-size: var(--step-body); line-height: 1.45; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--accent); }
+code, pre { font-family: var(--mono); }
 button, input { font: inherit; color: inherit; }
-* { scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: var(--faint); }
 
-.console { max-width: 1280px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column;
-  border-left: 1px solid var(--faint); border-right: 1px solid var(--faint); }
+/* corner links, not a navbar (blueprint: two-three links in a top corner) */
+.top { position: absolute; top: clamp(18px, 2.5vw, 34px); right: clamp(16px, 3vw, 44px);
+  display: flex; gap: 26px; font-weight: 700; font-size: var(--step-body); z-index: 5; }
+.top a:hover { color: var(--accent); }
 
-/* topbar: hook + identity + actions */
-.topbar { display: flex; align-items: center; gap: 18px; padding: 10px 16px;
-  border-bottom: 1px solid var(--faint); background: var(--pane); }
-.topbar .brand { color: var(--gate); font-weight: 700; }
-.topbar .brand .v { color: var(--dim); font-weight: 400; }
-.topbar .hook { color: var(--ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topbar .hook b { color: var(--amber); font-weight: 400; }
-.topbar .act { color: var(--dim); white-space: nowrap; }
-.topbar .act a.star { color: var(--gate); }
+.wrap { max-width: 1440px; margin: 0 auto; padding-inline: clamp(16px, 3vw, 44px); }
 
-/* grid: 2 cols on desktop, stacked on phones */
-.grid { display: grid; grid-template-columns: 1.25fr 1fr; flex: 1; }
-.col { display: flex; flex-direction: column; min-width: 0; }
-.col + .col { border-left: 1px solid var(--faint); }
+/* ---- hero: one word, cropped ---- */
+.hero { padding-top: 14vh; display: flex; flex-direction: column; gap: clamp(28px, 5vh, 60px);
+  position: relative; overflow: hidden; }
+.hero .word { font-weight: 900; text-transform: uppercase; letter-spacing: -.05em; line-height: .8;
+  font-size: clamp(5rem, 24vw, 36rem); margin-top: 10vh; margin-left: -0.03em; }
+.hero .word .crop { color: var(--ink); }
+.hero .foot { display: flex; justify-content: space-between; align-items: flex-end;
+  padding-bottom: clamp(20px, 3vw, 40px); gap: 24px; flex-wrap: wrap; }
+.hero .support { max-width: 44ch; font-size: var(--step-lead); line-height: 1.4; }
+.hero .support .rec { color: var(--accent); }
+.hero .action { display: inline-block; font-weight: 900; text-transform: uppercase; font-size: var(--step-body);
+  background: var(--accent); color: var(--accent-ink); padding: 14px 22px; border: 0; cursor: pointer; }
+.hero .action:hover { background: var(--ink); color: var(--bg); }
 
-/* panes: titled like tmux panes */
-.pane { border-bottom: 1px solid var(--faint); display: flex; flex-direction: column; min-width: 0; }
-.pane:last-child { border-bottom: 0; }
-.pt { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-  padding: 7px 16px; background: var(--pane-hi); color: #97a3ae; font-size: 13px; letter-spacing: .5px; }
-.pt .live { color: var(--gate); }
-.pt .live::before { content: "● "; animation: blink 2.1s steps(2) infinite; }
-@keyframes blink { 50% { opacity: .35; } }
-.pb { padding: 12px 16px; min-width: 0; }
+.r { opacity: 0; transform: translateY(14px); }
+.r.in { opacity: 1; transform: none; transition: opacity 300ms var(--ease), transform 300ms var(--ease); }
+@keyframes caret { 50% { opacity: 0; } }
+.caret { display: inline-block; width: .12em; height: .9em; background: var(--accent);
+  vertical-align: baseline; animation: caret 1.05s steps(2) infinite; }
 
-/* hook strip: the one-line value prop */
-.hookpane { border-bottom: 1px solid var(--faint); padding: 26px 16px 20px; }
-.hookpane .l1, .hookpane h1.l1 { font-size: 17px; color: var(--ink); font-weight: 400; }
-.hookpane .l1 b { color: var(--amber); font-weight: 400; }
-.hookpane .l2 { margin-top: 10px; color: #a8b4bd; font-size: 13px; max-width: 68ch; }
-.installs { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
-.installs .cmd { display: inline-flex; gap: 8px; background: var(--pane-hi); padding: 8px 12px;
-  cursor: pointer; font-size: 13px; border: 0; }
-.installs .cmd:hover { background: #131a20; }
-.installs .cmd:active { transform: scale(0.97); }
-.installs .cmd .ps { color: var(--gate); }
-.installs .cmd span { color: var(--ink); }
-.installs .lbl { color: #93a3ae; font-size: 13px; align-self: center; }
+/* ---- sections: each a different horizontal position ---- */
+section { padding: clamp(72px, 9vw, 150px) 0; }
+.stair .st { display: inline-block; font-weight: 900; text-transform: uppercase; letter-spacing: -.03em; line-height: .92; font-size: clamp(2.2rem, 1rem + 4.5vw, 6rem); }
+.stair .st:nth-child(1) { font-size: var(--step-display); margin-left: 0; }
+.stair .st:nth-child(2) { font-size: var(--step-display); color: var(--muted); margin-left: 8vw; }
+.stair .st:nth-child(3) { font-size: var(--step-display); color: var(--accent); margin-left: 16vw; }
+.stair .st.acc { color: var(--accent); }
+.st-mono { font-size: var(--step-body); color: var(--muted); margin: 20px 0 0 16vw; max-width: 60ch; }
+.st-mono code { color: var(--err); }
 
-/* terminal */
-.term-body { height: min(56vh, 500px); overflow-y: auto; padding: 12px 16px; }
-.term-body .line { display: block; white-space: pre-wrap; word-break: break-word; }
-.t-dim { color: #93a3ae; } .t-gate { color: var(--gate); } .t-warn { color: var(--amber); }
-.t-err { color: var(--err); } .t-recv { color: var(--recv); } .t-cyan { color: var(--cyan); }
-.term-input { display: flex; gap: 9px; padding: 10px 16px; background: var(--pane-hi); }
-.term-input .ps { color: var(--gate); white-space: nowrap; }
-.term-input input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0;
-  color: var(--ink); caret-color: var(--gate); }
-.term-hint { padding: 7px 16px 10px; color: var(--dim); font-size: 13px; }
-.term-hint code { color: var(--ink); cursor: pointer; }
-.term-hint code:hover { color: var(--gate); }
+/* comparison set as text */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 4vw, 72px); }
+.compare h3 { font-weight: 900; text-transform: uppercase; font-size: var(--step-body);
+  letter-spacing: -.02em; margin-bottom: 18px; }
+.compare .without h3 { color: var(--muted); }
+.compare .with h3 { color: var(--accent); }
+.compare p { font-size: var(--step-body); max-width: 52ch; }
+.compare p, .art-copy p, .hero .support { overflow-wrap: break-word; }
+.compare p + p { margin-top: 14px; }
+.compare .mark { font-family: var(--mono); font-size: var(--step-small); color: var(--muted); }
+.compare .with .mark { color: var(--accent); }
+@media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
 
-/* gate feed: streaming typed codes */
-.feed { height: 218px; overflow: hidden; padding: 10px 16px; position: relative; }
-.feed .fline { display: flex; gap: 10px; padding: 2.5px 0; font-size: 13px; white-space: nowrap; overflow: hidden; }
-.feed .ts { color: var(--dim); font-variant-numeric: tabular-nums; }
-.feed .pass { color: var(--gate); }
-.feed .refuse { color: var(--err); }
-.feed .info { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
-.feed::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 46px;
-  background: linear-gradient(transparent, var(--pane)); pointer-events: none; }
+/* call and response — the live terminal */
+.cr-head { font-weight: 900; text-transform: uppercase; font-size: var(--step-head);
+  line-height: .92; letter-spacing: -.03em; margin-bottom: 26px; }
+.cr-head .r2 { color: var(--accent); }
+.terminal { background: var(--surface); border: 1px solid #2a2a2a; padding: 18px 20px 14px; }
+.terminal .bar { display: flex; justify-content: space-between; color: var(--muted);
+  font-size: var(--step-small); border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; margin-bottom: 12px; }
+.terminal .body { height: min(46vh, 430px); overflow-y: auto; font-size: var(--step-small); line-height: 1.6; }
+.terminal .body .line { display: block; white-space: pre-wrap; word-break: break-word; }
+.t-dim { color: var(--muted); } .t-gate { color: var(--accent); } .t-err { color: var(--err); }
+.t-warn { color: var(--amber); } .t-recv { color: #8ab8a2; } .t-ink { color: var(--ink); }
+.terminal .inputline { display: flex; gap: 10px; padding-top: 10px; border-top: 1px solid #2a2a2a; }
+.terminal .inputline .ps { color: var(--accent); white-space: nowrap; }
+.terminal .inputline input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0;
+  color: var(--ink); caret-color: var(--accent); font-size: var(--step-small); }
+.terminal .hints { padding-top: 8px; color: var(--muted); font-size: var(--step-small); }
+.terminal .hints code { color: var(--ink); cursor: pointer; }
+.terminal .hints code:hover { color: var(--accent); }
 
-/* containment ascii map */
-.map { padding: 14px 16px 10px; font-size: 13px; line-height: 1.5; white-space: pre; overflow-x: auto; }
-.map .n0 { color: var(--gate); } .map .n1 { color: var(--recv); } .map .n2 { color: var(--dim); }
-.map .pk { color: var(--amber); } .map .ok { color: var(--gate); } .map .no { color: var(--err); }
-.map .dim { color: var(--dim); }
+/* stats: column aligned on the decimal */
+.stats { max-width: 760px; margin-left: auto; }
+.queue { width: 100%; border-collapse: collapse; font-size: var(--step-small); }
+.queue th { text-align: left; color: var(--muted); font-weight: 400; padding: 4px 10px; }
+.queue td { padding: 5px 10px; border-bottom: 1px solid #2a2a2a; }
+.queue .g { color: var(--accent); }
+.stats .srow { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 34px;
+  align-items: baseline; padding: 16px 0; }
+.stats .num { font-weight: 900; font-size: var(--step-head); letter-spacing: -.03em;
+  font-variant-numeric: tabular-nums; text-align: right; line-height: 1; color: var(--accent); }
 
-/* queue table */
-.queue { width: 100%; border-collapse: collapse; font-size: 13px; }
-.queue th { text-align: left; color: var(--dim); font-weight: 400; padding: 4px 10px; border-bottom: 1px solid var(--faint); }
-.queue td { padding: 5px 10px; border-bottom: 1px solid #10151a; white-space: nowrap; }
-.queue td.st { color: var(--gate); }
-.queue td.id { color: var(--recv); }
-.queue .more { color: var(--dim); white-space: normal; }
+.stats .lbl { font-size: var(--step-body); }
+.stats .lbl i { display: block; color: var(--muted); font-style: normal; font-size: var(--step-small); margin-top: 3px; }
 
-/* ledger ticker */
-.tick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
-.tick .c { padding: 14px 16px; border-right: 1px solid var(--faint); }
-.tick .c:last-child { border-right: 0; }
-.tick .n { font-size: 21px; color: var(--gate); font-variant-numeric: tabular-nums; }
-.tick .k { color: var(--dim); font-size: 13px; margin-top: 3px; }
+/* proof: names as one sentence */
+.onesentence { font-size: clamp(1.6rem, .9rem + 2.6vw, 3.4rem); font-weight: 700;
+  line-height: 1.25; letter-spacing: -.02em; max-width: 30ch; }
+.onesentence .g { color: var(--accent); }
+.onesentence .rest { color: var(--muted); font-weight: 400; }
 
-/* why strip */
-.why { display: grid; grid-template-columns: repeat(3, 1fr); }
-.why .w { padding: 16px 16px; border-right: 1px solid var(--faint); font-size: 13px; color: var(--ink); }
-.why .w:last-child { border-right: 0; }
-.why .w b { color: var(--gate); font-weight: 400; display: block; margin-bottom: 5px; }
-.why .w span { color: var(--dim); }
-
-/* bottom status bar (tmux) */
-.statusbar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 0; align-items: center;
-  background: var(--pane-hi); border-top: 1px solid var(--faint); font-size: 13px; overflow: hidden; }
-@media (max-width: 980px) { .statusbar .seg.dim { display: none; } }
-.statusbar .seg { padding: 6px 16px; white-space: nowrap; }
-.statusbar .seg:first-child { padding-left: 16px; }
-.statusbar .seg.on { background: var(--gate); color: var(--bg); font-weight: 700; }
-.statusbar .seg.dim { color: #93a3ae; }
-.statusbar .sp { flex: 1; min-width: 0; }
-.statusbar a { color: var(--recv); }
-
-@media (max-width: 980px) { .grid { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid var(--faint); }
-  .topbar .hook { display: none; } .why { grid-template-columns: 1fr; } .why .w { border-right: 0; border-bottom: 1px solid var(--faint); }
-  .tick { grid-template-columns: repeat(2, 1fr); } .tick .c:nth-child(2) { border-right: 0; } }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-/* ---- business brief band (plain-language layer) ---- */
-.brief { border-bottom: 1px solid var(--faint); background: var(--pane); padding: 30px 16px 26px; }
-.bq { font-size: 18px; line-height: 1.5; color: var(--ink); max-width: 72ch; }
-.bq b { color: var(--amber); font-weight: 400; }
-.ba { margin-top: 14px; font-size: 14px; line-height: 1.65; color: #a8b4bd; max-width: 78ch; }
-.ba b { color: var(--ink); font-weight: 400; }
-.bpaths { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
-.bp { display: inline-block; padding: 9px 14px; background: var(--pane-hi); color: var(--ink); font-size: 13px; }
-.bp:hover { background: #131a20; text-decoration: none; }
-.bp span { color: var(--gate); }
-.biz { display: grid; grid-template-columns: 1fr 1fr; }
-.biz .b { padding: 14px 16px; border-bottom: 1px solid #10151a; }
-.biz .b:nth-child(odd) { border-right: 1px solid #10151a; }
-.biz .b:nth-last-child(-n+2) { border-bottom: 0; }
-.biz .b b { display: block; color: var(--ink); font-weight: 400; margin-bottom: 5px; font-size: 14px; }
-.biz .b span { color: var(--dim); font-size: 13px; line-height: 1.55; display: block; }
-@media (max-width: 860px) { .biz { grid-template-columns: 1fr; } .biz .b { border-right: 0 !important; } }
-/* ---- artifact: the 3D receipt ---- */
-.artifact-strip { border-bottom: 1px solid var(--faint); }
-.art { display: grid; grid-template-columns: 440px 1fr; gap: 30px; padding: 22px 16px; align-items: center; }
-.rc-wrap { perspective: 1100px; display: flex; justify-content: center; padding: 12px 0; }
-.rc { width: 100%; max-width: 420px; background: #0d1318;
-  border: 1px solid var(--faint); padding: 18px 18px 16px; transform-style: preserve-3d;
-  transition: transform .08s linear; will-change: transform; position: relative; overflow: hidden; }
-.rc::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(51,209,122,.06); pointer-events: none; }
-.rc-face { position: relative; }
-.rc-head { display: flex; justify-content: space-between; color: var(--gate); font-size: 13px;
-  letter-spacing: 2px; border-bottom: 1px solid var(--faint); padding-bottom: 9px; margin-bottom: 10px; }
-.rc-head .rc-no { color: var(--amber); letter-spacing: 1px; }
-.rc-row { display: flex; gap: 12px; padding: 4px 0; font-size: 12.5px; }
-.rc-row span { color: var(--dim); min-width: 108px; }
+/* the receipt artifact — interface fragment */
+.artband { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 4vw, 70px); align-items: center; }
+@media (max-width: 860px) { .artband { grid-template-columns: 1fr; } }
+.rc-wrap { perspective: 1100px; }
+.rc { background: var(--surface); border: 1px solid #2a2a2a; padding: 18px 18px 16px;
+  transform-style: preserve-3d; transition: transform 120ms var(--ease); will-change: transform; position: relative; }
+.rc::after { content: ""; position: absolute; inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(51,209,122,.08); pointer-events: none; }
+.rc-head { display: flex; justify-content: space-between; color: var(--accent); font-size: var(--step-small);
+  letter-spacing: 2px; border-bottom: 1px solid #2a2a2a; padding-bottom: 9px; margin-bottom: 10px; }
+.rc-head .st { color: var(--err); }
+.rc.rc-sealed .rc-head .st { color: var(--accent); }
+.rc-row { display: flex; gap: 12px; padding: 4px 0; font-size: var(--step-small); }
+.rc-row span { color: var(--muted); min-width: 110px; }
 .rc-row code { color: var(--ink); word-break: break-all; }
-.rc-hash { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--faint);
-  color: var(--dim); font-size: 11.5px; word-break: break-all; }
-.rc-seal { position: absolute; right: 14px; top: 44px; transform: rotate(8deg) scale(1);
-  border: 2px solid var(--err); color: var(--err); padding: 3px 10px; font-size: 12px;
-  letter-spacing: 1px; opacity: .92; }
-.rc-sealed .rc-seal { border-color: var(--gate); color: var(--gate); }
-.rc-sealed .rc-row #rc-consumed { color: var(--gate); }
-.art-copy h2 { font-size: 16px; color: var(--ink); margin-bottom: 10px; font-weight: 400; }
-.art-copy p { color: #a8b4bd; font-size: 13.5px; line-height: 1.6; max-width: 60ch; }
-.art-cta { margin-top: 14px; }
-.seal-btn { background: var(--pane-hi); border: 0; color: var(--gate); font-family: var(--mono);
-  font-size: 13px; padding: 9px 14px; cursor: pointer; }
-.seal-btn:hover { background: #131a20; }
-.seal-btn:disabled { color: var(--dim); cursor: default; }
-.art-copy .dim { font-size: 12.5px; margin-left: 10px; }
-@media (max-width: 860px) { .art { grid-template-columns: 1fr; } }
+.rc-hash { margin-top: 10px; padding-top: 9px; border-top: 1px solid #2a2a2a;
+  color: var(--muted); font-size: var(--step-small); word-break: break-all; }
+.rc-seal { display: none; position: absolute; right: 14px; top: 42px; transform: rotate(8deg);
+  border: 2px solid var(--err); color: var(--err); padding: 3px 10px; font-size: var(--step-small); letter-spacing: 1px; }
+.rc.rc-sealed .rc-seal { display: block; border-color: var(--accent); color: var(--accent); }
+.rc h2 { font-weight: 900; text-transform: uppercase; font-size: var(--step-lead); letter-spacing: -.02em; margin-bottom: 14px; }
+.art-copy p { max-width: 46ch; }
+.art-copy p + p { margin-top: 12px; color: var(--muted); }
+.seal-btn { background: none; border: 0; color: var(--accent); font-weight: 700;
+  font-size: var(--step-body); cursor: pointer; padding: 0; border-bottom: 3px solid var(--accent); }
+.seal-btn:hover { color: var(--ink); border-color: var(--ink); }
+.seal-btn:disabled { color: var(--muted); border-color: var(--muted); cursor: default; }
+.art-copy .dim { font-size: var(--step-small); color: var(--muted); margin-left: 12px; }
 
-/* ---- session replay (TUI movie) ---- */
-.replay-pane { border-bottom: 1px solid var(--faint); }
-.rp { background: none; border: 0; color: var(--gate); cursor: pointer; font-size: 13px; }
-.rp:hover { color: var(--ink); }
-.rp-body { height: 240px; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.6; }
-.rp-body .line { display: block; white-space: pre-wrap; word-break: break-word; }
-.rp-bar { height: 3px; background: #10151a; }
-.rp-bar i { display: block; height: 100%; width: 100%; background: var(--gate); transform: scaleX(0); transform-origin: left; transition: transform .3s var(--ease-out-quart); }
+/* reel band: the moving picture */
+.reelband video { width: 100%; display: block; }
+.reelband .cap { font-size: var(--step-small); color: var(--muted); padding-top: 10px; }
+
+/* cta: one word is the button */
+.ctaword { display: block; font-weight: 900; text-transform: uppercase; letter-spacing: -.05em;
+  line-height: .88; font-size: clamp(4.2rem, 2rem + 12vw, 13rem); color: var(--accent);
+  background: none; border: 0; cursor: pointer;
+  padding: 0; text-align: left; width: 100%; }
+.ctaword:hover { color: var(--ink); }
+.ctaword .sub { font-size: var(--step-body); font-weight: 400; text-transform: none;
+  letter-spacing: 0; -webkit-text-stroke: 0; color: var(--muted); display: block;
+  margin-top: 18px; }
+.ctaword .sub code { font-size: var(--step-body); }
+
+/* footer: invitation over a cropped name */
+footer { padding-bottom: clamp(60px, 8vw, 120px); }
+footer .invite { font-size: var(--step-lead); max-width: 44ch; }
+footer .invite a { color: var(--accent); border-bottom: 2px solid var(--accent); }
+footer .inv-name { font-weight: 900; text-transform: uppercase; letter-spacing: -.05em;
+  line-height: .82; font-size: clamp(6rem, 3rem + 16vw, 19rem); color: var(--surface); margin-top: 40px; user-select: none; }
+footer .inv-name .last { color: var(--accent); }
+footer .fine { font-size: var(--step-small); color: var(--muted); margin-top: 26px; max-width: 88ch; }
+footer .fine code { color: var(--ink); }
+footer .fine b { color: var(--ink); font-weight: 400; }
+
+.toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(8px);
+  background: var(--surface); border: 1px solid var(--accent); color: var(--accent);
+  font-family: var(--mono); font-size: var(--step-small); padding: 9px 16px;
+  opacity: 0; pointer-events: none; transition: opacity 140ms var(--ease), transform 140ms var(--ease); z-index: 9; }
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 820px) { .top { display: flex; position: absolute; top: 12px; right: 16px; left: auto; font-size: var(--step-small); }
+  .stair .st { margin-left: 0 !important; font-size: clamp(1.8rem, 6.4vw, 3.6rem); }
+  .hero { padding-top: 16vh; } .hero .word { font-size: 15.5vw; }
+  .stair .st { font-size: clamp(1.9rem, 5.8vw, 4.2rem); display: block; }
+  .rc-wrap { margin-bottom: 12px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; }
+  .r { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
-<div class="console">
-
-<div class="topbar">
-  <span class="brand">g8s <span class="v" style="color:#93a3ae">v0.23.0</span></span>
-  <span class="hook">An AI agent just did something on your systems. <b>Can you prove what, and who allowed it?</b></span>
-  <span class="act"><a class="star" href="https://github.com/tamld/g8s">[star] github.com/tamld/g8s</a></span>
+<div class="top">
+  <a href="#console">console</a>
+  <a href="#proof">proof</a>
+  <a href="https://github.com/tamld/g8s">github ↗</a>
 </div>
 
-<div class="brief">
-  <div class="brief-main">
-    <p class="bq">AI agents now write code, send emails, move money, touch customers.
-    When one of them does something wrong — <b>who explains it, and with what evidence?</b></p>
-    <p class="ba">g8s is the checkpoint system that stands between your AI agents and your systems.
-    <b>Every action authorized in advance. Every refusal explained in machine-readable language.
-    Every outcome provable after the fact.</b> Not a policy document — a working gate.</p>
-    <div class="bpaths">
-      <a class="bp" href="#console">I run or build agents — <span>open the console ↓</span></a>
-      <a class="bp" href="#leaders">I lead the business — <span>what this buys me ↓</span></a>
+<header class="hero wrap">
+  <h1 class="word r in">GATED<span class="crop">.</span><span class="caret"></span></h1>
+  <div class="foot">
+    <p class="support">g8s stands between your AI agents and your systems. <span class="rec">Every action authorized before it happens. Every refusal explained in a language machines parse. Every outcome provable after.</span></p>
+    <button class="action" id="openConsole">Open the console</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section class="stair" id="what">
+  <span class="st r">Receipted.</span>
+  <span class="st r">Auditable.</span>
+  <span class="st r acc">Signed.</span>
+  <p class="st-mono r"><code>E_CLAIM_FENCE_STALE</code> — the refusal that taught the fence its manners</p>
+</section>
+
+<section id="compare">
+  <div class="compare">
+    <div class="side without r">
+      <h3>An agent without g8s</h3>
+      <p>It edits files nobody authorized. It touches paths outside the task. When something breaks,
+      the investigation starts with <em>“what did it even run?”</em> — and ends in guesses.</p>
+      <p>Compliance is a document. The gap between policy and behavior is where incidents live.</p>
+    </div>
+    <div class="side with r">
+      <h3>The same agent, gated</h3>
+      <p>Before it touches anything, it holds a receipt naming the exact paths, expiring in minutes.
+      Outside them: <code class="mark">E_DIFF_FIREWALL_OUT_OF_SCOPE</code> — refused in the moment, in a code an auditor reads.</p>
+      <p>Policy executes as gates. Every outcome carries its evidence. The investigation is a table.</p>
     </div>
   </div>
-</div>
+</section>
 
-<div class="grid" id="console">
-<div class="col">
-
-  <div class="hookpane">
-    <h1 class="l1">An operator console for agents that <b>refuse to be trusted blindly</b>.</h1>
-    <div class="l2">Every action behind a receipt. Every refusal carries a typed code. Every landing carries its lineage. The panes here run real captures from the harness that built itself — type into it.</div>
-    <div class="installs">
-      <span class="lbl">install in 30s:</span>
-      <button class="cmd" data-c="brew install tamld/g8s/g8s"><span class="ps">$</span><span>brew install tamld/g8s/g8s</span></button>
-      <button class="cmd" data-c="curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash"><span class="ps">$</span><span>curl … install.sh | bash</span></button>
+<section id="console">
+  <div class="callresp">
+    <div class="cr-head r">Call. <span class="r2">Response.</span><br>Every time.</div>
+    <p class="r" style="color:var(--muted); max-width:52ch; margin-bottom:26px">A faithful terminal — the transcript below is real g8s output from the session that built this page. Type into it.</p>
+    <div class="terminal r" data-ui>
+      <div class="bar"><span>operator@homelab — g8s session</span><span>interactive</span></div>
+      <div class="body" id="tbody"></div>
+      <div class="inputline"><span class="ps">$</span><input id="tin" autocomplete="off" spellcheck="false" placeholder="type a command — try: help"></div>
+      <div class="hints">try: <code>help</code> · <code>doctor</code> · <code>submit</code> · <code>receipt</code> · <code>fence</code> · <code>chaos</code> · <code>whoami</code></div>
     </div>
   </div>
+</section>
 
-  <div class="pane" style="flex:1">
-    <div class="pt"><span>terminal — for the engineers · real captures</span><span class="live">interactive</span></div>
-    <div class="term-body" id="tbody"></div>
-    <div class="term-input"><code class="ps">$</code><input id="tin" autocomplete="off" spellcheck="false" placeholder="type a command — try: help"></div>
-    <div class="term-hint">try: <code>help</code> · <code>doctor</code> · <code>submit</code> · <code>receipt</code> · <code>fence</code> · <code>verify</code> · <code>chaos</code> · <code>whoami</code></div>
+<section id="proof">
+  <div class="stats">
+    <div class="srow r"><div class="num">11</div><div class="lbl">gates in CI, standing between every change and main<i>layer ownership · coverage ratchet · SAST triad · provenance · matrix</i></div></div>
+    <div class="srow r"><div class="num">97</div><div class="lbl">implicit state machines documented in one audit<i>the harness knows its own anatomy — docs/research/36</i></div></div>
+    <div class="srow r"><div class="num">6261</div><div class="lbl">telemetry rows in the dogfood ledger<i>g8s built g8s — the tool measures its own supply</i></div></div>
+    <div class="srow r"><div class="num">0</div><div class="lbl">runtime dependencies<i>one static binary · zero CGO · SLSA L2 attested releases</i></div></div>
   </div>
-
-  <div class="pane">
-    <div class="pt"><span>queue — every task recorded</span><span>SQLite WAL</span></div>
+  <div class="terminal r" data-ui style="margin-top: 26px">
+    <div class="bar"><span>queue — every task recorded · SQLite WAL</span><span>real rows</span></div>
     <table class="queue">
       <tr><th>task</th><th>state</th><th>lane</th><th>receipt</th></tr>
-      <tr><td class="id">4ed2017f</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>9636f68d</td></tr>
-      <tr><td class="id">dba40b29</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>e9574675</td></tr>
-      <tr><td class="id">656d8e02</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>5a41fd02</td></tr>
-      <tr><td class="id">98c88b6d</td><td class="st">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>8e7edea3</td></tr>
-      <tr><td class="more" colspan="4">…6,255 more rows in the dogfood ledger — every row carries its lineage</td></tr>
+      <tr><td>4ed2017f</td><td class="g">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>9636f68d</td></tr>
+      <tr><td>dba40b29</td><td class="g">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>e9574675</td></tr>
+      <tr><td>656d8e02</td><td class="g">WORKER_COMPLETED</td><td>cursor/composer-2.5</td><td>5a41fd02</td></tr>
     </table>
   </div>
+</section>
 
-</div>
-<div class="col">
-
-  <div class="pane">
-    <div class="pt"><span>gate feed — the refusals, as engineers see them</span><span class="live">streaming</span></div>
-    <div class="feed" id="feed"></div>
-  </div>
-
-  <div class="pane">
-    <div class="pt"><span>containment — packets gated in flight</span><span>ADR-0032</span></div>
-    <div class="map" id="map"></div>
-  </div>
-
-  <div class="pane">
-    <div class="pt"><span>ledger — measured on its own supply</span><span>dogfood</span></div>
-    <div class="tick">
-      <div class="c"><div class="n">11</div><div class="k">gate classes in CI</div></div>
-      <div class="c"><div class="n">97</div><div class="k">FSMs documented</div></div>
-      <div class="c"><div class="n">6261</div><div class="k">ledger rows</div></div>
-      <div class="c"><div class="n">0</div><div class="k">runtime deps</div></div>
-    </div>
-  </div>
-
-  <div class="pane" id="leaders">
-    <div class="pt"><span>for the business — what this buys you</span><span>no terminal required</span></div>
-    <div class="biz">
-      <div class="b"><b>An audit trail that writes itself.</b><span>Every agent action — what ran, where, who allowed it — recorded as it happens. Compliance stops being a scramble.</span></div>
-      <div class="b"><b>Policy enforced by code, not by promise.</b><span>Your rules (what agents may touch, when, how far) execute as gates. An agent that breaks them is stopped and told why — in the moment.</span></div>
-      <div class="b"><b>Failures that explain themselves.</b><span>When something goes wrong you get a typed, specific reason — not a mystery. Your engineers fix causes, not symptoms.</span></div>
-      <div class="b"><b>Built the way it asks you to build.</b><span>This harness released itself: attested builds, signed artifacts, and a public ledger of its own quality. The proof habit is the product.</span></div>
-    </div>
-  </div>
-
-  <div class="pane">
-    <div class="pt"><span>why it exists — the doctrines</span><span>the doctrines</span></div>
-    <div class="why">
-      <div class="w"><b>COMPLIANCE-IN-CODE</b><span>every claim is a check; deviations are typed trailers, counted — adr-0040</span></div>
-      <div class="w"><b>FAIL LOUD</b><span>every ok=false carries an E_* reason an agent can parse — never silent</span></div>
-      <div class="w"><b>TRANSPARENT REGISTRIES</b><span>a claim a check cannot verify is deleted from the registry</span></div>
-    </div>
-  </div>
-
-</div>
-</div>
-
-
-<div class="artifact-strip">
-  <div class="pane" style="border:0">
-    <div class="pt"><span>the artifact — a receipt, made tangible</span><span>drag to tilt · click to seal</span></div>
-    <div class="art">
-      <div class="rc-wrap" id="rcWrap">
-        <div class="rc" id="rc">
-          <div class="rc-face">
-            <div class="rc-head"><span>Write receipt</span><span class="rc-no">single-use</span></div>
-            <div class="rc-row"><span>receipt_id</span><code>9636f68d-625e-4345-826d-272bae7e2561</code></div>
-            <div class="rc-row"><span>allowed_paths</span><code>internal/worker/**</code></div>
-            <div class="rc-row"><span>issued_to</span><code>task 4ed2017f · cursor/composer-2.5</code></div>
-            <div class="rc-row"><span>ttl</span><code>3300s · expires +55m</code></div>
-            <div class="rc-row"><span>consumed</span><code id="rc-consumed">false</code></div>
-            <div class="rc-hash" id="rc-hash">sha256: 9f2a7c41be04d8c6f31a55b0e7d92c48aa61f013b8c7e2d54f90a613c7eb42d1</div>
-            <div class="rc-seal" id="rc-seal">unsealed</div>
-          </div>
-        </div>
-      </div>
-      <div class="art-copy">
-        <h2>This is the whole idea, as an object.</h2>
-        <p>Before an agent touches anything, g8s mints one of these. It names the exact paths the agent may
-        change, expires in minutes, and is consumed by exactly one attempt. Inside your systems it is an
-        authorization; on this page it is a promise you can read.</p>
-        <p class="art-cta"><button class="seal-btn" id="sealBtn">seal it — watch the hash commit</button>
-        <span class="dim" id="seal-note">tilt with your cursor · the fields above are real, from today's session</span></p>
+<section id="artifact">
+  <div class="artband">
+    <div class="rc-wrap">
+      <div class="rc" id="rc" data-ui>
+        <div class="rc-head"><span>Write receipt</span><span class="st">unsealed</span></div>
+        <div class="rc-row"><span>receipt_id</span><code>9636f68d-625e-4345-826d-272bae7e2561</code></div>
+        <div class="rc-row"><span>allowed_paths</span><code>internal/worker/**</code></div>
+        <div class="rc-row"><span>issued_to</span><code>task 4ed2017f · cursor/composer-2.5</code></div>
+        <div class="rc-row"><span>ttl</span><code>3300s · expires +55m</code></div>
+        <div class="rc-row"><span>consumed</span><code id="rc-consumed">false</code></div>
+        <div class="rc-hash" id="rc-hash">sha256: 9f2a7c41be04d8c6f31a55b0e7d92c48aa61f013b8c7e2d54f90a613c7eb42d1</div>
+        <div class="rc-seal" id="rc-seal">unsealed</div>
       </div>
     </div>
+    <div class="art-copy">
+      <h2>The whole idea, as an object.</h2>
+      <p>Before an agent touches anything, g8s mints this. It names the exact paths the agent may change,
+      expires in minutes, and is consumed by exactly one attempt. Inside your systems it is an authorization.
+      Here it is a promise you can read.</p>
+      <p><button class="seal-btn" id="sealBtn">seal it — watch the hash commit</button>
+      <span class="dim"><em>tilt with your cursor · fields are real, from today’s session</em></span></p>
+    </div>
   </div>
-</div>
+</section>
 
-<div class="pane replay-pane">
-  <div class="pt"><span>session replay — 60 seconds of a real gated run</span><span><button id="rp-btn" class="rp">[replay]</button></span></div>
-  <div class="rp-body" id="rpbody"></div>
-  <div class="rp-bar"><i></i></div>
-</div>
+<section id="reel">
+  <div class="reelband">
+    <h2 class="r" style="font-weight:900; text-transform:uppercase; font-size: var(--step-head); line-height:.92; letter-spacing:-.03em; margin-bottom:22px">One task,<br>gate to gate.</h2>
+    <video class="r" width="100%" muted loop playsinline preload="metadata" poster="assets/reel-poster.jpg" src="assets/g8s-reel.mp4"
+      style="display:block" aria-label="36-second replay of a real gated g8s session: dispatch, receipt, gate refusal, quarantine, retry, verify, commit"></video>
+    <div class="cap">36 seconds · one real task from today · dispatch → receipt → gate refusal → quarantine → retry → verify → commit. muted by design · captions on · <a href="assets/g8s-reel-bgm.mp4" style="color:var(--accent);border-bottom:2px solid var(--accent)">sound version ↗</a></div>
+  </div>
+</section>
 
+<section id="quiet">
+  <figure style="margin:0">
+    <img src="https://picsum.photos/id/172/2400/1000" alt="A stone jetty stretching into still water and dense grey fog — the quiet before a verdict" width="2400" height="1000"
+      style="width:100%;display:block;filter:grayscale(1) contrast(1.05)" loading="lazy">
+    <figcaption style="font-size:var(--step-small);color:var(--muted);padding-top:10px">the run is quiet until it isn’t — every silent second was gated · photo: Aleksi Tappura — via Lorem Picsum (origin Unsplash)</figcaption>
+  </figure>
+</section>
 
-<div class="pane">
-  <div class="pt"><span>watch it run — 36s, one real task, gate to gate</span><span class="live">reel</span></div>
-  <video id="reel" width="100%" style="display:block;background:var(--pane)" muted loop playsinline
-    poster="assets/reel-poster.jpg" preload="metadata"
-    src="assets/g8s-reel.mp4"></video>
-  <div class="term-hint">muted by design — the transcript is the sound. full-quality version on github releases.</div>
-</div>
+<section id="cta">
+  <button class="ctaword" id="ctaBtn" title="copy install command">INSTALL<span class="sub"><code>brew install tamld/g8s/g8s</code> · curl · deb/rpm/apk · 30 seconds to your first gate</span></button>
+</section>
 
-<div class="statusbar">
-  <span class="seg on">CONSOLE</span>
-  <span class="seg">g8s v0.23.0</span>
-  <span class="seg dim">zero-CGO · zero deps · SLSA L2 attested · receipts since 2026</span>
-  <span class="sp"></span>
-  <span class="seg dim">provenance: every number on this page binds to a source</span>
-  <a class="seg" href="https://github.com/tamld/g8s/releases">releases ↗</a>
-</div>
+</main>
 
-</div>
+<footer class="wrap">
+  <p class="invite r">Read the governance model, the audit, and the ledger — <a href="https://github.com/tamld/g8s/tree/main/docs">all of it is public.</a>
+  The harness that gates your agents built itself under its own gates.</p>
+  <div class="inv-name r">g8<span class="last">s</span></div>
+  <p class="fine">provenance — <b>11</b>: <code>.github/workflows/quality.yml</code> · <b>97</b>: <code>docs/research/36-implicit-state-machines.md</code> · <b>6261</b>: <code>tools/dogfood_provenance</code> · <b>0 deps</b>: <code>manifest.json</code> · releases: SLSA L2 attested, cosign-signed · version <b>0.23.0</b> — claims machine-checked at deploy time (meta contract, ADR-0040)</p>
+</footer>
+
+<div class="toast" id="toast">copied</div>
 
 <script>
+document.getElementById('openConsole').addEventListener('click', () => {
+  document.getElementById('console').scrollIntoView({ behavior: 'smooth' });
+});
+
 /* ===== terminal — faithful g8s transcripts ===== */
 const OUT = document.getElementById('tbody'), IN = document.getElementById('tin');
 function line(html, cls) { const d = document.createElement('code');
   d.className = 'line ' + (cls || ''); d.innerHTML = html; OUT.appendChild(d); OUT.scrollTop = OUT.scrollHeight; }
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const code = s => esc(s).replace(/(E_[A-Z_]+)/g, '<span class="t-err">$1</span>');
+const cc = s => esc(s).replace(/(E_[A-Z_]+)/g, '<span class="t-err">$1</span>');
 const CMDS = {
   help: () => [
     ['g8s — the gatekeepers. commands (faithful subset):', 't-ink'],
@@ -387,8 +361,8 @@ const CMDS = {
     ['$ g8s submit --provider cursor --model composer-2.5 \\', 't-gate'],
     ['    -permission workspace_write --receipt-id 9636f68d --json', ''],
     ['{ "kind": "task", "state": "QUEUED",', ''],
-    ['  "data": { "task_id": "4ed2017f-36e1-4be4-b08f-6172e426660a",', ''],
-    ['            "claim": "single-winner (SQLite WAL)", "timeout": "1800s" } }', ''],
+    ['  "data": { "task_id": "656d8e02-7832-405d-95c0-37dcc2836c2b",', ''],
+    ['            "claim": "single-winner (SQLite WAL)", "timeout": "3000s" } }', ''],
     ['queued. one attempt = one worktree = one receipt.', 't-dim'],
   ],
   receipt: () => [
@@ -400,7 +374,7 @@ const CMDS = {
     ['  E_DIFF_FIREWALL_OUT_OF_SCOPE: 2 files outside receipt scope', 't-err'],
   ],
   verify: () => [
-    ['$ g8s verify --task 4ed2017f --json', 't-gate'],
+    ['$ g8s verify --task 656d8e02 --json', 't-gate'],
     ['{ "ok": true, "verifier": "acceptance-matrix", "checks": 6, "passed": 6,', ''],
     ['  "evidence": "worktree diff + gates" }', ''],
     ['a verdict without evidence is treated as a failure — by design.', 't-dim'],
@@ -435,13 +409,12 @@ function typeCmd(cmd, cb) {
   const ps = document.createElement('code'); ps.className = 'line t-gate'; ps.textContent = '$ ' + cmd;
   OUT.appendChild(ps); OUT.scrollTop = OUT.scrollHeight;
   setTimeout(() => { (CMDS[cmd] || CMDS._unknown(cmd)).forEach((l, i) =>
-    setTimeout(() => line(code(l[0]), l[1]), i * 50));
+    setTimeout(() => line(cc(l[0]), l[1]), i * 50));
     setTimeout(cb, (CMDS[cmd] ? CMDS[cmd].length : 4) * 50 + 60); }, 140);
 }
-/* boot: pane full at first paint — the replay IS the greeting */
 line('g8s — the gatekeepers. this pane replays real captures; only your keystrokes are yours.', 't-dim');
-(CMDS.help()).forEach(l => line(code(l[0]), l[1]));
-(CMDS.doctor()).forEach(l => line(code(l[0]), l[1]));
+(CMDS.help()).forEach(l => line(cc(l[0]), l[1]));
+(CMDS.doctor()).forEach(l => line(cc(l[0]), l[1]));
 IN.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const raw = IN.value.trim().toLowerCase(); IN.value = '';
@@ -449,104 +422,24 @@ IN.addEventListener('keydown', e => {
   const cmd = raw.split(/\s+/)[0];
   typeCmd(raw, () => { if (cmd === 'clear') OUT.innerHTML = ''; });
 });
-document.querySelectorAll('.term-hint code').forEach(c => c.addEventListener('click', () => {
+document.querySelectorAll('.terminal .hints code').forEach(c => c.addEventListener('click', () => {
   IN.value = c.textContent; IN.focus();
 }));
-document.querySelectorAll('.installs .cmd').forEach(b => b.addEventListener('click', () => {
-  navigator.clipboard && navigator.clipboard.writeText(b.dataset.c);
-  showToast('copied — 30s to first gate');
-}));
 
-/* ===== gate feed — streaming typed verdicts (real gate inventory) ===== */
-const FEED = document.getElementById('feed');
-const GATES = [
-  ['pass', 'layer_ownership', 'PR lanes clean (S/W/C/D)'],
-  ['refuse', 'E_DIFF_FIREWALL_OUT_OF_SCOPE', 'write outside receipt scope — refused'],
-  ['pass', 'coverage_ratchet', '82.43% ≥ baseline 82.18%'],
-  ['refuse', 'E_CLAIM_FENCE_STALE', 'stale renewal rejected — owner intact'],
-  ['pass', 'provenance_ledger', 'gap reported per-PR — visibility step'],
-  ['refuse', 'E_RECEIPT_EXPIRED', 'receipt past TTL — refused'],
-  ['pass', 'platform_matrix', 'README matrix = goreleaser targets'],
-  ['refuse', 'E_PROVIDER_QUOTA_EXHAUSTED', 'refusal classified — retry_at parsed'],
-  ['pass', 'sast_triad', 'codeql + semgrep + gitleaks clean'],
-  ['refuse', 'E_WORKER_UNPRODUCTIVE_SUCCESS', 'ask-for-help response = typed failure'],
-  ['pass', 'fence_renewal', 'same holder, same scope — renewed'],
-  ['refuse', 'E_LAYER_OWNERSHIP', 'worker+cmd mix — PR split ordered'],
-  ['pass', 'structure_sync', 'README tree matches disk'],
-  ['refuse', 'E_WORKER_EMPTY_SUCCESS_RESPONSE', 'empty ok=true — demoted to failure'],
-];
-let fi = 0;
-function feedLine() {
-  const [kind, code_, note] = GATES[fi % GATES.length]; fi++;
-  const d = document.createElement('div'); d.className = 'fline';
-  const ts = new Date().toTimeString().slice(0, 8);
-  d.innerHTML = `<span class="ts">${ts}</span><span class="${kind}">${kind === 'pass' ? 'PASS' : code_}</span><span class="info">${esc(note)}</span>`;
-  FEED.appendChild(d);
-  while (FEED.children.length > 14) FEED.removeChild(FEED.firstChild);
-}
-for (let i = 0; i < 9; i++) feedLine();
-const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-if (!reduce) setInterval(feedLine, 2600);
-
-/* ===== containment ascii map — packets gated in flight ===== */
-const MAP = document.getElementById('map');
-let inFlight = '<span class="pk">[r-9636f]</span> <span class="pk">[r-e9574]</span>';
-const baseLines = () => [
-  '            <span class="n0">╔══════════════╗</span>',
-  '            <span class="n0">║  F0 · BRAIN  ║</span>  <span class="dim">commits · receipts · promotion</span>',
-  '            <span class="n0">╚════╦═════════╝</span>',
-  '        ' + inFlight + '   <span class="dim">receipts in flight</span>',
-  '       ╔══════╧═══╦══════╩════╦════════╗',
-  '       ║ <span class="n1">F1 · W1</span>  ║  <span class="n1">F1 · W2</span>   ║ <span class="n1">F1 · W3</span> ║  <span class="dim">worktrees · leases</span>',
-  '       ╚════╤═════╝     ║     ═╦═════╝',
-  '            <span class="ok">[ok] gated</span>   <span class="no">[refused] E_FENCE</span>    ║        <span class="dim">one passes, one refuses — typed</span>',
-  '                 ╚═════F2 · CAGE═════╝   <span class="dim">shares the F1 boundary</span>',
-];
-function renderMap() { MAP.innerHTML = baseLines().join('\n'); }
-renderMap();
-const EVENTS = [
-  () => { inFlight = '<span class="ok">[ok] r-9636f gated</span> <span class="pk">[r-e9574]</span>'; },
-  () => { inFlight = '<span class="pk">[r-9636f]</span> <span class="no">[refused] r-e9574 E_FENCE</span>'; },
-  () => { inFlight = '<span class="pk">[r-9636f]</span> <span class="pk">[r-e9574]</span>'; },
-  () => { inFlight = '<span class="pk">[r-98c88]</span> <span class="ok">[ok] gated</span>'; },
-];
-let ei = 0;
-if (!reduce) setInterval(() => { EVENTS[ei % EVENTS.length](); ei++; renderMap(); }, 3000);
-
-/* reel video: autoplay in view, pause out */
-const reelV = document.getElementById('reel');
-if (reelV) {
-  const rio = new IntersectionObserver(es => es.forEach(en => {
-    if (en.isIntersecting) { reelV.play().catch(() => {}); } else { reelV.pause(); }
-  }), { threshold: .35 });
-  rio.observe(reelV);
-}
-
-/* toast */
-const toast = document.createElement('div');
-toast.style.cssText = 'position:fixed;bottom:52px;left:50%;transform:translateX(-50%);background:var(--pane-hi);border:1px solid var(--gate);color:var(--gate);padding:8px 14px;font-size:13px;opacity:0;transition:opacity .18s;pointer-events:none;z-index:9;font-family:var(--mono)';
-document.body.appendChild(toast);
-function showToast(m) { toast.textContent = m; toast.style.opacity = 1; setTimeout(() => toast.style.opacity = 0, 1500); }
-</script>
-
-<script>
-/* ===== the receipt artifact — tilt + seal ===== */
-const rc = document.getElementById('rc'), rcWrap = document.getElementById('rcWrap');
-if (rc && rcWrap) {
-  rcWrap.addEventListener('pointermove', e => {
-    const r = rc.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
-    rc.style.transform = `rotateY(${x * 16}deg) rotateX(${-y * 12}deg) translateZ(0)`;
-  });
-  rcWrap.addEventListener('pointerleave', () => { rc.style.transform = 'rotateY(0) rotateX(0)'; });
-}
+/* ===== receipt artifact ===== */
+const rc = document.getElementById('rc'), rcWrap = document.querySelector('.rc-wrap');
+rcWrap.addEventListener('pointermove', e => {
+  const r = rc.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+  rc.style.transform = `rotateY(${x * 14}deg) rotateX(${-y * 10}deg)`;
+});
+rcWrap.addEventListener('pointerleave', () => { rc.style.transform = 'rotateY(0) rotateX(0)'; });
 const sealBtn = document.getElementById('sealBtn');
-if (sealBtn) sealBtn.addEventListener('click', () => {
+sealBtn.addEventListener('click', () => {
   sealBtn.disabled = true; sealBtn.textContent = 'committing hash…';
   const hash = document.getElementById('rc-hash');
   const target = 'sha256: 4c7a1f9be20d8451c3a67b09e2d51faa7c0481e3b2d9f60a15c843ebd7ea92cf';
-  let i = 0;
-  const chars = '0123456789abcdef';
+  const chars = '0123456789abcdef'; let i = 0;
   const iv = setInterval(() => {
     i += 3;
     hash.textContent = 'sha256: ' + target.slice(7, 7 + i) + chars.split('').sort(() => Math.random() - .5).join('').slice(0, Math.max(0, 64 - i));
@@ -557,62 +450,36 @@ if (sealBtn) sealBtn.addEventListener('click', () => {
       document.getElementById('rc-seal').textContent = 'sealed';
       document.getElementById('rc-consumed').textContent = 'true — consumed by attempt 1';
       sealBtn.textContent = 'sealed. the agent may now write — paths, ttl, hash all bound.';
-      showToast('receipt sealed — authorization minted');
+      const t = document.getElementById('toast'); t.textContent = 'receipt sealed — authorization minted';
+      t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1500);
     }
   }, 24);
 });
 
-/* ===== session replay — a real 60s run, typed ===== */
-const RP = document.getElementById('rpbody');
-const RPSEQ = [
-  ['$ g8s submit --provider cursor --model composer-2.5 -permission workspace_write', 't-gate'],
-  ['  → QUEUED · task 656d8e02 · claim single-winner', 't-dim'],
-  ['$ g8s receipt issue --path "internal/controlplane/**" --ttl 3300', 't-gate'],
-  ['  → receipt 5a41fd02 · paths bound · expires +55m', 't-recv'],
-  ['$ g8s worker --once', 't-gate'],
-  ['  attempt claims 656d8e02 · worktree wt-cc7e6b8f @ pinned base', ''],
-  ['  worker edits store_claims.go, handle.go, lease_resilience_test.go', ''],
-  ['  worker ALSO edits internal/worker/lease_renew.go — OUTSIDE receipt scope', 't-warn'],
-  ['gate: E_DIFF_FIREWALL_OUT_OF_SCOPE — 2 files outside receipt scope', 't-err'],
-  ['  attempt failed. worktree QUARANTINED in place (evidence preserved, #815)', 't-dim'],
-  ['$ g8s receipt issue … --path "internal/worker/**"   # fresh receipt, wider scope', 't-gate'],
-  ['$ g8s submit (retry) → worker re-runs with corrected scope', ''],
-  ['  gates: layer_ownership PASS · coverage_ratchet PASS · sast_triad PASS', 't-gate'],
-  ['$ g8s verify --task 656d8e02 --json', 't-gate'],
-  ['  { ok: true, checks: 6, passed: 6, evidence: "worktree diff + gates" }', 't-gate'],
-  ['$ git commit -m "fix(controlplane,provider): typed heartbeat-transient + Wait race"', ''],
-  ['  Receipt: 656d8e02-7832-405d-95c0-37dcc2836c2b', 't-recv'],
-  ['  → landed. lineage intact. the refusal made the fix safer.', 't-dim'],
-];
-let rpi = 0, rpTimer = null, rpPlaying = false;
-function rpStep() {
-  if (!rpPlaying) return;
-  if (rpi >= RPSEQ.length) {
-    rpi = 0; RP.innerHTML = '';
-    showToast('replay loop — this refusal happened for real, today');
-    return;
-  }
-  const [txt, cls] = RPSEQ[rpi];
-  const d = document.createElement('code'); d.className = 'line ' + (cls || '');
-  d.innerHTML = code(txt); RP.appendChild(d); RP.scrollTop = RP.scrollHeight;
-  document.querySelector('.rp-bar i').style.transform = 'scaleX(' + ((rpi + 1) / RPSEQ.length) + ')';
-  rpi++;
-  rpTimer = setTimeout(rpStep, rpi % 4 === 0 ? 900 : 480);
-}
-function rpToggle(force) {
-  rpPlaying = force !== undefined ? force : !rpPlaying;
-  document.getElementById('rp-btn').textContent = rpPlaying ? '❚❚ pause' : '▶ replay';
-  if (rpPlaying) { if (rpi >= RPSEQ.length) { rpi = 0; RP.innerHTML = ''; } rpStep(); }
-  else clearTimeout(rpTimer);
-}
-const rpBtn = document.getElementById('rp-btn');
-if (rpBtn) {
-  rpBtn.addEventListener('click', () => rpToggle());
-  const io = new IntersectionObserver(es => es.forEach(en => {
-    if (en.isIntersecting && !rpPlaying) rpToggle(true);
-  }), { threshold: .4 });
-  io.observe(RP);
+/* ===== reel: autoplay in view ===== */
+const reelV = document.querySelector('.reelband video');
+if (reelV) {
+  const rio = new IntersectionObserver(es => es.forEach(en => {
+    if (en.isIntersecting) reelV.play().catch(() => {}); else reelV.pause();
+  }), { threshold: .35 });
+  rio.observe(reelV);
 }
 
+/* ===== reveal + stagger ===== */
+const rev = new IntersectionObserver(es => es.forEach(en => {
+  if (en.isIntersecting) { en.target.classList.add('in'); rev.unobserve(en.target); }
+}), { threshold: .12 });
+document.querySelectorAll('.r').forEach((el, i) => {
+  el.style.transitionDelay = (i % 3) * 70 + 'ms';
+  rev.observe(el);
+});
+
+/* ===== cta ===== */
+document.getElementById('ctaBtn').addEventListener('click', () => {
+  navigator.clipboard && navigator.clipboard.writeText('brew install tamld/g8s/g8s');
+  const t = document.getElementById('toast'); t.textContent = 'copied — 30 seconds to your first gate';
+  t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1500);
+});
+</script>
 </body>
 </html>
