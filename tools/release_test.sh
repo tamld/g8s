@@ -257,7 +257,8 @@ else
     # 2b. manifest.json version and latest_release.tag
     manifest_ver=$(grep -E '^[[:space:]]*"version":' "$FIXTURE_2/manifest.json" | head -1 | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
     manifest_tag=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' "$FIXTURE_2/manifest.json" | grep -E '"tag":' | head -1 | sed -E 's/.*"tag":[[:space:]]*"([^"]+)".*/\1/')
-    manifest_commit=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' "$FIXTURE_2/manifest.json" | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
+    release_cut_sha=$(cd "$FIXTURE_2" && git log -1 --format=%H --grep='^chore: release 0\.13\.0$' 2>/dev/null || true)
+    manifest_commit=$(cd "$FIXTURE_2" && git show "${release_cut_sha}:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
 
     if [ "$manifest_ver" != "0.13.0" ]; then
         echo "  FAIL: manifest.json version is '$manifest_ver', expected '0.13.0'"
@@ -304,7 +305,30 @@ else
         FAILURES=$((FAILURES + 1))
     fi
 
-    commit_files=$(cd "$FIXTURE_2" && git show --name-only --oneline HEAD)
+    if [ -z "$release_cut_sha" ]; then
+        echo "  FAIL: could not locate chore: release 0.13.0 commit"
+        FAILURES=$((FAILURES + 1))
+        release_cut_sha="HEAD"
+    fi
+
+    commit_msg_2f=$(cd "$FIXTURE_2" && git log -1 --format=%B "$release_cut_sha")
+    want_msg_2f=$(printf 'chore: release 0.13.0\n\nProvenance: F0-direct — automated release cut via tools/release.sh')
+    if [ "$commit_msg_2f" != "$want_msg_2f" ]; then
+        echo "  FAIL: release commit message mismatch: '$commit_msg_2f'"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    head_sha=$(cd "$FIXTURE_2" && git rev-parse HEAD)
+    if [ "$head_sha" != "$release_cut_sha" ]; then
+        head_msg=$(cd "$FIXTURE_2" && git log -1 --format=%B HEAD)
+        want_head_msg=$(printf 'chore(release): record v0.13.0 commit/date in manifest latest_release\n\nProvenance: F0-direct — automated release manifest metadata sync via tools/release.sh')
+        if [ "$head_msg" != "$want_head_msg" ]; then
+            echo "  FAIL: metadata sync commit message mismatch: '$head_msg'"
+            FAILURES=$((FAILURES + 1))
+        fi
+    fi
+
+    commit_files=$(cd "$FIXTURE_2" && git show --name-only --oneline "$release_cut_sha")
     for expected_file in "cmd/g8s/version.go" "CHANGELOG.md" "manifest.json" "packaging/windows/g8s.nsi" "packaging/windows/g8s.wxs" "packaging/chocolatey/tools/chocolateyinstall.ps1"; do
         if ! echo "$commit_files" | grep -q "$expected_file"; then
             echo "  FAIL: release commit does not stage $expected_file"

@@ -296,7 +296,7 @@ git add "${STAGE_FILES[@]}"
 if git diff --cached --quiet; then
     echo -e "${YELLOW}No changes to commit (already at version ${NEW_VERSION})${NC}"
 else
-    git commit -m "chore: release ${NEW_VERSION}"
+    git commit -m "chore: release ${NEW_VERSION}" -m "Provenance: F0-direct — automated release cut via tools/release.sh"
 fi
 
 # Create tag
@@ -318,14 +318,14 @@ else
     # The sync checker compares manifest.commit against the TAG's commit —
     # not HEAD — so this amendment keeps both green.
     if [ -f "manifest.json" ]; then
-        RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}")
+        RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}^{commit}")
         RELEASE_DATE=$(date +%Y-%m-%d)
         sed -i.bak -E "s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
         sed -i.bak -E "s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
         rm -f manifest.json.bak
         git add manifest.json
         if ! git diff --staged --quiet; then
-            git commit -m "chore(release): record v${NEW_VERSION} commit/date in manifest latest_release"
+            git commit -m "chore(release): record v${NEW_VERSION} commit/date in manifest latest_release" -m "Provenance: F0-direct — automated release manifest metadata sync via tools/release.sh"
             git push origin main
             echo -e "${GREEN}✓ manifest latest_release amended to ${RELEASE_SHA} / ${RELEASE_DATE}${NC}"
         fi

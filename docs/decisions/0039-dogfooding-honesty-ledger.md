@@ -24,13 +24,29 @@ Receipt: <task-id>
 or
 
 ```text
-Provenance: F0-direct — <one-line reason>
+Provenance: F0-direct — <reason>
 ```
 
+`Provenance: Receipt <task-id> [<annotation>]` and
+`Provenance: worker task <task-id> [<annotation>]` are accepted aliases for
+`Receipt: <task-id>`. Optional `<annotation>` must begin with `(`, `;`, or
+case-insensitive `via ` (followed by nonempty text). `Provenance: F0-direct —
+<reason>` may hard-wrap the reason across continuation lines without colons
+in the final trailer paragraph.
+
 Use a final trailer paragraph separated from the subject/body by a blank
-line, as with `git interpret-trailers`. Keys are case-insensitive; whitespace
-around keys, colons, values, and the em dash is tolerated. A task ID is one
-nonempty whitespace-free token. A reason is nonempty and on one line.
+line, as with `git interpret-trailers`. Trailer keys in that paragraph must be
+ASCII tokens matching `[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?` (the same
+token grammar `git interpret-trailers` uses); keys are case-insensitive and
+whitespace around keys, colons, values, and the em dash is tolerated. Lines in
+the trailer whose text before the first colon is not such a token — including
+colon-bearing explanatory prose — render the commit unclassified. The shared
+`<task-id>` token for `Receipt:` and both `Provenance:` receipt aliases is one
+whitespace-free ASCII token of at least 6 characters matching
+`[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]` with at least one digit (`0-9`). A
+logical reason is nonempty; in `Provenance: F0-direct — <reason>`, it may sit
+on one physical line or hard-wrap across continuation lines without colons in
+the final trailer paragraph (normalized to single spaces).
 Other single-line trailers may coexist. Missing, malformed, duplicate, or
 conflicting provenance is unclassified; a subject/body mention is insufficient.
 Normal commit messages continue to work; no commit-writing hook is imposed.

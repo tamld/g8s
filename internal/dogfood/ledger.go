@@ -17,10 +17,134 @@ type Provenance struct {
 	Ref  string
 }
 
+func isASCIIAlnum(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+}
+
+func isValidTrailerKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if len(key) == 0 {
+		return false
+	}
+	if !isASCIIAlnum(key[0]) || !isASCIIAlnum(key[len(key)-1]) {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		b := key[i]
+		if !isASCIIAlnum(b) && b != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidReceiptID(tok string) bool {
+	if len(tok) < 6 {
+		return false
+	}
+	if !isASCIIAlnum(tok[0]) || !isASCIIAlnum(tok[len(tok)-1]) {
+		return false
+	}
+	hasDigit := false
+	for i := 0; i < len(tok); i++ {
+		b := tok[i]
+		if b >= '0' && b <= '9' {
+			hasDigit = true
+		} else if !isASCIIAlnum(b) && b != '.' && b != '_' && b != '-' {
+			return false
+		}
+	}
+	return hasDigit
+}
+
+func provenanceAllowsF0DirectUnfold(line string) bool {
+	key, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(key), "provenance") {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	kind, _, found := strings.Cut(value, "—")
+	if !found {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(kind), "F0-direct")
+}
+
+func unfoldTrailerLines(trailer []string) ([]string, bool) {
+	out := make([]string, 0, len(trailer))
+	for _, line := range trailer {
+		trimmed := strings.TrimSpace(line)
+		if !strings.Contains(line, ":") && trimmed != "" {
+			if len(out) == 0 || !provenanceAllowsF0DirectUnfold(out[len(out)-1]) {
+				return nil, false
+			}
+			out[len(out)-1] = out[len(out)-1] + " " + trimmed
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, true
+}
+
+func parseProvenanceValue(value string) (Provenance, bool) {
+	kind, reason, found := strings.Cut(value, "—")
+	if found && strings.EqualFold(strings.TrimSpace(kind), "F0-direct") {
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			return Provenance{Kind: "classification_error", Ref: E_PROVENANCE_TAG_EMPTY_REASON}, true
+		}
+		return Provenance{Kind: "f0_direct", Ref: strings.Join(strings.Fields(reason), " ")}, true
+	}
+
+	v := strings.TrimSpace(value)
+	fields := strings.Fields(v)
+	var tok string
+	var consumed int
+	if len(fields) >= 2 && strings.EqualFold(fields[0], "Receipt") {
+		tok = fields[1]
+		consumed = 2
+	} else if len(fields) >= 3 && strings.EqualFold(fields[0], "worker") && strings.EqualFold(fields[1], "task") {
+		tok = fields[2]
+		consumed = 3
+	} else {
+		return Provenance{}, false
+	}
+	if !isValidReceiptID(tok) {
+		return Provenance{}, false
+	}
+	rest := v
+	for i := 0; i < consumed; i++ {
+		f := fields[i]
+		pos := strings.Index(rest, f)
+		if pos < 0 {
+			return Provenance{}, false
+		}
+		rest = rest[pos+len(f):]
+	}
+	rest = strings.TrimSpace(rest)
+	if rest != "" {
+		via := len(rest) >= 4 && strings.EqualFold(rest[:3], "via") && (rest[3] == ' ' || rest[3] == '\t')
+		viaOK := via && strings.TrimSpace(rest[3:]) != ""
+		if !strings.HasPrefix(rest, "(") && !strings.HasPrefix(rest, ";") && !viaOK {
+			return Provenance{}, false
+		}
+	}
+	return Provenance{Kind: "receipt", Ref: tok}, true
+}
+
 // ClassifyCommit reads the final blank-line-separated trailer paragraph.
-// Keys are case-insensitive; surrounding whitespace is ignored. Receipt values
-// are nonempty single tokens. Provenance values must be F0-direct — <reason>.
-// Body mentions, empty values, conflicting or repeated provenance are unclassified.
+// Trailer keys must satisfy isValidTrailerKey (git interpret-trailers token
+// grammar); colon-bearing prose lines in the trailer render the commit unclassified.
+// Keys are case-insensitive; surrounding whitespace is ignored.
+// Receipt: <task-id> and Provenance aliases (Provenance: Receipt <task-id> [<annotation>],
+// Provenance: worker task <task-id> [<annotation>]) share one receipt-ID grammar
+// validated by isValidReceiptID; optional <annotation> must begin with "(", ";", or
+// "via " (case-insensitive). Provenance: F0-direct — <reason> may unfold continuation
+// lines without colons onto the reason. Body mentions, empty values, conflicting
+// or repeated provenance are unclassified.
 func ClassifyCommit(msg string) Provenance {
 	unknown := Provenance{Kind: "unclassified"}
 	msg = strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", "\n"))
@@ -33,29 +157,30 @@ func ClassifyCommit(msg string) Provenance {
 	if start == 0 {
 		return unknown
 	}
+	trailer, ok := unfoldTrailerLines(lines[start:])
+	if !ok {
+		return unknown
+	}
 	result := unknown
-	for _, line := range lines[start:] {
+	for _, line := range trailer {
 		key, value, ok := strings.Cut(line, ":")
-		if !ok || strings.TrimSpace(key) == "" {
+		if !ok || !isValidTrailerKey(key) {
 			return unknown
 		}
 		value = strings.TrimSpace(value)
 		var candidate Provenance
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "receipt":
-			if len(strings.Fields(value)) != 1 {
+			if len(strings.Fields(value)) != 1 || !isValidReceiptID(value) {
 				return unknown
 			}
 			candidate = Provenance{Kind: "receipt", Ref: value}
 		case "provenance":
-			kind, reason, found := strings.Cut(value, "—")
-			if !found || !strings.EqualFold(strings.TrimSpace(kind), "F0-direct") {
+			var parsed bool
+			candidate, parsed = parseProvenanceValue(value)
+			if !parsed {
 				return unknown
 			}
-			if strings.TrimSpace(reason) == "" {
-				return Provenance{Kind: "classification_error", Ref: E_PROVENANCE_TAG_EMPTY_REASON}
-			}
-			candidate = Provenance{Kind: "f0_direct", Ref: strings.TrimSpace(reason)}
 		default:
 			continue
 		}
