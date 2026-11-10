@@ -401,7 +401,7 @@ g8s/
 │   ├── lockfile/ — provides non-blocking exclusive advisory file locks used to arbitrate concurrent supervisor sessions over one checkout (#393)
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over stdio using newline-delimited JSON-RPC 2.0 (DELTA-04)
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
-│   ├── mesh/ — (no package doc — add one)
+│   ├── mesh/ — implements peer-to-peer coordinator claim fencing, keepalive leases, and message transport across federated g8s nodes (DELTA-46)
 │   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (agy CLI wrapper) and internal/controlplane (SQLite WAL task store)
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
 │   ├── premise/ — implements the DELTA-42 Premise Challenge & Sycophancy Gate: it decomposes an operator request or supervisor brief into atomic claims and classifies each claim into an evidence tier

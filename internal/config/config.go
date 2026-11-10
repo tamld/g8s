@@ -87,12 +87,12 @@ func (p ProviderEntry) SupportsDirectExecution() bool {
 
 // EffectiveBaseURL returns the resolved base URL, checking BaseURLEnv first.
 func (p ProviderEntry) EffectiveBaseURL() string {
-	if p.BaseURLEnv != "" {
-		if envVal := os.Getenv(p.BaseURLEnv); envVal != "" {
+	if envKey := strings.TrimSpace(p.BaseURLEnv); envKey != "" {
+		if envVal := strings.TrimSpace(os.Getenv(envKey)); envVal != "" {
 			return strings.TrimRight(envVal, "/")
 		}
 	}
-	return strings.TrimRight(p.BaseURL, "/")
+	return strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
 }
 
 // EffectiveProtocol returns the normalized protocol ("openai", "anthropic", "9router").
@@ -273,7 +273,10 @@ func Load(path string) (*File, error) {
 
 		switch p.Class {
 		case classAPICall:
-			if p.BaseURL == "" && p.BaseURLEnv == "" {
+			if strings.TrimSpace(p.Name) == "" {
+				return nil, fmt.Errorf("provider %d: name is required for api_call entries", i)
+			}
+			if strings.TrimSpace(p.BaseURL) == "" && strings.TrimSpace(p.BaseURLEnv) == "" {
 				return nil, fmt.Errorf("provider %d (%s): base_url is required for api_call entries", i, p.Name)
 			}
 			if len(p.Models) == 0 && !p.AllowUnlistedModels {
@@ -283,7 +286,7 @@ func Load(path string) (*File, error) {
 				return nil, fmt.Errorf("provider %d (%s): slots must be >= 1 for api_call entries", i, p.Name)
 			}
 		case classPlatformDispatch:
-			if p.Name == "" {
+			if strings.TrimSpace(p.Name) == "" {
 				return nil, fmt.Errorf("provider %d: name is required for platform_dispatch entries", i)
 			}
 			if len(p.Models) == 0 && !p.AllowUnlistedModels {
@@ -294,6 +297,9 @@ func Load(path string) (*File, error) {
 		}
 
 		for j := range p.Models {
+			if strings.TrimSpace(p.Models[j].ID) == "" {
+				return nil, fmt.Errorf("provider %d (%s): model %d: id is required", i, p.Name, j)
+			}
 			if err := ValidateModelEffort(&p.Models[j]); err != nil {
 				return nil, fmt.Errorf("provider %d (%s): %w", i, p.Name, err)
 			}

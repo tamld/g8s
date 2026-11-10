@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,12 @@ func FuzzConfigLoad(f *testing.F) {
 	// Seed 9: empty bytes
 	f.Add([]byte{})
 
+	// Seed 10: api_call with base_url_env and no base_url
+	f.Add([]byte(`{"providers":[{"class":"api_call","name":"x","base_url_env":"NINEROUTER_URL","models":[{"id":"m"}],"slots":1}]}`))
+
+	// Seed 11: allow_unlisted_models with empty models
+	f.Add([]byte(`{"providers":[{"class":"api_call","name":"x","base_url":"http://p","allow_unlisted_models":true,"models":[],"slots":1}]}`))
+
 	tempDir := f.TempDir()
 
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -76,24 +83,32 @@ func FuzzConfigLoad(f *testing.F) {
 			for i, p := range cfg.Providers {
 				switch p.Class {
 				case classAPICall:
-					if p.BaseURL == "" {
-						t.Fatalf("provider %d (%s): api_call accepted with empty base_url", i, p.Name)
+					if strings.TrimSpace(p.Name) == "" {
+						t.Fatalf("provider %d: api_call accepted with empty name", i)
 					}
-					if len(p.Models) == 0 {
+					if strings.TrimSpace(p.BaseURL) == "" && strings.TrimSpace(p.BaseURLEnv) == "" {
+						t.Fatalf("provider %d (%s): api_call accepted without base_url or base_url_env", i, p.Name)
+					}
+					if len(p.Models) == 0 && !p.AllowUnlistedModels {
 						t.Fatalf("provider %d (%s): api_call accepted with empty models", i, p.Name)
 					}
 					if p.Slots < 1 {
 						t.Fatalf("provider %d (%s): api_call accepted with slots < 1 (%d)", i, p.Name, p.Slots)
 					}
 				case classPlatformDispatch:
-					if p.Name == "" {
+					if strings.TrimSpace(p.Name) == "" {
 						t.Fatalf("provider %d: platform_dispatch accepted with empty name", i)
 					}
-					if len(p.Models) == 0 {
+					if len(p.Models) == 0 && !p.AllowUnlistedModels {
 						t.Fatalf("provider %d (%s): platform_dispatch accepted with empty models", i, p.Name)
 					}
 				default:
 					t.Fatalf("provider %d: accepted unknown class %q", i, p.Class)
+				}
+				for j, m := range p.Models {
+					if strings.TrimSpace(m.ID) == "" {
+						t.Fatalf("provider %d (%s): model %d accepted with empty id", i, p.Name, j)
+					}
 				}
 			}
 		}
@@ -102,9 +117,9 @@ func FuzzConfigLoad(f *testing.F) {
 		var raw File
 		if jsonErr := json.Unmarshal(data, &raw); jsonErr == nil {
 			for _, p := range raw.Providers {
-				if p.Class == classAPICall && p.BaseURL == "" {
+				if p.Class == classAPICall && strings.TrimSpace(p.BaseURL) == "" && strings.TrimSpace(p.BaseURLEnv) == "" {
 					if err == nil {
-						t.Fatalf("invariant violated: api_call without base_url was accepted: %+v", p)
+						t.Fatalf("invariant violated: api_call without base_url or base_url_env was accepted: %+v", p)
 					}
 				}
 			}

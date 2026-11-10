@@ -110,7 +110,6 @@ jobs:
         with:
           version: latest
           args: --timeout=10m
-          skip-pkg-cache: true
 
       - name: gofumpt strict
         if: env.CI_LANE != 'docs'

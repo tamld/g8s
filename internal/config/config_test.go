@@ -155,6 +155,94 @@ func TestLoadRejectsEntryWithoutModels(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsAPICallWhitespaceOnlyName(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"api_call","name":"   ","base_url":"http://p","models":[{"id":"m"}],"slots":1}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for api_call with whitespace-only name")
+	}
+	if !strings.Contains(err.Error(), "name is required for api_call") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsAPICallMissingName(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"api_call","base_url":"http://p","models":[{"id":"m"}],"slots":1}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for api_call with missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required for api_call") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsPlatformDispatchWhitespaceOnlyName(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"platform_dispatch","name":"\t","models":[{"id":"m"}]}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for platform_dispatch with whitespace-only name")
+	}
+	if !strings.Contains(err.Error(), "name is required for platform_dispatch") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsAPICallWhitespaceOnlyBaseURLAndEnv(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"api_call","name":"x","base_url":"  ","base_url_env":"   ","models":[{"id":"m"}],"slots":1}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for api_call with whitespace-only base_url and base_url_env")
+	}
+	if !strings.Contains(err.Error(), "base_url is required") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsModelWhitespaceOnlyID(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"platform_dispatch","name":"x","models":[{"id":"  "}]}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for whitespace-only model id")
+	}
+	if !strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadRejectsModelEmptyID(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"api_call","name":"x","base_url":"http://p","models":[{"id":""}],"slots":1}]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("want error for empty model id")
+	}
+	if !strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadAcceptsAllowUnlistedModelsEmptyModelsAPICall(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"api_call","name":"x","base_url":"http://p","allow_unlisted_models":true,"models":[],"slots":1}]}`)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !f.Providers[0].AllowUnlistedModels || len(f.Providers[0].Models) != 0 {
+		t.Fatalf("provider = %+v", f.Providers[0])
+	}
+}
+
+func TestLoadAcceptsAllowUnlistedModelsEmptyModelsPlatformDispatch(t *testing.T) {
+	path := writeTemp(t, `{"providers":[{"class":"platform_dispatch","name":"x","allow_unlisted_models":true,"models":[]}]}`)
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !f.Providers[0].AllowUnlistedModels || len(f.Providers[0].Models) != 0 {
+		t.Fatalf("provider = %+v", f.Providers[0])
+	}
+}
+
 func TestLoadPreservesArgsTemplate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "providers.json")
