@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/lifecycle"
+	"github.com/tamld/g8s/internal/pathutil"
 )
 
 // fakeGitHub serves a v9.9.9 release whose archive targets the host platform.
@@ -123,13 +124,99 @@ func isolateHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("APPDATA", filepath.Join(home, "AppData"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	t.Setenv("G8S_STATE_DIR", filepath.Join(home, ".local", "state", "g8s"))
+	t.Setenv("G8S_PORTABLE", "")
+	t.Setenv("PORTABLE_MODE", "")
+	t.Setenv("G8S_DB", "")
 	return home
+}
+
+func assertPathInsideHome(t *testing.T, home, p string) {
+	t.Helper()
+	rel, err := filepath.Rel(home, p)
+	if err != nil {
+		t.Fatalf("filepath.Rel(%q, %q): %v", home, p, err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		t.Fatalf("path %q is not inside home %q (rel=%q)", p, home, rel)
+	}
+}
+
+func TestIsolateHomeContainsAllDefaultLifecyclePaths(t *testing.T) {
+	outside := t.TempDir()
+	t.Setenv("LOCALAPPDATA", outside)
+	t.Setenv("APPDATA", outside)
+	t.Setenv("XDG_DATA_HOME", outside)
+	t.Setenv("XDG_CONFIG_HOME", outside)
+	t.Setenv("XDG_CACHE_HOME", outside)
+	t.Setenv("XDG_STATE_HOME", outside)
+	t.Setenv("G8S_STATE_DIR", outside)
+	t.Setenv("G8S_DB", filepath.Join(outside, "g8s.db"))
+	t.Setenv("G8S_PORTABLE", "1")
+	t.Setenv("PORTABLE_MODE", "1")
+
+	home := isolateHome(t)
+
+	for _, dir := range lifecycle.DefaultStateDirs(home) {
+		assertPathInsideHome(t, home, dir)
+	}
+	assertPathInsideHome(t, home, pathutil.DefaultDatabasePath())
+	assertPathInsideHome(t, home, pathutil.DefaultEvidenceDir())
+	for _, cfg := range lifecycle.DefaultMCPConfigs(home) {
+		assertPathInsideHome(t, home, cfg.Path)
+	}
+
+	if got := os.Getenv("LOCALAPPDATA"); got != filepath.Join(home, "AppData", "Local") {
+		t.Fatalf("LOCALAPPDATA = %q, want %q", got, filepath.Join(home, "AppData", "Local"))
+	}
+	if got := os.Getenv("APPDATA"); got != filepath.Join(home, "AppData", "Roaming") {
+		t.Fatalf("APPDATA = %q, want %q", got, filepath.Join(home, "AppData", "Roaming"))
+	}
+
+	emptyEnv := func(string) string { return "" }
+	wantDataWin := pathutil.DataDirForOS("windows", emptyEnv, home, pathutil.ScopeUser)
+	wantConfigWin := pathutil.ConfigDirForOS("windows", emptyEnv, home)
+
+	dataWin := pathutil.DataDirForOS("windows", os.Getenv, home, pathutil.ScopeUser)
+	configWin := pathutil.ConfigDirForOS("windows", os.Getenv, home)
+
+	if runtime.GOOS == "windows" {
+		assertPathInsideHome(t, home, dataWin)
+		assertPathInsideHome(t, home, configWin)
+	}
+
+	if dataWin != wantDataWin {
+		t.Fatalf("DataDirForOS(windows) = %q, want %q", dataWin, wantDataWin)
+	}
+	if configWin != wantConfigWin {
+		t.Fatalf("ConfigDirForOS(windows) = %q, want %q", configWin, wantConfigWin)
+	}
+
+	outsideNorm := strings.Trim(strings.ReplaceAll(outside, `\`, "/"), "/")
+	if strings.Contains(dataWin, outsideNorm) {
+		t.Fatalf("dataWin %q must not reference poison outside %q", dataWin, outside)
+	}
+	if strings.Contains(configWin, outsideNorm) {
+		t.Fatalf("configWin %q must not reference poison outside %q", configWin, outside)
+	}
+
+	uncHome := `\\server\share\tmp\home01`
+	uncData := pathutil.DataDirForOS("windows", emptyEnv, uncHome, pathutil.ScopeUser)
+	uncConfig := pathutil.ConfigDirForOS("windows", emptyEnv, uncHome)
+	wantUncData := `\\server\share\tmp\home01\AppData\Local\Programs\g8s`
+	wantUncConfig := `\\server\share\tmp\home01\AppData\Roaming\g8s`
+	if uncData != wantUncData {
+		t.Fatalf("UNC DataDirForOS = %q, want %q", uncData, wantUncData)
+	}
+	if uncConfig != wantUncConfig {
+		t.Fatalf("UNC ConfigDirForOS = %q, want %q", uncConfig, wantUncConfig)
+	}
 }
 
 func TestRunUninstallDryRunAndApply(t *testing.T) {
