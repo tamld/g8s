@@ -76,8 +76,8 @@ jobs:
           sleep 20
           for i in 1 2 3 4 5; do
             CODE=$(curl -s -o /tmp/smoke.html -w '%{http_code}' https://g8s.flowaxon.com/ || echo 000)
-            if [ "$CODE" = "200" ] && grep -q "operator console" /tmp/smoke.html; then
-              echo "smoke PASS: 200 + console marker present"
+            if [ "$CODE" = "200" ] && grep -q "the gatekeepers" /tmp/smoke.html; then
+              echo "smoke PASS: 200 + brand marker present"
               grep -oE '<title>[^<]+</title>' /tmp/smoke.html
               exit 0
             fi
