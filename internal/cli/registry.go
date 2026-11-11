@@ -21,7 +21,7 @@ type CommandContract struct {
 }
 
 // CanonicalCommandContracts returns the authoritative Generative Surface Contract v2
-// for all 68 top-level g8s CLI commands (#677).
+// for all 69 top-level g8s CLI commands (#677).
 func CanonicalCommandContracts() []CommandContract {
 	return []CommandContract{
 		{Name: "submit", Stratum: "S2", EnvelopeKinds: []string{"task"}, Description: "Queue an asynchronous durable task with harness safety checks"},
@@ -74,7 +74,8 @@ func CanonicalCommandContracts() []CommandContract {
 		{Name: "permissions", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"permissions"}, Description: "List registered permission profiles"},
 		{Name: "providers", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"providers", "provider_conformance", "models_scorecard", "models_discovery"}, Description: "List detected agent providers and availability status"},
 		{Name: "llm-call", Stratum: "S2/S3", EnvelopeKinds: []string{"llm_call"}, Description: "Direct synchronous LLM call consumer against configured providers"},
-		{Name: "autopilot", Stratum: "S2", EnvelopeKinds: []string{"autopilot_schedule", "autopilot_config"}, Description: "Manage cron-based supervisor trigger (g8s autopilot start|status|trigger)"},
+		{Name: "blind-verify", Stratum: "S2/S3-A", EnvelopeKinds: []string{"blind_verify"}, Description: "Double-blind counterexample & falsification review on BlindReviewPacket (g8s blind-verify --spec --invariants --diff --test-output)"},
+		{Name: "autopilot", Stratum: "S2", EnvelopeKinds: []string{"autopilot_schedule", "autopilot_config", "autopilot_submit"}, Description: "Manage cron-based supervisor trigger (g8s autopilot start|status|trigger|submit)"},
 		{Name: "serve", Stratum: "S2", EnvelopeKinds: []string{"serve"}, Description: "Run daemon mode with HTTP API server (g8s serve [--address :8080])"},
 		{Name: "verify", Stratum: "S2/S3-A", EnvelopeKinds: []string{"verdict"}, Description: "Run verifier-class acceptance checks on a task (g8s verify --task <id>)"},
 		{Name: "feature", Stratum: "S2/O-Plane", EnvelopeKinds: []string{"feature"}, Description: "Declarative feature map validation and blast radius routing (g8s feature verify|inspect|list)"},

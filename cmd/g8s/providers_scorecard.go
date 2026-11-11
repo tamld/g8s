@@ -81,18 +81,21 @@ func runProvidersEvaluate(args []string) {
 	fs := flag.NewFlagSet("providers evaluate", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 	providerFlag := fs.String("provider", "9router", "provider name to evaluate (default: 9router)")
-	modelsFlag := fs.String("model", "reasoning-free,fast-agent,docs-retriever", "comma-separated models/combos to probe and evaluate")
+	modelsFlag := fs.String("model", "fast-agent,reasoning-high,deep-coding,docs-retriever", "comma-separated models/combos to probe and evaluate")
 	promptFlag := fs.String("prompt", "Reply with the exact single token: READY_OK", "canary evaluation prompt")
 	expectContainsFlag := fs.String("expect-contains", "READY_OK", "expected substring in model response for canary verification")
 	verifyCmdFlag := fs.String("verify-cmd", "", "optional shell verification command to execute after response")
 	timeoutFlag := fs.String("timeout", "30s", "per-model probe timeout")
+	maxTokensFlag := fs.Int("max-tokens", 512, "max output tokens for probe requests (default 512 for reasoning models)")
+	discoverCombosFlag := fs.Bool("discover-combos", false, "discover live models from provider and probe top-level combo IDs (no slash in ID)")
+	auditCatalogFlag := fs.Bool("audit-catalog", false, "load .g8s/agent-models.yml catalog and append cataloged model IDs for target provider to probe list")
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	_ = actor
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
-		exitUsage("providers", "evaluate", *traceID, err.Error(), "usage: g8s providers evaluate [--provider 9router] [--model m1,m2] [--json]", *jsonl)
+		exitUsage("providers", "evaluate", *traceID, err.Error(), "usage: g8s providers evaluate [--provider 9router] [--model m1,m2] [--discover-combos] [--audit-catalog] [--json]", *jsonl)
 	}
 
 	timeoutDur, err := time.ParseDuration(*timeoutFlag)
@@ -148,6 +151,55 @@ func runProvidersEvaluate(args []string) {
 			models = append(models, m)
 		}
 	}
+
+	modelExplicitlyPassed := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelExplicitlyPassed = true
+		}
+	})
+	if *discoverCombosFlag {
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
+		discovered, err := httpProv.DiscoverModels(ctx)
+		cancel()
+		if err == nil {
+			var combos []string
+			for _, m := range discovered {
+				if !strings.Contains(m, "/") {
+					combos = append(combos, m)
+				}
+			}
+			if !modelExplicitlyPassed && len(combos) > 0 {
+				models = combos
+			} else {
+				models = append(models, combos...)
+			}
+		}
+	}
+
+	// --audit-catalog: load .g8s/agent-models.yml and append cataloged model IDs for target provider
+	if *auditCatalogFlag {
+		cat, err := config.LoadDefaultCatalog()
+		if err == nil && cat != nil {
+			if provCat, ok := cat.FindProvider(entry.Name); ok {
+				for _, m := range provCat.Models {
+					models = append(models, m.ID)
+				}
+			}
+		}
+	}
+
+	// Deduplicate models
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(models))
+	for _, m := range models {
+		if !seen[m] {
+			seen[m] = true
+			deduped = append(deduped, m)
+		}
+	}
+	models = deduped
+
 	if len(models) == 0 {
 		exitUsage("providers", "evaluate", *traceID, "at least one --model is required", "", *jsonl)
 	}
@@ -160,6 +212,7 @@ func runProvidersEvaluate(args []string) {
 		VerifyPassed  bool   `json:"verify_passed"`
 		DurationMs    int64  `json:"duration_ms"`
 		Error         string `json:"error,omitempty"`
+		FailureClass  string `json:"failure_class,omitempty"`
 	}
 
 	var outcomes []probeOutcome
@@ -168,7 +221,7 @@ func runProvidersEvaluate(args []string) {
 		spec := provider.Spec{
 			Brief:     *promptFlag,
 			Model:     m,
-			MaxTokens: 256,
+			MaxTokens: *maxTokensFlag,
 			Timeout:   timeoutDur,
 			TraceID:   *traceID,
 		}
@@ -178,6 +231,7 @@ func runProvidersEvaluate(args []string) {
 			cancel()
 			dur := time.Since(start).Milliseconds()
 			errMsg := dispatch.SanitizeOutput(sErr.Error())
+			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 				Provider:       entry.Name,
 				ModelRequested: m,
@@ -188,11 +242,12 @@ func runProvidersEvaluate(args []string) {
 				ErrorReason:    errMsg,
 			})
 			outcomes = append(outcomes, probeOutcome{
-				Provider:   entry.Name,
-				Model:      m,
-				Success:    false,
-				DurationMs: dur,
-				Error:      errMsg,
+				Provider:     entry.Name,
+				Model:        m,
+				Success:      false,
+				DurationMs:   dur,
+				Error:        errMsg,
+				FailureClass: fc,
 			})
 			continue
 		}
@@ -205,6 +260,7 @@ func runProvidersEvaluate(args []string) {
 		}
 		if wErr != nil {
 			errMsg := dispatch.SanitizeOutput(wErr.Error())
+			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 				Provider:       entry.Name,
 				ModelRequested: m,
@@ -223,6 +279,7 @@ func runProvidersEvaluate(args []string) {
 				Success:       false,
 				DurationMs:    dur,
 				Error:         errMsg,
+				FailureClass:  fc,
 			})
 			continue
 		}
@@ -246,6 +303,7 @@ func runProvidersEvaluate(args []string) {
 			vCancel()
 		}
 
+		fc := classifyProbeFailure(true, vPassed, errMsg)
 		_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 			Provider:       entry.Name,
 			ModelRequested: m,
@@ -265,6 +323,7 @@ func runProvidersEvaluate(args []string) {
 			VerifyPassed:  vPassed,
 			DurationMs:    dur,
 			Error:         errMsg,
+			FailureClass:  fc,
 		})
 	}
 
@@ -282,4 +341,27 @@ func runProvidersEvaluate(args []string) {
 	}
 
 	runProvidersScorecard([]string{"--provider", entry.Name})
+}
+
+func classifyProbeFailure(success bool, verifyPassed bool, errMsg string) string {
+	if success && verifyPassed {
+		return "HEALTHY"
+	}
+	if success && !verifyPassed {
+		return "CANARY_MISMATCH"
+	}
+	lower := strings.ToLower(errMsg)
+	if strings.Contains(lower, "status 410") || strings.Contains(lower, "[410]") || strings.Contains(lower, "end of life") || strings.Contains(lower, "no longer available") {
+		return "MODEL_EOL_410"
+	}
+	if strings.Contains(lower, "status 404") || strings.Contains(lower, "[404]") || strings.Contains(lower, "not found") || strings.Contains(lower, "page not found") {
+		return "MODEL_NOT_FOUND_404"
+	}
+	if strings.Contains(lower, "status 400") || strings.Contains(lower, "agentservice") {
+		return "PROTOCOL_MISMATCH_400"
+	}
+	if strings.Contains(lower, "context deadline exceeded") || strings.Contains(lower, "client.timeout") {
+		return "TIMEOUT"
+	}
+	return "UPSTREAM_ERROR"
 }

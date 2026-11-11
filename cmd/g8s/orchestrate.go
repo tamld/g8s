@@ -18,6 +18,7 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/conv"
+	"github.com/tamld/g8s/internal/hooks"
 	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/supervisor"
@@ -487,11 +488,14 @@ func runOrchestrate(args []string) {
 		exitUsage("orchestrate", "", *traceID, fmt.Sprintf("invalid provider %q: %v", *providerName, provErr), "", *jsonl)
 	}
 
+	mountReg := orchestrator.NewMountRegistry()
+	mountReg.RegisterHook(hooks.NewAttentionerHook())
 	resolveWorker := func() orchestrator.Worker {
 		if *providerName == "agy" {
-			return orchestratorWorkerCtor()
+			base := orchestratorWorkerCtor()
+			return orchestrator.WithMounts(base, *mountReg)
 		}
-		return newProviderWorkerAdapter(prov)
+		return orchestrator.WithMounts(newProviderWorkerAdapter(prov), *mountReg)
 	}
 
 	if *blindConverge > 0 {

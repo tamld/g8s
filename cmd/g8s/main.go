@@ -223,6 +223,8 @@ func main() {
 		runWake(os.Args[2:])
 	case "providers":
 		runProviders(os.Args[2:])
+	case "blind-verify":
+		runBlindVerify(os.Args[2:])
 	case "llm-call":
 		runLLMCall(os.Args[2:])
 	case "autopilot":
@@ -355,6 +357,9 @@ func runProviders(args []string) {
 			return
 		case "evaluate":
 			runProvidersEvaluate(args[1:])
+			return
+		case "eval-combos":
+			runProvidersEvaluate(append([]string{"--discover-combos"}, args[1:]...))
 			return
 		case "conformance":
 			runProvidersConformance(args[1:])
