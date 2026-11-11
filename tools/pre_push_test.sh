@@ -200,13 +200,49 @@ EOF
     # 4) accepts real `go test -json` stream on ./internal/reach/... with per-package requirement
     CGO_ENABLED=0 go test -json -count=1 ./internal/reach/... > "${MOCK_TMP}/real-pass.jsonl" 2>&1
     REAL_VERIFY=$("$PRE_PUSH" --verify-scoped-log "${MOCK_TMP}/real-pass.jsonl" "github.com/tamld/g8s/internal/reach")
-    rm -rf "$MOCK_TMP"
     if [[ "$REAL_VERIFY" != PASS_COUNT=* ]]; then
+        rm -rf "$MOCK_TMP"
         echo "FAIL: --verify-scoped-log rejected real passing go test -json stream: $REAL_VERIFY"
         exit 1
     fi
 
-    echo "  [PASS] --impacted-plan leaf scoping, --no-renames, hotspot, and structured go test -json non-vacuity guards verified"
+    # 5) execution-stage `go list` partial stdout + nonzero exit discards partial output and fails closed
+    cat > "${MOCK_TMP}/mock-go-partial-fail.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "github.com/tamld/g8s/internal/a"
+exit 1
+EOF
+    chmod +x "${MOCK_TMP}/mock-go-partial-fail.sh"
+    set +e
+    PARTIAL_OUT=$(G8S_IMPACTED_GO_BIN="${MOCK_TMP}/mock-go-partial-fail.sh" "$PRE_PUSH" --resolve-expected-pkgs ./internal/a/... ./internal/b/... 2>/dev/null)
+    PARTIAL_RC=$?
+    set -e
+    if [ "$PARTIAL_RC" -eq 0 ] || [ -n "$PARTIAL_OUT" ]; then
+        rm -rf "$MOCK_TMP"
+        echo "FAIL: --resolve-expected-pkgs accepted partial stdout on nonzero go list exit (rc=$PARTIAL_RC, out='$PARTIAL_OUT')"
+        exit 1
+    fi
+
+    # 6) execution-stage `go list` with real Go toolchain resolves ./internal/reach/... cleanly
+    REAL_PKGS=$("$PRE_PUSH" --resolve-expected-pkgs ./internal/reach/...)
+    rm -rf "$MOCK_TMP"
+    if [[ "$REAL_PKGS" != *"github.com/tamld/g8s/internal/reach"* ]]; then
+        echo "FAIL: --resolve-expected-pkgs did not resolve github.com/tamld/g8s/internal/reach, got: $REAL_PKGS"
+        exit 1
+    fi
+
+    # 7) planner-stage & execution-stage `go list` executable-not-found (OSError / exit 127) fall back cleanly
+    PLAN_NOGO=$(G8S_IMPACTED_GO_BIN="/nonexistent/go" "$PRE_PUSH" --impacted-plan --paths "internal/reach/registry.go")
+    if [[ "$PLAN_NOGO" != FULL\|scoped\ package\ target\ failed\ go\ list\ validation* ]]; then
+        echo "FAIL: expected FULL fallback when G8S_IMPACTED_GO_BIN is missing, got: $PLAN_NOGO"
+        exit 1
+    fi
+    if G8S_IMPACTED_GO_BIN="/nonexistent/go" "$PRE_PUSH" --resolve-expected-pkgs ./internal/reach/... >/dev/null 2>&1; then
+        echo "FAIL: --resolve-expected-pkgs succeeded with missing G8S_IMPACTED_GO_BIN"
+        exit 1
+    fi
+
+    echo "  [PASS] --impacted-plan leaf scoping, --no-renames, hotspot, OSError/partial-fail go list fallback, and structured go test -json non-vacuity guards verified"
 fi
 
 if [ "${1:-}" = "--unit-only" ]; then

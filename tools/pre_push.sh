@@ -34,6 +34,7 @@ IMPACTED_MODE=0
 IMPACTED_PLAN_ONLY=0
 IMPACTED_OVERRIDE_PATHS=""
 VERIFY_SCOPED_LOG=""
+RESOLVE_EXPECTED_PKGS=0
 # Build-lane step count (--fast skips race + cross-platform sub-steps only).
 BUILD_STEPS=15
 
@@ -71,6 +72,11 @@ while [ $# -gt 0 ]; do
             fi
             VERIFY_SCOPED_LOG="$2"
             shift 2
+            break
+            ;;
+        --resolve-expected-pkgs)
+            RESOLVE_EXPECTED_PKGS=1
+            shift
             break
             ;;
         --help|-h)
@@ -156,14 +162,15 @@ for p in changed:
         print(f"FULL|root build/module file changed ({p})")
         sys.exit(0)
 
+def safe_run(cmd):
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
 csv_arg = ",".join(changed)
-col_proc = subprocess.run(
-    [g8s_bin, "feature", "collisions", "--file", ".g8s/feature-map.yml", "--paths", csv_arg, "--json"],
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True,
-)
-if col_proc.returncode != 0:
+col_proc = safe_run([g8s_bin, "feature", "collisions", "--file", ".g8s/feature-map.yml", "--paths", csv_arg, "--json"])
+if col_proc is None or col_proc.returncode != 0:
     print("FULL|feature collisions query failed")
     sys.exit(0)
 
@@ -228,13 +235,8 @@ while queue:
     fid = queue.pop(0)
     if fid in inspected:
         continue
-    iproc = subprocess.run(
-        [g8s_bin, "feature", "inspect", fid, "--file", ".g8s/feature-map.yml", "--json"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if iproc.returncode != 0:
+    iproc = safe_run([g8s_bin, "feature", "inspect", fid, "--file", ".g8s/feature-map.yml", "--json"])
+    if iproc is None or iproc.returncode != 0:
         print(f"FULL|feature inspect failed for {fid}")
         sys.exit(0)
     try:
@@ -278,13 +280,8 @@ if not pkgs:
     sys.exit(0)
 
 sorted_pkgs = sorted(pkgs)
-list_proc = subprocess.run(
-    ["go", "list", "-f", "{{.Dir}}|{{len .TestGoFiles}}|{{len .XTestGoFiles}}"] + sorted_pkgs,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True,
-)
-if list_proc.returncode != 0 or "matched no packages" in (list_proc.stderr or ""):
+list_proc = safe_run([os.environ.get("G8S_IMPACTED_GO_BIN", "go"), "list", "-f", "{{.Dir}}|{{len .TestGoFiles}}|{{len .XTestGoFiles}}"] + sorted_pkgs)
+if list_proc is None or list_proc.returncode != 0 or "matched no packages" in (list_proc.stderr or ""):
     print("FULL|scoped package target failed go list validation")
     sys.exit(0)
 
@@ -296,8 +293,14 @@ if not list_lines:
 total_test_files = 0
 for ln in list_lines:
     parts = ln.split("|")
-    if len(parts) == 3:
+    if len(parts) != 3:
+        print("FULL|malformed go list validation output")
+        sys.exit(0)
+    try:
         total_test_files += int(parts[1]) + int(parts[2])
+    except ValueError:
+        print("FULL|malformed go list test counts")
+        sys.exit(0)
 if total_test_files == 0:
     print("FULL|scoped packages contain zero Go test files")
     sys.exit(0)
@@ -376,6 +379,40 @@ for req_pkg in expected_test_pkgs:
 print(f"PASS_COUNT={total_test_passes}")
 PY
 }
+
+# resolve_expected_test_pkgs runs `go list` on scoped target patterns, checks exit status AND
+# "matched no packages" stderr BEFORE emitting any stdout, and outputs newline-separated
+# test-bearing import paths. On nonzero exit, stderr warning, or empty package list, partial
+# stdout is discarded and status 1 is returned so callers fall back cleanly to FULL (./...).
+resolve_expected_test_pkgs() {
+    if [ $# -eq 0 ]; then
+        return 1
+    fi
+    local go_bin="${G8S_IMPACTED_GO_BIN:-go}"
+    local out err_file rc
+    err_file=$(mktemp)
+    set +e
+    out=$(CGO_ENABLED=0 "$go_bin" list -f '{{if or (gt (len .TestGoFiles) 0) (gt (len .XTestGoFiles) 0)}}{{.ImportPath}}{{end}}' "$@" 2>"$err_file")
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] || grep -qi "matched no packages" "$err_file" 2>/dev/null; then
+        rm -f "$err_file"
+        return 1
+    fi
+    rm -f "$err_file"
+    local filtered
+    filtered=$(printf '%s\n' "$out" | awk 'NF > 0')
+    if [ -z "$filtered" ]; then
+        return 1
+    fi
+    printf '%s\n' "$filtered"
+    return 0
+}
+
+if [ "$RESOLVE_EXPECTED_PKGS" -eq 1 ]; then
+    resolve_expected_test_pkgs "$@"
+    exit $?
+fi
 
 if [ -n "$VERIFY_SCOPED_LOG" ]; then
     verify_scoped_test_log "$VERIFY_SCOPED_LOG" "$@"
@@ -620,7 +657,7 @@ SCOPED_RUN=0
 TEST_TARGETS=("./...")
 RACE_TARGETS=("./internal/...")
 if [ "$IMPACTED_MODE" -eq 1 ]; then
-    IMPACTED_PLAN="$(resolve_impacted_packages "")"
+    IMPACTED_PLAN="$(resolve_impacted_packages "" 2>/dev/null || echo 'FULL|planner invocation failed')"
     IMPACTED_KIND="${IMPACTED_PLAN%%|*}"
     IMPACTED_DETAIL="${IMPACTED_PLAN#*|}"
     if [ "$IMPACTED_KIND" = "SCOPED" ] && [ -n "$IMPACTED_DETAIL" ]; then
@@ -643,12 +680,24 @@ COV_FILE=$(mktemp)
 trap 'rm -f "$COV_FILE"' EXIT
 EXPECTED_TEST_PKGS=()
 if [ "$SCOPED_RUN" -eq 1 ]; then
-    while IFS= read -r tpkg; do
-        [ -n "$tpkg" ] && EXPECTED_TEST_PKGS+=("$tpkg")
-    done < <(CGO_ENABLED=0 go list -f '{{if or (gt (len .TestGoFiles) 0) (gt (len .XTestGoFiles) 0)}}{{.ImportPath}}{{end}}' "${TEST_TARGETS[@]}")
-    if [ "${#EXPECTED_TEST_PKGS[@]}" -eq 0 ]; then
-        fail "Scoped --impacted targets resolved zero test-bearing Go packages."
+    set +e
+    EXPECTED_RAW=$(resolve_expected_test_pkgs "${TEST_TARGETS[@]}")
+    EXPECTED_RC=$?
+    set -e
+    if [ "$EXPECTED_RC" -eq 0 ] && [ -n "$EXPECTED_RAW" ]; then
+        while IFS= read -r tpkg; do
+            [ -n "$tpkg" ] && EXPECTED_TEST_PKGS+=("$tpkg")
+        done <<< "$EXPECTED_RAW"
     fi
+    if [ "$EXPECTED_RC" -ne 0 ] || [ "${#EXPECTED_TEST_PKGS[@]}" -eq 0 ]; then
+        echo "  -> --impacted execution-stage go list failed or resolved zero test packages; falling back to full suite (./...)"
+        EXPECTED_TEST_PKGS=()
+        SCOPED_RUN=0
+        TEST_TARGETS=("./...")
+        RACE_TARGETS=("./internal/...")
+    fi
+fi
+if [ "$SCOPED_RUN" -eq 1 ]; then
     set +e
     CGO_ENABLED=0 go test -json -count=1 -cover "${TEST_TARGETS[@]}" >"$COV_FILE" 2>&1
     TEST_EXIT=$?

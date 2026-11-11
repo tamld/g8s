@@ -273,42 +273,237 @@ fi
 # Check packaging installer templates match VERSION_GO
 for f in packaging/windows/g8s.nsi packaging/windows/g8s.wxs; do
     if [ -f "$f" ]; then
-        LITERAL=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?"' "$f" | head -1 | tr -d '"')
-        if [ "$LITERAL" != "$VERSION_GO" ]; then
-            fail "Installer template version drift in $f: template=$LITERAL, canonical=$VERSION_GO"
+        LITERALS=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?"' "$f" | tr -d '"' || true)
+        LIT_COUNT=$(printf '%s\n' "$LITERALS" | awk 'NF > 0 {c++} END {print c+0}')
+        if [ "$LIT_COUNT" -lt 1 ]; then
+            fail "Installer template version drift in $f: no semver literal found"
         fi
+        while IFS= read -r lit; do
+            [ -z "$lit" ] && continue
+            if [ "$lit" != "$VERSION_GO" ]; then
+                fail "Installer template version drift in $f: template=$lit, canonical=$VERSION_GO"
+            fi
+        done <<< "$LITERALS"
     fi
 done
 EXPECTED_ZIP_URL="https://github.com/tamld/g8s/releases/download/v${VERSION_GO}/g8s_${VERSION_GO}_windows_amd64.zip"
+EXPECTED_ZIP_URL_ARM64="https://github.com/tamld/g8s/releases/download/v${VERSION_GO}/g8s_${VERSION_GO}_windows_arm64.zip"
 if [ -f "packaging/winget/manifest.yaml" ]; then
-    WINGET_ACTIVE=$(grep -vE '^[[:space:]]*#' packaging/winget/manifest.yaml || true)
-    WINGET_VER=$(printf '%s\n' "$WINGET_ACTIVE" | sed -nE 's/^[[:space:]]*PackageVersion:[[:space:]]*(.*)[[:space:]]*$/\1/p' | head -1)
-    if [ "$WINGET_VER" != "$VERSION_GO" ]; then
-        fail "Winget PackageVersion drift in packaging/winget/manifest.yaml: package=$WINGET_VER, canonical=$VERSION_GO"
+    WINGET_ACTIVE=$(sed -E 's/^[[:space:]]*#.*$//; s/[[:space:]]+#.*$//' packaging/winget/manifest.yaml | awk 'NF > 0')
+    WINGET_PV_CI_COUNT=$(printf '%s\n' "$WINGET_ACTIVE" | grep -ciE '^[[:space:]]*PackageVersion[[:space:]]*:' || true)
+    WINGET_VERS=$(printf '%s\n' "$WINGET_ACTIVE" | sed -nE 's/^PackageVersion:[[:space:]]*([^"'"'"'[:space:]]+)[[:space:]]*$/\1/p')
+    WINGET_VER_COUNT=$(printf '%s\n' "$WINGET_VERS" | awk 'NF > 0 {c++} END {print c+0}')
+    if [ "$WINGET_PV_CI_COUNT" -ne 1 ] || [ "$WINGET_VER_COUNT" -ne 1 ] || [ "$WINGET_VERS" != "$VERSION_GO" ]; then
+        fail "Winget PackageVersion drift in packaging/winget/manifest.yaml: package=$WINGET_VERS (count=$WINGET_PV_CI_COUNT), canonical=$VERSION_GO"
     fi
-    WINGET_URL=$(printf '%s\n' "$WINGET_ACTIVE" | sed -nE 's/^[[:space:]]*(-[[:space:]]*)?InstallerUrl:[[:space:]]*(.*)[[:space:]]*$/\2/p' | head -1)
-    if [ "$WINGET_URL" != "$EXPECTED_ZIP_URL" ]; then
-        fail "Winget InstallerUrl drift in packaging/winget/manifest.yaml: url=$WINGET_URL, expected=$EXPECTED_ZIP_URL"
+    if printf '%s\n' "$WINGET_ACTIVE" | grep -qE '[{}\[\]|>&*`\\!]'; then
+        fail "Winget InstallerUrl drift in packaging/winget/manifest.yaml: forbidden flow/anchor/multiline/escape YAML syntax"
     fi
+    WINGET_VALIDATION=$(awk -v exp_x64="$EXPECTED_ZIP_URL" -v exp_arm64="$EXPECTED_ZIP_URL_ARM64" '
+        function check_item() {
+            if (!inst_items) return
+            if (!cur_has_url) { print "installer entry missing InstallerUrl"; exit 1 }
+            if (cur_arch == "x64" && cur_url != exp_x64) { print "x64 url=" cur_url ", expected=" exp_x64; exit 1 }
+            if (cur_arch == "arm64" && cur_url != exp_arm64) { print "arm64 url=" cur_url ", expected=" exp_arm64; exit 1 }
+            if (cur_arch == "" && cur_url != exp_x64 && cur_url != exp_arm64) { print "url=" cur_url ", expected=" exp_x64; exit 1 }
+        }
+        BEGIN {
+            in_inst = 0; inst_items = 0; url_items = 0; cur_arch = ""; cur_url = ""; cur_has_url = 0
+        }
+        /^Installers:[[:space:]]*$/ {
+            if (seen_installers++) { print "duplicate Installers key"; exit 1 }
+            in_inst = 1; next
+        }
+        /^[A-Za-z]+:[[:space:]]*[^[:space:]].*$/ {
+            if (in_inst) { print "top-level key after Installers block: " $0; exit 1 }
+            key = $0; sub(/:.*/, "", key); lkey = tolower(key)
+            if (seen_top[lkey]++) { print "duplicate top-level key: " key; exit 1 }
+            if (key !~ /^(PackageIdentifier|PackageVersion|PackageLocale|Publisher|PackageName|License|ShortDescription)$/) {
+                print "unexpected top-level Winget key: " key; exit 1
+            }
+            next
+        }
+        in_inst && /^  - [A-Za-z0-9]+:[[:space:]]*[^[:space:]].*$/ {
+            check_item()
+            inst_items++; cur_arch = ""; cur_url = ""; cur_has_url = 0
+            delete seen_item
+            line = $0; sub(/^  - /, "", line)
+            key = line; sub(/:.*/, "", key); val = line; sub(/^[^:]+:[[:space:]]*/, "", val); sub(/[[:space:]]*$/, "", val)
+            seen_item[tolower(key)] = 1
+            if (key == "Architecture") {
+                if (val != "x64" && val != "arm64") { print "unsupported Architecture: " val; exit 1 }
+                cur_arch = val
+            } else if (key == "InstallerType") {
+                if (val != "zip") { print "unsupported InstallerType: " val; exit 1 }
+            } else if (key == "InstallerUrl") {
+                cur_url = val; cur_has_url = 1; url_items++
+            } else {
+                print "unexpected installer item start key: " key; exit 1
+            }
+            next
+        }
+        in_inst && /^    [A-Za-z0-9]+:[[:space:]]*[^[:space:]].*$/ {
+            if (inst_items == 0) { print "indented installer field before list item"; exit 1 }
+            line = $0; sub(/^    /, "", line)
+            key = line; sub(/:.*/, "", key); val = line; sub(/^[^:]+:[[:space:]]*/, "", val); sub(/[[:space:]]*$/, "", val)
+            if (seen_item[tolower(key)]++) { print "duplicate installer field: " key; exit 1 }
+            if (key == "Architecture") {
+                if (val != "x64" && val != "arm64") { print "unsupported Architecture: " val; exit 1 }
+                cur_arch = val
+            } else if (key == "InstallerType") {
+                if (val != "zip") { print "unsupported InstallerType: " val; exit 1 }
+            } else if (key == "InstallerUrl") {
+                cur_url = val; cur_has_url = 1; url_items++
+            } else if (key == "InstallerSha256") {
+                if (val != "<from checksums.txt>" && val !~ /^[0-9a-fA-F]{64}$/) { print "invalid InstallerSha256: " val; exit 1 }
+            } else {
+                print "unexpected installer key: " key; exit 1
+            }
+            next
+        }
+        { print "unrecognized Winget YAML line: " $0; exit 1 }
+        END {
+            if (!seen_installers || inst_items < 1 || url_items != inst_items) {
+                print "missing or incomplete Installers entries"
+                exit 1
+            }
+            check_item()
+        }
+    ' <<< "$WINGET_ACTIVE" 2>&1) || fail "Winget InstallerUrl drift in packaging/winget/manifest.yaml: $WINGET_VALIDATION"
 fi
 if [ -f "packaging/chocolatey/g8s.nuspec" ]; then
-    NUSPEC_VER=$(grep -vE '^[[:space:]]*<!--' packaging/chocolatey/g8s.nuspec | sed -nE 's|.*<version>([^<]+)</version>.*|\1|p' | head -1)
-    if [ "$NUSPEC_VER" != "$VERSION_GO" ]; then
-        fail "Chocolatey nuspec version drift in packaging/chocolatey/g8s.nuspec: nuspec=$NUSPEC_VER, canonical=$VERSION_GO"
+    if grep -qiE '<!DOCTYPE|<!ENTITY|<!\[CDATA\[|&#' packaging/chocolatey/g8s.nuspec; then
+        fail "Chocolatey nuspec version drift in packaging/chocolatey/g8s.nuspec: forbidden XML entity/CDATA/charref construct"
+    fi
+    NUSPEC_CLEAN=$(awk '
+        BEGIN { in_c = 0 }
+        {
+            line = $0
+            while (1) {
+                if (in_c) {
+                    idx = index(line, "-->")
+                    if (idx == 0) { line = ""; break }
+                    line = substr(line, idx + 3)
+                    in_c = 0
+                } else {
+                    idx = index(line, "<!--")
+                    if (idx == 0) { break }
+                    rest = substr(line, idx + 4)
+                    end_idx = index(rest, "-->")
+                    if (end_idx > 0) {
+                        line = substr(line, 1, idx - 1) substr(rest, end_idx + 3)
+                    } else {
+                        line = substr(line, 1, idx - 1)
+                        in_c = 1
+                        break
+                    }
+                }
+            }
+            print line
+        }
+    ' packaging/chocolatey/g8s.nuspec)
+    NUSPEC_OPEN_CI=$(printf '%s\n' "$NUSPEC_CLEAN" | grep -oiE '<version[[:space:]>]' | wc -l | tr -d '[:space:]')
+    NUSPEC_VERS=$(printf '%s\n' "$NUSPEC_CLEAN" | grep -oE '<version>[^<]+</version>' | sed -E 's|<version>([^<]+)</version>|\1|' || true)
+    NUSPEC_VER_COUNT=$(printf '%s\n' "$NUSPEC_VERS" | awk 'NF > 0 {c++} END {print c+0}')
+    if [ "$NUSPEC_OPEN_CI" -ne 1 ] || [ "$NUSPEC_VER_COUNT" -ne 1 ] || [ "$NUSPEC_VERS" != "$VERSION_GO" ]; then
+        fail "Chocolatey nuspec version drift in packaging/chocolatey/g8s.nuspec: nuspec=$NUSPEC_VERS (count=$NUSPEC_OPEN_CI), canonical=$VERSION_GO"
     fi
 fi
 if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
-    CHOCO_ACTIVE=$(grep -vE '^[[:space:]]*#' packaging/chocolatey/tools/chocolateyinstall.ps1 || true)
+    CHOCO_ACTIVE=$(awk '
+        BEGIN { in_blk = 0 }
+        {
+            line = $0
+            while (1) {
+                if (in_blk) {
+                    idx = index(line, "#>")
+                    if (idx == 0) { line = ""; break }
+                    line = substr(line, idx + 2)
+                    in_blk = 0
+                } else {
+                    idx = index(line, "<#")
+                    if (idx == 0) { break }
+                    rest = substr(line, idx + 2)
+                    end_idx = index(rest, "#>")
+                    if (end_idx > 0) {
+                        line = substr(line, 1, idx - 1) substr(rest, end_idx + 2)
+                    } else {
+                        line = substr(line, 1, idx - 1)
+                        in_blk = 1
+                        break
+                    }
+                }
+            }
+            if (line !~ /^[[:space:]]*#/ && line ~ /[^[:space:]]/) print line
+        }
+        END {
+            if (in_blk) { print "__UNCLOSED_BLOCK_COMMENT__" }
+        }
+    ' packaging/chocolatey/tools/chocolateyinstall.ps1)
     if printf '%s\n' "$CHOCO_ACTIVE" | grep -qiE '\.msi([^a-zA-Z0-9]|$)|fileType[[:space:]]*=[[:space:]]*['"'"'"]MSI['"'"'"]|Install-ChocolateyPackage([^a-zA-Z0-9]|$)'; then
         fail "Chocolatey installer script references unsupported .msi asset (expected GoReleaser .zip)"
     fi
-    CHOCO_URL=$(printf '%s\n' "$CHOCO_ACTIVE" | sed -nE "s/^[[:space:]]*\\\$url[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"][[:space:]]*\$/\\1/p" | head -1)
-    if [ "$CHOCO_URL" != "$EXPECTED_ZIP_URL" ]; then
-        fail "Chocolatey download URL drift in packaging/chocolatey/tools/chocolateyinstall.ps1: url=$CHOCO_URL, expected=$EXPECTED_ZIP_URL"
+    if printf '%s\n' "$CHOCO_ACTIVE" | grep -qE '[;`]'; then
+        fail "Chocolatey download URL drift in packaging/chocolatey/tools/chocolateyinstall.ps1: semicolons and backtick escapes are forbidden"
     fi
-    if ! printf '%s\n' "$CHOCO_ACTIVE" | grep -qE '^[[:space:]]*Install-ChocolateyZipPackage[[:space:]]+@packageArgs([[:space:]]|$)'; then
-        fail "Chocolatey installer script must invoke active 'Install-ChocolateyZipPackage @packageArgs' for .zip release asset"
-    fi
+    CHOCO_VALIDATION=$(awk -v exp_url="$EXPECTED_ZIP_URL" '
+        BEGIN {
+            in_args = 0; seen_url = 0; seen_args = 0; seen_args_close = 0; seen_bind_url = 0; seen_install = 0
+        }
+        seen_install { print "statement after Install-ChocolateyZipPackage: " $0; exit 1 }
+        /^\$toolsDir[[:space:]]*=[[:space:]]*"\$\(Split-Path -Parent \$MyInvocation\.MyCommand\.Definition\)"[[:space:]]*$/ {
+            if (in_args || seen_tools++) { print "duplicate or misplaced $toolsDir"; exit 1 }
+            next
+        }
+        /^\$url[[:space:]]*=[[:space:]]*'"'"'[^'"'"'\$]+'"'"'[[:space:]]*$/ {
+            if (in_args || seen_url++) { print "duplicate or misplaced $url assignment"; exit 1 }
+            val = $0; sub(/^\$url[[:space:]]*=[[:space:]]*'"'"'/, "", val); sub(/'"'"'[[:space:]]*$/, "", val)
+            if (val != exp_url) { print "url=" val ", expected=" exp_url; exit 1 }
+            next
+        }
+        /^\$checksum[[:space:]]*=[[:space:]]*'"'"'(<from checksums\.txt>|[0-9a-fA-F]{64})'"'"'[[:space:]]*$/ {
+            if (in_args || seen_csum++) { print "duplicate or misplaced $checksum"; exit 1 }
+            next
+        }
+        /^\$packageArgs[[:space:]]*=[[:space:]]*@\{[[:space:]]*$/ {
+            if (in_args || !seen_url || seen_args++) { print "invalid $packageArgs block start"; exit 1 }
+            in_args = 1; next
+        }
+        in_args && /^[[:space:]]+packageName[[:space:]]*=[[:space:]]*'"'"'g8s'"'"'[[:space:]]*$/ {
+            if (seen_pkg++) { print "duplicate packageName"; exit 1 }
+            next
+        }
+        in_args && /^[[:space:]]+unzipLocation[[:space:]]*=[[:space:]]*\$toolsDir[[:space:]]*$/ {
+            if (seen_unzip++) { print "duplicate unzipLocation"; exit 1 }
+            next
+        }
+        in_args && /^[[:space:]]+url[[:space:]]*=[[:space:]]*\$url[[:space:]]*$/ {
+            if (seen_bind_url++) { print "duplicate packageArgs url binding"; exit 1 }
+            next
+        }
+        in_args && /^[[:space:]]+checksum[[:space:]]*=[[:space:]]*\$checksum[[:space:]]*$/ {
+            if (seen_bind_csum++) { print "duplicate packageArgs checksum binding"; exit 1 }
+            next
+        }
+        in_args && /^[[:space:]]+checksumType[[:space:]]*=[[:space:]]*'"'"'sha256'"'"'[[:space:]]*$/ {
+            if (seen_bind_ctype++) { print "duplicate packageArgs checksumType"; exit 1 }
+            next
+        }
+        in_args && /^\}[[:space:]]*$/ {
+            in_args = 0; seen_args_close = 1; next
+        }
+        !in_args && /^Install-ChocolateyZipPackage[[:space:]]+@packageArgs[[:space:]]*$/ {
+            if (!seen_args_close || !seen_bind_url) { print "Install-ChocolateyZipPackage invoked before valid $packageArgs"; exit 1 }
+            seen_install = 1; next
+        }
+        { print "non-canonical PowerShell statement: " $0; exit 1 }
+        END {
+            if (in_args || !seen_url || !seen_args || !seen_args_close || !seen_bind_url || !seen_install) {
+                print "incomplete Chocolatey zip installer template"
+                exit 1
+            }
+        }
+    ' <<< "$CHOCO_ACTIVE" 2>&1) || fail "Chocolatey download URL drift in packaging/chocolatey/tools/chocolateyinstall.ps1: $CHOCO_VALIDATION"
 fi
 pass "Packaging templates match codebase version ($VERSION_GO)"
 

@@ -223,6 +223,9 @@ cat > "$FIXTURE_CHOCO_MSI/packaging/chocolatey/g8s.nuspec" <<'EOF'
 EOF
 cat > "$FIXTURE_CHOCO_MSI/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
 $url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.msi'
+$packageArgs = @{
+  url = $url
+}
 Install-ChocolateyPackage @packageArgs
 EOF
 run_test_with_output \
@@ -260,6 +263,81 @@ run_test_with_output \
     "(k) fixture chocolatey URL 0x23y0 drift fails check" 1 \
     "Chocolatey download URL drift" \
     bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_URL"
+
+# (l) fixture: second winget InstallerUrl entry with stale 0.19.0 ZIP fails check
+FIXTURE_WINGET_MULTI="$FIXTURE_ROOT/winget_multi_url"
+setup_fixture_repo "$FIXTURE_WINGET_MULTI" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_WINGET_MULTI/packaging/winget"
+cat > "$FIXTURE_WINGET_MULTI/packaging/winget/manifest.yaml" <<'EOF'
+PackageIdentifier: TamLD.g8s
+PackageVersion: 0.23.0
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip
+  - Architecture: x64
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.19.0/g8s_0.19.0_windows_amd64.zip
+EOF
+run_test_with_output \
+    "(l) fixture second winget InstallerUrl stale 0.19.0 fails check" 1 \
+    "Winget InstallerUrl drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_WINGET_MULTI"
+
+# (m) fixture: duplicate chocolatey $url assignment overriding 0.23.0 with 0.19.0 fails check
+FIXTURE_CHOCO_REASSIGN="$FIXTURE_ROOT/choco_reassign_url"
+setup_fixture_repo "$FIXTURE_CHOCO_REASSIGN" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_CHOCO_REASSIGN/packaging/chocolatey/tools"
+cat > "$FIXTURE_CHOCO_REASSIGN/packaging/chocolatey/g8s.nuspec" <<'EOF'
+<package><metadata><id>g8s</id><version>0.23.0</version></metadata></package>
+EOF
+cat > "$FIXTURE_CHOCO_REASSIGN/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+$url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip'
+$url = 'https://github.com/tamld/g8s/releases/download/v0.19.0/g8s_0.19.0_windows_amd64.zip'
+Install-ChocolateyZipPackage @packageArgs
+EOF
+run_test_with_output \
+    "(m) fixture duplicate chocolatey \$url reassignment to 0.19.0 fails check" 1 \
+    "Chocolatey download URL drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_REASSIGN"
+
+# (n) fixture: winget flow-style YAML installer entry with stale 0.19.0 ZIP fails check
+FIXTURE_WINGET_FLOW="$FIXTURE_ROOT/winget_flow_url"
+setup_fixture_repo "$FIXTURE_WINGET_FLOW" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_WINGET_FLOW/packaging/winget"
+cat > "$FIXTURE_WINGET_FLOW/packaging/winget/manifest.yaml" <<'EOF'
+PackageIdentifier: TamLD.g8s
+PackageVersion: 0.23.0
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip
+  - {Architecture: arm64, InstallerType: zip, InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.19.0/g8s_0.19.0_windows_arm64.zip}
+EOF
+run_test_with_output \
+    "(n) fixture winget flow-style YAML stale 0.19.0 URL fails check" 1 \
+    "Winget InstallerUrl drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_WINGET_FLOW"
+
+# (o) fixture: case-insensitive PowerShell $URL = $url.Replace(...) dynamic override fails check
+FIXTURE_CHOCO_DYNAMIC="$FIXTURE_ROOT/choco_dynamic_url"
+setup_fixture_repo "$FIXTURE_CHOCO_DYNAMIC" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_CHOCO_DYNAMIC/packaging/chocolatey/tools"
+cat > "$FIXTURE_CHOCO_DYNAMIC/packaging/chocolatey/g8s.nuspec" <<'EOF'
+<package><metadata><id>g8s</id><version>0.23.0</version></metadata></package>
+EOF
+cat > "$FIXTURE_CHOCO_DYNAMIC/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+$toolsDir = "$(Split-Path -Parent $MyInvocation.MyCommand.Definition)"
+$url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip'
+$URL = $url.Replace('0.23.0', '0.19.0')
+$packageArgs = @{
+  packageName = 'g8s'
+  unzipLocation = $toolsDir
+  url = $url
+}
+Install-ChocolateyZipPackage @packageArgs
+EOF
+run_test_with_output \
+    "(o) fixture PowerShell \$URL.Replace dynamic override fails check" 1 \
+    "Chocolatey download URL drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_DYNAMIC"
 
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
