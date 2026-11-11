@@ -453,7 +453,8 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if req.Permission == "" {
 		req.Permission = dispatch.DefaultPermission
 	}
-	if err := checkReadOnlyEnforcement(s.resolveTaskProvider(req), req.Permission); err != nil {
+	resolvedTaskProvider := s.resolveTaskProvider(req)
+	if err := checkReadOnlyEnforcement(resolvedTaskProvider, req.Permission); err != nil {
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
@@ -495,6 +496,20 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		req.ToolPolicyEvidenceLog = evidenceLogPath
 		req.AddDirs = append(append([]string{}, req.AddDirs...), hookDir)
 	}
+
+	hydratedPrompt, hydrateErr := hydrateRoleSkills(req, resolveHydrationRepoDir(s.runRoot, opts, req))
+	if hydrateErr != nil {
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.cp.GetTask(ctx, task.TaskID)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result:    mustJSON(map[string]any{"ok": false, "status": "skill_hydration_failed", "reason": hydrateErr.Error(), "error": hydrateErr.Error()}),
+			Success:   false,
+			Retryable: false,
+			Err:       hydrateErr.Error(),
+		})
+	}
+	req.Prompt = hydratedPrompt
 
 	// Parse per-command timeout for process execution
 	var cmdTimeout time.Duration
@@ -567,7 +582,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	// Nil isolator, Acquire error, or empty dir with nil error produces a
 	// structured isolation_unavailable failure, never invokes the child
 	// command, and terminally releases/finishes the attempt without leaking
-	// leases. read_only attempts are untouched.
+	// leases. read_only external CLI attempts use the same isolator (#880).
 	// #610: when req.AddDirs specifies an explicit target repository
 	// (cross-repo dispatch), it takes precedence over pool worktree opts.Dir.
 	explicitAddDir := strings.TrimSpace(firstOf(req.AddDirs))
@@ -579,7 +594,9 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	var releaseWorktree func(keep bool)
 	var isolatedWorktreeDir string
-	if req.Permission == "workspace_write" {
+	ephemeralReadOnly := needsEphemeralReadOnlyWorktree(req, resolvedTaskProvider.Name)
+	useWorktreeIsolation := req.Permission == "workspace_write" || ephemeralReadOnly
+	if useWorktreeIsolation {
 		if err := cleanupFailedWorktree(filepath.Dir(runDir)); err != nil {
 			return nil, err
 		}
@@ -672,12 +689,20 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			rewrittenDirs = append([]string{wt}, rewrittenDirs...)
 		}
 		req.AddDirs = rewrittenDirs
-		fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
+		if req.Permission == "workspace_write" {
+			fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in worktree %s (kept for inspection)\n", task.TaskID, wt)
+		} else {
+			fmt.Fprintf(os.Stderr, "[info] worker: attempt %s isolated in ephemeral read_only worktree %s\n", task.TaskID, wt)
+		}
 	}
 	keepWorktree := false
 	if releaseWorktree != nil {
 		defer func() {
 			if !keepWorktree {
+				if ephemeralReadOnly {
+					releaseWorktree(false)
+					return
+				}
 				releaseFailedWorktree(filepath.Dir(runDir), isolatedWorktreeDir, releaseWorktree)
 				return
 			}
@@ -782,7 +807,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	errFile.Close()
 	finalTask, collectErr := s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
 		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, startTime, isolatedWorktreeDir, req)
-	if collectErr == nil && finalTask != nil && isAttemptResultOK(finalTask.Result) {
+	if collectErr == nil && finalTask != nil && isAttemptResultOK(finalTask.Result) && req.Permission == "workspace_write" {
 		keepWorktree = true
 	}
 	return finalTask, collectErr

@@ -33,11 +33,11 @@ func TestReadOnlyEnforcementDecision(t *testing.T) {
 	}{
 		{"agy", false},
 		{"claude", true},
-		{"codex", true},
-		{"opencode", true},
-		{"commandcode", true},
-		{"qwen", true},
-		{"cursor", true},
+		{"codex", false},
+		{"opencode", false},
+		{"commandcode", false},
+		{"qwen", false},
+		{"cursor", false},
 		{"custom", false},
 		{"custom-external", true},
 		{"api", false},
@@ -70,7 +70,7 @@ func TestReadOnlyClaimRefusedBeforeSpawnAndArtifacts(t *testing.T) {
 			iso := &fakeWorktreeIsolator{dir: filepath.Join(t.TempDir(), "worktree")}
 			env := newWorkerEnv(t, nil, WithWorktreeIsolator(iso))
 			submitTask(t, env, "refuse-read-only", 1, map[string]any{
-				"provider": "codex", "permission": permission, "tool_policy": "none",
+				"provider": "claude", "permission": permission, "tool_policy": "none",
 			})
 			task, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-refused", LeaseSeconds: 60})
 			if err != nil {
@@ -114,7 +114,7 @@ func TestReadOnlyProviderResolution(t *testing.T) {
 		{"", "m", "custom", true},
 		{"", "api-model", "api", false},
 		{"", "unknown", "agy", false},
-		{"codex", "m", "codex", true},
+		{"codex", "m", "codex", false},
 		{"agy", "m", "agy", false},
 	} {
 		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {

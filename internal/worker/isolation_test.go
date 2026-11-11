@@ -86,8 +86,8 @@ func TestWorkspaceWriteAttemptGetsWorktreeIsolation(t *testing.T) {
 	}
 }
 
-// read_only attempts keep the shared checkout — the isolator must not be
-// consulted (nothing to clobber, no worktree churn).
+// read_only agy attempts keep the shared checkout — the isolator must not be
+// consulted (in-process enforcement; no worktree churn).
 func TestReadOnlyAttemptSkipsIsolation(t *testing.T) {
 	iso := &fakeWorktreeIsolator{dir: filepath.Join(t.TempDir(), "wt-ro")}
 	env := newIsolationEnv(t, iso)
