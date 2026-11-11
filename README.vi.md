@@ -8,7 +8,7 @@
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-1.26.10-00ADD8?logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26.11-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
 [![Release](https://img.shields.io/github/v/release/tamld/g8s)](https://github.com/tamld/g8s/releases)
 
@@ -97,7 +97,7 @@ Tải file chạy trực tiếp từ [GitHub Releases](https://github.com/tamld/
 - Linux (`amd64` / `arm64`)
 - Windows (`amd64`)
 
-### Cài qua Go (`go1.26.10`+)
+### Cài qua Go (`go1.26.11`+)
 
 ```bash
 go install github.com/tamld/g8s/cmd/g8s@latest
@@ -191,16 +191,16 @@ cat result.json | g8s select data.status
 g8s mcp
 ```
 
-#### Danh mục 22 công cụ MCP
+#### Danh mục 23 công cụ MCP đã đăng ký (22 hoạt động + `g8s_run` dự trữ)
 
 | Tên công cụ | Mục đích & Thao tác |
 | :--- | :--- |
-| `g8s_run` | Thực thi đồng bộ một worker task cô lập (yêu cầu Phase 4 supervisor). |
+| `g8s_run` | Stub thực thi đồng bộ dự trữ hậu MVP (trả lỗi JSON-RPC `-32603`; dùng `g8s_submit`). |
 | `g8s_submit` | Nạp một task bền vững với role, quyền và ngân sách thời gian. |
 | `g8s_get` | Tra cứu trạng thái task đã làm sạch theo `task_id`. |
 | `g8s_receipt_issue` | Cấp biên nhận ghi có phạm vi đường dẫn và thời hạn dùng một lần. |
 | `g8s_self_awareness` | Báo cáo danh sách provider, model khả dụng và số slot đồng thời. |
-| `g8s_blast_radius` | Phân tích phạm vi ảnh hưởng LSP và AST cho file/symbol (`DELTA-07`). |
+| `g8s_blast_radius` | Phân tích phạm vi ảnh hưởng AST thuần Go và CodeIntel đa tầng cho file/symbol (`DELTA-07`, `DELTA-20`). |
 | `g8s_dispatch` | Thực thi lệnh dispatch chỉ đọc qua lớp bọc an toàn. |
 | `g8s_list_tasks` | Liệt kê danh sách task theo trạng thái (`QUEUED`, `SUCCEEDED`, v.v.). |
 | `g8s_cancel_task` | Yêu cầu hủy task hợp tác kèm lý do kiểm toán. |
@@ -253,23 +253,23 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | :--- | :--- |
 | [Hướng dẫn Quickstart](docs/quickstart.md) | Khởi đầu từ cài đặt đến lần ủy quyền thực thi đầu tiên. |
 | [Tra cứu lệnh CLI](docs/user-guide/cli-reference.md) | Sổ tay đầy đủ về mọi lệnh con, cờ tùy chọn và mã thoát. |
-| [Tài liệu MCP Tools](docs/user-guide/mcp-tools.md) | Schema JSON, tham số và kiểu dữ liệu trả về của 21 MCP tool. |
+| [Tài liệu MCP Tools](docs/user-guide/mcp-tools.md) | Schema JSON, tham số và kiểu dữ liệu trả về của 23 MCP tool đã đăng ký. |
 | [Hướng dẫn I/O Agent](offer/SEARCH_GUIDE.md) | Tìm kiếm, cắt dòng, sửa nguyên tử và trích xuất JSON dot-path. |
 | [Đặc tả Sản phẩm (PRD)](docs/PRD.md) | Vấn đề giải quyết, đối tượng hướng tới và giá trị cốt lõi. |
-| [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..10) và phi chức năng (NFR-1..4). |
+| [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..11) và phi chức năng (NFR-1..4). |
 | [Định nghĩa Xong & Sẵn sàng (DOD_DOR)](docs/DOD_DOR.md) | Tiêu chuẩn chất lượng, quy trình xác thực đa vòng và cổng kiểm soát. |
 | [Chuẩn Bảo mật OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Ánh xạ OWASP Top 10 cho LLM/Agent (2025), SLSA v1.0 và SPDX SBOM. |
-| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0035. |
+| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0041 (kèm ghi chú tombstone). |
 
 ### 4 trụ cột cổng chất lượng & AppSec
 
-Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec và 54 khẳng định định lượng đăng ký tại [`docs/claims.yml`](docs/claims.yml):
+Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec và 57 khẳng định định lượng đăng ký tại [`docs/claims.yml`](docs/claims.yml):
 
 | Trụ cột | Cơ chế bảo đảm chất lượng | Mục tiêu kiểm chứng |
 | :--- | :--- | :--- |
 | **1. SAST Triad** | `gosec` (trong `golangci-lint`) + `Semgrep` (`.semgrep/g8s-rules.yml`) + `CodeQL` | Không có lỗ hổng bảo mật, bắt buộc xử lý mọi lỗi (`errcheck`). |
 | **2. Black-Box DAST** | Fuzzing API và thăm dò biên giới hạn (`dast_test.go`) | Kiểm tra endpoint HTTP và MCP stdio chống payload độc và thoát thư mục. |
-| **3. In-Process IAST** | `RuntimeSensor` và bộ probe red-team (`sa-006`..`sa-008`) | Phát hiện vi phạm sandbox, tranh chấp lease và dùng lại biên nhận thời gian thực. |
+| **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) và bộ probe red-team (`sa-006`..`sa-008`) | Snapshot kiểm định vệ sinh runtime xác minh tranh chấp CAS, giam giữ symlink và không rò rỉ goroutine/file tạm. |
 | **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Độ bền vững của bộ phân tích trước mọi đầu vào bất thường. |
 
 ---
@@ -284,9 +284,10 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): sổ cái bằng chứng hash-chain, mandate T0–T4, gates G0–G7, tường lửa verify không suy hao. | **Xong** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
-| **`v0.20.0`** (2026-10-25) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model, Hydrate Skill Gắn Mã Băm, Nén Ngữ cảnh AST/Knapsack, Pipeline QA AI 6 Tầng & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): động cơ charter `S0..S3` + `O-Plane`, 22 công cụ MCP (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, cổng tiền thực thi `Lane F/R/S`, `g8s context-pack`, `g8s qa-report` và `DeviceLeasePool`. | **Xong** |
-| **`v0.22.0`** (2026-11-01, Hiện tại) | **Sổ cái Liên hợp Coordinator Đa nền tảng & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): sổ cái SQLite WAL chung cho các coordinator F0 ngang hàng (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` qua CLI + MCP), tin nhắn có kiểu chống trùng lặp (`message_id` UNIQUE + echo theo digest), CAS claim với TTL + hàng rào context-revision, long-poll `wait` có biên, tự báo quota 2 tầng (không biết thì nói không biết), miễn nhiễm whitespace cho layer-gate (A6), workflow full-battery hằng đêm; được phê chuẩn chéo bởi các peer Codex/AGY/ZCode với trao đổi 3 nền tảng thật ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Tầng thu thập dữ liệu đa nền tảng ("reach")** — chuỗi tool fallback có thứ tự theo platform (`g8s reach read`), sổ cái sức khỏe & đường dẫn sở hữu (`S2`), cấp dữ liệu cho Context Broker `WorldSnippets` và thăng cấp vào vault ở trạng thái `PROPOSED` (`S3`), cùng artifact nghiên cứu lấy bằng máy (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Xong** |
-| **`v0.30.0`** (Kế hoạch) | **Bộ Adapter CLI Agent Đa năng (`opencode`, `commandcode`, `codex`), Định tuyến Free-Model Phân tầng & Liên bang MCP F0/F1/F2** (`DELTA-39`, [#672](https://github.com/tamld/g8s/issues/672)): tích hợp các CLI coding agent ngoài dưới sandbox worktree/receipt của `g8s`, định tuyến free-model cho tác vụ chỉ đọc (`scout`/`researcher`), và phân quyền MCP theo biên nhận trong worktree F1/F2. | **Kế hoạch** |
+| **`v0.20.0`** (2026-10-25) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model, Hydrate Skill Gắn Mã Băm, Nén Ngữ cảnh AST/Knapsack, Pipeline QA AI 6 Tầng & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): động cơ charter `S0..S3` + `O-Plane`, mở rộng MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, cổng tiền thực thi `Lane F/R/S`, `g8s context-pack`, `g8s qa-report` và `DeviceLeasePool`. | **Xong** |
+| **`v0.22.0`** (2026-11-01) | **Sổ cái Liên hợp Coordinator Đa nền tảng & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): sổ cái SQLite WAL chung cho các coordinator F0 ngang hàng (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` qua CLI + công cụ MCP `g8s_coordinator_mesh`), tin nhắn có kiểu chống trùng lặp (`message_id` UNIQUE + echo theo digest), CAS claim với TTL + hàng rào context-revision, long-poll `wait` có biên, tự báo quota 2 tầng (không biết thì nói không biết), miễn nhiễm whitespace cho layer-gate (A6), workflow full-battery hằng đêm; được phê chuẩn chéo bởi các peer Codex/AGY/ZCode với trao đổi 3 nền tảng thật ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Tầng thu thập dữ liệu đa nền tảng ("reach")** — chuỗi tool fallback có thứ tự theo platform (`g8s reach read`), sổ cái sức khỏe & đường dẫn sở hữu (`S2`), cấp dữ liệu cho Context Broker `WorldSnippets` và thăng cấp vào vault ở trạng thái `PROPOSED` (`S3`), cùng artifact nghiên cứu lấy bằng máy (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Xong** |
+| **`v0.23.0`** (2026-11-08, Hiện tại) | **Gia cố Cô lập, Cơ giới hóa SSoT & Phản tỉnh Quy trình** ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)): hàng rào ghi gắn claim đầu-cuối, `RT-MESH v1.1` (`A1..A5`), khép kín chu trình phản xạ `D-09` (`SENSE->JUDGE->ACT`), sổ cái liêm chính dogfooding, cơ giới hóa kiểm định SSoT và proxy git-commit cho worker. | **Xong** |
+| **`v0.30.0`** (Kế hoạch) | **Proxy Phân quyền MCP F0/F1/F2 & Vận hành Thực chiến Offer Đa Repo** ([#672](https://github.com/tamld/g8s/issues/672); các adapter CLI ngoài và tường lửa worktree `read_only` của `DELTA-39` đã phát hành từ `v0.20.0+`): proxy giới hạn năng lực MCP theo biên nhận trong worktree F1/F2 và kiểm chứng giữ chân Offer Bundle 90 ngày trên đa repo. | **Kế hoạch** |
 | **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
 | **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
 

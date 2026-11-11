@@ -3,7 +3,7 @@
 ## 1. Functional Requirements (FR)
 
 * **FR-1 (Role & Permission Harness)**:
-  * Enforce 6 distinct worker roles: `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`.
+  * Enforce 10 distinct worker roles: `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`, `researcher`, `implementer`, `sec-auditor`, `analyst`.
   * Enforce 4 permission profiles: `read_only` (default), `automation_read` (permits CLI permission skipping behind sandbox), `workspace_write` (requires write receipt), and `supplied_text` (disables all model-initiated tool calls at the provider adapter boundary).
   * Enforce tool policy options (`--tool-policy default|none`): `supplied_text` and `--tool-policy none` disable all model-facing tool calls at the provider adapter boundary (`PreToolUse` hook interceptor + callback audit). Boundary specification: this capability governs model-facing tool calls at the provider adapter boundary and does not claim an OS filesystem sandbox or prove that trusted provider/runtime housekeeping made no changes.
   * Enforce pre-dispatch safety filters: `BLOCKED_TASK_PATTERNS` (destructive shell/database commands) and `DENIED_PATH_FRAGMENTS` (`.ssh`, `.aws`, `.env`, `id_rsa`, etc.).
@@ -29,10 +29,10 @@
 
 * **FR-5 (Stdio MCP Server)**:
   * Implement JSON-RPC 2.0 stdio protocol for MCP compatibility.
-  * Expose 19 tools: `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`, `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`.
+  * Expose 23 registered tools (22 active + `g8s_run` reserved post-MVP sync-supervisor stub): `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`, `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`, `g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_coordinator_mesh`.
 
 * **FR-6 (Cross-Platform Daemon Service)**:
-  * Support `g8s service install|start|stop|uninstall|status` on macOS (`launchd`), Linux (`systemd`), and Windows (`sc.exe`); unsupported platforms fail closed with a clear error.
+  * Support `g8s service install|start|stop|uninstall|status` on macOS (`launchd`) in MVP; Linux (`systemd`), Windows (`sc.exe`), and unsupported platforms fail closed with a clear error until post-MVP implementation.
   * Non-loopback HTTP daemon binds (`g8s serve`) require bearer token authentication (`G8S_SERVE_TOKEN`, `DELTA-27`).
 
 * **FR-7 (Decoupled Pure-Go Knowledge Vault)**:
@@ -84,4 +84,5 @@
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): 16-tool MCP Server (`g8s_llm_call`, `g8s_select`), Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
 | **`v0.20.0`** (2026-10-22) | **Zero-Trust Execution Hardening, Bounded Agentic Loop & Epistemic Verification** (`DELTA-26..32`, `#661..#664`): Fail-closed worktree isolation (`#656`), Draft-7 `--output-schema` (`#659`), `g8s fleet status` (`DELTA-32`), multi-project Vault grounding (`#661`), fail-closed T3 model-family disjointness (`#662`), non-Markovian loop rollback (`#663`), and `--verify-cmd` DLP scrubbing (`#664`). | **Done** |
 | **`v0.22.0`** (2026-11-01) | **Multi-Coordinator Native Interop Ledger (`RT-MESH v1`, `DELTA-46`) & Reach Layer (`DELTA-47`, [ADR-0037](decisions/0037-reach-layer.md))**: shared SQLite WAL peer ledger (`#700`), `g8s reach` ordered fallback chains (`S1`), health/owned-paths ledgers (`S2`), Context Broker `WorldSnippets` + `PROPOSED` vault promotion (`S3`), and machine-artifact research citations (`S4`). | **Done** |
+| **`v0.23.0`** (2026-11-08) | **Containment Hardened, Mechanized SSoT & Process-Reflective** ([ADR-0038](decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](decisions/0040-mechanized-ssot.md), [ADR-0041](decisions/0041-worker-git-proxy.md)): claim-scoped mutation fence end-to-end, `RT-MESH v1.1` (`A1..A5`), `D-09` reflex cycle (`SENSE->JUDGE->ACT`), provenance honesty ledger, Mechanized SSoT parity gates, and worker git-commit proxy. | **Done** |
 | **`v0.30.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

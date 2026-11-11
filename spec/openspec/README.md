@@ -14,7 +14,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-04`](04-mcp-stdio-server-spec.md)** | Stdio JSON-RPC 2.0 MCP Server | `internal/mcp` | M2 (Capabilities) | `APPLIED` |
 | **[`DELTA-05`](05-provider-and-resource-pool-spec.md)**| Provider Registry & Resource Pool Governor | `internal/provider` | M2 (Capabilities) | `APPLIED` |
 | **[`DELTA-06`](06-os-daemon-service-spec.md)** | Cross-Platform OS Daemon Service | `internal/service` | M3 (OS Daemon) | `APPLIED` |
-| **[`DELTA-07`](07-blast-radius-analyzer-spec.md)** | LSP & Dependency Blast Radius Analyzer | `internal/analyzer` | M2 (Capabilities) | `APPLIED` |
+| **[`DELTA-07`](07-blast-radius-analyzer-spec.md)** | Pure-Go AST & Dependency Blast Radius Analyzer | `internal/analyzer` | M2 (Capabilities) | `APPLIED` |
 | **[`DELTA-08`](08-dispatch-wrapper-spec.md)** | Bounded AGY CLI Dispatch Wrapper | `internal/dispatch` | M3 (OS Daemon) | `APPLIED` |
 | **[`DELTA-09`](09-worker-supervisor-spec.md)** | Worker Process Supervisor & Sandbox | `internal/worker` | M3 (OS Daemon) | `APPLIED` |
 | **[`DELTA-10`](10-two-class-providers-spec.md)** | Two-Class Providers Architecture (API vs Dispatch) | `internal/provider` | M2 (Capabilities) | `APPLIED` |

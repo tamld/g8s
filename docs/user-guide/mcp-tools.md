@@ -1,14 +1,14 @@
 # MCP Tools
 
-`g8s mcp` serves a twenty-two-tool stdio JSON-RPC server (protocol version
+`g8s mcp` serves a twenty-three-tool (22 active + `g8s_run` reserved post-MVP stub) stdio JSON-RPC server (protocol version
 negotiated per client, default `2025-06-18`).
 
 ## Tool surface
 
 | Tool | Purpose | Guard notes |
 | --- | --- | --- |
-| `g8s_run` | Execute a control-plane helper run | typed pending-dependency error by design |
-| `g8s_blast_radius` | Blast-radius analysis | typed pending-dependency error by design |
+| `g8s_run` | Reserved post-MVP synchronous worker execution stub | returns JSON-RPC `-32603` by design; use `g8s_submit` |
+| `g8s_blast_radius` | Blast-radius analysis | read-only Pure-Go AST & multi-tier CodeIntel blast-radius analysis (DELTA-07, DELTA-20) |
 | `g8s_submit` | Enqueue a durable task | supports `model`, `provider`, `effort`, `scope_root`, `role`, `permission`, `priority`, `max_attempts`; rejects `workspace_write` (`blocked_by_policy`) and `no_sandbox` (`blocked_by_sandbox_policy`) |
 | `g8s_get` | Sanitized task view | request payloads never echo the raw prompt |
 | `g8s_receipt_issue` | Issue single-use write receipt | TTL bounded server-side |

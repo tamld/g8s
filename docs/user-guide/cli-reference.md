@@ -617,7 +617,7 @@ Serves the standard Stdio JSON-RPC 2.0 Model Context Protocol (MCP) server on `s
 g8s mcp
 ```
 
-**16 tools exposed**: `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_submit`, `g8s_blast_radius`, `g8s_run`, `g8s_self_awareness`, `g8s_receipt_issue`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`.
+**23 tools registered** (22 active + `g8s_run` reserved post-MVP stub): `g8s_run`, `g8s_submit`, `g8s_get`, `g8s_receipt_issue`, `g8s_self_awareness`, `g8s_blast_radius`, `g8s_dispatch`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_list_roles`, `g8s_list_permissions`, `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_llm_call`, `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`, `g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_coordinator_mesh`.
 
 ---
 

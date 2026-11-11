@@ -1,30 +1,32 @@
 // Package mcp implements the g8s Model Context Protocol (MCP) server over
 // stdio using newline-delimited JSON-RPC 2.0 (DELTA-04).
 //
-// The server exposes twenty-one tools that let a Brain-tier or Worker-tier client
-// drive the g8s runtime:
+// The server exposes twenty-three tools (22 active + g8s_run reserved stub)
+// that let a Brain-tier or Worker-tier client drive the g8s runtime:
 //
-//	g8s_run             synchronous task execution (Phase 4 supervisor dependency)
-//	g8s_submit          durable queue submission via internal/controlplane
-//	g8s_get             task status lookup via internal/controlplane
-//	g8s_receipt_issue   single-use write receipt via internal/receipt
-//	g8s_self_awareness  provider/model discovery via internal/provider
-//	g8s_blast_radius    Pure-Go AST and multi-tier CodeIntel blast-radius (DELTA-07, DELTA-20)
-//	g8s_dispatch        bounded read-only dispatch through g8s wrapper
-//	g8s_list_tasks      list durable tasks with optional state filter
-//	g8s_cancel_task     request cooperative cancellation of a durable task
-//	g8s_list_roles      enumerate registered role profiles
+//	g8s_run              reserved synchronous execution stub (returns -32603; use g8s_submit)
+//	g8s_submit           durable queue submission via internal/controlplane
+//	g8s_get              task status lookup via internal/controlplane
+//	g8s_receipt_issue    single-use write receipt via internal/receipt
+//	g8s_self_awareness   provider/model discovery via internal/provider
+//	g8s_blast_radius     Pure-Go AST and multi-tier CodeIntel blast-radius (DELTA-07, DELTA-20)
+//	g8s_dispatch         bounded read-only dispatch through g8s wrapper
+//	g8s_list_tasks       list durable tasks with optional state filter
+//	g8s_cancel_task      request cooperative cancellation of a durable task
+//	g8s_list_roles       enumerate registered role profiles
 //	g8s_list_permissions enumerate permission profiles with MCP enablement metadata
-//	g8s_search          native pure-Go repository search engine (DELTA-22/23)
-//	g8s_read            bounded file reader with SHA-256 fingerprint (DELTA-23)
-//	g8s_edit            atomic file editor with CAS SHA-256 (DELTA-23)
-//	g8s_select          native pure-Go JSON dot-path selector (DELTA-23)
-//	g8s_llm_call        direct synchronous LLM invocation (DELTA-25)
-//	g8s_charter_issue   issue an epoch-fenced Stratum Charter (DELTA-33)
-//	g8s_charter_verify  verify a Stratum Charter epoch & fence token (DELTA-33)
+//	g8s_search           native pure-Go repository search engine (DELTA-22/23)
+//	g8s_read             bounded file reader with SHA-256 fingerprint (DELTA-23)
+//	g8s_edit             atomic file editor with CAS SHA-256 (DELTA-23)
+//	g8s_select           native pure-Go JSON dot-path selector (DELTA-23)
+//	g8s_llm_call         direct synchronous LLM invocation (DELTA-25)
+//	g8s_charter_issue    issue an epoch-fenced Stratum Charter (DELTA-33)
+//	g8s_charter_verify   verify a Stratum Charter epoch & fence token (DELTA-33)
 //	g8s_portfolio_status O-Plane read-only portfolio & charter projection (DELTA-33)
-//	g8s_skills_list     list digest-pinned skills across F0/F1/F2 tiers (DELTA-34)
-//	g8s_skills_read     read a skill with optional expected_digest TOCTOU check (DELTA-34)
+//	g8s_skills_list      list digest-pinned skills across F0/F1/F2 tiers (DELTA-34)
+//	g8s_skills_read      read a skill with optional expected_digest TOCTOU check (DELTA-34)
+//	g8s_context_pack     Pure-Go AST & Knapsack context compressor (DELTA-36)
+//	g8s_coordinator_mesh peer coordinator SQLite WAL mesh ledger ops (DELTA-46)
 //
 // Dependencies are injected as narrow local interfaces so this package stays
 // decoupled from concrete store types and remains trivially testable. Per the
@@ -245,7 +247,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "g8s", "version": "0.21.0"},
+			"serverInfo":      map[string]any{"name": "g8s", "version": "0.23.0"},
 		})
 	case "tools/list":
 		return okResponse(req.ID, map[string]any{"tools": s.list})
@@ -417,7 +419,7 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 			RulesetVersion: "v1",
 			PipelineDigest: "mcp-server-default",
 		}),
-		receipt.WithProvenanceContext("g8s/0.21.0", "", ""),
+		receipt.WithProvenanceContext("g8s/0.23.0", "", ""),
 	)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}

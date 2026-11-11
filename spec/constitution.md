@@ -9,8 +9,8 @@
 ## 1. Foundational Axioms
 
 1. **Axiom of Two-Tier Governance**:
-   - High-tier reasoning models (**Brain**: `claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) hold exclusive authority over system architecture, git commits, permanent state promotion, and write receipt issuance.
-   - Low-tier mechanical models (**Worker**: Gemini Flash, Claude Haiku, Ollama) execute strictly inside bounded sandboxes with explicit role contracts and time-limited receipts.
+   - High-tier reasoning models (**Brain**: sovereign/high-reasoning tier governed by [`.g8s/agent-models.yml`](../.g8s/agent-models.yml)) hold exclusive authority over system architecture, git commits, permanent state promotion, and write receipt issuance.
+   - Bounded execution models and combo pools (**Worker**: model/combo fleet governed by [`.g8s/agent-models.yml`](../.g8s/agent-models.yml), including `9router` NIM combos `fast-agent`, `deep-coding`, and `reasoning-high`, Gemini Flash, Claude Haiku, `opencode`, `codex`, `cursor`, `agy`, and `ollama`) execute strictly inside bounded sandboxes with explicit role contracts and time-limited receipts.
 
 2. **Axiom of Zero-Trust Capability (Capability Receipts)**:
    - No worker process may mutate the filesystem unless presented with a cryptographically tracked, time-limited ($\le 3600s$), path-scoped (`allowed_paths` glob) **Write Receipt**.
@@ -35,7 +35,7 @@
 
 ## 2. Coding & Architecture Standards
 
-* **Language**: Go 1.26.10 (Zero-CGO, Pure-Go).
+* **Language**: Go 1.26.11 (Zero-CGO, Pure-Go).
 * **CLI Architecture**: Standard library `flag.FlagSet` for command routing; pure-Go zero-dependency configuration.
 * **Testing Standard**: 100% boundary testing for security filters, race condition validation (`go test -race ./...`), mock clock testing for TTL expiry.
 * **Licensing**: All files are distributed under the MIT License.

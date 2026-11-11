@@ -923,11 +923,12 @@ features:
         - "internal/server"
         - "internal/service"
     invariants:
-      - "Stdio JSON-RPC 2.0 MCP server conformance (19 tools)"
+      - "Stdio JSON-RPC 2.0 MCP server conformance (23 tools)"
       - "Cross-platform daemon service lifecycle"
       - "Non-loopback HTTP daemon bind requires bearer token authentication (#655)"
     visible_tests:
       - "internal/mcp/server_test.go"
+      - "internal/mcp/ssot_parity_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:
