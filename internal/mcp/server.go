@@ -9,7 +9,7 @@
 //	g8s_get             task status lookup via internal/controlplane
 //	g8s_receipt_issue   single-use write receipt via internal/receipt
 //	g8s_self_awareness  provider/model discovery via internal/provider
-//	g8s_blast_radius    LSP impact analysis (DELTA-07)
+//	g8s_blast_radius    Pure-Go AST and multi-tier CodeIntel blast-radius (DELTA-07, DELTA-20)
 //	g8s_dispatch        bounded read-only dispatch through g8s wrapper
 //	g8s_list_tasks      list durable tasks with optional state filter
 //	g8s_cancel_task     request cooperative cancellation of a durable task
@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/analyzer"
+	"github.com/tamld/g8s/internal/codeintel"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/provider"
@@ -179,7 +180,7 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_get", Description: "Fetch sanitized task status by task id.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}`)},
 		{Name: "g8s_receipt_issue", Description: "Issue a path-scoped, single-use write receipt (TTL seconds, max 3600).", InputSchema: json.RawMessage(`{"type":"object","properties":{"allowed_paths":{"type":"array","items":{"type":"string"}},"ttl_seconds":{"type":"integer"}},"required":["allowed_paths"]}`)},
 		{Name: "g8s_self_awareness", Description: "Report discovered providers, model availability, and concurrency slots.", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
-		{Name: "g8s_blast_radius", Description: "LSP and AST call-hierarchy impact analysis for a file/symbol (DELTA-07).", InputSchema: json.RawMessage(`{"type":"object","properties":{"file":{"type":"string","description":"Target source file path"},"symbol":{"type":"string","description":"Optional symbol name to analyze"}},"required":["file"]}`)},
+		{Name: "g8s_blast_radius", Description: "Pure-Go AST and multi-tier CodeIntel blast-radius analysis (DELTA-07, DELTA-20).", InputSchema: json.RawMessage(`{"type":"object","properties":{"file":{"type":"string","description":"Target source file path"},"symbol":{"type":"string","description":"Optional symbol name to analyze"}},"required":["file"]}`)},
 		{Name: "g8s_dispatch", Description: "Run one bounded read-only dispatch through the g8s wrapper (guards apply).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"timeout":{"type":"string"},"add_dirs":{"type":"array","items":{"type":"string"}},"skip_permissions":{"type":"boolean"},"no_sandbox":{"type":"boolean"},"receipt_id":{"type":"string"}},"required":["prompt","add_dirs"]}`)},
 		{Name: "g8s_list_tasks", Description: "List durable tasks, optionally filtered by state.", InputSchema: json.RawMessage(`{"type":"object","properties":{"state":{"type":"string"},"limit":{"type":"integer"}}}`)},
 		{Name: "g8s_cancel_task", Description: "Request cooperative cancellation of a durable task.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","reason"]}`)},
@@ -294,26 +295,30 @@ type blastRadiusArgs struct {
 	Symbol string `json:"symbol,omitempty"`
 }
 
-// blastRadiusTool executes AST and LSP blast radius analysis for the target file/symbol.
-func (s *Server) blastRadiusTool(_ context.Context, raw json.RawMessage) (any, *jsonRPCError) {
+// blastRadiusTool executes multi-tier CodeIntel blast radius analysis for the target file/symbol.
+func (s *Server) blastRadiusTool(ctx context.Context, raw json.RawMessage) (any, *jsonRPCError) {
 	var a blastRadiusArgs
 	if err := json.Unmarshal(raw, &a); err != nil || a.File == "" {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_blast_radius requires file"}
 	}
-	an, err := analyzer.NewAnalyzer("")
-	if err != nil {
+	if _, err := analyzer.NewAnalyzer(""); err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("initialize analyzer: %v", err)}
 	}
-	if a.Symbol != "" {
-		report, err := an.AnalyzeSymbolImpact(a.File, a.Symbol)
-		if err != nil {
-			return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("analyze symbol: %v", err)}
-		}
-		return report, nil
-	}
-	report, err := an.AnalyzeFileImpact(a.File)
+	anaBridge, err := codeintel.NewAnalyzerAdapter("")
 	if err != nil {
-		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("analyze file: %v", err)}
+		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("initialize analyzer adapter: %v", err)}
+	}
+	astAd, err := codeintel.NewASTAdapter("")
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("initialize ast adapter: %v", err)}
+	}
+	if !anaBridge.Capabilities().CanCallHierarchy || !astAd.Capabilities().CanReferences {
+		return nil, &jsonRPCError{Code: codeInternal, Message: "codeintel adapters unavailable for blast-radius"}
+	}
+	router := codeintel.NewMultiTierRouter(anaBridge, astAd)
+	report, err := router.BlastRadius(ctx, "", a.File, a.Symbol)
+	if err != nil {
+		return nil, &jsonRPCError{Code: codeInternal, Message: fmt.Sprintf("blast radius: %v", err)}
 	}
 	return report, nil
 }

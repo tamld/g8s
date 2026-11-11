@@ -123,7 +123,7 @@ func NewManager(cfg Config, guard LifecycleGuard) (*Manager, error) {
 		platform = runtime.GOOS
 	}
 	if platform != "darwin" {
-		return nil, serr("g8s service management is only supported on macOS (got %q); systemd and Windows backends are deferred post-MVP", platform)
+		return nil, serr("launchd Manager only supports darwin (got %q); use NewPlatformServiceManager for linux/windows", platform)
 	}
 	if strings.TrimSpace(cfg.BinaryPath) == "" {
 		return nil, serr("binary path is required")

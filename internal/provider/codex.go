@@ -160,7 +160,7 @@ type CodexProvider struct {
 	lookPath func(string) (string, error)
 }
 
-// NewCodexProvider creates a new CodexProvider stub instance.
+// NewCodexProvider creates a new CodexProvider instance.
 func NewCodexProvider() *CodexProvider {
 	return &CodexProvider{
 		lookPath: exec.LookPath,

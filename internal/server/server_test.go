@@ -221,6 +221,93 @@ func TestHandleReceipts_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+type stubReceiptReader struct {
+	list []*receipt.WriteReceipt
+	byID map[string]*receipt.WriteReceipt
+}
+
+func (s *stubReceiptReader) ListReceipts() ([]*receipt.WriteReceipt, error) {
+	return s.list, nil
+}
+
+func (s *stubReceiptReader) GetReceipt(id string) (*receipt.WriteReceipt, error) {
+	if s.byID == nil {
+		return nil, &receipt.NotFoundError{ReceiptID: id}
+	}
+	rec, ok := s.byID[id]
+	if !ok {
+		return nil, &receipt.NotFoundError{ReceiptID: id}
+	}
+	return rec, nil
+}
+
+func TestReceiptsHTTP_WithReader(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	rec := &receipt.WriteReceipt{ReceiptID: "rec-1", Issuer: "brain"}
+	srv.SetReceiptReader(&stubReceiptReader{
+		list: []*receipt.WriteReceipt{rec},
+		byID: map[string]*receipt.WriteReceipt{"rec-1": rec},
+	})
+
+	reqList := httptest.NewRequest(http.MethodGet, "/api/v1/receipts", nil)
+	recList := httptest.NewRecorder()
+	srv.handleReceipts(recList, reqList)
+	if recList.Code != http.StatusOK {
+		t.Fatalf("list: %d", recList.Code)
+	}
+	var listed []*receipt.WriteReceipt
+	if err := json.Unmarshal(recList.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ReceiptID != "rec-1" {
+		t.Fatalf("unexpected list: %+v", listed)
+	}
+
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/receipts/rec-1", nil)
+	recGet := httptest.NewRecorder()
+	srv.handleReceiptByID(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("get: %d body=%s", recGet.Code, recGet.Body.String())
+	}
+
+	reqMissing := httptest.NewRequest(http.MethodGet, "/api/v1/receipts/missing", nil)
+	recMissing := httptest.NewRecorder()
+	srv.handleReceiptByID(recMissing, reqMissing)
+	if recMissing.Code != http.StatusNotFound {
+		t.Fatalf("missing: %d", recMissing.Code)
+	}
+}
+
+func TestReceiptsHTTP_ManagerExpiredReceiptStillReadable(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	now := time.Now()
+	mgr, err := receipt.NewReceiptManager(t.TempDir()+"/receipts.db", func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	defer mgr.Close()
+
+	issued, err := mgr.IssueReceipt("operator", []string{"internal/server/**"}, 5*time.Second,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{SchemaURI: "g8s://receipt/v1", FieldOrder: []string{"receipt_id"}}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{RulesetVersion: "v1", PipelineDigest: "sha256:test"}),
+	)
+	if err != nil {
+		t.Fatalf("IssueReceipt: %v", err)
+	}
+	// Advance clock past TTL so VerifyReceipt returns ExpiredError.
+	now = now.Add(10 * time.Second)
+
+	// SetReceiptVerifier auto-wires ReceiptReader when given a ReceiptManager.
+	srv.SetReceiptVerifier(mgr)
+
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/receipts/"+issued.ReceiptID, nil)
+	recGet := httptest.NewRecorder()
+	srv.handleReceiptByID(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 for expired receipt audit read, got %d: %s", recGet.Code, recGet.Body.String())
+	}
+}
+
 func TestHandleReceiptByID_MethodNotAllowed(t *testing.T) {
 	cfg := DefaultConfig()
 	srv := NewServer(cfg, nil)
@@ -524,12 +611,12 @@ func TestReceiptsEndpoints(t *testing.T) {
 		t.Errorf("expected 405, got %d", recPost.Code)
 	}
 
-	// GET /api/v1/receipts/{id}
+	// GET /api/v1/receipts/{id} without store -> 503
 	reqID := httptest.NewRequest(http.MethodGet, "/api/v1/receipts/rec-123", nil)
 	recID := httptest.NewRecorder()
 	srv.handleReceiptByID(recID, reqID)
-	if recID.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", recID.Code)
+	if recID.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", recID.Code)
 	}
 
 	// POST /api/v1/receipts/{id} -> 405

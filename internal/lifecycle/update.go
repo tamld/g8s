@@ -26,6 +26,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/tamld/g8s/internal/signing"
 )
 
 const (
@@ -103,6 +105,19 @@ type Updater struct {
 	// Smoke, when set, runs against the freshly installed binary; a non-nil
 	// error triggers an automatic rollback to the backup.
 	Smoke func(binaryPath string) error
+	// Signer optionally verifies code signature on the installed binary.
+	Signer signing.Signer
+}
+
+// VerifyBinarySignature checks binPath with the provided signer when non-nil.
+func VerifyBinarySignature(_ context.Context, s signing.Signer, binPath string) (bool, error) {
+	if s == nil {
+		return false, fmt.Errorf("signer is nil")
+	}
+	if strings.TrimSpace(binPath) == "" {
+		return false, fmt.Errorf("binary path is empty")
+	}
+	return s.Verify(binPath)
 }
 
 func (u *Updater) defaults() {
@@ -501,6 +516,22 @@ func (u *Updater) Apply(ctx context.Context, version string, force bool) (*Updat
 	res.BackupPath = backup
 	res.Applied = true
 	res.Message = fmt.Sprintf("updated %s -> %s", u.CurrentVersion, rel.TagName)
+
+	if u.Signer != nil {
+		ok, verr := VerifyBinarySignature(ctx, u.Signer, target)
+		if verr != nil || !ok {
+			if rbErr := Rollback(target, backup, u.GOOS); rbErr != nil {
+				return res, fmt.Errorf("signature verify failed (%v) and rollback failed: %w", verr, rbErr)
+			}
+			res.Applied = false
+			res.RolledBack = true
+			res.Message = "signature verification failed; restored previous binary"
+			if verr != nil {
+				return res, fmt.Errorf("E_UPDATE_SIGNATURE_VERIFY: %w", verr)
+			}
+			return res, fmt.Errorf("E_UPDATE_SIGNATURE_VERIFY: binary signature invalid")
+		}
+	}
 
 	if u.Smoke != nil {
 		if smokeErr := u.Smoke(target); smokeErr != nil {
