@@ -249,17 +249,31 @@ func TestOllamaProvider_Extended(t *testing.T) {
 		t.Errorf("expected fallback version v0.1.0, got %s, err: %v", ver, err)
 	}
 
-	// Spawn returns not implemented when available
+	// Spawn issues /api/generate when daemon is reachable
 	srvOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"models":[]}`))
+		switch r.URL.Path {
+		case "/api/tags":
+			w.WriteHeader(http.StatusOK)
+		case "/api/generate":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"response":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srvOK.Close()
 	t.Setenv("OLLAMA_HOST", srvOK.URL)
-	pOK := NewOllamaProvider()
-	_, err = pOK.Spawn(context.Background(), Spec{Brief: "test"})
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("expected not implemented error, got %v", err)
+	pOK := NewOllamaProvider().WithHTTPClient(srvOK.Client())
+	h, err := pOK.Spawn(context.Background(), Spec{Brief: "test"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	rcpt, waitErr := h.Wait(context.Background())
+	if waitErr != nil {
+		t.Fatalf("Wait: %v", waitErr)
+	}
+	if rcpt.Status != "COMPLETED" || rcpt.Stdout != "ok" {
+		t.Fatalf("unexpected receipt: %+v", rcpt)
 	}
 }
 

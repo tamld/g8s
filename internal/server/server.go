@@ -28,21 +28,80 @@ type ReceiptVerifier interface {
 	VerifyReceipt(receiptID string) (*receipt.WriteReceipt, error)
 }
 
+// ReceiptReader lists and loads write receipts for HTTP read APIs (non-consuming).
+type ReceiptReader interface {
+	ListReceipts() ([]*receipt.WriteReceipt, error)
+	GetReceipt(id string) (*receipt.WriteReceipt, error)
+}
+
+type receiptManagerReader struct {
+	m receipt.ReceiptManager
+}
+
+func (a *receiptManagerReader) ListReceipts() ([]*receipt.WriteReceipt, error) {
+	return a.m.ListReceipts("", time.Time{}, "")
+}
+
+func (a *receiptManagerReader) GetReceipt(id string) (*receipt.WriteReceipt, error) {
+	rec, err := a.m.VerifyReceipt(id)
+	if err == nil {
+		return rec, nil
+	}
+	var expired *receipt.ExpiredError
+	if errors.As(err, &expired) {
+		list, listErr := a.m.ListReceipts("", time.Time{}, "")
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, item := range list {
+			if item != nil && item.ReceiptID == id {
+				return item, nil
+			}
+		}
+		return nil, &receipt.NotFoundError{ReceiptID: id}
+	}
+	return nil, err
+}
+
 // Server is the HTTP API server for g8s daemon mode.
 type Server struct {
-	config   Config
-	store    *controlplane.Store
-	receipts ReceiptVerifier
-	httpSrv  *http.Server
-	mu       sync.RWMutex
-	running  bool
+	config        Config
+	store         *controlplane.Store
+	receipts      ReceiptVerifier
+	receiptReader ReceiptReader
+	httpSrv       *http.Server
+	mu            sync.RWMutex
+	running       bool
 }
 
 // SetReceiptVerifier configures the write receipt verifier used by /api/v1/fs/* endpoints.
+// When v also implements receipt.ReceiptManager and no ReceiptReader has been set yet,
+// it automatically backs GET /api/v1/receipts and GET /api/v1/receipts/{id}.
 func (s *Server) SetReceiptVerifier(v ReceiptVerifier) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.receipts = v
+	if s.receiptReader == nil {
+		if rm, ok := v.(receipt.ReceiptManager); ok && rm != nil {
+			s.receiptReader = &receiptManagerReader{m: rm}
+		}
+	}
+}
+
+// SetReceiptReader configures the receipt list/get store for /api/v1/receipts* endpoints.
+func (s *Server) SetReceiptReader(r ReceiptReader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.receiptReader = r
+}
+
+// SetReceiptStore wires a receipt.Manager (or any ReceiptManager) as the HTTP receipt reader.
+func (s *Server) SetReceiptStore(m *receipt.Manager) {
+	if m == nil {
+		s.SetReceiptReader(nil)
+		return
+	}
+	s.SetReceiptReader(&receiptManagerReader{m: m})
 }
 
 // maxRequestBodyBytes bounds JSON request bodies on the unauthenticated API
@@ -438,9 +497,24 @@ func (s *Server) handleReceipts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For now, return empty list - receipts are in a separate DB
+	s.mu.RLock()
+	reader := s.receiptReader
+	s.mu.RUnlock()
+
+	out := []*receipt.WriteReceipt{}
+	if reader != nil {
+		list, err := reader.ListReceipts()
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if list != nil {
+			out = list
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode([]string{})
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // handleReceiptByID handles GET /api/v1/receipts/{id}.
@@ -450,8 +524,43 @@ func (s *Server) handleReceiptByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	path := r.URL.Path
+	const prefix = "/api/v1/receipts/"
+	if len(path) <= len(prefix) {
+		apiError(w, http.StatusBadRequest, "Receipt ID required")
+		return
+	}
+	receiptID := path[len(prefix):]
+	if receiptID == "" {
+		apiError(w, http.StatusBadRequest, "Receipt ID required")
+		return
+	}
+
+	s.mu.RLock()
+	reader := s.receiptReader
+	s.mu.RUnlock()
+	if reader == nil {
+		apiError(w, http.StatusServiceUnavailable, "receipt store not configured")
+		return
+	}
+
+	rec, err := reader.GetReceipt(receiptID)
+	if err != nil {
+		var notFound *receipt.NotFoundError
+		if errors.As(err, &notFound) {
+			apiError(w, http.StatusNotFound, notFound.Error())
+			return
+		}
+		apiError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rec == nil {
+		apiError(w, http.StatusNotFound, fmt.Sprintf("write receipt not found: %s", receiptID))
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	_ = json.NewEncoder(w).Encode(rec)
 }
 
 // handleSupervisor handles GET /api/v1/supervisor.

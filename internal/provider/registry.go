@@ -78,15 +78,17 @@ type ProviderStatus struct {
 
 // Registry manages the set of available agent providers.
 type Registry struct {
-	mu        sync.RWMutex
-	providers map[string]Provider
-	order     []string
+	mu         sync.RWMutex
+	providers  map[string]Provider
+	order      []string
+	devicePool *DeviceLeasePool
 }
 
 // NewRegistry constructs a new Registry preloaded with default providers if none are specified.
 func NewRegistry(providers ...Provider) *Registry {
 	r := &Registry{
-		providers: make(map[string]Provider),
+		providers:  make(map[string]Provider),
+		devicePool: NewDeviceLeasePool(),
 	}
 	if len(providers) == 0 {
 		providers = []Provider{
@@ -104,6 +106,13 @@ func NewRegistry(providers ...Provider) *Registry {
 		r.Register(p)
 	}
 	return r
+}
+
+// DeviceLeasePool returns the registry-wide mobile emulator lease pool (DELTA-38).
+func (r *Registry) DeviceLeasePool() *DeviceLeasePool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.devicePool
 }
 
 // Register adds or updates a provider in the registry.

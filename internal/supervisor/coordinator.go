@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/dialectic"
 	"github.com/tamld/g8s/internal/featuremap"
 	"github.com/tamld/g8s/internal/lane"
 	"github.com/tamld/g8s/internal/memory"
@@ -93,6 +94,8 @@ type CoordinatorDialecticalDeconstruction struct {
 	RootCoreProbes     []string `json:"root_core_probes"`
 	SocraticAntithesis string   `json:"socratic_antithesis"`
 	PersonaChecks      []string `json:"persona_checks"`
+	DebateHardCeiling  int      `json:"debate_hard_ceiling"`
+	DebateFSMState     string   `json:"debate_fsm_state"`
 }
 
 // CoordinatorRoutingPlan is Step 4 (Pillar 3: Deterministic Skill/Tool/Worker Routing) (#688).
@@ -361,7 +364,12 @@ func RunCoordinatorIntake(ctx context.Context, req CoordinatorIntakeRequest) (*C
 	researchReason := fmt.Sprintf("GateLane=%s, DomainMastery=%s", routedLane, domainTier)
 	scoutCmd := fmt.Sprintf("./bin/g8s submit --idempotency-key \"scout-intake-01\" --role scout --permission read_only --provider 9router --model docs-retriever --prompt %q", "Scan existing patterns and upstream conventions for: "+goal)
 
-	// Step 3: 3-Round Dialectical Deconstruction
+	// Step 3: 3-Round Dialectical Deconstruction (bounded by dialectic.HardCeiling)
+	intakeDebate := dialectic.NewDebate(goal)
+	if dialectic.HardCeiling > 3 {
+		return nil, fmt.Errorf("supervisor: dialectic HardCeiling invariant violated (got %d)", dialectic.HardCeiling)
+	}
+
 	invSummary := "Preserve zero-orphan feature-map ownership and single-binary self-containment"
 	if len(matchedInvariants) > 0 {
 		invSummary = strings.Join(matchedInvariants, "; ")
@@ -388,6 +396,8 @@ func RunCoordinatorIntake(ctx context.Context, req CoordinatorIntakeRequest) (*C
 			"Performance: Bound queries and avoid O(N^2) scans on hot paths",
 			"Operator DX: Provide actionable ErrPayload hints and --json envelope output",
 		},
+		DebateHardCeiling: dialectic.HardCeiling,
+		DebateFSMState:    string(intakeDebate.State),
 	}
 
 	// Step 4: Deterministic Routing Plan

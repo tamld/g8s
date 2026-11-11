@@ -473,7 +473,7 @@ func TestUnsupportedPlatformRejectedFailClosed(t *testing.T) {
 		t.Fatalf("write binary: %v", err)
 	}
 	_, err := NewManager(Config{Label: "l", BinaryPath: binary, Platform: "linux", Home: root}, nil)
-	if err == nil || !strings.Contains(err.Error(), "only supported on macOS") {
+	if err == nil || !strings.Contains(err.Error(), "launchd Manager only supports darwin") {
 		t.Fatalf("want macOS-only platform guard, got %v", err)
 	}
 }

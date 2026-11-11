@@ -21,6 +21,7 @@ import (
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/registry"
+	g8sruntime "github.com/tamld/g8s/internal/runtime"
 	_ "modernc.org/sqlite"
 )
 
@@ -528,6 +529,14 @@ func checkWorkspace() DiagnosticResult {
 	}
 }
 
+func workerBinaryVerifyDetail(path string) string {
+	vr, err := g8sruntime.VerifyExecutable(path, g8sruntime.VerifyOptions{})
+	if err != nil {
+		return fmt.Sprintf("%s (runtime verify failed: %v)", path, err)
+	}
+	return fmt.Sprintf("%s (verified=%v basename=%s)", path, vr.Verified, vr.BaseName)
+}
+
 func checkWorkerBinaries() []DiagnosticResult {
 	var results []DiagnosticResult
 	binaries := []string{"agy", "claude", "gemini", "ollama"}
@@ -538,7 +547,7 @@ func checkWorkerBinaries() []DiagnosticResult {
 				Name:    "Worker Binary (AGY_BIN)",
 				Status:  "OK",
 				Message: "Custom worker binary found",
-				Details: envAgy,
+				Details: workerBinaryVerifyDetail(envAgy),
 			})
 		} else {
 			results = append(results, DiagnosticResult{
@@ -557,7 +566,7 @@ func checkWorkerBinaries() []DiagnosticResult {
 				Name:    fmt.Sprintf("Worker CLI (%s)", bin),
 				Status:  "OK",
 				Message: fmt.Sprintf("Available in PATH at %s", path),
-				Details: path,
+				Details: workerBinaryVerifyDetail(path),
 			})
 		} else {
 			results = append(results, DiagnosticResult{

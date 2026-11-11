@@ -7,10 +7,13 @@ package autopilot
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,11 +21,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// StaticAnalysisRunner executes static analysis in codebasePath and returns combined output.
+type StaticAnalysisRunner func(ctx context.Context, codebasePath string) ([]byte, error)
+
 // Scanner discovers work items from various sources.
 type Scanner struct {
-	config       Config
-	githubClient *github.Client
-	queue        *PriorityQueue
+	config               Config
+	githubClient         *github.Client
+	queue                *PriorityQueue
+	staticAnalysisRunner StaticAnalysisRunner
 }
 
 // NewScanner creates a new scanner with the given configuration and queue.
@@ -170,14 +177,87 @@ func (s *Scanner) scanFailingCI(ctx context.Context) error {
 	return nil
 }
 
-// scanStaticAnalysis runs golangci-lint and other static analysis tools.
-func (s *Scanner) scanStaticAnalysis(ctx context.Context) error {
-	// For now, we'll create placeholder items based on common patterns
-	// A real implementation would run golangci-lint, errcheck, govet, etc.
-	// and parse their output
+var vetLinePattern = regexp.MustCompile(`^(.+?):(\d+)(?::(\d+))?:\s*(.+)$`)
 
-	// This is a stub - in practice you'd run the linters and parse output
-	// For v0.3.0, we'll skip actual execution and leave as extensible
+func defaultStaticAnalysisRunner(ctx context.Context, codebasePath string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "go", "vet", "./...")
+	cmd.Dir = codebasePath
+	return cmd.CombinedOutput()
+}
+
+// scanStaticAnalysis runs go vet (or an injected runner) and enqueues findings.
+func (s *Scanner) scanStaticAnalysis(ctx context.Context) error {
+	dir := strings.TrimSpace(s.config.CodebasePath)
+	if dir == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+		if os.IsNotExist(err) && s.staticAnalysisRunner == nil {
+			return nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("check go.mod in %q: %w", dir, err)
+		}
+	}
+
+	runner := s.staticAnalysisRunner
+	if runner == nil {
+		runner = defaultStaticAnalysisRunner
+	}
+
+	out, err := runner(ctx, dir)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return fmt.Errorf("static analysis: %w", err)
+		}
+		if len(out) == 0 {
+			out = exitErr.Stderr
+			if len(out) == 0 {
+				out = []byte(exitErr.Error())
+			}
+		}
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		m := vetLinePattern.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		filePath := m[1]
+		lineNum, _ := strconv.Atoi(m[2])
+		col := 0
+		if m[3] != "" {
+			col, _ = strconv.Atoi(m[3])
+		}
+		msg := strings.TrimSpace(m[4])
+
+		item := &WorkItem{
+			ID:           fmt.Sprintf("vet-%s-%d-%d", filepath.Base(filePath), lineNum, col),
+			Source:       SourceStaticAnalysis,
+			Title:        fmt.Sprintf("Static analysis: %s:%d", filePath, lineNum),
+			Description:  msg,
+			FilePath:     filePath,
+			LineNumber:   lineNum,
+			Severity:     0.6,
+			Confidence:   0.85,
+			Cost:         2.5,
+			DiscoveredAt: time.Now(),
+			Metadata: map[string]string{
+				"column":  strconv.Itoa(col),
+				"message": msg,
+				"tool":    "go vet",
+			},
+		}
+		item.Score = CalculateScore(item, s.config.PriorityWeights)
+		if item.Score >= s.config.MinScoreThreshold {
+			heap.Push(s.queue, item)
+		}
+	}
 	return nil
 }
 
