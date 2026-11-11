@@ -54,8 +54,12 @@ button, input { font: inherit; color: inherit; }
   padding-bottom: clamp(20px, 3vw, 40px); gap: 24px; flex-wrap: wrap; }
 .hero .support { max-width: 44ch; font-size: var(--step-lead); line-height: 1.4; }
 .hero .support .rec { color: var(--accent); }
+.action-row { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero .action { display: inline-block; font-weight: 900; text-transform: uppercase; font-size: var(--step-body);
   background: var(--accent); color: var(--accent-ink); padding: 14px 22px; border: 0; cursor: pointer; }
+.hero .action.gr { background: none; color: var(--accent); border: 0; border-bottom: 3px solid var(--accent);
+  padding: 12px 4px; }
+.hero .action.gr:hover { color: var(--ink); border-color: var(--ink); }
 .hero .action:hover { background: var(--ink); color: var(--bg); }
 
 .r { opacity: 0; transform: translateY(14px); }
@@ -207,7 +211,10 @@ footer .fine b { color: var(--ink); font-weight: 400; }
   <h1 class="word r in">GATED<span class="crop">.</span><span class="caret"></span></h1>
   <div class="foot">
     <p class="support">g8s stands between your AI agents and your systems. <span class="rec">Every action authorized before it happens. Every refusal explained in a language machines parse. Every outcome provable after.</span></p>
-    <button class="action" id="openConsole">Open the console</button>
+    <div class="action-row">
+      <button class="action" id="openConsole">Open the console</button>
+      <a class="action gr" href="gate-room.html">Enter the Gate Room ↗</a>
+    </div>
   </div>
 </header>
 
