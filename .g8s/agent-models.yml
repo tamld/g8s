@@ -7,7 +7,7 @@
 
 schema_version: agent-models.v1
 catalog_version: 2
-verified_at: "2026-11-07"
+verified_at: "2026-11-11"
 sources:
   - https://developers.openai.com/api/docs/models
   - https://developers.openai.com/api/docs/guides/reasoning
@@ -24,6 +24,10 @@ profiles:
   scout-fast:     {provider: cursor, model: composer-2.5, effort: low, timeout: 180s, role: scout, permission: read_only}
   verifier:       {provider: cursor, model: composer-2.5, effort: high, timeout: 420s, role: verifier, permission: read_only}
   docs-retriever: {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
+  nim-scout:      {provider: 9router, model: fast-agent, effort: low, timeout: 180s, role: scout, permission: read_only}
+  nim-verifier:   {provider: 9router, model: reasoning-high, effort: high, timeout: 300s, role: verifier, permission: read_only}
+  nim-coding:     {provider: 9router, model: deep-coding, effort: high, timeout: 420s, role: implementer, permission: workspace_write}
+  nim-docs:       {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
 
 providers:
   openai:
@@ -196,11 +200,12 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* ROUTING IDS are DOUBLE-PREFIX nvidia/nvidia/<model> — the single-prefix ids shown in /v1/models do not route (catalog display mismatch, cosmetic)"
+    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* ROUTING IDS are DOUBLE-PREFIX nvidia/nvidia/<model> — the single-prefix ids shown in /v1/models do not route (catalog display mismatch, cosmetic); audit combo/model liveness regularly via 'g8s providers eval-combos --provider 9router --json' (retired upstream NIM direct IDs return HTTP 410 MODEL_EOL_410)"
     models:
       - id: reasoning-free
         supported_efforts: [low, medium, high]
         default_effort: high
+        notes: "~24s first-candidate failover lag observed 2026-11-11; prefer fast-agent, reasoning-high, or deep-coding"
       - id: reasoning-high
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: high

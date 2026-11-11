@@ -424,3 +424,27 @@
     demo: "go test -run '^$' -fuzz FuzzVerifyScope -fuzztime 100x ./internal/fsops/"
     source: docs/ENTERPRISE_LEDGER.md
 
+- id: claim-readonly-external-cli-firewall
+  claim: "External CLI coding adapters (opencode, commandcode, gemini, qwen) allow read_only execution only under worktree diff firewall containment and fail closed on direct unguarded dispatch"
+  evidence:
+    test: TestSupportsWorktreeReadOnlyFirewall
+    eval: ""
+    demo: "bin/g8s dispatch --help"
+    source: internal/dispatch/dispatch.go
+
+- id: claim-combo-liveness-eval
+  claim: "Provider combo liveness evaluation probes 9router/gateway combos and classifies HTTP 410 retired upstream models as MODEL_EOL_410"
+  evidence:
+    test: TestClassifyProbeFailure
+    eval: ""
+    demo: "bin/g8s providers eval-combos --help"
+    source: cmd/g8s/providers_scorecard.go
+
+- id: claim-no-dead-internal-packages
+  claim: "Every internal Go package is transitively reachable from the cmd/g8s production binary import graph with zero orphaned production packages"
+  evidence:
+    test: TestNoDeadInternalPackages
+    eval: ""
+    demo: "go test ./cmd/g8s -run TestNoDeadInternalPackages"
+    source: cmd/g8s/dead_packages_test.go
+

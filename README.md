@@ -261,16 +261,16 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Complete MCP Tool Inventory (22 Tools)
+#### Complete MCP Tool Inventory (23 Registered Tools: 22 Active + `g8s_run` Stub)
 
 | Tool Name | Operation & Purpose |
 | :--- | :--- |
-| `g8s_run` | Synchronously execute an isolated worker task (requires Phase 4 supervisor). |
+| `g8s_run` | Reserved post-MVP synchronous worker execution stub (returns JSON-RPC `-32603`; use `g8s_submit`). |
 | `g8s_submit` | Enqueue a durable task with role, permissions, and timeout budget. |
 | `g8s_get` | Fetch sanitized task status by task ID. |
 | `g8s_receipt_issue` | Issue a single-use, path-scoped, time-limited Write Receipt. |
 | `g8s_self_awareness` | Report discovered providers, model availability, and concurrency slots. |
-| `g8s_blast_radius` | LSP and AST call-hierarchy impact analysis for a file/symbol (`DELTA-07`). |
+| `g8s_blast_radius` | Pure-Go AST and multi-tier CodeIntel impact analysis for a file/symbol (`DELTA-07`, `DELTA-20`). |
 | `g8s_dispatch` | Execute a bounded, read-only dispatch through the CLI wrapper. |
 | `g8s_list_tasks` | List tasks filtered by state (`QUEUED`, `LEASED`, `SUCCEEDED`, `FAILED`). |
 | `g8s_cancel_task` | Request cooperative cancellation of a durable task with an audit reason. |
@@ -325,13 +325,13 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | [Windows Installation](docs/WINDOWS_INSTALL.md) | PowerShell installer, `PATH`, and Windows-specific install troubleshooting. |
 | [Release Rollback](docs/release/ROLLBACK.md) | Revert to a prior release binary when an upgrade fails or must be undone. |
 | [CLI Reference](docs/user-guide/cli-reference.md) | Exhaustive manual of all subcommands, flags, and exit codes. |
-| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 21 MCP tools. |
+| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 23 registered MCP tools. |
 | [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Fast pure-Go searching, slicing, editing, and dot-path extraction. |
 | [Product Requirements (PRD)](docs/PRD.md) | Problem statement, target personas, and core value propositions. |
-| [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..10) and non-functional requirements (NFR-1..4). |
+| [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..11) and non-functional requirements (NFR-1..4). |
 | [Definition of Done & Ready](docs/DOD_DOR.md) | Engineering criteria, multi-round verification, and gate rules. |
 | [OWASP Agentic, SLSA & SBOM Security](docs/security/owasp-agentic-slsa-sbom.md) | OWASP Top 10 for LLM/Agentic Apps (2025), SLSA v1.0, and SPDX SBOM matrix. |
-| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0035 architectural choices and rationales. |
+| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0041 architectural choices and rationales (with documented tombstone gaps). |
 
 ### AppSec & Quality Gates
 
@@ -341,7 +341,7 @@ Every code change is verified against four AppSec pillars and quantitative claim
 | :--- | :--- | :--- |
 | **1. SAST Triad** | `gosec` (in `golangci-lint`) + `Semgrep` (`.semgrep/g8s-rules.yml`) + `CodeQL` | Zero security antipatterns, zero unchecked errors (`errcheck`). |
 | **2. Black-Box DAST** | End-to-end API fuzzing & boundary probing (`dast_test.go`) | HTTP endpoints and MCP stdio resist malicious payloads and path escapes. |
-| **3. In-Process IAST** | `RuntimeSensor` and red-team probe suite (`sa-006`..`sa-008`) | Real-time detection of sandbox bypasses, lease races, and receipt reuse. |
+| **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) and red-team probe suite (`sa-006`..`sa-008`) | Eval-probe runtime hygiene snapshots verifying CAS contention, symlink confinement, and zero goroutine/temp leaks. |
 | **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Deterministic parsing resilience across arbitrary inputs. |
 
 ---
@@ -356,10 +356,10 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | :--- | :--- | :---: |
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
-| **`v0.20.0`** (2026-10-25) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, 22-tool MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
-| **`v0.22.0`** (2026-11-01, Current) | **Multi-Coordinator Native Interop Ledger & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): shared SQLite WAL ledger for equal-peer F0 coordinators (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` via CLI + MCP), typed idempotent messages (UNIQUE `message_id` + digest echo), CAS claims with TTL + context-revision fence, bounded wait long-poll, 2-tier quota self-report (unknown stays unknown), whitespace-only layer-gate exemption (A6), nightly full-battery workflow; ratified across Codex/AGY/ZCode peers with live 3-platform exchange ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Platform data-acquisition layer ("reach")** — per-platform ordered fallback tool chains (`g8s reach read`), persistent health & owned-paths ledgers (`S2`), Context Broker `WorldSnippets` & `PROPOSED`-default vault promotion (`S3`), and machine-fetched research-gate artifacts (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Done** |
-| **`v0.23.0`** (2026-11-08) | **Containment Hardened & Process-Reflective** — claim-scoped mutation fence end-to-end ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md)): issuance-clip/TTL≤lease/renewal, fsops pre-mutation gate, claim-aware fail-closed harvest firewall, red matrix R1-R7 + conformance probe P9; **RT-MESH v1.1** A1-A5 (cumulative ack, flow window, retry budget, keepalive, screen-state gate — spec 46); **D-09 REFLEX-CYCLE closed** (SENSE→JUDGE→ACT→PRUNE-LAW, self-tombstoning); **provenance honesty ledger** ([ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), weekly receipt-ratio); release-gate hardening (pre-tag surface inventory, fail-loud pre_push, doctor binary-vs-HEAD). | **Done** (tag v0.23.0 — attested, cosigned; live drill + agy co-sign recorded in spec 46) |
-| **`v0.30.0`** (Planned) | **Universal CLI Agent Adapter Suite (`opencode`, `commandcode`, `codex`), Free-Model Tiered Routing & F0/F1/F2 MCP Proxy** (`DELTA-39`, [#672](https://github.com/tamld/g8s/issues/672)): pluggable external CLI coding agents under `g8s` worktree/receipt containment, zero-cost free-model routing for `read_only` (`scout`/`researcher`) tasks, and in-worktree F1/F2 MCP capability scoping. | **Planned** |
+| **`v0.20.0`** (2026-10-25) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, expanded MCP surface (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
+| **`v0.22.0`** (2026-11-01) | **Multi-Coordinator Native Interop Ledger & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): shared SQLite WAL ledger for equal-peer F0 coordinators (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` via CLI + `g8s_coordinator_mesh` MCP tool), typed idempotent messages (UNIQUE `message_id` + digest echo), CAS claims with TTL + context-revision fence, bounded wait long-poll, 2-tier quota self-report (unknown stays unknown), whitespace-only layer-gate exemption (A6), nightly full-battery workflow; ratified across Codex/AGY/ZCode peers with live 3-platform exchange ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Platform data-acquisition layer ("reach")** — per-platform ordered fallback tool chains (`g8s reach read`), persistent health & owned-paths ledgers (`S2`), Context Broker `WorldSnippets` & `PROPOSED`-default vault promotion (`S3`), and machine-fetched research-gate artifacts (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Done** |
+| **`v0.23.0`** (2026-11-08, Current) | **Containment Hardened & Process-Reflective** — claim-scoped mutation fence end-to-end ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md)): issuance-clip/TTL≤lease/renewal, fsops pre-mutation gate, claim-aware fail-closed harvest firewall, red matrix R1-R7 + conformance probe P9; **RT-MESH v1.1** A1-A5 (cumulative ack, flow window, retry budget, keepalive, screen-state gate — spec 46); **D-09 REFLEX-CYCLE closed** (SENSE→JUDGE→ACT→PRUNE-LAW, self-tombstoning); **provenance honesty ledger** ([ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), weekly receipt-ratio); Mechanized SSoT & worker git-commit proxy ([ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)); release-gate hardening (pre-tag surface inventory, fail-loud pre_push, doctor binary-vs-HEAD). | **Done** (tag v0.23.0 — attested, cosigned; live drill + agy co-sign recorded in spec 46) |
+| **`v0.30.0`** (Planned) | **F0/F1/F2 Scoped MCP Capability Proxy & Multi-Repo Offer Burn-In** ([#672](https://github.com/tamld/g8s/issues/672); `DELTA-39` external CLI adapters & `read_only` worktree diff firewall already shipped in `v0.20.0+`): in-worktree F1/F2 MCP capability-scoping proxy and 90-day multi-repo Offer retention burn-in. | **Planned** |
 | **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
 | **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0` and passing **$\ge 50$ receipt-backed real dispatches** across all 4 Offer Bundle domain profiles (`knowledge`, `security`, `infra`, `utility`) with **0 P0 escapes** and **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
 
@@ -441,7 +441,7 @@ g8s/
 ├── schemas/                # JSON schemas (task, receipt, result)
 ├── scripts/                # Public installer (scripts/install.sh curl entrypoint)
 ├── skills/                 # Vendored agent skills (g8s-supervisor charter + manifest)
-├── spec/openspec/          # OpenSpec deltas (DELTA-01..25)
+├── spec/openspec/          # OpenSpec deltas (DELTA-01..47)
 ├── tools/                  # CI helper scripts (pre-push gates, SAST, release)
 ├── .g8s/                   # Declarative governance registries (models, effort, lanes, trust)
 ├── .semgrep/               # Offline AST security & explicit-error rules (g8s-rules.yml)

@@ -122,18 +122,27 @@ EOF
 - Test entry
 EOF
 
+        git add cmd/g8s/version.go CHANGELOG.md
+        git commit -q -m "tag target commit"
+        git tag "v$tag"
+
+        local tag_commit tag_date
+        tag_commit="$(git rev-list -n1 "v$tag" | cut -c1-7)"
+        tag_date="$(git show -s --format=%cs "v$tag^{commit}")"
+
         cat > "manifest.json" <<EOF
 {
   "version": "$ver_go",
   "latest_release": {
-    "tag": "v$tag"
+    "tag": "v$tag",
+    "commit": "$tag_commit",
+    "date": "$tag_date"
   }
 }
 EOF
 
-        git add .
-        git commit -q -m "initial fixture commit"
-        git tag "v$tag"
+        git add manifest.json
+        git commit -q -m "sync manifest latest_release metadata"
     )
 }
 
@@ -189,6 +198,68 @@ run_test_with_output \
     "(g) unit compare 0.13.0 == 0.13.0 returns 0" 0 \
     "^0$" \
     bash "$CHECK_SCRIPT" --compare "0.13.0" "0.13.0"
+
+# (h) fixture: winget PackageVersion drift fails check
+FIXTURE_WINGET_DRIFT="$FIXTURE_ROOT/winget_drift"
+setup_fixture_repo "$FIXTURE_WINGET_DRIFT" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_WINGET_DRIFT/packaging/winget"
+cat > "$FIXTURE_WINGET_DRIFT/packaging/winget/manifest.yaml" <<'EOF'
+PackageIdentifier: TamLD.g8s
+PackageVersion: 0.7.0
+Installers:
+  - InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.7.0/g8s_0.7.0_windows_amd64.zip
+EOF
+run_test_with_output \
+    "(h) fixture winget version drift fails check" 1 \
+    "Winget PackageVersion drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_WINGET_DRIFT"
+
+# (i) fixture: chocolatey .msi drift fails check
+FIXTURE_CHOCO_MSI="$FIXTURE_ROOT/choco_msi"
+setup_fixture_repo "$FIXTURE_CHOCO_MSI" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_CHOCO_MSI/packaging/chocolatey/tools"
+cat > "$FIXTURE_CHOCO_MSI/packaging/chocolatey/g8s.nuspec" <<'EOF'
+<package><metadata><id>g8s</id><version>0.23.0</version></metadata></package>
+EOF
+cat > "$FIXTURE_CHOCO_MSI/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+$url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.msi'
+Install-ChocolateyPackage @packageArgs
+EOF
+run_test_with_output \
+    "(i) fixture chocolatey .msi asset fails check" 1 \
+    "unsupported .msi asset" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_MSI"
+
+# (j) fixture: winget InstallerUrl dot-wildcard / malformed version drift fails check
+FIXTURE_WINGET_URL="$FIXTURE_ROOT/winget_url_drift"
+setup_fixture_repo "$FIXTURE_WINGET_URL" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_WINGET_URL/packaging/winget"
+cat > "$FIXTURE_WINGET_URL/packaging/winget/manifest.yaml" <<'EOF'
+PackageIdentifier: TamLD.g8s
+PackageVersion: 0.23.0
+Installers:
+  - InstallerUrl: https://github.com/tamld/g8s/releases/download/v0x23y0/g8s_0x23y0_windows_amd64.zip
+EOF
+run_test_with_output \
+    "(j) fixture winget InstallerUrl 0x23y0 drift fails check" 1 \
+    "Winget InstallerUrl drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_WINGET_URL"
+
+# (k) fixture: chocolatey $url dot-wildcard / malformed version drift fails check
+FIXTURE_CHOCO_URL="$FIXTURE_ROOT/choco_url_drift"
+setup_fixture_repo "$FIXTURE_CHOCO_URL" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_CHOCO_URL/packaging/chocolatey/tools"
+cat > "$FIXTURE_CHOCO_URL/packaging/chocolatey/g8s.nuspec" <<'EOF'
+<package><metadata><id>g8s</id><version>0.23.0</version></metadata></package>
+EOF
+cat > "$FIXTURE_CHOCO_URL/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+$url = 'https://github.com/tamld/g8s/releases/download/v0x23y0/g8s_0x23y0_windows_amd64.zip'
+Install-ChocolateyZipPackage @packageArgs
+EOF
+run_test_with_output \
+    "(k) fixture chocolatey URL 0x23y0 drift fails check" 1 \
+    "Chocolatey download URL drift" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_URL"
 
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
