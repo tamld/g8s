@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -113,6 +114,8 @@ func runAutopilot(args []string) {
 		runAutopilotInstallSchedule(subArgs)
 	case "uninstall-schedule":
 		runAutopilotUninstallSchedule(subArgs)
+	case "submit":
+		runAutopilotSubmit(subArgs)
 	case "help", "-h", "--help":
 		printAutopilotUsage()
 	default:
@@ -132,6 +135,7 @@ func printAutopilotUsage() {
 	fmt.Println("  tick                Run one tick of background jobs (doctor, retention, hygiene)")
 	fmt.Println("  install-schedule    Install OS-native scheduler for periodic ticks")
 	fmt.Println("  uninstall-schedule  Uninstall OS-native scheduler")
+	fmt.Println("  submit              Submit tasks from scan sources to the queue")
 	fmt.Println("  help                Show this help message")
 	fmt.Println()
 	fmt.Println("Use 'g8s autopilot <command> --help' for more information about a command.")
@@ -145,6 +149,10 @@ func runAutopilotStart(args []string) {
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	configFile := fs.String("config", "", "path to autopilot config YAML file")
 	daemon := fs.Bool("daemon", true, "run until stopped (default true)")
+	submitTasks := fs.Bool("submit", false, "submit due scan items to control plane queue as read_only scout tasks")
+	maxSubmissions := fs.Int("max-submissions", 5, "maximum tasks submitted per scheduler session when --submit is enabled")
+	submitProvider := fs.String("provider", "9router", "target worker provider when --submit is enabled")
+	submitModel := fs.String("model", "fast-agent", "target worker model when --submit is enabled")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("autopilot", "start", *traceID, err.Error(), "", *jsonl)
 	}
@@ -178,17 +186,40 @@ func runAutopilotStart(args []string) {
 	// Task submission and execution are deferred to stage 2 (throttle & admission control)
 	// and stage 3 (tick handler integration with control plane and OS-native scheduling).
 	// DO NOT submit actual tasks here until stage 2 rate limiting is in place.
+	submittedSoFar := 0
 	handler := func(ctx context.Context, item *autopilot.WorkItem) error {
+		var submittedTaskID string
+		var submitErr error
+		if *submitTasks && (*maxSubmissions <= 0 || submittedSoFar < *maxSubmissions) {
+			dbPath, dbErr := databasePath()
+			if dbErr != nil {
+				submitErr = fmt.Errorf("resolve autopilot database path: %w", dbErr)
+			} else {
+				submittedTaskID, submitErr = submitSingleAutopilotItem(ctx, dbPath, item, &submittedSoFar, *maxSubmissions, *submitProvider, *submitModel, cfg.CodebasePath)
+			}
+		}
 		if *jsonMode || *jsonl {
-			env := cli.NewEnvelope("autopilot_item", "autopilot", "item", map[string]any{
-				"item_id": item.ID,
-				"score":   item.Score,
-			})
-			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			payload := map[string]any{
+				"item_id":   item.ID,
+				"score":     item.Score,
+				"submitted": submittedTaskID != "",
+				"task_id":   submittedTaskID,
+			}
+			if submitErr != nil {
+				payload["error"] = submitErr.Error()
+			}
+			env := cli.NewEnvelope("autopilot_item", "autopilot", "item", payload)
+			if wErr := cli.WriteResponse(os.Stdout, env, *jsonl); wErr != nil && submitErr == nil {
+				submitErr = wErr
+			}
+		} else if submitErr != nil {
+			fmt.Fprintf(os.Stderr, "[error] autopilot: submit task %s failed: %v\n", item.ID, submitErr)
+		} else if submittedTaskID != "" {
+			fmt.Printf("Autopilot: submitted task %s -> %s (score=%.3f)\n", item.ID, submittedTaskID, item.Score)
 		} else {
 			fmt.Printf("Autopilot: would submit task %s (score=%.3f)\n", item.ID, item.Score)
 		}
-		return nil
+		return submitErr
 	}
 
 	scheduler, err := autopilot.NewScheduler(cfg, handler)
@@ -1082,5 +1113,247 @@ func runAutopilotUninstallSchedule(args []string) {
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 	} else {
 		fmt.Printf("Uninstalled native autopilot schedule (OS: %s)\n", targetOS)
+	}
+}
+
+type autopilotSubmitResultItem struct {
+	ItemID string  `json:"item_id"`
+	Status string  `json:"status"` // "submitted", "would_submit", or "skipped"
+	TaskID string  `json:"task_id,omitempty"`
+	Reason string  `json:"reason,omitempty"`
+	Score  float64 `json:"score,omitempty"`
+}
+
+func buildAutopilotSubmitRequest(item *autopilot.WorkItem, providerName, modelName, scopeDir string) (controlplane.SubmitTaskRequest, error) {
+	if item == nil {
+		return controlplane.SubmitTaskRequest{}, fmt.Errorf("nil autopilot work item")
+	}
+	if strings.TrimSpace(providerName) == "" {
+		providerName = "9router"
+	}
+	if strings.TrimSpace(modelName) == "" {
+		modelName = "fast-agent"
+	}
+	cleanScope := strings.TrimSpace(scopeDir)
+	if cleanScope == "" || cleanScope == ".." || strings.HasPrefix(cleanScope, "../") || strings.HasPrefix(cleanScope, ".."+string(os.PathSeparator)) {
+		cleanScope = "."
+	}
+	prompt := fmt.Sprintf("Autopilot read-only scout triage for %s [%s]: %s\n\n%s",
+		item.ID, item.Source, strings.TrimSpace(item.Title), strings.TrimSpace(item.Description))
+	payload, err := json.Marshal(map[string]any{
+		"autopilot_item": item,
+		"prompt":         prompt,
+		"permission":     "read_only",
+		"role":           "scout",
+		"provider":       providerName,
+		"model":          modelName,
+		"add_dirs":       []string{cleanScope},
+	})
+	if err != nil {
+		return controlplane.SubmitTaskRequest{}, fmt.Errorf("marshal autopilot payload: %w", err)
+	}
+	key := "autopilot-" + strings.ReplaceAll(strings.TrimSpace(item.ID), "#", "-")
+	if len(key) > 200 {
+		key = key[:200]
+	}
+	return controlplane.SubmitTaskRequest{
+		IdempotencyKey: key,
+		Priority:       0,
+		MaxAttempts:    1,
+		Payload:        payload,
+		Role:           "scout",
+		Permission:     "read_only",
+		Provider:       providerName,
+		Model:          modelName,
+		AddDirs:        []string{cleanScope},
+	}, nil
+}
+
+func submitSingleAutopilotItem(
+	ctx context.Context,
+	dbPath string,
+	item *autopilot.WorkItem,
+	submittedSoFar *int,
+	maxSubmissions int,
+	providerName, modelName, scopeDir string,
+) (string, error) {
+	if maxSubmissions > 0 && submittedSoFar != nil && *submittedSoFar >= maxSubmissions {
+		return "", nil
+	}
+	req, err := buildAutopilotSubmitRequest(item, providerName, modelName, scopeDir)
+	if err != nil {
+		return "", err
+	}
+	store, err := controlplane.NewControlPlane(dbPath, nil)
+	if err != nil {
+		return "", fmt.Errorf("open control plane database %s: %w", dbPath, err)
+	}
+	task, subErr := store.SubmitTask(ctx, req)
+	if cErr := store.Close(); cErr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] autopilot: close store: %v\n", cErr)
+	}
+	if subErr != nil {
+		return "", subErr
+	}
+	if task == nil || task.TaskID == "" {
+		return "", fmt.Errorf("submit autopilot item %s returned empty task ID", item.ID)
+	}
+	if submittedSoFar != nil {
+		*submittedSoFar++
+	}
+	return task.TaskID, nil
+}
+
+func submitAutopilotItems(
+	ctx context.Context,
+	store *controlplane.Store,
+	items []*autopilot.WorkItem,
+	maxSubmissions int,
+	dryRun bool,
+	providerName, modelName, scopeDir string,
+) ([]autopilotSubmitResultItem, int, int, error) {
+	if maxSubmissions > 0 && len(items) > maxSubmissions {
+		items = items[:maxSubmissions]
+	}
+	results := make([]autopilotSubmitResultItem, 0, len(items))
+	submittedCount := 0
+	skippedCount := 0
+	var errs []error
+
+	for _, item := range items {
+		if dryRun {
+			results = append(results, autopilotSubmitResultItem{
+				ItemID: item.ID,
+				Status: "would_submit",
+				Score:  item.Score,
+			})
+			skippedCount++
+			continue
+		}
+		if store == nil {
+			skippedCount++
+			sErr := fmt.Errorf("submit autopilot item %s: control plane store is nil", item.ID)
+			errs = append(errs, sErr)
+			results = append(results, autopilotSubmitResultItem{
+				ItemID: item.ID,
+				Status: "failed",
+				Reason: sErr.Error(),
+				Score:  item.Score,
+			})
+			continue
+		}
+		req, err := buildAutopilotSubmitRequest(item, providerName, modelName, scopeDir)
+		if err != nil {
+			skippedCount++
+			errs = append(errs, fmt.Errorf("build autopilot item %s: %w", item.ID, err))
+			results = append(results, autopilotSubmitResultItem{
+				ItemID: item.ID,
+				Status: "failed",
+				Reason: err.Error(),
+				Score:  item.Score,
+			})
+			continue
+		}
+		task, err := store.SubmitTask(ctx, req)
+		if err != nil {
+			skippedCount++
+			errs = append(errs, fmt.Errorf("submit autopilot item %s: %w", item.ID, err))
+			results = append(results, autopilotSubmitResultItem{
+				ItemID: item.ID,
+				Status: "failed",
+				Reason: err.Error(),
+				Score:  item.Score,
+			})
+			continue
+		}
+		submittedCount++
+		results = append(results, autopilotSubmitResultItem{
+			ItemID: item.ID,
+			Status: "submitted",
+			TaskID: task.TaskID,
+			Score:  item.Score,
+		})
+	}
+	return results, submittedCount, skippedCount, errors.Join(errs...)
+}
+
+// runAutopilotSubmit submits tasks from scan sources to the control plane queue.
+func runAutopilotSubmit(args []string) {
+	fs := flag.NewFlagSet("autopilot submit", flag.ExitOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	configFile := fs.String("config", "", "path to autopilot config YAML file")
+	maxSubmissions := fs.Int("max-submissions", 0, "maximum number of tasks to submit (0 = unlimited)")
+	dryRun := fs.Bool("dry-run", false, "show tasks that would be submitted without submitting")
+	submitProvider := fs.String("provider", "9router", "target worker provider for submitted scout tasks")
+	submitModel := fs.String("model", "fast-agent", "target worker model for submitted scout tasks")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("autopilot", "submit", *traceID, err.Error(), "", *jsonl)
+	}
+
+	cfg := autopilot.DefaultConfig()
+	if *configFile != "" {
+		loaded, err := autopilot.LoadConfig(*configFile)
+		if err != nil {
+			exitRuntime("autopilot", "submit", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		cfg = loaded
+	}
+	if len(strings.Fields(cfg.Cron)) == 5 {
+		cfg.Cron = "0 " + cfg.Cron
+	}
+
+	var store *controlplane.Store
+	if !*dryRun {
+		dbPath, err := databasePath()
+		if err != nil {
+			exitRuntime("autopilot", "submit", *traceID, cli.CodeIO, err, "Failed to resolve database path", *jsonl)
+		}
+		store, err = controlplane.NewControlPlane(dbPath, nil)
+		if err != nil {
+			exitRuntime("autopilot", "submit", *traceID, cli.CodeRuntime, err, "Failed to open control plane database", *jsonl)
+		}
+		defer store.Close()
+	}
+
+	queue := autopilot.NewPriorityQueue()
+	scanner, err := autopilot.NewScanner(cfg, queue)
+	if err != nil {
+		exitRuntime("autopilot", "submit", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	ctx := context.Background()
+	if err := scanner.Scan(ctx); err != nil {
+		exitRuntime("autopilot", "submit", *traceID, cli.CodeRuntime, err, "Failed to scan for work items", *jsonl)
+	}
+
+	scannedItems := queue.Items()
+	results, submittedCount, skippedCount, submitErr := submitAutopilotItems(
+		ctx, store, scannedItems, *maxSubmissions, *dryRun, *submitProvider, *submitModel, cfg.CodebasePath,
+	)
+
+	if submitErr != nil {
+		exitRuntime("autopilot", "submit", *traceID, cli.CodeRuntime, submitErr, "Inspect control plane database permissions and task request parameters", *jsonl)
+	}
+
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("autopilot_submit", "autopilot", "submit", map[string]any{
+			"scanned":         len(results),
+			"submitted":       submittedCount,
+			"skipped":         skippedCount,
+			"max_submissions": *maxSubmissions,
+			"results":         results,
+		})
+		env.TraceID = *traceID
+		if wErr := cli.WriteResponse(os.Stdout, env, *jsonl); wErr != nil {
+			exitRuntime("autopilot", "submit", *traceID, cli.CodeIO, wErr, "", *jsonl)
+		}
+	} else {
+		fmt.Printf("Scanned: %d, Submitted: %d, Skipped: %d (max-submissions: %d)\n", len(results), submittedCount, skippedCount, *maxSubmissions)
+		for _, r := range results {
+			if r.Reason != "" {
+				fmt.Printf("  %s: %s (score=%.3f, reason=%s)\n", r.ItemID, r.Status, r.Score, r.Reason)
+			} else {
+				fmt.Printf("  %s: %s (score=%.3f)\n", r.ItemID, r.Status, r.Score)
+			}
+		}
 	}
 }

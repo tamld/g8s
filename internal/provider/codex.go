@@ -40,10 +40,153 @@ func (r ProviderRefusal) Reason() string {
 
 var providerRetryAtPattern = regexp.MustCompile(`(?i)try\s+again\s+at\s+(.+?)(?:\.|\s*$)`)
 
+func isCodexTurnContinuationMarker(rawLine string) bool {
+	return rawLine == "--------" ||
+		rawLine == "user" ||
+		rawLine == "thinking" ||
+		rawLine == "exec" ||
+		rawLine == "codex" ||
+		rawLine == "patch_apply" ||
+		strings.HasPrefix(rawLine, "hook: ") ||
+		strings.HasPrefix(rawLine, "mcp:") ||
+		strings.HasPrefix(rawLine, "mcp startup:")
+}
+
+func isUsageLimitLine(rawLine string) bool {
+	return strings.HasPrefix(rawLine, "You've hit your usage limit") ||
+		strings.HasPrefix(rawLine, "You hit your usage limit")
+}
+
+func isTopLevelCodexRefusalLine(rawLine string) bool {
+	return strings.HasPrefix(rawLine, "ERROR:") ||
+		strings.HasPrefix(rawLine, "Error:") ||
+		isUsageLimitLine(rawLine)
+}
+
+// sanitizeStderrForRefusal removes echoed user prompts, shell tool output blocks,
+// echoed assistant responses (both with and without Codex hook markers), and
+// unified git diff blocks from CLI stderr before refusal classification.
+func sanitizeStderrForRefusal(stderr string) string {
+	isCodexTranscript := strings.Contains(stderr, "OpenAI Codex") ||
+		strings.Contains(stderr, "\n--------\nuser\n") ||
+		strings.HasPrefix(stderr, "--------\nuser\n")
+
+	const (
+		secNone = iota
+		secPromptOrTurn
+		secToolOrAssistant
+		secTokens
+	)
+	sec := secNone
+
+	lines := strings.Split(stderr, "\n")
+	hasLaterTurnMarker := make([]bool, len(lines))
+	if isCodexTranscript {
+		seenTurnMarker := false
+		for i := len(lines) - 1; i >= 0; i-- {
+			hasLaterTurnMarker[i] = seenTurnMarker
+			if isCodexTurnContinuationMarker(lines[i]) {
+				seenTurnMarker = true
+			}
+		}
+	}
+
+	var kept []string
+	inGitDiff := false
+	inDiffHunk := false
+	for idx, rawLine := range lines {
+		if isCodexTranscript {
+			switch {
+			case rawLine == "--------", strings.HasPrefix(rawLine, "hook: "):
+				sec = secNone
+				inGitDiff = false
+				inDiffHunk = false
+				continue
+			case rawLine == "user", rawLine == "thinking":
+				sec = secPromptOrTurn
+				inGitDiff = false
+				inDiffHunk = false
+				continue
+			case rawLine == "exec",
+				rawLine == "codex",
+				rawLine == "patch_apply",
+				strings.HasPrefix(rawLine, "mcp:"),
+				strings.HasPrefix(rawLine, "mcp startup:"):
+				sec = secToolOrAssistant
+				inGitDiff = false
+				inDiffHunk = false
+				continue
+			case rawLine == "tokens used":
+				sec = secTokens
+				inGitDiff = false
+				inDiffHunk = false
+				continue
+			}
+
+			switch sec {
+			case secPromptOrTurn:
+				if !hasLaterTurnMarker[idx] && isTopLevelCodexRefusalLine(rawLine) {
+					sec = secNone
+				} else {
+					continue
+				}
+			case secToolOrAssistant:
+				// Echoed tool output (`exec`, `patch_apply`, `mcp:`) and echoed assistant
+				// responses (`codex`) are stripped in full until the next explicit Codex
+				// section, hook, or `tokens used` marker closes the block.
+				continue
+			case secTokens:
+				if !hasLaterTurnMarker[idx] && isTopLevelCodexRefusalLine(rawLine) {
+					sec = secNone
+				} else {
+					continue
+				}
+			}
+		}
+
+		if strings.HasPrefix(rawLine, "diff --git ") {
+			inGitDiff = true
+			inDiffHunk = false
+			continue
+		}
+		if inGitDiff {
+			if strings.HasPrefix(rawLine, "index ") ||
+				strings.HasPrefix(rawLine, "--- ") ||
+				strings.HasPrefix(rawLine, "+++ ") ||
+				strings.HasPrefix(rawLine, "new file mode ") ||
+				strings.HasPrefix(rawLine, "deleted file mode ") ||
+				strings.HasPrefix(rawLine, "similarity index ") ||
+				strings.HasPrefix(rawLine, "rename from ") ||
+				strings.HasPrefix(rawLine, "rename to ") {
+				inDiffHunk = false
+				continue
+			}
+			if strings.HasPrefix(rawLine, "@@") {
+				inDiffHunk = true
+				continue
+			}
+			if inDiffHunk && (strings.HasPrefix(rawLine, " ") ||
+				strings.HasPrefix(rawLine, "+") ||
+				strings.HasPrefix(rawLine, "-") ||
+				strings.HasPrefix(rawLine, `\`)) {
+				continue
+			}
+			if !inDiffHunk && (strings.HasPrefix(rawLine, "+") || strings.HasPrefix(rawLine, "-")) {
+				continue
+			}
+			inGitDiff = false
+			inDiffHunk = false
+		}
+		kept = append(kept, rawLine)
+	}
+	return strings.Join(kept, "\n")
+}
+
 // ClassifyProviderStderrRefusal detects provider refusals printed to stderr while the
 // CLI may still exit 0 with empty stdout (#825, #810).
 func ClassifyProviderStderrRefusal(stderr string) (ProviderRefusal, bool) {
-	lower := strings.ToLower(strings.TrimSpace(stderr))
+	cleaned := sanitizeStderrForRefusal(stderr)
+	lower := strings.ToLower(strings.TrimSpace(cleaned))
 	if lower == "" {
 		return ProviderRefusal{}, false
 	}
@@ -51,8 +194,8 @@ func ClassifyProviderStderrRefusal(stderr string) (ProviderRefusal, bool) {
 	if strings.Contains(lower, "you've hit your usage limit") || strings.Contains(lower, "you hit your usage limit") {
 		return ProviderRefusal{
 			Code:    ErrCodeProviderQuotaExhausted,
-			Message: extractRefusalSummary(stderr, "usage limit"),
-			RetryAt: parseProviderRetryAt(stderr, time.Now()),
+			Message: extractRefusalSummary(cleaned, "usage limit"),
+			RetryAt: parseProviderRetryAt(cleaned, time.Now()),
 		}, true
 	}
 
@@ -62,17 +205,17 @@ func ClassifyProviderStderrRefusal(stderr string) (ProviderRefusal, bool) {
 		strings.Contains(lower, "insufficient credits"):
 		return ProviderRefusal{
 			Code:    ErrCodeProviderAuth,
-			Message: extractRefusalSummary(stderr, "auth"),
+			Message: extractRefusalSummary(cleaned, "auth"),
 		}, true
 	case strings.Contains(lower, "model not found"):
 		return ProviderRefusal{
 			Code:    ErrCodeProviderModelUnavailable,
-			Message: extractRefusalSummary(stderr, "model"),
+			Message: extractRefusalSummary(cleaned, "model"),
 		}, true
 	case strings.Contains(lower, "does not exist") && strings.Contains(lower, "model"):
 		return ProviderRefusal{
 			Code:    ErrCodeProviderModelUnavailable,
-			Message: extractRefusalSummary(stderr, "model"),
+			Message: extractRefusalSummary(cleaned, "model"),
 		}, true
 	default:
 		return ProviderRefusal{}, false

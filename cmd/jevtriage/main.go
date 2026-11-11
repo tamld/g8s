@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -13,21 +14,34 @@ import (
 )
 
 func main() {
-	taskID := flag.String("task", "m", "")
-	files := flag.String("files", "", "")
-	summary := flag.String("summary", "", "")
-	allowed := flag.String("allowed", "", "")
-	flag.Parse()
+	if err := runJevTriage(os.Args[1:], os.Stdout); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runJevTriage(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("jevtriage", flag.ContinueOnError)
+	taskID := fs.String("task", "m", "")
+	files := fs.String("files", "", "")
+	summary := fs.String("summary", "", "")
+	allowed := fs.String("allowed", "", "")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	gate := reflex.NewReflexGate()
 	req := reflex.TriageRequest{TaskID: *taskID, FilesModified: split(*files), DiffSummary: *summary, AllowedPaths: split(*allowed)}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	v, err := gate.TriageMutation(ctx, req)
 	if err != nil {
-		os.Exit(1)
+		return err
 	}
-	out, _ := json.Marshal(map[string]any{"action": v.Action, "risk": v.RiskScore, "breach": v.BreachProb, "confidence": v.Confidence})
-	fmt.Println(string(out))
+	out, err := json.Marshal(map[string]any{"action": v.Action, "risk": v.RiskScore, "breach": v.BreachProb, "confidence": v.Confidence})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout, string(out))
+	return err
 }
 
 func split(s string) []string {

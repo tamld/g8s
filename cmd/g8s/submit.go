@@ -470,6 +470,23 @@ func runSubmit(args []string) {
 		effectiveRole = dec.Role
 	}
 
+	if *permission == "read_only" && dispatch.SupportsWorktreeReadOnlyFirewall(effectiveProvider, "") {
+		seenRoots := make(map[string]bool)
+		for _, root := range scopeRoots {
+			absRoot, absErr := filepath.Abs(root)
+			if absErr != nil {
+				absRoot = root
+			}
+			if seenRoots[absRoot] {
+				continue
+			}
+			seenRoots[absRoot] = true
+			if !isInsideGitWorkTree(absRoot) {
+				warnings = append(warnings, fmt.Sprintf("scope root %s is not a git repository: read_only external CLI firewall (%s) requires a git repository", absRoot, effectiveProvider))
+			}
+		}
+	}
+
 	// Resolve effort for the effective provider and model across both manual and auto routes
 	effortRes, effortErr := routing.ResolveEffort(manifest, effectiveProvider, effectiveModel, requestedEffort)
 	if effortErr != nil {

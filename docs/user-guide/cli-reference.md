@@ -359,7 +359,24 @@ g8s autopilot config --show
 # Run one maintenance tick (doctor, retention, hygiene) or reflection-receipt packets
 g8s autopilot tick
 g8s autopilot tick --reflection-receipt path/to/receipt.json --dry-run
+
+# Submit tasks from scan sources to the queue
+g8s autopilot submit --config autopilot.yaml --max-submissions 10
+g8s autopilot submit --dry-run --max-submissions 5
 ```
+
+#### Subcommands:
+| Subcommand | Description |
+| :--- | :--- |
+| `start` | Start the in-process autopilot scheduler |
+| `stop` | Stop the autopilot scheduler |
+| `status` | Show autopilot scheduler status |
+| `trigger` | Manually trigger a scan cycle |
+| `config` | Show or update autopilot configuration |
+| `tick` | Run one tick of background jobs (doctor, retention, hygiene) |
+| `submit` | Submit tasks from scan sources to the queue |
+| `install-schedule` | Install OS-native scheduler for periodic ticks |
+| `uninstall-schedule` | Uninstall OS-native scheduler |
 
 #### Flags (`g8s autopilot tick`):
 | Flag | Type | Default | Description |
@@ -371,6 +388,16 @@ g8s autopilot tick --reflection-receipt path/to/receipt.json --dry-run
 | `--model` | `string` | `gemini-3.8-flash-high` | Target reflection worker model. |
 | `--effort` | `string` | `""` | Reflection worker effort (queue default when empty). |
 | `--json` / `--jsonl` | `bool` | `false` | Emit machine-readable envelope. |
+
+#### Flags (`g8s autopilot submit`):
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--config` | `string` | `""` | Path to autopilot config YAML file |
+| `--max-submissions` | `int` | `0` | Maximum number of tasks to submit (0 = unlimited) |
+| `--dry-run` | `bool` | `false` | Show tasks that would be submitted without submitting |
+| `--provider` | `string` | `"9router"` | Target worker provider for submitted read-only scout tasks |
+| `--model` | `string` | `"fast-agent"` | Target worker model for submitted read-only scout tasks |
+| `--json` / `--jsonl` | `bool` | `false` | Emit machine-readable envelope |
 
 ---
 
@@ -780,8 +807,10 @@ g8s doctor --json --select .data.overall_status
 Invokes any configured `api_call` provider (`9router`, `cliproxyapi`, `openai`, `anthropic`) synchronously or in a bounded multi-turn verify-and-repair loop with Pre-Turn-1 toolchain/Vault grounding, Non-Markovian cycle breaking (`A->B->A`), atomic per-turn file snapshot rollback, and `--verify-cmd` secret environment scrubbing.
 
 ```sh
-# Live model discovery from configured gateways
+# Live model discovery and combo liveness / sunset-model (HTTP 410 EOL) audit
 g8s providers discover --provider 9router --json
+g8s providers eval-combos --provider 9router --timeout 30s --json
+g8s providers evaluate --provider 9router --audit-catalog --max-tokens 512 --json
 
 # Bounded multi-turn verify-and-repair loop
 g8s llm-call \
@@ -794,6 +823,45 @@ g8s llm-call \
   --verify-cmd "go test ./internal/pkg/..." \
   --json
 ```
+
+---
+
+### 33a. `g8s blind-verify` — Double-Blind Counterexample & Falsification Review (`DELTA-34`, `g8s-blind-verifier`)
+Executes the g8s-blind-verifier protocol: strips worker self-report and model identity, presents ONLY SpecContract + Invariants + RawGitDiff + MechanicalTestOutput to a fresh verifier model, and returns structured PASS/FAIL with counterexamples.
+
+```sh
+g8s blind-verify \
+  --spec SPEC.md \
+  --invariants INVARIANTS.md \
+  --diff changes.diff \
+  --test-output test-results.txt \
+  --model deep-coding \
+  --provider 9router \
+  --timeout 120s \
+  --json
+```
+
+#### Flags:
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--base` | `string` | `"origin/main"` | Git base ref when `--diff` is omitted (captures full untruncated `git diff`) |
+| `--head` | `string` | `""` | Optional git head ref when `--diff` is omitted |
+| `--diff` | `string` | `""` | Optional path to git diff file (or `-` for stdin) |
+| `--spec` | `string` | `""` | Optional path to SpecContract markdown file |
+| `--spec-text` | `string` | `""` | Inline spec contract summary when `--spec` is omitted |
+| `--invariants` | `string` | `"spec/constitution.md"` | Optional path to Invariants file |
+| `--test-output` | `string` | `"PASS"` | Optional path to mechanical test output file (or `-` for stdin) |
+| `--model` | `string` | `"fast-agent"` | Verifier model identifier |
+| `--effort` | `string` | `"low"` | Reasoning effort level for verifier |
+| `--provider` | `string` | `"9router"` | Provider for verifier model |
+| `--max-tokens` | `int` | `4096` | Max output tokens for verifier response |
+| `--timeout` | `duration` | `"180s"` | Verification timeout |
+
+#### Blind Verification Protocol (S3-A):
+1. **Input**: BlindReviewPacket (SpecContract, Invariants, RawGitDiff, MechanicalTestOutput)
+2. **Stripped**: Worker self-report, PR description, model identity, narrative context
+3. **Output**: `{ "passed": boolean, "findings": [...], "counterexamples": [...] }`
+4. **Contract**: If `passed=false`, at least one counterexample MUST be provided
 
 ---
 

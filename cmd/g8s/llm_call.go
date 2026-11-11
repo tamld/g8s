@@ -216,7 +216,7 @@ func runLLMCall(args []string) {
 	promptFlag := fs.String("prompt", "", "user prompt text")
 	promptFileFlag := fs.String("prompt-file", "", "read prompt from file")
 	systemFlag := fs.String("system", "", "optional system prompt")
-	timeoutFlag := fs.String("timeout", "60s", "HTTP request timeout")
+	timeoutFlag := fs.String("timeout", "90s", "HTTP request timeout")
 	effortFlag := fs.String("effort", "", "optional reasoning effort level")
 	maxTokensFlag := fs.Int("max-tokens", 0, "optional max output tokens")
 	baseURLFlag := fs.String("base-url", "", "optional direct base URL override")

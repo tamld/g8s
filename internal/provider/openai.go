@@ -234,6 +234,18 @@ func (p *OpenAIProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	return p.spawnOpenAI(ctx, spec)
 }
 
+func (p *OpenAIProvider) clientForTimeout(timeout time.Duration) *http.Client {
+	if p.httpClient == nil {
+		return &http.Client{Timeout: timeout}
+	}
+	if timeout > p.httpClient.Timeout {
+		c := *p.httpClient
+		c.Timeout = timeout
+		return &c
+	}
+	return p.httpClient
+}
+
 func (p *OpenAIProvider) spawnAnthropic(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -291,7 +303,7 @@ func (p *OpenAIProvider) spawnAnthropic(ctx context.Context, spec Spec) (Handle,
 	}
 
 	start := time.Now()
-	resp, err := p.httpClient.Do(req)
+	resp, err := p.clientForTimeout(spec.Timeout).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request failed: %w", err)
 	}
@@ -398,7 +410,7 @@ func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, er
 	}
 
 	start := time.Now()
-	resp, err := p.httpClient.Do(req)
+	resp, err := p.clientForTimeout(spec.Timeout).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("chat request failed: %w", err)
 	}

@@ -75,6 +75,79 @@ func TestClassifyProviderStderrRefusal(t *testing.T) {
 			stderr: "file does not exist\n",
 			want:   false,
 		},
+		{
+			name:   "unified diff line with model not found fixture ignored",
+			stderr: "diff --git a/a.go b/a.go\n+\t\t\terrMsg: \"model not found\",\n",
+			want:   false,
+		},
+		{
+			name:   "unified diff context line with model not found ignored",
+			stderr: "diff --git a/a.go b/a.go\n@@ -1 +1,2 @@\n \tmessage := \"model not found\"\n+\t_ = message\n",
+			want:   false,
+		},
+		{
+			name:   "codex echoed assistant block mentioning refusal phrase ignored",
+			stderr: "OpenAI Codex v0.166.0\ncodex\n{\"counterexamples\":[\"model not found\"]}\nhook: Stop\ntokens used\n100\n",
+			want:   false,
+		},
+		{
+			name:   "codex exec tool block echoing refusal fixture ignored",
+			stderr: "OpenAI Codex v0.166.0\nexec\n/bin/zsh -lc 'cat test.go'\n succeeded in 0ms:\nThe model not found in your account\nhook: PostToolUse\ncodex\n{\"verdict\":\"ACCEPTED\"}\n",
+			want:   false,
+		},
+		{
+			name:   "codex exec tool block echoing ERROR refusal line ignored",
+			stderr: "OpenAI Codex v0.166.0\nexec\ncat fixture.txt\n succeeded in 0ms:\nERROR: model not found\nhook: PostToolUse\ncodex\nDone\n",
+			want:   false,
+		},
+		{
+			name:   "codex transcript without hook markers ignores echoed user exec and assistant fixtures",
+			stderr: "OpenAI Codex\n--------\nuser\ninspect model not found fixture\nexec\ncat fixture.txt\n succeeded in 0ms:\nmodel not found\ncodex\nDone\n",
+			want:   false,
+		},
+		{
+			name:     "codex transcript without hook markers still catches real ERROR line",
+			stderr:   "OpenAI Codex v0.166.0\n--------\nuser\nhello\nERROR: model gpt-foo does not exist\n",
+			want:     true,
+			wantCode: ErrCodeProviderModelUnavailable,
+		},
+		{
+			name:   "codex exec tool block echoing ERROR refusal line without trailing marker ignored",
+			stderr: "OpenAI Codex v0.166.0\nexec\ncat fixture.txt\n succeeded in 0ms:\nERROR: model not found\n",
+			want:   false,
+		},
+		{
+			name:     "codex transcript with tokens used footer still catches real ERROR line",
+			stderr:   "OpenAI Codex v0.166.0\n--------\nuser\nhello\nERROR: model gpt-foo does not exist\ntokens used\n0\n",
+			want:     true,
+			wantCode: ErrCodeProviderModelUnavailable,
+		},
+		{
+			name:   "codex exec tool block echoing usage limit fixture without trailing marker ignored",
+			stderr: "OpenAI Codex v0.166.0\nexec\ncat fixture.txt\n succeeded in 0ms:\nYou've hit your usage limit.\n",
+			want:   false,
+		},
+		{
+			name:       "codex exec without hook markers followed by next turn thinking usage limit caught",
+			stderr:     "OpenAI Codex v0.166.0\nexec\nls\n succeeded in 0ms:\nok\nthinking\nYou've hit your usage limit.\n",
+			want:       true,
+			wantCode:   ErrCodeProviderQuotaExhausted,
+			wantSubstr: "usage limit",
+		},
+		{
+			name:     "codex ERROR line containing stderr substring still caught",
+			stderr:   "OpenAI Codex\nuser\nhello\nERROR: model not found; stderr: upstream rejected request\n",
+			want:     true,
+			wantCode: ErrCodeProviderModelUnavailable,
+		},
+		{
+			name:       "codex exec tool block followed by real usage limit refusal caught",
+			stderr:     "OpenAI Codex v0.166.0\nexec\n/bin/zsh -lc 'ls'\n succeeded in 0ms:\nok\nhook: PostToolUse\nYou've hit your usage limit. Upgrade for more usage, or try again at 9:57 PM.\n",
+			want:       true,
+			wantCode:   ErrCodeProviderQuotaExhausted,
+			wantRetry:  true,
+			wantSubstr: "usage limit",
+		},
 	}
 
 	for _, tc := range tests {
