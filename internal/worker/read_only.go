@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/dispatch"
 )
 
 // WithProviderRegistry supplies the same registry used to resolve commands.
@@ -37,8 +38,13 @@ func (s *Supervisor) resolveTaskProvider(req taskRequest) config.ProviderEntry {
 }
 
 func checkReadOnlyEnforcement(provider config.ProviderEntry, permission string) error {
-	if permission != "read_only" || provider.Class != "platform_dispatch" ||
-		provider.EffectiveEnforcement() == config.EnforcementInProcess {
+	if permission != "read_only" || provider.Class != "platform_dispatch" {
+		return nil
+	}
+	if provider.EffectiveEnforcement() == config.EnforcementInProcess {
+		return nil
+	}
+	if dispatch.SupportsWorktreeReadOnlyFirewall(provider.Name, "") {
 		return nil
 	}
 	return fmt.Errorf("E_READ_ONLY_UNENFORCEABLE: read_only cannot be mechanically enforced for %s; dispatch with -permission workspace_write (isolated worktree) or use a provider with in-process enforcement", provider.Name)
