@@ -50,7 +50,11 @@ jobs:
           set -euo pipefail
           rm -rf .deploy-stage && mkdir -p .deploy-stage/assets
           cp sites/home/index.html .deploy-stage/
-          cp sites/home/assets/g8s-reel.mp4 sites/home/assets/reel-poster.jpg .deploy-stage/assets/
+          # fail-loud asset copy: a missing asset fails the deploy — never a silent soft-404
+          for f in g8s-reel.mp4 g8s-reel-bgm.mp4 g8s-reel.vtt reel-poster.jpg; do
+            test -f "sites/home/assets/$f" || { echo "::error::missing site asset: $f"; exit 1; }
+            cp "sites/home/assets/$f" .deploy-stage/assets/
+          done
           printf '%s\n' \
             '/*' \
             '  X-Frame-Options: DENY' \
