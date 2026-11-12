@@ -7,6 +7,10 @@
 > **Single-binary zero-trust process execution harness (<25MB static pure-Go binary) for AI agent CLI workers.**  
 > *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."*
 
+<p align="center">
+  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — landing page, 36s product reel, and <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: an interactive 3D containment hall where the laws are the physics.
+</p>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.26.11-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
@@ -40,7 +44,7 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 | Term | Architectural Definition |
 | :--- | :--- |
 | **Brain (`F0`)** | High-tier orchestrator (`claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) holding strategic reasoning and commit authority. |
-| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `claude`, `gemini`, `ollama`) or HTTP gateway consumer executing one scoped packet. |
+| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) or HTTP gateway consumer (`9router`, OpenAI, Anthropic) executing one scoped packet. |
 | **Subagent (`F2`)** | Ephemeral subagent spawned recursively by F1 within F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`). |
 | **Task** | An atomic, durable work item queued in the SQLite WAL store with an idempotency key and attempt budget. |
 | **Receipt** | A cryptographically validated single-use authorization token granting scoped filesystem write permissions (`AllowedPaths`). |
@@ -321,6 +325,7 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 
 | Guide / Specification | Scope & Focus |
 | :--- | :--- |
+| [Product site](https://g8s.flowaxon.com) | Landing page, product reel, and The Gate Room interactive containment demo. |
 | [Quickstart Guide](docs/quickstart.md) | Step-by-step introduction from first install to delegated execution. |
 | [Windows Installation](docs/WINDOWS_INSTALL.md) | PowerShell installer, `PATH`, and Windows-specific install troubleshooting. |
 | [Release Rollback](docs/release/ROLLBACK.md) | Revert to a prior release binary when an upgrade fails or must be undone. |
@@ -357,6 +362,7 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
 | **`v0.20.0`** (2026-10-25) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, expanded MCP surface (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
+| **`v0.21.0`** (2026-10-27) | **Universal CLI Agent Adapter Suite & Dual-Path Cursor Integration** (`DELTA-39..45`, [#672](https://github.com/tamld/g8s/issues/672)): first-class CLI worker adapters for `opencode`, `commandcode`, `qwen`, `codex`, and `cursor` (Cursor Cloud REST discovery via `CURSOR_API_KEY` + local `cursor-agent` headless), worktree `diff_firewall` failing closed on out-of-scope mutations (`E_OUT_OF_SCOPE_MUTATION`), Spec-Kit v2 with 8 living domain specs (40-repo crucible rollout), generative CLI surface contract v2 (`E_UNBOUND_CLI_CLAIM`), unified telemetry bus + 5-Axis Kaizen scorecard, transactional enterprise access-audit log, and capability-scoped skill/MCP hydration. | **Done** |
 | **`v0.22.0`** (2026-11-01) | **Multi-Coordinator Native Interop Ledger & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): shared SQLite WAL ledger for equal-peer F0 coordinators (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` via CLI + `g8s_coordinator_mesh` MCP tool), typed idempotent messages (UNIQUE `message_id` + digest echo), CAS claims with TTL + context-revision fence, bounded wait long-poll, 2-tier quota self-report (unknown stays unknown), whitespace-only layer-gate exemption (A6), nightly full-battery workflow; ratified across Codex/AGY/ZCode peers with live 3-platform exchange ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Platform data-acquisition layer ("reach")** — per-platform ordered fallback tool chains (`g8s reach read`), persistent health & owned-paths ledgers (`S2`), Context Broker `WorldSnippets` & `PROPOSED`-default vault promotion (`S3`), and machine-fetched research-gate artifacts (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Done** |
 | **`v0.23.0`** (2026-11-08, Current) | **Containment Hardened & Process-Reflective** — claim-scoped mutation fence end-to-end ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md)): issuance-clip/TTL≤lease/renewal, fsops pre-mutation gate, claim-aware fail-closed harvest firewall, red matrix R1-R7 + conformance probe P9; **RT-MESH v1.1** A1-A5 (cumulative ack, flow window, retry budget, keepalive, screen-state gate — spec 46); **D-09 REFLEX-CYCLE closed** (SENSE→JUDGE→ACT→PRUNE-LAW, self-tombstoning); **provenance honesty ledger** ([ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), weekly receipt-ratio); Mechanized SSoT & worker git-commit proxy ([ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)); release-gate hardening (pre-tag surface inventory, fail-loud pre_push, doctor binary-vs-HEAD). | **Done** (tag v0.23.0 — attested, cosigned; live drill + agy co-sign recorded in spec 46) |
 | **`v0.30.0`** (Planned) | **F0/F1/F2 Scoped MCP Capability Proxy & Multi-Repo Offer Burn-In** ([#672](https://github.com/tamld/g8s/issues/672); `DELTA-39` external CLI adapters & `read_only` worktree diff firewall already shipped in `v0.20.0+`): in-worktree F1/F2 MCP capability-scoping proxy and 90-day multi-repo Offer retention burn-in. | **Planned** |
@@ -385,7 +391,7 @@ g8s/
 │   ├── conv/ — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications
 │   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A): a deterministic debate engine where a thesis is refined through bounded critique rounds
 │   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning, and context slicing for high-precision, token-efficient subagent code reviews
-│   ├── dispatch/ — implements the bounded AGY CLI dispatch wrapper ported from reference/python/scripts/agy_dispatch.py
+│   ├── dispatch/ — implements the bounded CLI dispatch adapter layer (agy-dispatch is the original bridge; live providers resolve from providers.json)
 │   ├── doctor/ — implements diagnostic sanity checks for g8s environment, security boundaries, permissions, and worker binary availability
 │   ├── dogfood/ — classifies commit provenance without performing Git I/O
 │   ├── featuremap/ — provides declarative end-to-end feature DAG loading, validation, and blast-radius routing
@@ -402,7 +408,7 @@ g8s/
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over stdio using newline-delimited JSON-RPC 2.0 (DELTA-04)
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
 │   ├── mesh/ — implements peer-to-peer coordinator claim fencing, keepalive leases, and message transport across federated g8s nodes (DELTA-46)
-│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (agy CLI wrapper) and internal/controlplane (SQLite WAL task store)
+│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (provider CLI adapters) and internal/controlplane (SQLite WAL task store)
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
 │   ├── premise/ — implements the DELTA-42 Premise Challenge & Sycophancy Gate: it decomposes an operator request or supervisor brief into atomic claims and classifies each claim into an evidence tier
 │   ├── process/ — provides cross-platform process discovery, inspection, and termination primitives for g8s lifecycle management per DEBT-36

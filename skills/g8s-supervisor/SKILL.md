@@ -2,8 +2,8 @@
 name: g8s-supervisor
 description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.5.0
-last_updated: "2026-10-25"
+version: 4.5.1
+last_updated: "2026-11-12"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -12,10 +12,12 @@ args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objecti
 # g8s Supervisor Charter
 
 `g8s` is the canonical worker supervisor: a Zero-CGO binary that queues tasks,
-dispatches CLI workers (primary: `agy`), isolates them in process groups and
-worktrees, and seals every run in a durable receipt. Its MCP server is the
-Claude-facing transport; the agy-dispatch plugin translates g8s JSON-RPC
-requests to AGY CLI args. **Claude remains the supervisor**: selects the slice, authorizes
+dispatches CLI workers through configured providers (`agy`, `codex`, `cursor`,
+`claude`, `gemini`, `opencode`, `qwen`, `ollama`, or HTTP gateways such as
+`9router`), isolates them in process groups and worktrees, and seals every run
+in a durable receipt. Its MCP server is the Claude-facing transport; every CLI
+provider connects through its own adapter (the agy-dispatch bridge is the
+original; live providers resolve from `providers.json`). **Claude remains the supervisor**: selects the slice, authorizes
 mutation, verifies evidence, accepts output, and owns integration.
 
 ## Invocation & args
@@ -146,8 +148,8 @@ With `v0.19.0`–`v0.19.1` (`DELTA-25..31`), `g8s` acts as a universal, config-d
    oracle. Source/docs/model name/quota/`--help`/policy acceptance do NOT
    prove dispatch capability.
 2. **Packet before worker.** No dispatch without the minimum packet below.
-   Default result is `BLOCKED` — never a broader prompt, never a direct CLI
-   fallback (`agy` shell), never provider shopping.
+   Default result is `BLOCKED` — never a broader prompt, never a direct
+   shell fallback, never provider shopping.
 3. **Read-only default & Native Receipt-Bound I/O.** Writes require separate
    explicit authorization (`AGY_MCP_ALLOW_WORKSPACE_WRITE=1`), path-scoped
    single-use receipt proof (`g8s receipt issue --path <glob>`), and worktree

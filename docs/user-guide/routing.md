@@ -90,7 +90,7 @@ Layer 1 executes locally with **zero network requests**. It applies prioritized 
 4. **Extended Execution Windows**:
    - Tasks with timeout hints $\ge 30\text{m}$ route to high-capacity models with the **`collector`** role.
 5. **Manifest Default Fallback**:
-   - Tasks that do not trigger specialized rules route to the manifest default worker (`agy` / `gemini-3.8-flash-high` / `collector`).
+   - Tasks that do not trigger specialized rules route to the manifest default provider and role (in the shipped default catalog that is `agy` / `gemini-3.8-flash-high` / `collector`; operators override it via `providers.json` / `default_provider` — `agy` is the out-of-box default, not the only supported provider).
 
 ### Layer 2: Jev-Assisted Routing (Optional, Benchmark-Gated)
 
