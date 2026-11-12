@@ -391,7 +391,7 @@ g8s/
 │   ├── conv/ — executes multi-worker dual-blind design runs and synthesizes proposals into converged specifications
 │   ├── dialectic/ — implements the Dialectic Bounce lifecycle (#258 Phase A): a deterministic debate engine where a thesis is refined through bounded critique rounds
 │   ├── diffintel/ — implements pure-Go unified diff parsing, noise pruning, and context slicing for high-precision, token-efficient subagent code reviews
-│   ├── dispatch/ — implements the bounded CLI dispatch adapter layer (agy-dispatch is the original bridge; live providers resolve from providers.json)
+│   ├── dispatch/ — implements the bounded AGY CLI dispatch adapter — the original worker bridge, ported from reference/python/scripts/agy_dispatch.py
 │   ├── doctor/ — implements diagnostic sanity checks for g8s environment, security boundaries, permissions, and worker binary availability
 │   ├── dogfood/ — classifies commit provenance without performing Git I/O
 │   ├── featuremap/ — provides declarative end-to-end feature DAG loading, validation, and blast-radius routing
@@ -408,7 +408,7 @@ g8s/
 │   ├── mcp/ — implements the g8s Model Context Protocol (MCP) server over stdio using newline-delimited JSON-RPC 2.0 (DELTA-04)
 │   ├── memory/ — provides a unified memory facade across working, episodic, semantic, and capability storage tiers
 │   ├── mesh/ — implements peer-to-peer coordinator claim fencing, keepalive leases, and message transport across federated g8s nodes (DELTA-46)
-│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (provider CLI adapters) and internal/controlplane (SQLite WAL task store)
+│   ├── orchestrator/ — implements the Brain→Worker fan-out layer that sits on top of internal/dispatch (the AGY CLI adapter, one backend among many) and internal/controlplane (SQLite WAL task store)
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
 │   ├── premise/ — implements the DELTA-42 Premise Challenge & Sycophancy Gate: it decomposes an operator request or supervisor brief into atomic claims and classifies each claim into an evidence tier
 │   ├── process/ — provides cross-platform process discovery, inspection, and termination primitives for g8s lifecycle management per DEBT-36

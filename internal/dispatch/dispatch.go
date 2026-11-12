@@ -1,9 +1,10 @@
-// Package dispatch implements the bounded AGY CLI dispatch wrapper ported
-// from reference/python/scripts/agy_dispatch.py. It resolves the AGY
-// executable without host assumptions, builds sandboxed commands behind the
-// harness gate, executes them through an injectable runner, detects read-only
-// contract violations, sanitizes sensitive output, and returns a structured
-// result envelope.
+// Package dispatch implements the bounded AGY CLI dispatch adapter — the
+// original worker bridge, ported from reference/python/scripts/agy_dispatch.py.
+// It resolves the AGY executable without host assumptions, builds sandboxed
+// commands behind the harness gate, executes them through an injectable runner,
+// detects read-only contract violations, sanitizes sensitive output, and
+// returns a structured result envelope. Provider-agnostic dispatch is layered
+// above it via the Worker interface (see internal/orchestrator registry).
 package dispatch
 
 import (

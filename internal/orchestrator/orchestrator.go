@@ -1,10 +1,12 @@
 // Package orchestrator implements the Brain→Worker fan-out layer that sits
-// on top of internal/dispatch (agy CLI wrapper) and internal/controlplane
-// (SQLite WAL task store). It owns the Worker interface, the git worktree
-// pool, and the FSM that drives each worker from spawn through receipt.
+// on top of internal/dispatch (the AGY CLI adapter, one backend among many)
+// and internal/controlplane (SQLite WAL task store). It owns the Worker
+// interface, the git worktree pool, and the FSM that drives each worker from
+// spawn through receipt.
 //
-// AGY is the default worker. Other backends (codex, claude-cli, gemini-cli)
-// plug in via the Worker interface — see registry.go.
+// AGY is the out-of-box default worker (operators override it via
+// providers.json / default_provider). Other backends (codex, claude-cli,
+// gemini-cli) plug in via the Worker interface — see registry.go.
 package orchestrator
 
 import (
