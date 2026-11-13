@@ -90,10 +90,12 @@ jobs:
             if [ "$CODE" = "200" ] && grep -q "the gatekeepers" /tmp/smoke.html; then
               echo "smoke PASS: 200 + brand marker present"
               grep -oE '<title>[^<]+</title>' /tmp/smoke.html
-              # gate-room probe: the page must exist with its OWN title —
-              # the index fallback (soft-404) carries the index title instead
-              GRCODE=$(curl -s -o /tmp/smoke-gr.html -w '%{http_code}' https://g8s.flowaxon.com/gate-room.html || echo 000)
-              if [ "$GRCODE" = "200" ] && grep -q "The Gate Room" /tmp/smoke-gr.html && grep -q "RuleEngine" /tmp/smoke-gr.html; then
+              # gate-room probe: the page must exist with its OWN identity —
+              # CF Pages 308s /gate-room.html -> /gate-room (follow it), and the
+              # body must carry the page title + a typed-code marker from the
+              # RuleEngine source (an index fallback would carry neither)
+              GRCODE=$(curl -sL -o /tmp/smoke-gr.html -w '%{http_code}' https://g8s.flowaxon.com/gate-room.html || echo 000)
+              if [ "$GRCODE" = "200" ] && grep -q "The Gate Room" /tmp/smoke-gr.html && grep -q "E_RECEIPT_EXPIRED" /tmp/smoke-gr.html; then
                 echo "smoke PASS: gate-room 200 + own content (no index fallback)"
               else
                 echo "::error::gate-room smoke FAILED: code=${GRCODE} — index fallback suspected"; exit 1
