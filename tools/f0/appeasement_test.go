@@ -263,7 +263,7 @@ func TestSignal3_TestSkip(t *testing.T) {
 
 func TestG4_OverrideHandling(t *testing.T) {
 	repoDir, _, _ := setupReplayRepo(t, "override-repo")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	// Create commit with appeasement violation
 	fPath := filepath.Join(repoDir, "pkg", "artifact.go")

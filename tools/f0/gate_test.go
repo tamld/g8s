@@ -12,7 +12,7 @@ import (
 
 func setupTestGitRepo(t *testing.T) (repoDir string, baseSHA string, headSHA string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 
 	runGit := func(args ...string) string {
 		t.Helper()
@@ -50,7 +50,7 @@ func setupTestGitRepo(t *testing.T) (repoDir string, baseSHA string, headSHA str
 }
 
 func TestGate_G0(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	// Issue a mandate with T2 max tier
@@ -97,7 +97,7 @@ func TestGate_G0(t *testing.T) {
 }
 
 func TestGate_G1(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)
@@ -209,7 +209,7 @@ func TestGate_G1(t *testing.T) {
 }
 
 func TestGate_G2(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)
@@ -425,7 +425,7 @@ func TestGate_G2(t *testing.T) {
 }
 
 func TestGate_G3(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)

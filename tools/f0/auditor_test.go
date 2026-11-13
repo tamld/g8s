@@ -26,7 +26,7 @@ func (m *mockAuditor) Audit(digest *SessionDigest, repoEntries []Entry) (AuditVe
 }
 
 func TestBuildSessionDigest_LedgerOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupReplayRepo(t, "digest-repo")
 
 	m := &Mandate{
@@ -177,7 +177,7 @@ func TestBuildSessionDigest_LedgerOnly(t *testing.T) {
 }
 
 func TestBuildSessionDigest_ZeroAuditors_Unaudited(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "zero-auditors")
 
 	m := &Mandate{
@@ -215,7 +215,7 @@ func TestBuildSessionDigest_ZeroAuditors_Unaudited(t *testing.T) {
 }
 
 func TestBuildSessionDigest_OneAuditor_Pass(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "pass-auditor")
 
 	m := &Mandate{
@@ -257,7 +257,7 @@ func TestBuildSessionDigest_OneAuditor_Pass(t *testing.T) {
 }
 
 func TestBuildSessionDigest_AuditorFail_DebitsBudget(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "fail-auditor")
 
 	m := &Mandate{
@@ -329,7 +329,7 @@ func TestBuildSessionDigest_AuditorFail_DebitsBudget(t *testing.T) {
 }
 
 func TestBuildSessionDigest_MultipleAuditors(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "multi-auditors")
 
 	m := &Mandate{
@@ -376,7 +376,7 @@ func TestBuildSessionDigest_MultipleAuditors(t *testing.T) {
 }
 
 func TestScorecardAuditor_C8_ScorecardMismatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupReplayRepo(t, "c8-scorecard-repo")
 
 	m := &Mandate{
@@ -479,7 +479,7 @@ func TestScorecardAuditor_C8_ScorecardMismatch(t *testing.T) {
 }
 
 func TestDigestCommandCLI(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "digest-cli-repo")
 
 	m := &Mandate{
