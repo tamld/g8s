@@ -58,7 +58,7 @@ jobs:
             cp "sites/home/$p" .deploy-stage/
           done
           # fail-loud asset copy: a missing asset fails the deploy — never a silent soft-404
-          for f in g8s-reel.mp4 g8s-reel-bgm.mp4 g8s-reel.vtt reel-poster.jpg; do
+          for f in g8s-reel.mp4 g8s-reel.vtt reel-poster.jpg; do
             test -f "sites/home/assets/$f" || { echo "::error::missing site asset: $f"; exit 1; }
             cp "sites/home/assets/$f" .deploy-stage/assets/
           done

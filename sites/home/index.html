@@ -196,6 +196,8 @@ footer .fine b { color: var(--ink); font-weight: 400; }
   .rc-wrap { margin-bottom: 12px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; }
   .r { opacity: 1; transform: none; } }
+.panel{width:100%;aspect-ratio:12/5;background:linear-gradient(180deg,#0d0d0d,#151515);border:1px solid #242424;display:flex;align-items:center;justify-content:center}
+.panel span{font-weight:700;font-size:clamp(18px,2.4vw,34px);line-height:1;color:#8f8f8f;letter-spacing:.14em;text-transform:uppercase}
 </style>
 </head>
 <body>
@@ -301,17 +303,16 @@ footer .fine b { color: var(--ink); font-weight: 400; }
 <section id="reel">
   <div class="reelband">
     <h2 class="r" style="font-weight:900; text-transform:uppercase; font-size: var(--step-head); line-height:.92; letter-spacing:-.03em; margin-bottom:22px">One task,<br>gate to gate.</h2>
-    <video class="r" width="100%" muted loop playsinline preload="metadata" poster="assets/reel-poster.jpg" src="assets/g8s-reel.mp4"
+    <video class="r" width="100%" muted autoplay loop playsinline preload="metadata" poster="assets/reel-poster.jpg" src="assets/g8s-reel.mp4"
       style="display:block" aria-label="36-second replay of a real gated g8s session: dispatch, receipt, gate refusal, quarantine, retry, verify, commit"></video>
-    <div class="cap">36 seconds · one real task from today · dispatch → receipt → gate refusal → quarantine → retry → verify → commit. muted by design · captions on · <a href="assets/g8s-reel-bgm.mp4" style="color:var(--accent);border-bottom:2px solid var(--accent)">sound version ↗</a></div>
+    <div class="cap">36 seconds · one real task from today · dispatch → receipt → gate refusal → quarantine → retry → verify → commit. vo + score · captions on</div>
   </div>
 </section>
 
 <section id="quiet">
   <figure style="margin:0">
-    <img src="https://picsum.photos/id/172/2400/1000" alt="A stone jetty stretching into still water and dense grey fog — the quiet before a verdict" width="2400" height="1000"
-      style="width:100%;display:block;filter:grayscale(1) contrast(1.05)" loading="lazy">
-    <figcaption style="font-size:var(--step-small);color:var(--muted);padding-top:10px">the run is quiet until it isn’t — every silent second was gated · photo: Aleksi Tappura — via Lorem Picsum (origin Unsplash)</figcaption>
+    <div class="panel" role="img" aria-label="The quiet before a verdict"><span>The quiet before a verdict</span></div>
+    <figcaption style="font-size:var(--step-small);color:var(--muted);padding-top:10px">the run is quiet until it isn’t — every silent second was gated</figcaption>
   </figure>
 </section>
 
