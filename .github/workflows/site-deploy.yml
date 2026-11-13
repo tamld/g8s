@@ -49,7 +49,14 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .deploy-stage && mkdir -p .deploy-stage/assets
-          cp sites/home/index.html .deploy-stage/
+          # fail-loud page copy: each shipped page must exist and be non-trivial —
+          # a missing page would soft-404 into the index fallback and look alive
+          for p in index.html gate-room.html; do
+            test -f "sites/home/$p" || { echo "::error::missing page: sites/home/$p"; exit 1; }
+            PAGESIZE=$(stat -c%s "sites/home/$p")
+            [ "${PAGESIZE}" -gt 10000 ] || { echo "::error::page $p suspiciously small (${PAGESIZE}B)"; exit 1; }
+            cp "sites/home/$p" .deploy-stage/
+          done
           # fail-loud asset copy: a missing asset fails the deploy — never a silent soft-404
           for f in g8s-reel.mp4 g8s-reel-bgm.mp4 g8s-reel.vtt reel-poster.jpg; do
             test -f "sites/home/assets/$f" || { echo "::error::missing site asset: $f"; exit 1; }
@@ -62,7 +69,7 @@ jobs:
             '  Strict-Transport-Security: max-age=31536000; includeSubDomains' \
             '  Referrer-Policy: strict-origin-when-cross-origin' \
             '  Permissions-Policy: camera=(), microphone=(), geolocation=()' \
-            "  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" \
+            "  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; media-src 'self'; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" \
             > .deploy-stage/_headers
           echo "stage: $(du -sh .deploy-stage | cut -f1)"
 
@@ -83,6 +90,17 @@ jobs:
             if [ "$CODE" = "200" ] && grep -q "the gatekeepers" /tmp/smoke.html; then
               echo "smoke PASS: 200 + brand marker present"
               grep -oE '<title>[^<]+</title>' /tmp/smoke.html
+              # gate-room probe: the page must exist with its OWN title —
+              # the index fallback (soft-404) carries the index title instead
+              GRCODE=$(curl -s -o /tmp/smoke-gr.html -w '%{http_code}' https://g8s.flowaxon.com/gate-room.html || echo 000)
+              if [ "$GRCODE" = "200" ] && grep -q "The Gate Room" /tmp/smoke-gr.html && grep -q "RuleEngine" /tmp/smoke-gr.html; then
+                echo "smoke PASS: gate-room 200 + own content (no index fallback)"
+              else
+                echo "::error::gate-room smoke FAILED: code=${GRCODE} — index fallback suspected"; exit 1
+              fi
+              # CSP probe: font + CDN allowances must be live or typography/WebGL break silently
+              curl -sI https://g8s.flowaxon.com/ | grep -q "fonts.googleapis.com" || { echo "::error::CSP lost fonts allowance"; exit 1; }
+              curl -sI https://g8s.flowaxon.com/ | grep -q "cdn.jsdelivr.net" || { echo "::error::CSP lost three.js CDN allowance"; exit 1; }
               exit 0
             fi
             echo "smoke attempt ${i}: code=${CODE} — retrying"; sleep 15

@@ -7,6 +7,10 @@
 > **Harness thực thi tiến trình zero-trust bằng binary tĩnh thuần Go (<25MB, không CGO) cho các AI agent CLI worker.**  
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
+<p align="center">
+  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — trang giới thiệu, product reel 36s, và <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: sảnh containment 3D tương tác, nơi luật lệ chính là vật lý.
+</p>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.26.11-00ADD8?logo=go)](https://golang.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/tamld/g8s)
@@ -42,7 +46,7 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 | Thuật ngữ | Định nghĩa kiến trúc |
 | :--- | :--- |
 | **Brain (`F0`)** | Orchestrator tầng cao (Claude 3.7 Sonnet / Opus, GPT-4o, Codex) giữ quyền tư duy và commit Git. |
-| **Worker (`F1`)** | Tiến trình cơ học (`agy`, `claude`, `gemini`, `ollama`) hoặc gateway consumer thực thi gói việc được giao. |
+| **Worker (`F1`)** | Tiến trình cơ học (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) hoặc gateway consumer (`9router`, OpenAI, Anthropic) thực thi gói việc được giao. |
 | **Subagent (`F2`)** | Subagent tạm thời được sinh đệ quy bởi F1, chia sẻ chung worktree và biên nhận của F1 (`F2 ⊆ F1 ⊆ F0`). |
 | **Task** | Đơn vị công việc nguyên tử, bền vững nằm trong hàng đợi SQLite WAL kèm ngân sách và mã chống trùng. |
 | **Receipt** | Biên nhận quyền ghi file: dùng một lần, có thời hạn và giới hạn vùng đường dẫn (`AllowedPaths`). |

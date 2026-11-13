@@ -5,7 +5,8 @@
 ## Default authority
 
 - g8s supervises workers. Claude selects scope, authorizes actions, verifies evidence, and accepts output.
-- g8s MCP is transport. `agy-dispatch` is compatibility bridge. Neither proves worker identity,
+- g8s MCP is transport. `agy-dispatch` is a legacy compatibility bridge (one adapter among
+  many — providers resolve from `providers.json`). Neither proves worker identity,
   containment, output quality, canonical-write authority, or permission elevation.
 - Normal bounded project work may use a runtime-admitted `read_only` worker. No blanket ban on
   g8s status, task inspection, or submission after explicit task-level authorization and DoR.
