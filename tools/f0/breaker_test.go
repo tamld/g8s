@@ -11,7 +11,7 @@ import (
 )
 
 func TestBreakerNominal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "nominal-repo")
 
 	m := &Mandate{
@@ -63,7 +63,7 @@ func TestBreakerNominal(t *testing.T) {
 }
 
 func TestBreakerBudgetExhaustion_ImmediateOnNextActionWithoutRestart(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "exhaustion-repo")
 
 	m := &Mandate{
@@ -119,7 +119,7 @@ func TestBreakerBudgetExhaustion_ImmediateOnNextActionWithoutRestart(t *testing.
 }
 
 func TestBreakerCleanStreakUpgradePolicy(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupReplayRepo(t, "streak-repo")
 
 	baseTime := time.Now().UTC().Add(-20 * time.Second)
@@ -241,7 +241,7 @@ func TestBreakerCleanStreakUpgradePolicy(t *testing.T) {
 }
 
 func TestBreakerPiCReset(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "reset-repo")
 
 	m := &Mandate{
@@ -297,7 +297,7 @@ func TestBreakerPiCReset(t *testing.T) {
 }
 
 func TestBreakerCommandCLI(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "cli-repo")
 
 	m := &Mandate{

@@ -122,7 +122,7 @@ func TestT3Escalation(t *testing.T) {
 }
 
 func TestMandateIssuance(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	repoPath := t.TempDir()
 
@@ -200,7 +200,7 @@ func TestMandateIssuance(t *testing.T) {
 }
 
 func TestMandateCheckPermissions(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	repoPath := t.TempDir()
 
@@ -274,7 +274,7 @@ func TestMandateCheckPermissions(t *testing.T) {
 }
 
 func TestMandateEffectiveMaxTierT0(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	repoPath := t.TempDir()
 
@@ -348,7 +348,7 @@ func TestMandateEffectiveMaxTierT0(t *testing.T) {
 
 func TestMandateCacheTamper(t *testing.T) {
 	t.Run("cache exists without ledger entry", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		t.Setenv("HOME", robustTempDir(t))
 
 		cachePath, err := MandateCachePath()
 		if err != nil {
@@ -369,7 +369,7 @@ func TestMandateCacheTamper(t *testing.T) {
 	})
 
 	t.Run("cache file modified on disk vs global ledger", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		t.Setenv("HOME", robustTempDir(t))
 
 		repoPath := t.TempDir()
 		code := mandateCommand([]string{
@@ -414,7 +414,7 @@ func TestMandateCacheTamper(t *testing.T) {
 }
 
 func TestMandateBudgetExhaustion(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	repoPath := t.TempDir()
 	code := mandateCommand([]string{
@@ -482,7 +482,7 @@ func TestMandateBudgetExhaustion(t *testing.T) {
 }
 
 func TestMandateShowCLI(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	// No mandate yet
 	code := mandateCommand([]string{"show"})

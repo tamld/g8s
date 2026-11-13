@@ -11,7 +11,7 @@ import (
 )
 
 func TestHook_ClassifierTable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	tests := []struct {
 		name     string
@@ -79,7 +79,7 @@ func TestHook_ClassifierTable(t *testing.T) {
 }
 
 func TestHook_NonCommandToolAllowed(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	input := PreToolInput{
 		ToolName:    "read_file",
@@ -92,7 +92,7 @@ func TestHook_NonCommandToolAllowed(t *testing.T) {
 }
 
 func TestHook_MergeCommandGateCheck(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 	t.Cleanup(func() { gateCheckWg.Wait() })
 
@@ -187,7 +187,7 @@ func TestHook_MergeCommandGateCheck(t *testing.T) {
 }
 
 func TestHook_MergeTimeoutFailSafe(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupTestGitRepo(t)
 	t.Cleanup(func() { gateCheckWg.Wait() })
 
@@ -211,7 +211,7 @@ func TestHook_MergeTimeoutFailSafe(t *testing.T) {
 }
 
 func TestHook_StopHook(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)
@@ -290,7 +290,7 @@ func TestHook_StopHook(t *testing.T) {
 }
 
 func TestHook_CLIExecution(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	// Test f0 hook pre-tool via CLI
 	runPreTool := func(inputJSON string) (int, HookDecision) {
@@ -366,7 +366,7 @@ func TestHook_CLIExecution(t *testing.T) {
 }
 
 func TestHook_FlexibleSchemas(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 
 	// Schema A: toolCall.name & toolCall.arguments.CommandLine
 	var inA PreToolInput

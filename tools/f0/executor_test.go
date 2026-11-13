@@ -63,7 +63,7 @@ func setupPassingGateRepo(t *testing.T) (repoDir, headSHA string, ledger *Ledger
 }
 
 func TestExecuteT2Merge_GateFailBlocksMerge(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	mergeCalled := false
@@ -106,7 +106,7 @@ func TestExecuteT2Merge_GateFailBlocksMerge(t *testing.T) {
 }
 
 func TestExecuteT2Merge_PassingGateMergesWithAttestationTrailer(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, headSHA, ledger := setupPassingGateRepo(t)
 
 	var capturedRepo string
@@ -240,7 +240,7 @@ func TestExecuteT2Merge_PassingGateMergesWithAttestationTrailer(t *testing.T) {
 }
 
 func TestExecuteT2Merge_RedPostMergeCI_TriggersAutoRevertAndDebit(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, headSHA, ledger := setupPassingGateRepo(t)
 
 	fakeMergeSHA := "aaaa22223333444455556666777788889999bbbb"
@@ -352,7 +352,7 @@ func TestExecuteT2Merge_RedPostMergeCI_TriggersAutoRevertAndDebit(t *testing.T) 
 }
 
 func TestExecuteT2Merge_WaivedCheck_DoesNotAutoRevert(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, headSHA, ledger := setupPassingGateRepo(t)
 
 	// Append waiver for flaky-check
@@ -441,7 +441,7 @@ func TestCredentialStores(t *testing.T) {
 }
 
 func TestMergeCommand_CLI(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// 1. Failing gate -> returns 1
@@ -481,7 +481,7 @@ func TestMergeCommand_CLI(t *testing.T) {
 }
 
 func TestExecuteT2Merge_MergeFuncError(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, headSHA, _ := setupPassingGateRepo(t)
 
 	opts := MergeOptions{

@@ -42,7 +42,7 @@ func captureStderr(f func()) string {
 }
 
 func TestCommands_Waive(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// Issue active mandate
@@ -160,7 +160,7 @@ func TestCommands_Waive_MissingFlags(t *testing.T) {
 }
 
 func TestCommands_Manual(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupTestGitRepo(t)
 
 	// Setup .g8s/f0.yml with manual_free: ["plans/**"]
@@ -265,7 +265,7 @@ func TestCommands_Manual_MissingFlags(t *testing.T) {
 }
 
 func TestCommands_Anchor(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, _ := OpenRepoLedger(repoDir)
@@ -289,7 +289,7 @@ func TestCommands_Anchor(t *testing.T) {
 }
 
 func TestCommands_Audit(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, baseSHA, headSHA := setupTestGitRepo(t)
 
 	// 1. Initial commit has neither gate PASS nor trailer -> audit detects 2 unattested commits
@@ -348,7 +348,7 @@ func TestCommands_Audit(t *testing.T) {
 }
 
 func TestCommands_Status(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, _ := OpenRepoLedger(repoDir)
@@ -421,7 +421,7 @@ func TestCommands_Status(t *testing.T) {
 }
 
 func TestCommands_Gate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// Issue active mandate
@@ -489,7 +489,7 @@ func TestCommands_Gate(t *testing.T) {
 }
 
 func TestCommands_DispatchAndUsage(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// printUsage()
@@ -584,7 +584,7 @@ func TestCommands_DispatchAndUsage(t *testing.T) {
 }
 
 func TestCommands_MandateIssueOptionsAndErrors(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupTestGitRepo(t)
 
 	// Valid mandate issue

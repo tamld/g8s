@@ -16,7 +16,7 @@ import (
 // []GateCheckResult inside Entry.Extra are canonicalized by normalizeExtra
 // so that f0 ledger verify succeeds 100% after EvaluateGate.
 func TestSlice06b2_NormalizeExtraAndGateLedgerVerify(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)
@@ -85,7 +85,7 @@ func TestSlice06b2_NormalizeExtraAndGateLedgerVerify(t *testing.T) {
 // TestSlice06b2_TreeSHAEquivalence_CommitAmend proves that when a commit is amended
 // (changing HEAD SHA but preserving HEAD^{tree}), G1 remains PASS via TreeSHA equivalence.
 func TestSlice06b2_TreeSHAEquivalence_CommitAmend(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	ledger, err := OpenRepoLedger(repoDir)
@@ -186,7 +186,7 @@ func TestSlice06b2_TreeSHAEquivalence_CommitAmend(t *testing.T) {
 // 3. Modifying a delivered file after bundle generation fails G3.
 // 4. Tampering with bundle JSON fails G1 and G3.
 func TestSlice06b2_PortableBundle_RemoteModeAndTamper(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupTestGitRepo(t)
 
 	// Create and commit a file delivered by worker

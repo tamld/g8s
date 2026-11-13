@@ -75,7 +75,7 @@ func TestSelectIndependentProvider_ExcludesF0AndEmpty(t *testing.T) {
 }
 
 func TestRunT3Verification_NoVerifierAvailable_VetoAndEscalate(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// Case 1: only F0's provider is in available list, no EvalProbeRunner
@@ -130,7 +130,7 @@ func TestRunT3Verification_NoVerifierAvailable_VetoAndEscalate(t *testing.T) {
 }
 
 func TestRunT3Verification_IndependentProvider_Passed(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	var capturedProvider, capturedRepo, capturedDiff string
@@ -206,7 +206,7 @@ func TestRunT3Verification_IndependentProvider_Passed(t *testing.T) {
 }
 
 func TestRunT3Verification_IndependentProvider_Disagreement(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	opts := T3VerifyOptions{
@@ -268,7 +268,7 @@ func TestRunT3Verification_IndependentProvider_Disagreement(t *testing.T) {
 }
 
 func TestRunT3Verification_IndependentProvider_Error(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	opts := T3VerifyOptions{
@@ -296,7 +296,7 @@ func TestRunT3Verification_IndependentProvider_Error(t *testing.T) {
 }
 
 func TestRunT3Verification_FallbackToEvalProbeRunner(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// No independent provider available
@@ -351,7 +351,7 @@ func TestRunT3Verification_FallbackToEvalProbeRunner(t *testing.T) {
 }
 
 func TestVerifyT3Command_CLI(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 	t.Setenv("PATH", t.TempDir())
 
@@ -453,7 +453,7 @@ func TestWireDefaultT3Options(t *testing.T) {
 }
 
 func TestRunT3Verification_MultiProviderFailoverAndProbeFallback(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
 	// Subcase A: 9router is unreachable (returns err), automatically fails over to cliproxyapi which passes!

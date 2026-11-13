@@ -163,7 +163,7 @@ func setupRealisticGateFixture(tb testing.TB) (string, GateOptions) {
 }
 
 func TestWaveAReplay_C1_to_C10(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	defer SetGlobalForge(nil)
 
 	var results []ReplayCaseResult
@@ -1101,7 +1101,7 @@ func TestWaveAReplay_C1_to_C10(t *testing.T) {
 }
 
 func TestWaveBCircuitBreakerTripsOnReplay(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, _ := setupReplayRepo(t, "breaker-replay-repo")
 
 	m := &Mandate{
@@ -1166,7 +1166,7 @@ func TestWaveBCircuitBreakerTripsOnReplay(t *testing.T) {
 }
 
 func TestWaveAGateCheckLatency(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", robustTempDir(t))
 	_, opts := setupRealisticGateFixture(t)
 
 	const runs = 11
