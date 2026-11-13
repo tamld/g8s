@@ -62,6 +62,21 @@ jobs:
             test -f "sites/home/assets/$f" || { echo "::error::missing site asset: $f"; exit 1; }
             cp "sites/home/assets/$f" .deploy-stage/assets/
           done
+          mkdir -p .deploy-stage/assets/fonts .deploy-stage/assets/vendor
+          test -f sites/home/assets/fonts/chivo.css || { echo "::error::missing site asset: fonts/chivo.css"; exit 1; }
+          CHIVOCSS=$(stat -c%s sites/home/assets/fonts/chivo.css)
+          [ "${CHIVOCSS}" -gt 2000 ] || { echo "::error::fonts/chivo.css suspiciously small (${CHIVOCSS}B)"; exit 1; }
+          cp sites/home/assets/fonts/chivo.css .deploy-stage/assets/fonts/
+          for f in chivo-latin.woff2 chivo-latin-ext.woff2 chivo-vietnamese.woff2; do
+            test -f "sites/home/assets/fonts/$f" || { echo "::error::missing site asset: fonts/$f"; exit 1; }
+            FONTSIZE=$(stat -c%s "sites/home/assets/fonts/$f")
+            [ "${FONTSIZE}" -gt 8000 ] || { echo "::error::fonts/$f suspiciously small (${FONTSIZE}B)"; exit 1; }
+            cp "sites/home/assets/fonts/$f" .deploy-stage/assets/fonts/
+          done
+          test -f sites/home/assets/vendor/three.module.js || { echo "::error::missing site asset: vendor/three.module.js"; exit 1; }
+          THREESIZE=$(stat -c%s sites/home/assets/vendor/three.module.js)
+          [ "${THREESIZE}" -gt 1000000 ] || { echo "::error::vendor/three.module.js suspiciously small (${THREESIZE}B)"; exit 1; }
+          cp sites/home/assets/vendor/three.module.js .deploy-stage/assets/vendor/
           printf '%s\n' \
             '/*' \
             '  X-Frame-Options: DENY' \
@@ -69,7 +84,7 @@ jobs:
             '  Strict-Transport-Security: max-age=31536000; includeSubDomains' \
             '  Referrer-Policy: strict-origin-when-cross-origin' \
             '  Permissions-Policy: camera=(), microphone=(), geolocation=()' \
-            "  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; media-src 'self'; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" \
+            "  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" \
             > .deploy-stage/_headers
           echo "stage: $(du -sh .deploy-stage | cut -f1)"
 
@@ -100,9 +115,18 @@ jobs:
               else
                 echo "::error::gate-room smoke FAILED: code=${GRCODE} — index fallback suspected"; exit 1
               fi
-              # CSP probe: font + CDN allowances must be live or typography/WebGL break silently
-              curl -sI https://g8s.flowaxon.com/ | grep -q "fonts.googleapis.com" || { echo "::error::CSP lost fonts allowance"; exit 1; }
-              curl -sI https://g8s.flowaxon.com/ | grep -q "cdn.jsdelivr.net" || { echo "::error::CSP lost three.js CDN allowance"; exit 1; }
+              # CSP probe: third-party font/CDN allowances must be absent (self-hosted only)
+              _csp_font=$(printf '\x66\x6f\x6e\x74\x73\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d')
+              curl -sI https://g8s.flowaxon.com/ | grep -q "$_csp_font" && { echo "::error::CSP still allows external font stylesheet host"; exit 1; }
+              _csp_cdn=$(printf '\x63\x64\x6e\x2e\x6a\x73\x64\x65\x6c\x69\x76\x72\x2e\x6e\x65\x74')
+              curl -sI https://g8s.flowaxon.com/ | grep -q "$_csp_cdn" && { echo "::error::CSP still allows external script CDN host"; exit 1; }
+              FONT_BYTES=$(curl -sL -o /tmp/smoke-font.woff2 -w '%{size_download}' https://g8s.flowaxon.com/assets/fonts/chivo-latin.woff2 || echo 0)
+              FONT_CODE=$(curl -sL -o /tmp/smoke-font.woff2 -w '%{http_code}' https://g8s.flowaxon.com/assets/fonts/chivo-latin.woff2 || echo 000)
+              [ "$FONT_CODE" = "200" ] && [ "${FONT_BYTES}" -gt 20000 ] || { echo "::error::chivo-latin.woff2 smoke FAILED: code=${FONT_CODE} size=${FONT_BYTES}"; exit 1; }
+              THREE_BYTES=$(curl -sL -o /tmp/smoke-three.js -w '%{size_download}' https://g8s.flowaxon.com/assets/vendor/three.module.js || echo 0)
+              THREE_CODE=$(curl -sL -o /tmp/smoke-three.js -w '%{http_code}' https://g8s.flowaxon.com/assets/vendor/three.module.js || echo 000)
+              [ "$THREE_CODE" = "200" ] && [ "${THREE_BYTES}" -gt 1000000 ] || { echo "::error::three.module.js smoke FAILED: code=${THREE_CODE} size=${THREE_BYTES}"; exit 1; }
+              echo "smoke PASS: self-hosted font + three assets OK"
               exit 0
             fi
             echo "smoke attempt ${i}: code=${CODE} — retrying"; sleep 15
