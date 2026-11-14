@@ -305,7 +305,7 @@ footer .fine b { color: var(--ink); font-weight: 400; }
     <h2 class="r" style="font-weight:900; text-transform:uppercase; font-size: var(--step-head); line-height:.92; letter-spacing:-.03em; margin-bottom:22px">One task,<br>gate to gate.</h2>
     <video class="r" width="100%" muted autoplay loop playsinline preload="metadata" poster="assets/reel-poster.jpg" src="assets/g8s-reel.mp4"
       style="display:block" aria-label="36-second replay of a real gated g8s session: dispatch, receipt, gate refusal, quarantine, retry, verify, commit"></video>
-    <div class="cap">36 seconds · one real task from today · dispatch → receipt → gate refusal → quarantine → retry → verify → commit. vo + score · captions on</div>
+    <div class="cap">36 seconds · one real task from today · dispatch → receipt → gate refusal → quarantine → retry → verify → commit. vo + score · captions on<button id="soundToggle" type="button" aria-pressed="false" style="background:none;border:1px solid var(--accent);color:var(--accent);padding:4px 12px;cursor:pointer;font:inherit;font-size:inherit;margin-left:10px">🔊 sound on</button></div>
   </div>
 </section>
 
@@ -487,5 +487,6 @@ document.getElementById('ctaBtn').addEventListener('click', () => {
   t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1500);
 });
 </script>
+<script>const _rv=document.querySelector('#reel video'),_rb=document.getElementById('soundToggle');_rb.addEventListener('click',()=>{_rv.muted=!_rv.muted;_rb.textContent=_rv.muted?'🔊 sound on':'🔊 sound off';_rb.setAttribute('aria-pressed',String(!_rv.muted));});</script>
 </body>
 </html>
