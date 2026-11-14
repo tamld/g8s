@@ -615,7 +615,7 @@ func runMCPServer(args []string) {
 			_ = registry.LoadProvidersJSON(providersPath)
 		}
 	}
-	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry)
+	server := mcp.NewServer(os.Stdin, os.Stdout, store, receipts, registry, mcp.WithVersion(Version))
 	if err := server.ServeStdio(context.Background()); err != nil {
 		exitRuntime("mcp", "", "", cli.CodeRuntime, err, "", false)
 	}

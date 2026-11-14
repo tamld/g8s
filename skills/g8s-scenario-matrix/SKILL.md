@@ -6,7 +6,7 @@ version: 1.0.1
 last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
-args_syntax: "g8s matrix [gen|verify|inspect] --spec <spec_path> [--holdout-dir <dir>] [--dimensions <d1,d2...>] [--seed <seed>] [--json]"
+args_syntax: "g8s verify --task <id> --holdout-dir <dir> [--json]"
 ---
 
 # g8s Scenario Matrix Verification Skill

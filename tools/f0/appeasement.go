@@ -25,7 +25,7 @@ var (
 	validConfigKeys = map[string][]string{
 		"trust-boundaries": {"trust_boundaries"},
 		"f0":               {"ci", "verify_commands", "manual_free", "parsers"},
-		"verifier-classes": {"schema_version", "classes", "verifier_classes", "version"},
+		"verifier-classes": {"schema_version", "classes", "verifier_classes", "version", "verification_skills"},
 		"lane-bundles":     {"schema_version", "bundles", "lanes", "default_lane", "audit_cadence", "dominant_dimensions", "version"},
 		"effort-classes":   {"schema_version", "classes", "effort_classes", "default_effort", "version"},
 		"agent-models":     {"schema_version", "catalog_version", "verified_at", "sources", "providers", "models", "profiles", "version"},

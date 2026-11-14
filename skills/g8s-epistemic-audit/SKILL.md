@@ -6,7 +6,7 @@ version: 1.0.1
 last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
-args_syntax: "g8s-epistemic-audit [audit|decompose|classify] --input <file.md> [--threshold <ratio>] [--json]"
+args_syntax: "g8s claim check --file <path> [--json]"
 ---
 
 # g8s Epistemic Audit (`g8s-epistemic-audit`)

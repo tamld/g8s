@@ -19,12 +19,12 @@ The **Verification Skills Suite** eliminates these vulnerabilities by replacing 
 
 | Skill Module | Domain / Focus | Key Threat Defeated | Primary Invocation |
 |---|---|---|---|
-| [`g8s-blind-verifier`](../../g8s-blind-verifier/SKILL.md) | Double-Blind Adversarial Review | Reviewer sycophancy, AI evaluation awareness | `g8s verify --blind` |
-| [`g8s-red-prove`](../../g8s-red-prove/SKILL.md) | Mechanical Repro & Mutation Proof | Vacuous tests, phantom bugfixes | `g8s verify --red-green --canary-mutant` |
-| [`g8s-scenario-matrix`](../../g8s-scenario-matrix/SKILL.md) | 12-Dimension Edge Matrix & Holdouts | Incomplete test suites, concurrency blindspots | `g8s matrix gen --holdout-dir` |
-| [`g8s-ux-visual-gate`](../../g8s-ux-visual-gate/SKILL.md) | DOM Geometry, Contrast & Media | Visual regressions, clipping, accessibility | `g8s verify-ux --url` |
-| [`g8s-sec-gate`](../../g8s-sec-gate/SKILL.md) | Zero-Trust SAST & Live DAST Probes | SSRF, path traversal, auth bypasses | `g8s sec probe --targets` |
-| [`g8s-epistemic-audit`](../../g8s-epistemic-audit/SKILL.md) | Claim Decomposition & Purity | Epistemic inflation, observational confusion | `g8s epistemic audit --input` |
+| [`g8s-blind-verifier`](../../g8s-blind-verifier/SKILL.md) | Double-Blind Adversarial Review | Reviewer sycophancy, AI evaluation awareness | `g8s blind-verify --spec <path> --invariants <list> --diff <path> --test-output <path>` |
+| [`g8s-red-prove`](../../g8s-red-prove/SKILL.md) | Mechanical Repro & Mutation Proof | Vacuous tests, phantom bugfixes | `g8s verify --task <id> --canary-mutant` |
+| [`g8s-scenario-matrix`](../../g8s-scenario-matrix/SKILL.md) | 12-Dimension Edge Matrix & Holdouts | Incomplete test suites, concurrency blindspots | `g8s verify --task <id> --holdout-dir <dir>` |
+| [`g8s-ux-visual-gate`](../../g8s-ux-visual-gate/SKILL.md) | DOM Geometry, Contrast & Media | Visual regressions, clipping, accessibility | `g8s-ux-visual-gate --url <target_url>` |
+| [`g8s-sec-gate`](../../g8s-sec-gate/SKILL.md) | Zero-Trust SAST & Live DAST Probes | SSRF, path traversal, auth bypasses | `g8s eval run [--category <cat>]` |
+| [`g8s-epistemic-audit`](../../g8s-epistemic-audit/SKILL.md) | Claim Decomposition & Purity | Epistemic inflation, observational confusion | `g8s claim check --file <path>` |
 
 ---
 

@@ -80,6 +80,14 @@ type Class struct {
 	Checks        []Check  `json:"checks" yaml:"checks"`
 }
 
+// VerificationSkill represents a verification skill entry in the registry.
+type VerificationSkill struct {
+	Name        string `json:"name" yaml:"name"`
+	Entry       string `json:"entry" yaml:"entry"`
+	Layer       string `json:"layer" yaml:"layer"`
+	GateCommand string `json:"gate_command" yaml:"gate_command"`
+}
+
 // BriefDoDItem represents a single Definition of Done requirement from BriefSchema.
 type BriefDoDItem struct {
 	ID           string `json:"id"`

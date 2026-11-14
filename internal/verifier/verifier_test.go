@@ -387,8 +387,9 @@ classes:
 	}
 }
 
-// TestSeededRegistry verifies that .g8s/verifier-classes.yml contains exactly two advisory
-// classes ('docs' and 'test') with founding catches and valid checks.
+// TestSeededRegistry verifies that .g8s/verifier-classes.yml contains the two constitutional
+// advisory classes ('docs' and 'test', preserving SCORECARD S-7 Guarantee 1 deny-by-default on
+// arbitrary production paths) with founding catches and valid checks, plus 6 verification skills.
 func TestSeededRegistry(t *testing.T) {
 	reg, err := LoadRegistry(DefaultRegistryPath)
 	if err != nil {
@@ -398,6 +399,11 @@ func TestSeededRegistry(t *testing.T) {
 	classes := reg.Classes()
 	if len(classes) != 2 {
 		t.Fatalf("expected exactly 2 seeded classes, got %d", len(classes))
+	}
+
+	skills := reg.Skills()
+	if len(skills) != 6 {
+		t.Fatalf("expected exactly 6 verification skills, got %d", len(skills))
 	}
 
 	classMap := make(map[string]Class)
@@ -442,6 +448,120 @@ func TestSeededRegistry(t *testing.T) {
 	}
 	if testCls.Checks[0].Type != CheckTypeGoTest {
 		t.Errorf("test check[0] type = %q, want %q", testCls.Checks[0].Type, CheckTypeGoTest)
+	}
+
+	// 3. verification skills checks
+	skillNames := make(map[string]bool)
+	for _, s := range skills {
+		skillNames[s.Name] = true
+		if strings.TrimSpace(s.GateCommand) == "" {
+			t.Errorf("verification skill %s missing gate_command", s.Name)
+		}
+	}
+	requiredSkills := []string{
+		"g8s-blind-verifier",
+		"g8s-red-prove",
+		"g8s-scenario-matrix",
+		"g8s-ux-visual-gate",
+		"g8s-sec-gate",
+		"g8s-epistemic-audit",
+	}
+	for _, req := range requiredSkills {
+		if !skillNames[req] {
+			t.Errorf("missing verification skill: %s", req)
+		}
+	}
+}
+
+// TestVerifier_SiblingScopeRootSkipsMissingFallbackScript verifies that when a sibling scope-root
+// lacks its own .g8s/verifier-classes.yml and falls back to the CWD g8s registry, script checks
+// absent in the sibling scope-root are skipped with a scope-mismatch detail instead of failing (#893).
+func TestVerifier_SiblingScopeRootSkipsMissingFallbackScript(t *testing.T) {
+	bareSibling := t.TempDir()
+	_ = os.WriteFile(filepath.Join(bareSibling, "notes.md"), []byte("# Sibling Note\n"), 0o644)
+
+	vFallback := NewVerifier(
+		WithRepoRoot(bareSibling),
+		WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+			t.Fatal("runScriptCheck should not be called when fallback script is absent in bare sibling repoRoot")
+			return nil, nil, 0, nil
+		}),
+	)
+
+	verdictFallback, err := vFallback.VerifyContext(context.Background(), TaskRef{
+		ID:           "task-893-bare-sibling",
+		ReceiptID:    "rcpt-893",
+		AllowedPaths: []string{"notes.md"},
+		WorktreeDir:  bareSibling,
+	}, TaskRef{})
+	if err != nil {
+		t.Fatalf("unexpected error on bare sibling: %v", err)
+	}
+	if verdictFallback.Class != "docs" || verdictFallback.Outcome != OutcomePass {
+		t.Fatalf("bare sibling verdict = (%s, %s), want (docs, pass)", verdictFallback.Class, verdictFallback.Outcome)
+	}
+	foundSkipped := false
+	for _, c := range verdictFallback.Checks {
+		if c.Type == "script" && c.OK && strings.Contains(c.Detail, "scope-mismatch") {
+			foundSkipped = true
+			break
+		}
+	}
+	if !foundSkipped {
+		t.Errorf("expected skipped script check with scope-mismatch detail, got checks: %+v", verdictFallback.Checks)
+	}
+}
+
+// TestVerifier_SiblingScopeRootLoadsOwnRegistry verifies that when a target worktree has its own
+// .g8s/verifier-classes.yml, it's loaded and used for class resolution (Issue #893).
+func TestVerifier_SiblingScopeRootLoadsOwnRegistry(t *testing.T) {
+	// Create a temp directory structure with a custom registry
+	tmpDir := t.TempDir()
+	registryPath := filepath.Join(tmpDir, ".g8s/verifier-classes.yml")
+	_ = os.MkdirAll(filepath.Dir(registryPath), 0o755)
+
+	// Write a registry with a custom class that matches *.go files
+	registryContent := `
+classes:
+  - name: custom-go
+    status: advisory
+    founding_catch: "#883"
+    priority: 5
+    paths:
+      - "*.go"
+    checks:
+      - type: go-test
+        packages: ["./..."]
+verification_skills: []
+`
+	_ = os.WriteFile(registryPath, []byte(registryContent), 0o644)
+
+	// Create a dummy Go file in the temp dir
+	_ = os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n"), 0o644)
+
+	v := NewVerifier(
+		WithRepoRoot(tmpDir),
+		WithCommandRunner(func(ctx context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+			return []byte("ok"), nil, 0, nil
+		}),
+	)
+
+	verdict, err := v.VerifyContext(context.Background(), TaskRef{
+		ID:           "task-sibling-registry",
+		ReceiptID:    "rcpt-1",
+		AllowedPaths: []string{"main.go"},
+		WorktreeDir:  tmpDir,
+	}, TaskRef{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should resolve to custom-go class from the sibling registry
+	if verdict.Class != "custom-go" {
+		t.Errorf("expected class 'custom-go' from sibling registry, got %q", verdict.Class)
+	}
+	if !verdict.Registered {
+		t.Errorf("expected registered=true")
 	}
 }
 

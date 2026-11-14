@@ -6,7 +6,7 @@ version: 1.0.1
 last_updated: "2026-10-24"
 risk_level: medium
 evidence_level: runtime_required
-args_syntax: "g8s verify-ux --url <target_url> [--viewport <WxH>] [--wcag-level <AA|AAA>] [--media-selector <sel>] [--json]"
+args_syntax: "g8s-ux-visual-gate --url <target_url> [--viewport <WxH>] [--wcag-level <AA|AAA>] [--media-selector <sel>] [--json]"
 ---
 
 # g8s UX & Visual Gate Verification Skill

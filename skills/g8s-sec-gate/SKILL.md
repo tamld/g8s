@@ -6,7 +6,7 @@ version: 1.0.1
 last_updated: "2026-10-24"
 risk_level: high
 evidence_level: runtime_required
-args_syntax: "g8s sec probe [--targets <paths>] [--endpoint <url>] [--config .g8s/trust-boundaries.yml] [--json]"
+args_syntax: "g8s eval run [--category <cat>] [--json]"
 ---
 
 # g8s Security Gate Verification Skill

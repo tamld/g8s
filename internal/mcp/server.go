@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/analyzer"
@@ -118,6 +119,7 @@ type Server struct {
 	prober    BinaryProber
 	tools     map[string]toolHandler
 	list      []toolDescriptor
+	version   string
 }
 
 // Option customizes optional Server dependencies; unspecified options keep the
@@ -129,6 +131,14 @@ func WithDispatcher(d SyncDispatcher) Option { return func(s *Server) { s.dispat
 
 // WithBinaryProber overrides the worker-binary resolution seam.
 func WithBinaryProber(p BinaryProber) Option { return func(s *Server) { s.prober = p } }
+
+// WithVersion sets the server version reported in initialize and receipt provenance.
+// If v is empty, defaults to "0.23.0". Leading "v" is stripped (e.g. "v0.24.0" -> "0.24.0").
+func WithVersion(v string) Option {
+	return func(s *Server) {
+		s.version = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	}
+}
 
 // toolHandler executes one tools/call invocation and returns the result value.
 type toolHandler func(ctx context.Context, args json.RawMessage) (any, *jsonRPCError)
@@ -144,6 +154,9 @@ func NewServer(in io.Reader, out io.Writer, cp ControlPlaneAPI, receipts Receipt
 	}
 	if s.prober == nil {
 		s.prober = defaultBinaryProber
+	}
+	if s.version == "" {
+		s.version = "0.23.0"
 	}
 	_ = s.RegisterTools()
 	return s
@@ -177,7 +190,7 @@ func (s *Server) RegisterTools() error {
 		"g8s_coordinator_mesh": s.coordinatorMeshTool,
 	}
 	s.list = []toolDescriptor{
-		{Name: "g8s_run", Description: "Synchronously execute an isolated g8s worker task (requires Phase 4 supervisor).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
+		{Name: "g8s_run", Description: "Reserved synchronous worker stub (returns -32603; use g8s_dispatch, g8s_llm_call, or g8s_submit).", InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"role":{"type":"string"}},"required":["prompt"]}`)},
 		{Name: "g8s_submit", Description: "Queue a durable background task in the SQLite-backed control plane.", InputSchema: json.RawMessage(`{"type":"object","properties":{"idempotency_key":{"type":"string"},"payload":{"type":"object"},"priority":{"type":"integer"},"max_attempts":{"type":"integer"},"model":{"type":"string"},"role":{"type":"string"},"permission":{"type":"string"},"provider":{"type":"string"},"effort":{"type":"string"},"scope_root":{"type":"string"},"no_sandbox":{"type":"boolean"},"add_dirs":{"type":"array","items":{"type":"string"}}},"required":["idempotency_key","payload"]}`)},
 		{Name: "g8s_get", Description: "Fetch sanitized task status by task id.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}`)},
 		{Name: "g8s_receipt_issue", Description: "Issue a path-scoped, single-use write receipt (TTL seconds, max 3600).", InputSchema: json.RawMessage(`{"type":"object","properties":{"allowed_paths":{"type":"array","items":{"type":"string"}},"ttl_seconds":{"type":"integer"}},"required":["allowed_paths"]}`)},
@@ -247,7 +260,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "g8s", "version": "0.23.0"},
+			"serverInfo":      map[string]any{"name": "g8s", "version": s.version},
 		})
 	case "tools/list":
 		return okResponse(req.ID, map[string]any{"tools": s.list})
@@ -287,9 +300,9 @@ func (s *Server) handleToolCall(ctx context.Context, id json.RawMessage, params 
 	return okResponse(id, json.RawMessage(payload))
 }
 
-// runTool reports the Phase 4 dependency honestly instead of pretending.
+// runTool reports the reserved stub status honestly.
 func (s *Server) runTool(_ context.Context, _ json.RawMessage) (any, *jsonRPCError) {
-	return nil, &jsonRPCError{Code: codeInternal, Message: "g8s_run requires the Phase 4 worker supervisor; use g8s_submit"}
+	return nil, &jsonRPCError{Code: codeInternal, Message: "g8s_run is a reserved synchronous stub; use g8s_dispatch, g8s_llm_call, or g8s_submit"}
 }
 
 type blastRadiusArgs struct {
@@ -419,7 +432,7 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 			RulesetVersion: "v1",
 			PipelineDigest: "mcp-server-default",
 		}),
-		receipt.WithProvenanceContext("g8s/0.23.0", "", ""),
+		receipt.WithProvenanceContext("g8s/"+s.version, "", ""),
 	)
 	if err != nil {
 		return nil, &jsonRPCError{Code: codeInternal, Message: err.Error()}
