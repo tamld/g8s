@@ -139,6 +139,7 @@ Incoming Task:
 | **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
 | **DELTA-46** | [`46-peer-coordinator-ledger-spec.md`](../spec/openspec/46-peer-coordinator-ledger-spec.md) | `internal/mesh`, `internal/mcp`, `cmd/g8s` | APPLIED |
 | **DELTA-47** | [`47-reach-layer-spec.md`](../spec/openspec/47-reach-layer-spec.md) | `internal/reach`, `cmd/g8s` | APPLIED |
+| **DELTA-48** | [`48-declarative-model-adoption-and-adapter-neutrality-spec.md`](../spec/openspec/48-declarative-model-adoption-and-adapter-neutrality-spec.md) | `internal/config`, `internal/routing`, `internal/provider`, `internal/provider/conformance`, `internal/harness/probe`, `internal/verifier`, `cmd/g8s` | APPLIED |
 
 ---
 

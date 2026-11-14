@@ -103,53 +103,21 @@ func runProvidersEvaluate(args []string) {
 		timeoutDur = 30 * time.Second
 	}
 
-	providersPath := os.Getenv("G8S_PROVIDERS")
-	if providersPath == "" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
-		}
+	// Resolve provider using the unified helper supporting both api_call and platform_dispatch
+	ctx := context.Background()
+	cfgFile := loadProvidersManifestFile()
+	cat, _ := config.LoadDefaultCatalog()
+	httpProv, err := resolveCallableProvider(ctx, *providerFlag)
+	if err != nil {
+		exitUsage("providers", "evaluate", *traceID, err.Error(), "Configure provider in providers.json or use a registered platform_dispatch provider", *jsonl)
 	}
-	var cfgFile *config.File
-	if providersPath != "" {
-		if _, statErr := os.Stat(providersPath); statErr == nil {
-			cfgFile, _ = config.Load(providersPath)
-		}
-	}
+	_, isHTTP := httpProv.(*provider.OpenAIProvider)
+	isCLI := !isHTTP
 
-	var entry config.ProviderEntry
-	found := false
-	if cfgFile != nil {
-		if p, ok := config.FindProvider(cfgFile, *providerFlag); ok && p.Class == "api_call" {
-			entry = *p
-			found = true
-		}
-	}
-	if !found {
-		if strings.EqualFold(*providerFlag, "9router") {
-			entry = config.ProviderEntry{
-				Class:               "api_call",
-				Name:                "9router",
-				Protocol:            "9router",
-				BaseURL:             "http://127.0.0.1:20128/v1",
-				BaseURLEnv:          "NINEROUTER_URL",
-				AuthEnv:             "OPENAI_API_KEY",
-				AllowUnlistedModels: true,
-			}
-			found = true
-		}
-	}
-	if !found {
-		exitUsage("providers", "evaluate", *traceID, fmt.Sprintf("provider %q not found", *providerFlag), "Configure provider in providers.json", *jsonl)
-	}
-
-	httpProv := provider.NewHTTPProviderFromConfig(entry)
-	var models []string
-	for _, raw := range strings.Split(*modelsFlag, ",") {
-		m := strings.TrimSpace(raw)
-		if m != "" {
-			models = append(models, m)
-		}
+	// Get the provider name for recording outcomes
+	entryName := *providerFlag
+	if p, ok := httpProv.(interface{ Name() string }); ok {
+		entryName = p.Name()
 	}
 
 	modelExplicitlyPassed := false
@@ -158,9 +126,30 @@ func runProvidersEvaluate(args []string) {
 			modelExplicitlyPassed = true
 		}
 	})
+
+	var models []string
+	if !modelExplicitlyPassed && !strings.EqualFold(entryName, "9router") {
+		if defModel := config.ResolveProviderDefaultModel(cfgFile, cat, entryName); defModel != "" {
+			models = []string{defModel}
+		}
+	} else {
+		for _, raw := range strings.Split(*modelsFlag, ",") {
+			m := strings.TrimSpace(raw)
+			if m != "" {
+				models = append(models, m)
+			}
+		}
+	}
 	if *discoverCombosFlag {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
-		discovered, err := httpProv.DiscoverModels(ctx)
+		// Try to call DiscoverModels via type assertion for platform_dispatch providers
+		var discovered []string
+		var err error
+		if p, ok := httpProv.(interface {
+			DiscoverModels(context.Context) ([]string, error)
+		}); ok {
+			discovered, err = p.DiscoverModels(ctx)
+		}
 		cancel()
 		if err == nil {
 			var combos []string
@@ -181,7 +170,10 @@ func runProvidersEvaluate(args []string) {
 	if *auditCatalogFlag {
 		cat, err := config.LoadDefaultCatalog()
 		if err == nil && cat != nil {
-			if provCat, ok := cat.FindProvider(entry.Name); ok {
+			if provCat, ok := cat.FindProvider(entryName); ok && len(provCat.Models) > 0 {
+				if !modelExplicitlyPassed && !*discoverCombosFlag {
+					models = nil
+				}
 				for _, m := range provCat.Models {
 					models = append(models, m.ID)
 				}
@@ -208,6 +200,9 @@ func runProvidersEvaluate(args []string) {
 		Provider      string `json:"provider"`
 		Model         string `json:"model"`
 		ModelResolved string `json:"model_resolved,omitempty"`
+		Family        string `json:"family,omitempty"`
+		CostTier      string `json:"cost_tier,omitempty"`
+		Status        string `json:"status,omitempty"`
 		Success       bool   `json:"success"`
 		VerifyPassed  bool   `json:"verify_passed"`
 		DurationMs    int64  `json:"duration_ms"`
@@ -217,6 +212,7 @@ func runProvidersEvaluate(args []string) {
 
 	var outcomes []probeOutcome
 	for _, m := range models {
+		fam, costTier, mStatus := lookupDeclarativeModelMeta(cfgFile, cat, entryName, m)
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
 		spec := provider.Spec{
 			Brief:     *promptFlag,
@@ -225,15 +221,27 @@ func runProvidersEvaluate(args []string) {
 			Timeout:   timeoutDur,
 			TraceID:   *traceID,
 		}
+		var iterCleanup func()
+		if isCLI {
+			if hookDir, _, cl, hErr := dispatch.SetupToolPolicyNoneWorkspace(); hErr == nil {
+				iterCleanup = cl
+				spec.WorktreeDir = hookDir
+				spec.AddDirs = []string{hookDir}
+				spec.Env = map[string]string{"G8S_SANDBOX": "1"}
+			}
+		}
 		start := time.Now()
 		handle, sErr := httpProv.Spawn(ctx, spec)
 		if sErr != nil {
 			cancel()
+			if iterCleanup != nil {
+				iterCleanup()
+			}
 			dur := time.Since(start).Milliseconds()
 			errMsg := dispatch.SanitizeOutput(sErr.Error())
 			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
-				Provider:       entry.Name,
+				Provider:       entryName,
 				ModelRequested: m,
 				Success:        false,
 				VerifyChecked:  true,
@@ -242,8 +250,11 @@ func runProvidersEvaluate(args []string) {
 				ErrorReason:    errMsg,
 			})
 			outcomes = append(outcomes, probeOutcome{
-				Provider:     entry.Name,
+				Provider:     entryName,
 				Model:        m,
+				Family:       fam,
+				CostTier:     costTier,
+				Status:       mStatus,
 				Success:      false,
 				DurationMs:   dur,
 				Error:        errMsg,
@@ -254,6 +265,9 @@ func runProvidersEvaluate(args []string) {
 
 		res, wErr := handle.Wait(ctx)
 		cancel()
+		if iterCleanup != nil {
+			iterCleanup()
+		}
 		dur := res.DurationMs
 		if dur <= 0 {
 			dur = time.Since(start).Milliseconds()
@@ -262,7 +276,7 @@ func runProvidersEvaluate(args []string) {
 			errMsg := dispatch.SanitizeOutput(wErr.Error())
 			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
-				Provider:       entry.Name,
+				Provider:       entryName,
 				ModelRequested: m,
 				ModelResolved:  res.ModelResolved,
 				Success:        false,
@@ -273,9 +287,12 @@ func runProvidersEvaluate(args []string) {
 				ErrorReason:    errMsg,
 			})
 			outcomes = append(outcomes, probeOutcome{
-				Provider:      entry.Name,
+				Provider:      entryName,
 				Model:         m,
 				ModelResolved: res.ModelResolved,
+				Family:        fam,
+				CostTier:      costTier,
+				Status:        mStatus,
 				Success:       false,
 				DurationMs:    dur,
 				Error:         errMsg,
@@ -305,7 +322,7 @@ func runProvidersEvaluate(args []string) {
 
 		fc := classifyProbeFailure(true, vPassed, errMsg)
 		_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
-			Provider:       entry.Name,
+			Provider:       entryName,
 			ModelRequested: m,
 			ModelResolved:  res.ModelResolved,
 			Success:        true,
@@ -316,9 +333,12 @@ func runProvidersEvaluate(args []string) {
 			ErrorReason:    errMsg,
 		})
 		outcomes = append(outcomes, probeOutcome{
-			Provider:      entry.Name,
+			Provider:      entryName,
 			Model:         m,
 			ModelResolved: res.ModelResolved,
+			Family:        fam,
+			CostTier:      costTier,
+			Status:        mStatus,
 			Success:       true,
 			VerifyPassed:  vPassed,
 			DurationMs:    dur,
@@ -327,10 +347,10 @@ func runProvidersEvaluate(args []string) {
 		})
 	}
 
-	scores, _ := routing.ComputeScorecard(pathutil.DefaultStateDir(), entry.Name, routing.DefaultScorecardWindow)
+	scores, _ := routing.ComputeScorecard(pathutil.DefaultStateDir(), entryName, routing.DefaultScorecardWindow)
 	if *jsonMode || *jsonl {
 		data := map[string]any{
-			"provider":  entry.Name,
+			"provider":  entryName,
 			"probes":    outcomes,
 			"scorecard": scores,
 		}
@@ -340,7 +360,7 @@ func runProvidersEvaluate(args []string) {
 		return
 	}
 
-	runProvidersScorecard([]string{"--provider", entry.Name})
+	runProvidersScorecard([]string{"--provider", entryName})
 }
 
 func classifyProbeFailure(success bool, verifyPassed bool, errMsg string) string {
@@ -364,4 +384,132 @@ func classifyProbeFailure(success bool, verifyPassed bool, errMsg string) string
 		return "TIMEOUT"
 	}
 	return "UPSTREAM_ERROR"
+}
+
+func loadProvidersManifestFile() *config.File {
+	providersPath := os.Getenv("G8S_PROVIDERS")
+	if providersPath == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+		}
+	}
+	if providersPath != "" {
+		if _, statErr := os.Stat(providersPath); statErr == nil {
+			cfgFile, _ := config.Load(providersPath)
+			return cfgFile
+		}
+	}
+	return nil
+}
+
+func lookupDeclarativeModelMeta(cfgFile *config.File, cat *config.Catalog, providerName, modelID string) (family, costTier, status string) {
+	if cfgFile != nil {
+		if p, ok := config.FindProvider(cfgFile, providerName); ok {
+			for _, m := range p.Models {
+				if strings.EqualFold(m.ID, modelID) {
+					family, costTier, status = m.Family, m.CostTier, m.Status
+					break
+				}
+			}
+		}
+	}
+	if cat != nil {
+		cp, ok := cat.FindProvider(providerName)
+		if !ok {
+			switch strings.ToLower(strings.TrimSpace(providerName)) {
+			case "codex":
+				cp, ok = cat.FindProvider("openai")
+			case "claude":
+				cp, ok = cat.FindProvider("anthropic")
+			case "gemini":
+				cp, ok = cat.FindProvider("google")
+			}
+		}
+		if ok {
+			cm, found := cp.FindModel(modelID)
+			if !found {
+				for _, lvl := range config.EffortLadder {
+					if strings.HasSuffix(strings.ToLower(modelID), "-"+lvl) {
+						baseID := modelID[:len(modelID)-len("-"+lvl)]
+						if bm, bFound := cp.FindModel(baseID); bFound {
+							cm, found = bm, true
+							break
+						}
+					}
+				}
+			}
+			if found {
+				if family == "" {
+					family = cm.Family
+				}
+				if costTier == "" {
+					costTier = cm.CostTier
+				}
+				if status == "" {
+					status = cm.Status
+				}
+			}
+			if family == "" {
+				family = cp.Family
+			}
+			if costTier == "" {
+				costTier = cp.CostTier
+			}
+			if status == "" {
+				status = cp.Status
+			}
+		}
+	}
+	return family, costTier, status
+}
+
+// resolveCallableProvider resolves a provider to a callable provider instance.
+// It checks the providers.json manifest first, then the default catalog,
+// and falls back to platform_dispatch providers (agy, cursor, etc.) if available.
+func resolveCallableProvider(ctx context.Context, providerName string) (provider.Provider, error) {
+	cfgFile := loadProvidersManifestFile()
+	if cfgFile != nil {
+		if p, ok := config.FindProvider(cfgFile, providerName); ok {
+			if p.Class == "api_call" {
+				return provider.NewHTTPProviderFromConfig(*p), nil
+			}
+			if p.Class == "platform_dispatch" {
+				if cliProv, err := provider.NewRegistry().Get(strings.ToLower(p.Name)); err == nil {
+					if aErr := cliProv.Available(ctx); aErr == nil {
+						return cliProv, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Check default catalog for 9router provider
+	if cat, err := config.LoadDefaultCatalog(); err == nil && cat != nil {
+		if cp, ok := cat.FindProvider(providerName); ok {
+			// Check if it's a 9router provider (has 9router protocol or name)
+			if strings.EqualFold(cp.Name, "9router") || strings.Contains(strings.ToLower(cp.Name), "9router") {
+				// Create a 9router HTTP provider entry
+				return provider.NewHTTPProviderFromConfig(config.ProviderEntry{
+					Class:               "api_call",
+					Name:                cp.Name,
+					Protocol:            "9router",
+					BaseURL:             "http://127.0.0.1:20128/v1",
+					BaseURLEnv:          "NINEROUTER_URL",
+					AuthEnv:             "OPENAI_API_KEY",
+					AllowUnlistedModels: true,
+				}), nil
+			}
+		}
+	}
+
+	// Fall back to platform_dispatch providers
+	reg := provider.NewRegistry()
+	if p, err := reg.Get(providerName); err == nil {
+		if err := p.Available(ctx); err == nil {
+			return p, nil
+		}
+	}
+
+	return nil, fmt.Errorf("provider %q not callable (not in providers.json as api_call, not in catalog as 9router, or not available as platform_dispatch)", providerName)
 }

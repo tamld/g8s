@@ -34,7 +34,7 @@ type BlindReviewPacket struct {
 
 var (
 	headerTrailerRegex = regexp.MustCompile(`(?i)^(\+|-)?\s*(Author|Commit|Date|Signed-off-by|Co-authored-by|Reviewed-by):`)
-	redactionMarkers   = regexp.MustCompile(`(?i)(worker\.Summary|worker\.ReportedDoD|ReportedDoD|claude-[a-z0-9_.-]+|gpt-[a-z0-9_.-]+|gemini-[a-z0-9_.-]+|deepseek-[a-z0-9_.-]+|9router)`)
+	redactionMarkers   = regexp.MustCompile(`(?i)(worker\.Summary|worker\.ReportedDoD|ReportedDoD|claude-[a-z0-9_.-]+|gpt-[a-z0-9_.-]+|gemini-[a-z0-9_.-]+|deepseek-[a-z0-9_.-]+|composer-[a-z0-9_.-]+|nemotron-[a-z0-9_.-]+|mistral-[a-z0-9_.-]+|grok-[a-z0-9_.-]+|qwen[a-z0-9_.-]*|9router)`)
 )
 
 // SanitizeDiffForBlindReview scrubs metadata headers, commit prose, and identity/persuasion

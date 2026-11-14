@@ -448,7 +448,8 @@ func runProvidersDiscover(args []string) {
 
 	var targetEntries []config.ProviderEntry
 	discoverCursorOnly := strings.EqualFold(*providerFlag, "cursor") || strings.EqualFold(*providerFlag, "cursor-agent")
-	if *providerFlag != "" && !discoverCursorOnly {
+	discoverAgyOnly := strings.EqualFold(*providerFlag, "agy")
+	if *providerFlag != "" && !discoverCursorOnly && !discoverAgyOnly {
 		if cfgFile != nil {
 			if p, ok := config.FindProvider(cfgFile, *providerFlag); ok && p.Class == "api_call" {
 				targetEntries = append(targetEntries, *p)
@@ -466,10 +467,10 @@ func runProvidersDiscover(args []string) {
 					AllowUnlistedModels: true,
 				})
 			} else {
-				exitUsage("providers", "discover", *traceID, fmt.Sprintf("provider %q not found or not an api_call provider", *providerFlag), "Declare provider in providers.json or use 9router / cursor", *jsonl)
+				exitUsage("providers", "discover", *traceID, fmt.Sprintf("provider %q not found or not an api_call provider", *providerFlag), "Declare provider in providers.json or use 9router / agy / cursor", *jsonl)
 			}
 		}
-	} else if !discoverCursorOnly {
+	} else if !discoverCursorOnly && !discoverAgyOnly {
 		if cfgFile != nil {
 			for _, p := range cfgFile.Providers {
 				if p.Class == "api_call" {
@@ -508,6 +509,18 @@ func runProvidersDiscover(args []string) {
 		}
 		results = append(results, discoveryResult{
 			Provider: "cursor",
+			Models:   models,
+		})
+	}
+
+	if discoverAgyOnly {
+		ap := provider.NewAgyProvider()
+		models, err := ap.DiscoverModels(ctx)
+		if err != nil {
+			exitRuntime("providers", "discover", *traceID, cli.CodeRuntime, fmt.Errorf("provider agy discover failed: %w", err), "", *jsonl)
+		}
+		results = append(results, discoveryResult{
+			Provider: "agy",
 			Models:   models,
 		})
 	}

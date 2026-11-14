@@ -176,8 +176,8 @@ func TestLoadDefaultCatalogFile(t *testing.T) {
 	for _, prov := range cat.Providers {
 		totalModels += len(prov.Models)
 	}
-	if totalModels != 68 {
-		t.Fatalf("got %d total models across providers, want 68", totalModels)
+	if totalModels != 95 {
+		t.Fatalf("got %d total models across providers, want 95", totalModels)
 	}
 
 	// Spot-check 9router
@@ -907,6 +907,479 @@ func TestCatalogMergeNilSafety(t *testing.T) {
 	rep2 := cat.MergeInto(nil)
 	if rep2.FilledModels != 0 || rep2.SkippedProviders != 0 {
 		t.Errorf("expected zero report on nil manifest: %+v", rep2)
+	}
+}
+
+func TestCatalogDeclarativeMetadataAndValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		yaml      string
+		wantErr   bool
+		errModel  string
+		errField  string
+		errMsgSub string
+	}{
+		{
+			name: "valid family, cost_tier, status on provider and model",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    family: google
+    cost_tier: standard
+    status: active
+    models:
+      - id: test-model
+        supported_efforts: [low, medium, high]
+        family: google
+        cost_tier: standard
+        status: active
+`,
+			wantErr: false,
+		},
+		{
+			name: "invalid family on provider",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    family: Invalid_Family
+    models:
+      - id: test-model
+        supported_efforts: [low]
+`,
+			wantErr:   true,
+			errModel:  "",
+			errField:  "family",
+			errMsgSub: "invalid family",
+		},
+		{
+			name: "invalid cost_tier on provider",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    cost_tier: premium
+    models:
+      - id: test-model
+        supported_efforts: [low]
+`,
+			wantErr:   true,
+			errModel:  "",
+			errField:  "cost_tier",
+			errMsgSub: "invalid cost_tier",
+		},
+		{
+			name: "invalid status on provider",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    status: archived
+    models:
+      - id: test-model
+        supported_efforts: [low]
+`,
+			wantErr:   true,
+			errModel:  "",
+			errField:  "status",
+			errMsgSub: "invalid status",
+		},
+		{
+			name: "invalid family on model",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    models:
+      - id: test-model
+        supported_efforts: [low]
+        family: Bad Family
+`,
+			wantErr:   true,
+			errModel:  "test-model",
+			errField:  "family",
+			errMsgSub: "invalid family",
+		},
+		{
+			name: "invalid cost_tier on model",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    models:
+      - id: test-model
+        supported_efforts: [low]
+        cost_tier: ultra
+`,
+			wantErr:   true,
+			errModel:  "test-model",
+			errField:  "cost_tier",
+			errMsgSub: "invalid cost_tier",
+		},
+		{
+			name: "invalid status on model",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: named
+    models:
+      - id: test-model
+        supported_efforts: [low]
+        status: obsolete
+`,
+			wantErr:   true,
+			errModel:  "test-model",
+			errField:  "status",
+			errMsgSub: "invalid status",
+		},
+		{
+			name: "effort_style none with default_effort high should fail",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: none
+    models:
+      - id: test-model
+        supported_efforts: []
+        default_effort: high
+`,
+			wantErr:   true,
+			errModel:  "test-model",
+			errField:  "default_effort",
+			errMsgSub: "not allowed with effort_style none",
+		},
+		{
+			name: "effort_style none with default_effort none should pass",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: none
+    models:
+      - id: test-model
+        supported_efforts: []
+        default_effort: none
+`,
+			wantErr: false,
+		},
+		{
+			name: "effort_style none with empty default_effort should pass",
+			yaml: `
+schema_version: agent-models.v1
+catalog_version: 3
+verified_at: "2026-11-14"
+providers:
+  test:
+    effort_style: none
+    models:
+      - id: test-model
+        supported_efforts: []
+`,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCatalog([]byte(tt.yaml))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				errStr := err.Error()
+				if tt.errModel != "" && !strings.Contains(errStr, tt.errModel) {
+					t.Errorf("error %q should name model %q", errStr, tt.errModel)
+				}
+				if tt.errField != "" && !strings.Contains(errStr, tt.errField) {
+					t.Errorf("error %q should name field %q", errStr, tt.errField)
+				}
+				if tt.errMsgSub != "" && !strings.Contains(errStr, tt.errMsgSub) {
+					t.Errorf("error %q should contain %q", errStr, tt.errMsgSub)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDefaultCatalogGemini4AndAdapterParity(t *testing.T) {
+	cat, err := LoadDefaultCatalog()
+	if err != nil {
+		t.Fatalf("LoadDefaultCatalog failed: %v", err)
+	}
+
+	if cat.CatalogVersion < 3 {
+		t.Errorf("CatalogVersion = %d, want >= 3", cat.CatalogVersion)
+	}
+
+	// Check agy provider has Gemini 4 models
+	agy, ok := cat.FindProvider("agy")
+	if !ok {
+		t.Fatal("agy provider not found")
+	}
+
+	expectedModels := []string{
+		"gemini-4-hydrogen-low",
+		"gemini-4-hydrogen-medium",
+		"gemini-4-hydrogen-high",
+		"gemini-4-hydrogen-xhigh",
+		"gemini-4-argon-low",
+		"gemini-4-argon-medium",
+		"gemini-4-argon-high",
+		"gemini-4-carbon-low",
+		"gemini-4-carbon-medium",
+		"gemini-4-carbon-high",
+		"gemini-pro-orchestrator",
+	}
+
+	for _, modelID := range expectedModels {
+		m, ok := agy.FindModel(modelID)
+		if !ok {
+			t.Errorf("agy model %q not found", modelID)
+			continue
+		}
+		if modelID == "gemini-pro-orchestrator" {
+			if m.EffortStyle != EffortStyleNone {
+				t.Errorf("%s: EffortStyle = %q, want %q", modelID, m.EffortStyle, EffortStyleNone)
+			}
+		} else {
+			if m.Status != ModelStatusActive {
+				t.Errorf("%s: Status = %q, want %q", modelID, m.Status, ModelStatusActive)
+			}
+		}
+	}
+
+	// Check gemini-3.8-flash-high is deprecated
+	flashHigh, ok := agy.FindModel("gemini-3.8-flash-high")
+	if !ok {
+		t.Fatal("gemini-3.8-flash-high missing in agy provider")
+	}
+	if flashHigh.Status != ModelStatusDeprecated {
+		t.Errorf("gemini-3.8-flash-high: Status = %q, want %q", flashHigh.Status, ModelStatusDeprecated)
+	}
+
+	// Verify every profile points to a provider in cat.Providers and a cataloged model ID
+	for profName, prof := range cat.Profiles {
+		catProv, ok := cat.FindProvider(prof.Provider)
+		if !ok {
+			t.Errorf("profile %q: provider %q not found in catalog", profName, prof.Provider)
+			continue
+		}
+		_, ok = catProv.FindModel(prof.Model)
+		if !ok {
+			t.Errorf("profile %q: model %q not found in provider %q", profName, prof.Model, prof.Provider)
+		}
+	}
+}
+
+func TestResolveProviderDefaultModel(t *testing.T) {
+	// Test with a mock catalog
+	cat := &Catalog{
+		SchemaVersion:  CurrentCatalogSchemaVersion,
+		CatalogVersion: 3,
+		VerifiedAt:     "2026-11-14",
+		Providers: map[string]ProviderCatalog{
+			"testprov": {
+				Name:          "testprov",
+				EffortStyle:   EffortStyleNamed,
+				DefaultEffort: "high",
+				Models: []ModelCatalog{
+					{
+						ID:               "model-a",
+						SupportedEfforts: []string{"low", "medium", "high"},
+						DefaultEffort:    "medium",
+						Status:           ModelStatusActive,
+					},
+					{
+						ID:               "model-b-deprecated",
+						SupportedEfforts: []string{"high"},
+						DefaultEffort:    "high",
+						Status:           ModelStatusDeprecated,
+					},
+				},
+			},
+			"bakedprov": {
+				Name:          "bakedprov",
+				EffortStyle:   EffortStyleBakedName,
+				DefaultEffort: "high",
+				Models: []ModelCatalog{
+					{
+						ID:               "gemini-4-hydrogen",
+						SupportedEfforts: []string{"low", "medium", "high", "xhigh"},
+						DefaultEffort:    "high",
+						EffortStyle:      EffortStyleBakedName,
+						Status:           ModelStatusActive,
+					},
+				},
+			},
+			"noneprov": {
+				Name:        "noneprov",
+				EffortStyle: EffortStyleNone,
+				Models: []ModelCatalog{
+					{
+						ID:               "orchestrator-model",
+						SupportedEfforts: []string{},
+						EffortStyle:      EffortStyleNone,
+						Status:           ModelStatusActive,
+					},
+				},
+			},
+			"transitionalfirst": {
+				Name:        "transitionalfirst",
+				EffortStyle: EffortStyleNamed,
+				Models: []ModelCatalog{
+					{
+						ID:               "legacy-transitional",
+						SupportedEfforts: []string{"high"},
+						Status:           ModelStatusTransitional,
+					},
+					{
+						ID:               "nextgen-active",
+						SupportedEfforts: []string{"low", "high"},
+						Status:           ModelStatusActive,
+					},
+				},
+			},
+		},
+	}
+
+	manifest := &File{
+		Providers: []ProviderEntry{
+			{
+				Name:         "testprov",
+				DefaultModel: "model-a",
+				Models: []ModelEntry{
+					{ID: "model-a", EffortStyle: EffortStyleNamed, SupportedEfforts: []string{"low", "medium", "high"}, DefaultEffort: "medium"},
+				},
+			},
+			{
+				Name:         "bakedprov",
+				DefaultModel: "gemini-4-hydrogen",
+				Models: []ModelEntry{
+					{ID: "gemini-4-hydrogen", EffortStyle: EffortStyleBakedName, SupportedEfforts: []string{"low", "medium", "high", "xhigh"}, DefaultEffort: "high"},
+				},
+			},
+			{
+				Name:         "noneprov",
+				DefaultModel: "orchestrator-model",
+				Models: []ModelEntry{
+					{ID: "orchestrator-model", EffortStyle: EffortStyleNone, SupportedEfforts: []string{}},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		manifest   *File
+		cat        *Catalog
+		provider   string
+		wantModel  string
+		wantSuffix bool // whether baked-name suffix expansion should happen
+	}{
+		{
+			name:       "manifest provider with default model (named style)",
+			manifest:   manifest,
+			cat:        cat,
+			provider:   "testprov",
+			wantModel:  "model-a",
+			wantSuffix: false,
+		},
+		{
+			name:       "manifest provider with baked-name model expands suffix",
+			manifest:   manifest,
+			cat:        cat,
+			provider:   "bakedprov",
+			wantModel:  "gemini-4-hydrogen-high", // should expand with default effort
+			wantSuffix: true,
+		},
+		{
+			name:       "manifest provider with none style returns base model",
+			manifest:   manifest,
+			cat:        cat,
+			provider:   "noneprov",
+			wantModel:  "orchestrator-model",
+			wantSuffix: false,
+		},
+		{
+			name:       "catalog fallback picks first non-deprecated",
+			manifest:   nil,
+			cat:        cat,
+			provider:   "testprov",
+			wantModel:  "model-a",
+			wantSuffix: false,
+		},
+		{
+			name:       "catalog fallback with baked-name expands suffix",
+			manifest:   nil,
+			cat:        cat,
+			provider:   "bakedprov",
+			wantModel:  "gemini-4-hydrogen-high",
+			wantSuffix: true,
+		},
+		{
+			name:       "empty provider name returns empty",
+			manifest:   manifest,
+			cat:        cat,
+			provider:   "",
+			wantModel:  "",
+			wantSuffix: false,
+		},
+		{
+			name:       "catalog fallback prefers active over earlier transitional model",
+			manifest:   nil,
+			cat:        cat,
+			provider:   "transitionalfirst",
+			wantModel:  "nextgen-active",
+			wantSuffix: false,
+		},
+		{
+			name:       "unknown provider returns empty",
+			manifest:   manifest,
+			cat:        cat,
+			provider:   "unknown",
+			wantModel:  "",
+			wantSuffix: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ResolveProviderDefaultModel(tt.manifest, tt.cat, tt.provider)
+			if result != tt.wantModel {
+				t.Errorf("ResolveProviderDefaultModel(%q) = %q, want %q", tt.provider, result, tt.wantModel)
+			}
+		})
 	}
 }
 

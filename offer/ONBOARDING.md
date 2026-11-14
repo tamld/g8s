@@ -39,20 +39,21 @@ for L1-domain-locked repositories that forbid top-level `tools/*.sh`):
 | `ci_structure_sync.sh` (+test) | README structure truth (`go list` or `docs/README.md` taxonomy) | README markers + `go.mod` or `docs/README.md` (skips gracefully when neither is present) |
 | `ci_link_integrity.sh` (+test) | No dead relative links | Nothing |
 
-## Step 4 — Run the first brief & cross-repo remediation
+## Step 4 — Run the first brief & cross-repo remediation (DELTA-48: Adapter-Neutral)
 
-Dispatch the first audit (`read_only`) or bounded fix (`workspace_write`) through `g8s`:
+Dispatch the first audit (`read_only`) or bounded fix (`workspace_write`) through `g8s` using any configured adapter:
 
 ```bash
-# Read-only first audit
-g8s submit --idempotency-key <key> --prompt "..." --role verifier --scope-root <repo> --add-dir <repo>
+# Read-only first audit (9router)
+g8s submit --idempotency-key <key> --prompt "..." --role verifier --provider 9router --model reasoning-high --add-dir <repo>
 g8s worker --once
 
 # Delegated cross-repo write (isolated git worktree + single-use receipt)
 RID=$(g8s receipt issue --path "docs/**" --select .data.receipt_id)
-AGY_MCP_ALLOW_WORKSPACE_WRITE=1 g8s submit --idempotency-key <key> --prompt "..." \
-  --permission workspace_write --receipt-id "$RID" --scope-root <repo> --add-dir <repo> --skip-permissions
-g8s worker --once
+g8s submit --idempotency-key <key> --prompt "..." \
+  --allow-workspace-write --permission workspace_write --receipt-id "$RID" \
+  --provider opencode --model 9router/deep-coding --scope-root <repo> --add-dir <repo> --skip-permissions
+g8s worker --once --allow-workspace-write --provider opencode
 g8s deliver <task-id> --prune-worktree
 ```
 
@@ -119,6 +120,42 @@ Copy or symlink modular verification charters from `skills/`:
 - [`g8s-sec-gate`](../skills/g8s-sec-gate/SKILL.md): Zero-trust SAST + live DAST probe runner.
 - [`g8s-epistemic-audit`](../skills/g8s-epistemic-audit/SKILL.md): Claim decomposition & evidence-tier classifier enforcing the 4 Epistemic Laws.
 - Supervisor integration guide: [`skills/g8s-supervisor/references/verification-skills-suite.md`](../skills/g8s-supervisor/references/verification-skills-suite.md).
+
+## Step 8 — Multi-Adapter Parity & Declarative Model Adoption (DELTA-48)
+
+The offer bundle supports **adapter-neutral execution** — `9router`, `opencode`, `codex`, `claude`, `agy`, and others are all peers. No adapter is privileged.
+
+### 4-Step Protocol (Discover → Declare → Evaluate → Blind-Verify)
+
+Run for each adapter you intend to use:
+
+```bash
+# 1. Discover installed adapters and live models from providers
+g8s providers --json
+g8s providers discover --provider 9router --json
+g8s providers discover --provider agy --json
+g8s providers discover --provider cursor --json
+
+# 2. Declare models with declarative metadata in ~/.config/g8s/providers.json
+#    (family, cost_tier, status, effort_style)
+#    See offer/templates/providers.example.json for reference entries.
+
+# 3. Evaluate capability parity
+g8s providers evaluate --provider 9router --audit-catalog --json
+g8s eval run --provider 9router --model reasoning-high --json
+g8s eval run --provider agy --model gemini-4-hydrogen-high --json
+
+# 4. Disjoint S3-A Blind-Verify (all adapters symmetrically)
+g8s blind-verify --spec SPEC.md --invariants INVARIANTS.md --diff changes.diff \
+  --model deep-coding --provider 9router --json
+```
+
+### Gemini 4 Element Series (catalog_version: 3)
+- `gemini-4-hydrogen-{low,medium,high,xhigh}` (economy)
+- `gemini-4-argon-{low,medium,high}` (standard)
+- `gemini-4-carbon-{low,medium,high}` (frontier)
+- `gemini-pro-orchestrator` (frontier, `effort_style: none`)
+- `gemini-3.8-*` retained as `deprecated`
 
 ## Agent pull path (fastest — no git)
 

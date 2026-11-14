@@ -434,7 +434,7 @@ func runAutopilotTick(args []string) {
 	jobsFlag := fs.String("jobs", "", "comma-separated list of jobs to run (default: doctor,retention,hygiene)")
 	reflectionReceipt := fs.String("reflection-receipt", "", "path to an S2 reflection receipt; submit bounded add-list packets instead of maintenance jobs")
 	dryRun := fs.Bool("dry-run", false, "print reflection packet specs without opening the queue")
-	packetModel := fs.String("model", "gemini-3.8-flash-high", "target reflection worker model")
+	packetModel := fs.String("model", "gemini-4-hydrogen-high", "target reflection worker model")
 	packetProvider := fs.String("provider", "", "target reflection worker provider (queue default when empty)")
 	packetEffort := fs.String("effort", "", "reflection worker effort (queue default when empty)")
 	if err := fs.Parse(args); err != nil {

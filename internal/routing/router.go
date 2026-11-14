@@ -152,6 +152,26 @@ func modelCostRank(modelID string) int {
 		return 10
 	case strings.Contains(id, "haiku") || strings.Contains(noGemini, "mini") || strings.Contains(id, "nano"):
 		return 20
+	case strings.Contains(id, "hydrogen"):
+		if strings.Contains(id, "xhigh") {
+			return 40
+		}
+		if strings.Contains(id, "high") {
+			return 35
+		}
+		return 30
+	case strings.Contains(id, "carbon"):
+		return 95
+	case strings.Contains(id, "orchestrator"):
+		if strings.Contains(id, "argon") {
+			return 75
+		}
+		return 95
+	case strings.Contains(id, "argon"):
+		if strings.Contains(id, "high") {
+			return 75
+		}
+		return 70
 	case strings.Contains(id, "opus") || strings.Contains(id, "large") || strings.Contains(id, "high"):
 		return 90
 	case strings.Contains(id, "pro") || strings.Contains(id, "sonnet"):
@@ -211,6 +231,11 @@ func largestContextModel(candidates []candidateModel) candidateModel {
 
 func defaultModel(candidates []candidateModel) candidateModel {
 	for _, c := range candidates {
+		if c.provider == "agy" && c.model == "gemini-4-hydrogen-high" {
+			return c
+		}
+	}
+	for _, c := range candidates {
 		if c.provider == "agy" && c.model == "gemini-3.8-flash-high" {
 			return c
 		}
@@ -221,6 +246,11 @@ func defaultModel(candidates []candidateModel) candidateModel {
 		}
 	}
 	return candidates[0]
+}
+
+// ModelCostRankForTest exposes modelCostRank for testing.
+func ModelCostRankForTest(modelID string) int {
+	return modelCostRank(modelID)
 }
 
 func isDocsPath(p string) bool {

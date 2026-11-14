@@ -583,6 +583,12 @@
       "title": "Reach Layer — Read-Only Platform Data Acquisition",
       "path": "spec/openspec/47-reach-layer-spec.md",
       "status": "APPLIED"
+    },
+    {
+      "id": "DELTA-48",
+      "title": "Declarative Model Adoption & Adapter-Neutral Control Plane",
+      "path": "spec/openspec/48-declarative-model-adoption-and-adapter-neutrality-spec.md",
+      "status": "APPLIED"
     }
   ],
   "milestones": {

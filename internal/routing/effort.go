@@ -24,13 +24,14 @@ func (e *MandatoryEffortError) Error() string {
 // ModelEffortView represents a model's effort capabilities normalized from
 // either a config.ModelEntry or a catalog entry.
 type ModelEffortView struct {
-	Provider         string
-	Model            string
-	EffortStyle      string
-	SupportedEfforts []string
-	DefaultEffort    string
-	Mandatory        bool
-	EffortBudgetMap  map[string]int
+	Provider           string
+	Model              string
+	EffortStyle        string
+	SupportedEfforts   []string
+	DefaultEffort      string
+	Mandatory          bool
+	EffortBudgetMap    map[string]int
+	BakedFamilyEfforts []string // Union of effort levels across baked-name family variants (issue #902)
 }
 
 // EffortResult holds the outcome of resolving and adapting an effort request.
@@ -71,6 +72,9 @@ func AdaptEffort(view *ModelEffortView, requested string) (applied string, misma
 	}
 
 	if requested == "" {
+		if view.EffortStyle == config.EffortStyleNone {
+			return "", false, 0, nil
+		}
 		def := view.DefaultEffort
 		if config.IsValidEffortLevel(def) {
 			applied = def
@@ -85,7 +89,16 @@ func AdaptEffort(view *ModelEffortView, requested string) (applied string, misma
 	}
 
 	switch view.EffortStyle {
+	case config.EffortStyleNone:
+		return "", requested != "" && requested != config.EffortNone, 0, nil
+
 	case config.EffortStyleBakedName:
+		if len(view.BakedFamilyEfforts) > 0 {
+			if containsString(view.BakedFamilyEfforts, requested) {
+				return requested, false, 0, nil
+			}
+			return nearestEffort(requested, view.BakedFamilyEfforts), true, 0, nil
+		}
 		return requested, false, 0, nil
 
 	case config.EffortStyleBudget:
@@ -222,6 +235,7 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 							}
 						}
 					}
+					populateBakedFamilyEfforts(view, manifest, cat)
 					return view
 				}
 			}
@@ -234,6 +248,7 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 			if catProv, ok := cat.FindProvider(provider); ok {
 				if catModel, ok := findCatalogModel(catProv, modelID); ok {
 					view := NormalizeCatalogModel(catProv.Name, &catProv, &catModel)
+					populateBakedFamilyEfforts(view, manifest, cat)
 					return view
 				}
 			}
@@ -242,6 +257,7 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 			for _, catProv := range cat.Providers {
 				if catModel, ok := findCatalogModel(catProv, modelID); ok {
 					view := NormalizeCatalogModel(catProv.Name, &catProv, &catModel)
+					populateBakedFamilyEfforts(view, manifest, cat)
 					return view
 				}
 			}
@@ -249,6 +265,79 @@ func resolveModelEffortView(manifest *config.File, cat *config.Catalog, provider
 	}
 
 	return nil
+}
+
+// populateBakedFamilyEfforts collects the union of valid ladder levels across
+// all model variants sharing the same baked base name (for baked-name style).
+func populateBakedFamilyEfforts(view *ModelEffortView, manifest *config.File, cat *config.Catalog) {
+	if view.EffortStyle != config.EffortStyleBakedName {
+		return
+	}
+	// Extract base name by stripping -<lvl> or -{effort} suffix
+	baseName := view.Model
+	for _, lvl := range config.EffortLadder {
+		baseName = strings.TrimSuffix(baseName, "-"+lvl)
+	}
+	baseName = strings.TrimSuffix(baseName, "-{effort}")
+
+	effortSet := make(map[string]bool)
+
+	// Collect from manifest provider models
+	if manifest != nil {
+		for _, p := range manifest.Providers {
+			for _, m := range p.Models {
+				if m.EffortStyle == config.EffortStyleBakedName {
+					mBase := m.ID
+					for _, lvl := range config.EffortLadder {
+						mBase = strings.TrimSuffix(mBase, "-"+lvl)
+					}
+					mBase = strings.TrimSuffix(mBase, "-{effort}")
+					if strings.EqualFold(mBase, baseName) {
+						for _, lvl := range m.SupportedEfforts {
+							if config.IsValidEffortLevel(lvl) {
+								effortSet[lvl] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Collect from catalog provider models
+	if cat != nil {
+		for _, catProv := range cat.Providers {
+			for _, m := range catProv.Models {
+				mStyle := m.EffortStyle
+				if mStyle == "" {
+					mStyle = catProv.EffortStyle
+				}
+				if mStyle == config.EffortStyleBakedName {
+					mBase := m.ID
+					for _, lvl := range config.EffortLadder {
+						mBase = strings.TrimSuffix(mBase, "-"+lvl)
+					}
+					mBase = strings.TrimSuffix(mBase, "-{effort}")
+					if strings.EqualFold(mBase, baseName) {
+						for _, lvl := range m.SupportedEfforts {
+							if config.IsValidEffortLevel(lvl) {
+								effortSet[lvl] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Order collected levels in canonical EffortLadder order
+	var ordered []string
+	for _, lvl := range config.EffortLadder {
+		if effortSet[lvl] {
+			ordered = append(ordered, lvl)
+		}
+	}
+	view.BakedFamilyEfforts = ordered
 }
 
 func matchModelID(candID, targetID string) bool {

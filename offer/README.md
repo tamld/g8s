@@ -39,10 +39,10 @@ sanitized contribution packets (g8s-supervisor Mode 3).
 10. **Zero-Trust Worker Execution & Output Hardening (`DELTA-26..31`, `v0.19.1`)**:
     - Fail-closed worktree isolation (`DELTA-26`), serial + concurrent `--provider`/`--model` claim affinity (`DELTA-27`), structured `receipt_export` visibility & `g8s receipt-export` retry (`DELTA-28`), recursive JSON Schema Draft-7 output validation (`DELTA-29`), non-loopback `g8s serve` auth enforcement (`DELTA-30`), and mechanical `EvaluateDoDMatrix` check binding (`DELTA-31`).
 
-## Onboard in four steps
+## Onboard in four steps + adapter parity
 
 See [`ONBOARDING.md`](ONBOARDING.md). Short version: pull → scaffold `.g8s/`
-from your profile → wire the three gates into CI → run your first brief.
+from your profile → wire the three gates into CI → run your first brief → **Step 8: multi-adapter parity (DELTA-48)**.
 
 ## Contribute back
 

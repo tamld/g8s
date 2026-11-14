@@ -63,8 +63,9 @@ func DefaultCLIProfiles() []CLIProfile {
 				ProbeP5: {"--sandbox", "--add-dir"},
 				ProbeP7: {"--json-schema"},
 			},
-			Policy:      PolicyForbidden,
-			NewProvider: func() provider.Provider { return provider.NewAgyProvider() },
+			Policy:       PolicyPaid,
+			DefaultModel: "gemini-4-hydrogen-low",
+			NewProvider:  func() provider.Provider { return provider.NewAgyProvider() },
 		},
 		{
 			Name:        "codex",

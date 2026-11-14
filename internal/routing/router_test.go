@@ -610,3 +610,55 @@ func TestFreeTierReconRouting(t *testing.T) {
 		t.Fatalf("expected trust-boundary override, got provider=%s model=%s role=%s", trustDec.Provider, trustDec.Model, trustDec.Role)
 	}
 }
+
+func TestModelCostRank_Gemini4ElementTiers(t *testing.T) {
+	tests := []struct {
+		model       string
+		wantRank    int
+		description string
+	}{
+		{"gemini-4-hydrogen-low", 30, "hydrogen-low base"},
+		{"gemini-4-hydrogen-medium", 30, "hydrogen-medium (no high/xhigh) = 30"},
+		{"gemini-4-hydrogen-high", 35, "hydrogen-high"},
+		{"gemini-4-hydrogen-xhigh", 40, "hydrogen-xhigh"},
+		{"gemini-4-argon-low", 70, "argon-low base"},
+		{"gemini-4-argon-medium", 70, "argon-medium (no high) = 70"},
+		{"gemini-4-argon-high", 75, "argon-high"},
+		{"gemini-pro-orchestrator-argon", 75, "orchestrator-argon = 75"},
+		{"gemini-pro-orchestrator", 95, "orchestrator (no argon) = 95"},
+		{"gemini-4-carbon-high", 95, "carbon-high = 95"},
+		{"gemini-3.8-flash-high", 90, "flash-high = 90 (existing rule)"},
+		{"gemini-pro", 70, "gemini-pro = 70 (existing rule)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.description, func(t *testing.T) {
+			got := routing.ModelCostRankForTest(tc.model)
+			if got != tc.wantRank {
+				t.Errorf("modelCostRank(%q) = %d, want %d", tc.model, got, tc.wantRank)
+			}
+		})
+	}
+
+	// Verify ordering: hydrogen-low (30) < hydrogen-high (35) < hydrogen-xhigh (40) < argon-medium (70) < argon-high (75) == orchestrator-argon (75) < flash-high (90) < carbon-high (95) == orchestrator (95)
+	// And gemini-pro == 70
+	hLow := routing.ModelCostRankForTest("gemini-4-hydrogen-low")
+	hHigh := routing.ModelCostRankForTest("gemini-4-hydrogen-high")
+	hXHigh := routing.ModelCostRankForTest("gemini-4-hydrogen-xhigh")
+	argonMed := routing.ModelCostRankForTest("gemini-4-argon-medium")
+	argonHigh := routing.ModelCostRankForTest("gemini-4-argon-high")
+	orchArgon := routing.ModelCostRankForTest("gemini-pro-orchestrator-argon")
+	flashHigh := routing.ModelCostRankForTest("gemini-3.8-flash-high")
+	carbonHigh := routing.ModelCostRankForTest("gemini-4-carbon-high")
+	orchestrator := routing.ModelCostRankForTest("gemini-pro-orchestrator")
+	pro := routing.ModelCostRankForTest("gemini-pro")
+
+	ordered := hLow < hHigh && hHigh < hXHigh && hXHigh < argonMed && argonMed < argonHigh && argonHigh == orchArgon && orchArgon < flashHigh && flashHigh < carbonHigh && carbonHigh == orchestrator
+	if !ordered {
+		t.Errorf("ordering violated: hLow=%d hHigh=%d hXHigh=%d argonMed=%d argonHigh=%d orchArgon=%d flashHigh=%d carbonHigh=%d orch=%d",
+			hLow, hHigh, hXHigh, argonMed, argonHigh, orchArgon, flashHigh, carbonHigh, orchestrator)
+	}
+	if pro != 70 {
+		t.Errorf("gemini-pro rank = %d, want 70", pro)
+	}
+}

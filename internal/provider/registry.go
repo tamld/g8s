@@ -29,18 +29,19 @@ type Provider interface {
 
 // Spec defines the configuration and requirements for a worker execution.
 type Spec struct {
-	Brief        string        `json:"brief"`
-	Model        string        `json:"model,omitempty"`
-	Effort       string        `json:"effort,omitempty"`
-	MaxTokens    int           `json:"max_tokens,omitempty"`
-	Temperature  *float64      `json:"temperature,omitempty"`
-	AddDirs      []string      `json:"add_dirs,omitempty"`
-	SystemPrompt string        `json:"system_prompt,omitempty"`
-	Timeout      time.Duration `json:"timeout,omitempty"`
-	TraceID      string        `json:"trace_id,omitempty"`
-	Role         string        `json:"role,omitempty"`
-	Permission   string        `json:"permission,omitempty"`
-	WorktreeDir  string        `json:"worktree_dir,omitempty"`
+	Brief        string            `json:"brief"`
+	Model        string            `json:"model,omitempty"`
+	Effort       string            `json:"effort,omitempty"`
+	MaxTokens    int               `json:"max_tokens,omitempty"`
+	Temperature  *float64          `json:"temperature,omitempty"`
+	AddDirs      []string          `json:"add_dirs,omitempty"`
+	SystemPrompt string            `json:"system_prompt,omitempty"`
+	Timeout      time.Duration     `json:"timeout,omitempty"`
+	TraceID      string            `json:"trace_id,omitempty"`
+	Role         string            `json:"role,omitempty"`
+	Permission   string            `json:"permission,omitempty"`
+	WorktreeDir  string            `json:"worktree_dir,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
 }
 
 // Receipt records the outcome of a worker subprocess execution.

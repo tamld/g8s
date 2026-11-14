@@ -20,14 +20,53 @@ The `g8s` binary is the self-describing, single entry point for task submission,
 Queues an asynchronous durable task into the SQLite WAL control plane after validating it against the security harness.
 
 ```sh
+# Multi-adapter examples (DELTA-48: adapter-neutral control plane)
+
+# 9router (api_call)
 g8s submit \
   --idempotency-key "task-refactor-001" \
   --prompt "Scan internal/harness for security bypasses" \
   --role "collector" \
   --permission "read_only" \
   --add-dir "." \
+  --provider "9router" \
+  --model "reasoning-high" \
+  --priority 10 \
+  --max-attempts 3
+
+# opencode (platform_dispatch)
+g8s submit \
+  --idempotency-key "task-refactor-002" \
+  --prompt "Scan internal/harness for security bypasses" \
+  --role "collector" \
+  --permission "read_only" \
+  --add-dir "." \
+  --provider "opencode" \
+  --model "9router/reasoning-high" \
+  --priority 10 \
+  --max-attempts 3
+
+# codex (platform_dispatch)
+g8s submit \
+  --idempotency-key "task-refactor-003" \
+  --prompt "Scan internal/harness for security bypasses" \
+  --role "collector" \
+  --permission "read_only" \
+  --add-dir "." \
+  --provider "codex" \
+  --model "gpt-5.4" \
+  --priority 10 \
+  --max-attempts 3
+
+# agy / Google Antigravity (platform_dispatch) — Gemini 4 element series
+g8s submit \
+  --idempotency-key "task-refactor-004" \
+  --prompt "Scan internal/harness for security bypasses" \
+  --role "collector" \
+  --permission "read_only" \
+  --add-dir "." \
   --provider "agy" \
-  --model "gemini-3.8-flash-high" \
+  --model "gemini-4-hydrogen-high" \
   --priority 10 \
   --max-attempts 3
 ```
@@ -44,8 +83,8 @@ g8s submit \
 | `--parent-task-id`| `string` | `""` | Parent task ID for subtask lineage tracking and tree queries. |
 | `--skip-permissions`| `bool` | `false` | Bypass permission checks (allowed only if permission profile permits). |
 | `--allow-worker-commit` | `bool` | `false` | Opt in to the ADR-0041 worker git-commit proxy (`allow_worker_commit` in task payload). Commit-only: `git fetch`/`git push` remain supervisor-owned. Requires `--permission workspace_write` (rejected for `read_only` and other profiles). |
-| `--provider` | `string` | `""` | Target provider name (`agy`, `codex`, etc.). Stored durably in task payload for worker claim affinity. Falls back to `default_provider` setting if omitted. Precedence: CLI flag > settings default > absent (legacy). |
-| `--model` | `string` | `"gemini-3.8-flash-high"` | Target worker model identifier. |
+| `--provider` | `string` | `""` | Target provider name (`9router`, `opencode`, `codex`, `claude`, `cursor`, `commandcode`, `qwen`, `agy`, etc.). Stored durably in task payload for worker claim affinity. Falls back to `default_provider` setting if omitted. Precedence: CLI flag > settings default > absent (legacy). All adapters are peers — `agy` is one `platform_dispatch` adapter among many. |
+| `--model` | `string` | *(resolved from provider manifest)* | Target worker model identifier. Default resolved via `ResolveProviderDefaultModel` from the provider's `default_model` or first `models[].id` with `status: active`. Examples: `reasoning-high` (9router), `9router/reasoning-high` (opencode), `gpt-5.4` (codex), `gemini-4-hydrogen-high` (agy). Legacy default `gemini-3.8-flash-high` is deprecated. |
 | `--priority` | `int` | `0` | Queue priority (`-100` to `100`). Higher priority tasks are claimed first. |
 | `--max-attempts` | `int` | `1` | Retry budget (`1` to `10`). |
 | `--effort` | `string` | `"medium"` | Target worker reasoning effort level (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). See [effort.md](effort.md). |
@@ -225,9 +264,23 @@ Lists all active, consumed, or expired receipts with status filtering.
 Runs the supervisor self-test loop against the worker engine with automated Root Cause Analysis (RCA) and bounded fix cycles.
 
 ```sh
+# Multi-adapter examples (DELTA-48: adapter-neutral control plane)
 g8s orchestrate --from-intent "Run security benchmark suite" \
   --max-attempts 5 \
-  --model "gemini-3.8-flash-high"
+  --provider 9router \
+  --model reasoning-high
+
+# Alternative: opencode
+g8s orchestrate --from-intent "Run security benchmark suite" \
+  --max-attempts 5 \
+  --provider opencode \
+  --model 9router/reasoning-high
+
+# Alternative: agy (Gemini 4)
+g8s orchestrate --from-intent "Run security benchmark suite" \
+  --max-attempts 5 \
+  --provider agy \
+  --model gemini-4-hydrogen-high
 ```
 
 ---
@@ -256,14 +309,17 @@ Runs the local background supervisor loop, claiming tasks from the SQLite queue,
 # Claim and execute a single task, then exit (ideal for CI)
 g8s worker --once
 
-# Run continuous worker for a specific model with 120s lease
-g8s worker --once=false --model "gemini-3.8-flash-high" --lease 120
+# Run continuous worker for a specific provider/model with 120s lease (multi-adapter)
+g8s worker --once=false --provider 9router --model reasoning-high --lease 120
+g8s worker --once=false --provider opencode --model 9router/reasoning-high --lease 120
+g8s worker --once=false --provider codex --model gpt-5.4 --lease 120
+g8s worker --once=false --provider agy --model gemini-4-hydrogen-high --lease 120
 
 # Run worker with strict provider claim affinity
-g8s worker --provider agy
+g8s worker --provider 9router
 
 # Run concurrent workers with provider and model claim affinity (#657)
-g8s worker --concurrency 4 --provider agy --model "gemini-3.8-flash-high"
+g8s worker --concurrency 4 --provider 9router --model reasoning-high
 ```
 
 When `--provider` and/or `--model` are specified, the worker enforces strict claim affinity across serial (`--concurrency 1`, `--once`) and concurrent modes (`--concurrency > 1`, #657):
@@ -385,7 +441,7 @@ g8s autopilot submit --dry-run --max-submissions 5
 | `--reflection-receipt` | `string` | `""` | Path to an S2 reflection receipt; submit bounded add-list packets instead of maintenance jobs. |
 | `--dry-run` | `bool` | `false` | Print reflection packet specs without opening the queue. |
 | `--provider` | `string` | `""` | Target reflection worker provider (queue default when empty). |
-| `--model` | `string` | `gemini-3.8-flash-high` | Target reflection worker model. |
+| `--model` | `string` | `gemini-4-hydrogen-high` | Target reflection worker model. |
 | `--effort` | `string` | `""` | Reflection worker effort (queue default when empty). |
 | `--json` / `--jsonl` | `bool` | `false` | Emit machine-readable envelope. |
 
@@ -663,8 +719,9 @@ g8s eval list --category self-audit
 # Run evaluation suite against mock compliant provider
 g8s eval run --provider mock-compliant
 
-# Run self-audit probes against live agy provider per ADR-0026 release gate
-g8s eval run --category self-audit --provider agy --model gemini-3.8-flash-high
+# Run evaluation probes symmetrically across HTTP api_call or CLI platform_dispatch adapters
+g8s eval run --provider 9router --model reasoning-high --probes pi-001,pt-001,re-001
+g8s eval run --provider agy --model gemini-4-hydrogen-high --probes pi-001,pt-001,re-001
 ```
 
 #### Subcommands:
@@ -679,8 +736,8 @@ g8s eval run --category self-audit --provider agy --model gemini-3.8-flash-high
 #### Flags (`g8s eval run`):
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--provider` | `string` | `"mock-compliant"` | Target provider: `mock-compliant`, `mock-defiant`, `agy`, `claude`. |
-| `--model` | `string` | `""` | Target model for live providers (defaults to `gemini-3.8-flash-high` for `agy`, `claude-sonnet-4-5` for `claude`). |
+| `--provider` | `string` | `"mock-compliant"` | Target provider: `mock-compliant`, `mock-defiant`, or any configured/registered adapter (`9router`, `opencode`, `codex`, `claude`, `agy`, `cursor`). |
+| `--model` | `string` | `""` | Target model for live providers (resolved from `providers.json` or `.g8s/agent-models.yml` per provider when omitted). |
 | `--category` | `string` | `""` | Filter probe suite by category. |
 | `--probes` | `string` | `""` | Comma-separated list of probe IDs to execute. |
 | `--timeout` | `duration` | `30s` | Per-probe execution timeout. |
@@ -854,6 +911,7 @@ g8s blind-verify \
 | `--model` | `string` | `"fast-agent"` | Verifier model identifier |
 | `--effort` | `string` | `"low"` | Reasoning effort level for verifier |
 | `--provider` | `string` | `"9router"` | Provider for verifier model |
+| `--author-family` | `string` | `""` | Optional author model family slug (`google`, `nvidia`, `anthropic`, `openai`, etc.) to enforce disjoint `S3-A` verification |
 | `--max-tokens` | `int` | `4096` | Max output tokens for verifier response |
 | `--timeout` | `duration` | `"180s"` | Verification timeout |
 

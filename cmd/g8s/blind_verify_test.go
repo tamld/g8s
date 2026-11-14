@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -236,5 +238,211 @@ func TestExecuteBlindVerify_MissingSkillBankFailsClosed(t *testing.T) {
 	}
 	if called {
 		t.Fatal("provider must not be invoked when mandatory g8s-blind-verifier skill hydration fails")
+	}
+}
+
+type mockCLIVerifierHandle struct {
+	receipt provider.Receipt
+}
+
+func (h *mockCLIVerifierHandle) PID() int { return 101 }
+func (h *mockCLIVerifierHandle) Wait(_ context.Context) (provider.Receipt, error) {
+	return h.receipt, nil
+}
+func (h *mockCLIVerifierHandle) Cancel(_ context.Context) error { return nil }
+func (h *mockCLIVerifierHandle) StdoutStream() io.ReadCloser {
+	return io.NopCloser(strings.NewReader(""))
+}
+
+type mockCLIVerifierProvider struct {
+	name     string
+	lastSpec provider.Spec
+	hasHooks bool
+}
+
+func (p *mockCLIVerifierProvider) Name() string                              { return p.name }
+func (p *mockCLIVerifierProvider) Binary() string                            { return p.name }
+func (p *mockCLIVerifierProvider) Version(_ context.Context) (string, error) { return "1.5.8", nil }
+func (p *mockCLIVerifierProvider) Available(_ context.Context) error         { return nil }
+func (p *mockCLIVerifierProvider) Spawn(_ context.Context, spec provider.Spec) (provider.Handle, error) {
+	p.lastSpec = spec
+	if spec.WorktreeDir != "" {
+		if _, err := os.Stat(filepath.Join(spec.WorktreeDir, ".agents", "hooks.json")); err == nil {
+			p.hasHooks = true
+		}
+	}
+	return &mockCLIVerifierHandle{
+		receipt: provider.Receipt{
+			Provider:      p.name,
+			Status:        "COMPLETED",
+			Stdout:        `{"verdict":"ACCEPTED","passed":true,"summary":"No counterexample found","findings":[],"counterexamples":[]}`,
+			ExitCode:      0,
+			ModelResolved: spec.Model,
+		},
+	}, nil
+}
+
+func TestBlindVerify_PlatformDispatchAdapter(t *testing.T) {
+	cliProv := &mockCLIVerifierProvider{name: "agy"}
+	verdict, err := executeBlindVerify(
+		context.Background(),
+		cliProv,
+		BlindReviewPacket{
+			SpecContract:         "DELTA-48 adapter neutrality",
+			Invariants:           "Zero-CGO, fail-closed sandbox",
+			RawGitDiff:           "+func DiscoverModels()",
+			MechanicalTestOutput: "PASS",
+		},
+		"gemini-4-hydrogen-high",
+		"high",
+		4096,
+		5*time.Second,
+		"trace-cli-blind-verify",
+		filepath.Join("..", "..", "skills"),
+	)
+	if err != nil {
+		t.Fatalf("executeBlindVerify with platform_dispatch adapter failed: %v", err)
+	}
+	if verdict.Verdict != "ACCEPTED" || !verdict.Passed {
+		t.Fatalf("expected ACCEPTED verdict, got %+v", verdict)
+	}
+	if !cliProv.hasHooks {
+		t.Fatalf("expected isolated tool-denied workspace with .agents/hooks.json, got %q", cliProv.lastSpec.WorktreeDir)
+	}
+	if cliProv.lastSpec.Env["G8S_SANDBOX"] != "1" {
+		t.Fatalf("expected G8S_SANDBOX=1 on CLI blind verifier, got %+v", cliProv.lastSpec.Env)
+	}
+	if !strings.Contains(cliProv.lastSpec.Brief, "Do NOT invoke any tools, shell commands, or file reads") {
+		t.Fatalf("expected inline tool-denial guard in verifier prompt")
+	}
+}
+
+func TestValidateDisjointVerifierFamily(t *testing.T) {
+	if err := validateDisjointVerifierFamily("", "google"); err != nil {
+		t.Fatalf("empty authorFamily must pass: %v", err)
+	}
+	if err := validateDisjointVerifierFamily("nvidia", "google"); err != nil {
+		t.Fatalf("disjoint families nvidia vs google must pass: %v", err)
+	}
+	if err := validateDisjointVerifierFamily("google", "multi"); err != nil {
+		t.Fatalf("multi gateway family must pass: %v", err)
+	}
+	if err := validateDisjointVerifierFamily("google", "GOOGLE"); err == nil || !strings.Contains(err.Error(), "E_DISJOINT_FAMILY") {
+		t.Fatalf("same family must fail closed with E_DISJOINT_FAMILY, got %v", err)
+	}
+	if err := validateDisjointVerifierFamily("google", ""); err == nil || !strings.Contains(err.Error(), "E_DISJOINT_FAMILY") {
+		t.Fatalf("unknown verifier family must fail closed when authorFamily is set, got %v", err)
+	}
+}
+
+type shardedMockCLIVerifierProvider struct {
+	name          string
+	specs         []provider.Spec
+	rejectShardAt int // 1-based shard index to reject; 0 = accept all
+}
+
+func (p *shardedMockCLIVerifierProvider) Name() string   { return p.name }
+func (p *shardedMockCLIVerifierProvider) Binary() string { return p.name }
+func (p *shardedMockCLIVerifierProvider) Version(_ context.Context) (string, error) {
+	return "1.5.8", nil
+}
+func (p *shardedMockCLIVerifierProvider) Available(_ context.Context) error { return nil }
+func (p *shardedMockCLIVerifierProvider) Spawn(_ context.Context, spec provider.Spec) (provider.Handle, error) {
+	p.specs = append(p.specs, spec)
+	idx := len(p.specs)
+	stdout := `{"verdict":"ACCEPTED","passed":true,"summary":"shard clean","findings":[],"counterexamples":[]}`
+	if p.rejectShardAt == idx {
+		stdout = `{"verdict":"REJECTED","passed":false,"summary":"bug in shard","findings":["nil deref"],"counterexamples":["input=nil panics"]}`
+	}
+	return &mockCLIVerifierHandle{
+		receipt: provider.Receipt{
+			Provider:      p.name,
+			Status:        "COMPLETED",
+			Stdout:        stdout,
+			ExitCode:      0,
+			ModelResolved: spec.Model,
+		},
+	}, nil
+}
+
+func TestExecuteBlindVerify_LargeMultiFileDiffShardsFailClosed(t *testing.T) {
+	fileChunk := func(path, sentinel string) string {
+		var sb strings.Builder
+		sb.WriteString("diff --git a/" + path + " b/" + path + "\n")
+		sb.WriteString("--- a/" + path + "\n+++ b/" + path + "\n@@ -1,1 +1,900 @@\n")
+		sb.WriteString(strings.Repeat("+line of untruncated file implementation detail for sharded blind verification\n", 850))
+		sb.WriteString("+" + sentinel + "\n")
+		return sb.String()
+	}
+	bigDiff := fileChunk("pkg/a.go", "SENTINEL_FILE_A_END") +
+		fileChunk("pkg/b.go", "SENTINEL_FILE_B_END") +
+		fileChunk("pkg/c.go", "SENTINEL_FILE_C_END")
+
+	// 1. All shards ACCEPTED -> aggregate ACCEPTED, every prompt <= maxBlindPromptBytes, all sentinels present
+	provAccept := &shardedMockCLIVerifierProvider{name: "agy"}
+	v1, err := executeBlindVerify(
+		context.Background(),
+		provAccept,
+		BlindReviewPacket{
+			SpecContract:         "Spec",
+			Invariants:           "Inv",
+			RawGitDiff:           bigDiff,
+			MechanicalTestOutput: "PASS",
+		},
+		"gemini-4-hydrogen-high",
+		"high",
+		4096,
+		10*time.Second,
+		"trace-shard-accept",
+		filepath.Join("..", "..", "skills"),
+	)
+	if err != nil {
+		t.Fatalf("sharded executeBlindVerify failed: %v", err)
+	}
+	if !v1.Passed || v1.Verdict != "ACCEPTED" {
+		t.Fatalf("expected aggregate ACCEPTED, got %+v", v1)
+	}
+	if len(provAccept.specs) < 3 {
+		t.Fatalf("expected >= 3 shards for ~200KB diff, got %d", len(provAccept.specs))
+	}
+	var combinedPrompts strings.Builder
+	for i, sp := range provAccept.specs {
+		if len(sp.Brief) > maxBlindPromptBytes+4096 {
+			t.Fatalf("shard %d prompt exceeded safe bound: %d bytes", i+1, len(sp.Brief))
+		}
+		combinedPrompts.WriteString(sp.Brief)
+	}
+	for _, sentinel := range []string{"SENTINEL_FILE_A_END", "SENTINEL_FILE_B_END", "SENTINEL_FILE_C_END"} {
+		if !strings.Contains(combinedPrompts.String(), sentinel) {
+			t.Fatalf("missing untruncated sentinel %q across sharded prompts", sentinel)
+		}
+	}
+
+	// 2. Shard 2 REJECTED -> aggregate REJECTED fail-closed with counterexample preserved
+	provReject := &shardedMockCLIVerifierProvider{name: "agy", rejectShardAt: 2}
+	v2, err := executeBlindVerify(
+		context.Background(),
+		provReject,
+		BlindReviewPacket{
+			SpecContract:         "Spec",
+			Invariants:           "Inv",
+			RawGitDiff:           bigDiff,
+			MechanicalTestOutput: "PASS",
+		},
+		"gemini-4-hydrogen-high",
+		"high",
+		4096,
+		10*time.Second,
+		"trace-shard-reject",
+		filepath.Join("..", "..", "skills"),
+	)
+	if err != nil {
+		t.Fatalf("sharded executeBlindVerify reject test failed: %v", err)
+	}
+	if v2.Passed || v2.Verdict != "REJECTED" {
+		t.Fatalf("expected fail-closed REJECTED when shard 2 rejects, got %+v", v2)
+	}
+	if len(v2.Counterexamples) == 0 || !strings.Contains(v2.Counterexamples[0], "input=nil panics") {
+		t.Fatalf("expected shard 2 counterexample preserved, got %+v", v2.Counterexamples)
 	}
 }

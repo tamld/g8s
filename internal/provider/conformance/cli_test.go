@@ -134,7 +134,9 @@ func TestDecideLivePolicy(t *testing.T) {
 		allowed bool
 		code    string
 	}{
-		{"agy", PolicyForbidden, "", paid, false, "E_LIVE_FORBIDDEN"},
+		{"forbidden-adapter", PolicyForbidden, "", paid, false, "E_LIVE_FORBIDDEN"},
+		{"agy", PolicyPaid, "gemini-4-hydrogen-low", nil, false, "E_PAID_NOT_ALLOWED"},
+		{"agy", PolicyPaid, "gemini-4-hydrogen-low", paid, true, ""},
 		{"claude", PolicyPaid, "", nil, false, "E_PAID_NOT_ALLOWED"},
 		{"claude", PolicyPaid, "", paid, true, ""},
 		{"codex", PolicyPaid, "", paid, true, ""},
@@ -329,8 +331,8 @@ func TestDefaultCLIProfilesShape(t *testing.T) {
 			t.Fatalf("%s: empty schema args", p.Name)
 		}
 	}
-	if names["agy"].Policy != PolicyForbidden {
-		t.Fatal("agy must be forbidden")
+	if names["agy"].Policy != PolicyPaid || names["agy"].DefaultModel != "gemini-4-hydrogen-low" {
+		t.Fatal("agy must be PolicyPaid with DefaultModel gemini-4-hydrogen-low")
 	}
 	if names["claude"].Policy != PolicyPaid || names["codex"].Policy != PolicyPaid {
 		t.Fatal("claude/codex must be paid-gated")

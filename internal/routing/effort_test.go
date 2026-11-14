@@ -671,3 +671,172 @@ func TestResolveEffort_BakedSuffixPassThrough(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveEffort_Gemini4BakedVariantClampingAndNoneStyle(t *testing.T) {
+	// Build a catalog with Gemini 4 hydrogen/carbon families and orchestrator (none style)
+	cat := &config.Catalog{
+		SchemaVersion:  config.CurrentCatalogSchemaVersion,
+		CatalogVersion: 3,
+		VerifiedAt:     "2026-11-14",
+		Sources:        []string{"test"},
+		Providers: map[string]config.ProviderCatalog{
+			"agy": {
+				Name:          "agy",
+				EffortStyle:   config.EffortStyleBakedName,
+				DefaultEffort: "high",
+				Models: []config.ModelCatalog{
+					{
+						ID:               "gemini-4-hydrogen",
+						SupportedEfforts: []string{"low", "medium", "high", "xhigh"},
+						DefaultEffort:    "high",
+						EffortStyle:      config.EffortStyleBakedName,
+						Status:           config.ModelStatusActive,
+					},
+					{
+						ID:               "gemini-4-carbon",
+						SupportedEfforts: []string{"low", "medium", "high"},
+						DefaultEffort:    "high",
+						EffortStyle:      config.EffortStyleBakedName,
+						Status:           config.ModelStatusActive,
+					},
+					{
+						ID:               "gemini-pro-orchestrator",
+						SupportedEfforts: []string{},
+						EffortStyle:      config.EffortStyleNone,
+						Status:           config.ModelStatusActive,
+					},
+				},
+			},
+		},
+	}
+
+	// Also test with manifest that has the variant models
+	manifest := &config.File{
+		Providers: []config.ProviderEntry{
+			{
+				Name: "agy",
+				Models: []config.ModelEntry{
+					{
+						ID:               "gemini-4-hydrogen-high",
+						EffortStyle:      config.EffortStyleBakedName,
+						SupportedEfforts: []string{"high"},
+						DefaultEffort:    "high",
+					},
+					{
+						ID:               "gemini-4-carbon-high",
+						EffortStyle:      config.EffortStyleBakedName,
+						SupportedEfforts: []string{"high"},
+						DefaultEffort:    "high",
+					},
+					{
+						ID:               "gemini-pro-orchestrator",
+						EffortStyle:      config.EffortStyleNone,
+						SupportedEfforts: []string{},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		useManifest  bool
+		provider     string
+		modelID      string
+		requested    string
+		wantApplied  string
+		wantMismatch bool
+	}{
+		{
+			name:         "gemini-4-hydrogen-high + xhigh -> xhigh, no mismatch (within family)",
+			useManifest:  true,
+			provider:     "agy",
+			modelID:      "gemini-4-hydrogen-high",
+			requested:    "xhigh",
+			wantApplied:  "xhigh",
+			wantMismatch: false,
+		},
+		{
+			name:         "gemini-4-hydrogen-high + max -> xhigh, mismatch (max not in family)",
+			useManifest:  true,
+			provider:     "agy",
+			modelID:      "gemini-4-hydrogen-high",
+			requested:    "max",
+			wantApplied:  "xhigh",
+			wantMismatch: true,
+		},
+		{
+			name:         "gemini-4-carbon-high + xhigh -> high, mismatch (carbon only supports up to high)",
+			useManifest:  true,
+			provider:     "agy",
+			modelID:      "gemini-4-carbon-high",
+			requested:    "xhigh",
+			wantApplied:  "high",
+			wantMismatch: true,
+		},
+		{
+			name:         "gemini-pro-orchestrator (none style) + high -> empty, mismatch",
+			useManifest:  true,
+			provider:     "agy",
+			modelID:      "gemini-pro-orchestrator",
+			requested:    "high",
+			wantApplied:  "",
+			wantMismatch: true,
+		},
+		{
+			name:         "gemini-pro-orchestrator (none style) + empty -> empty, no mismatch",
+			useManifest:  true,
+			provider:     "agy",
+			modelID:      "gemini-pro-orchestrator",
+			requested:    "",
+			wantApplied:  "",
+			wantMismatch: false,
+		},
+		{
+			name:         "catalog lookup: gemini-4-hydrogen-high + xhigh -> xhigh",
+			useManifest:  false,
+			provider:     "agy",
+			modelID:      "gemini-4-hydrogen-high",
+			requested:    "xhigh",
+			wantApplied:  "xhigh",
+			wantMismatch: false,
+		},
+		{
+			name:         "catalog lookup: gemini-4-carbon-high + xhigh -> high",
+			useManifest:  false,
+			provider:     "agy",
+			modelID:      "gemini-4-carbon-high",
+			requested:    "xhigh",
+			wantApplied:  "high",
+			wantMismatch: true,
+		},
+		{
+			name:         "catalog lookup: gemini-pro-orchestrator (none) + high -> empty, mismatch",
+			useManifest:  false,
+			provider:     "agy",
+			modelID:      "gemini-pro-orchestrator",
+			requested:    "high",
+			wantApplied:  "",
+			wantMismatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var m *config.File
+			if tt.useManifest {
+				m = manifest
+			}
+			res, err := ResolveEffortWithCatalog(m, cat, tt.provider, tt.modelID, tt.requested)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if res.Applied != tt.wantApplied {
+				t.Errorf("Applied = %q, want %q", res.Applied, tt.wantApplied)
+			}
+			if res.Mismatch != tt.wantMismatch {
+				t.Errorf("Mismatch = %v, want %v", res.Mismatch, tt.wantMismatch)
+			}
+		})
+	}
+}
