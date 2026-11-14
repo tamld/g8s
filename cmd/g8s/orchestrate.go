@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/conv"
 	"github.com/tamld/g8s/internal/hooks"
@@ -257,7 +258,11 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 	}
 	model := opts.Model
 	if model == "" {
-		model = "gemini-3.8-flash-high"
+		cat, _ := config.LoadDefaultCatalog()
+		model = config.ResolveProviderDefaultModel(nil, cat, worker.Name())
+		if model == "" {
+			model = "gemini-4-hydrogen-high"
+		}
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {
@@ -414,7 +419,7 @@ func executeOrchestration(ctx context.Context, intent string, opts orchestrateOp
 func runOrchestrate(args []string) {
 	fs := flag.NewFlagSet("orchestrate", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
-	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the real agy worker")
+	selfTest := fs.Bool("self-test", false, "run a self-contained supervisor loop against the configured worker provider")
 	briefFile := fs.String("brief-file", "", "path to brief markdown file to issue and dispatch")
 	dispatchID := fs.String("dispatch", "", "stored brief ID to re-issue and dispatch")
 	briefID := fs.String("brief", "", "stored brief ID for dual-blind orchestration")

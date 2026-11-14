@@ -35,7 +35,7 @@ func runSubmit(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
-	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to provider's configured/catalog default)")
+	model := fs.String("model", "", "target worker model (defaults to provider's configured/catalog default)")
 	providerFlag := fs.String("provider", "", "target worker provider (e.g. codex, agy)")
 	effortFlag := fs.String("effort", config.EffortMedium, "target worker effort level (none|minimal|low|medium|high|xhigh|max, defaults to medium)")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
@@ -109,6 +109,8 @@ func runSubmit(args []string) {
 	var locEstimatePassed bool
 	var toolPolicyPassed bool
 	var timeoutPassed bool
+	var premiseCheckPassed bool
+	var enforceConformancePassed bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "provider" {
 			providerPassed = true
@@ -136,6 +138,12 @@ func runSubmit(args []string) {
 		}
 		if f.Name == "timeout" {
 			timeoutPassed = true
+		}
+		if f.Name == "premise-check" {
+			premiseCheckPassed = true
+		}
+		if f.Name == "enforce-conformance" {
+			enforceConformancePassed = true
 		}
 	})
 
@@ -267,6 +275,33 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeIO, err, "Failed to resolve working directory", *jsonl)
 	}
 
+	// Honor declarative env/settings for --premise-check and --enforce-conformance
+	// when those flags are NOT explicitly passed on CLI.
+	if !premiseCheckPassed {
+		envVal := os.Getenv("G8S_PREMISE_CHECK")
+		if envVal == "1" || strings.EqualFold(envVal, "true") {
+			*premiseCheck = true
+		} else if mgr, err := settings.NewManager(""); err == nil {
+			if val, ok := mgr.Get("premise_check"); ok && val != nil {
+				if b, ok := val.(bool); ok && b {
+					*premiseCheck = true
+				}
+			}
+		}
+	}
+	if !enforceConformancePassed {
+		envVal := os.Getenv("G8S_ENFORCE_CONFORMANCE")
+		if envVal == "1" || strings.EqualFold(envVal, "true") {
+			*enforceConformance = true
+		} else if mgr, err := settings.NewManager(""); err == nil {
+			if val, ok := mgr.Get("enforce_conformance"); ok && val != nil {
+				if b, ok := val.(bool); ok && b {
+					*enforceConformance = true
+				}
+			}
+		}
+	}
+
 	// DELTA-42: optional pre-dispatch premise gate. A brief whose repo
 	// premises are refuted by deterministic probes is not dispatched unless
 	// the operator records an explicit override reason.
@@ -324,9 +359,6 @@ func runSubmit(args []string) {
 	}
 
 	effectiveModel := *model
-	if effectiveModel == "" {
-		effectiveModel = "gemini-3.8-flash-high"
-	}
 	effectiveRole := *role
 
 	var routeDecision *routing.Decision
@@ -351,11 +383,22 @@ func runSubmit(args []string) {
 		}
 	}
 
-	if !modelPassed && !modelFromProfile && effectiveProvider != "" && *routeFlag != "auto" {
+	if !modelPassed && !modelFromProfile && *routeFlag != "auto" {
 		cat, _ := config.LoadDefaultCatalog()
-		if resolved := config.ResolveProviderDefaultModel(manifest, cat, effectiveProvider); resolved != "" {
-			effectiveModel = resolved
+		var resolved string
+		if effectiveProvider != "" {
+			resolved = config.ResolveProviderDefaultModel(manifest, cat, effectiveProvider)
 		}
+		if resolved == "" && manifest != nil && len(manifest.Providers) > 0 {
+			resolved = config.ResolveProviderDefaultModel(manifest, cat, manifest.Providers[0].Name)
+		}
+		if resolved == "" {
+			resolved = config.ResolveProviderDefaultModel(manifest, cat, "agy")
+		}
+		if resolved == "" {
+			resolved = "gemini-4-hydrogen-high"
+		}
+		effectiveModel = resolved
 	}
 
 	var classPaths []string
@@ -507,9 +550,71 @@ func runSubmit(args []string) {
 	}
 
 	if !timeoutPassed && !timeoutFromProfile {
-		effTimeout := defaultTimeoutForEffort(effortRes.Applied)
-		if effTimeout != "" {
-			*timeout = effTimeout
+		// Profile timeout inheritance on explicit triple (--provider + --model without --profile + --timeout)
+		// Only applies when effectiveProvider != "" (i.e., caller passed explicit --provider)
+		var matchedTimeout string
+		if effectiveProvider != "" {
+			cat, _ := config.LoadDefaultCatalog()
+			// Search catalog profiles for matching (provider, model) with non-empty timeout
+			type profileMatch struct {
+				name     string
+				prof     config.Profile
+				priority int // 0=best, higher=worse
+			}
+			var matches []profileMatch
+			for _, profName := range cat.ProfileNames() {
+				prof, _ := cat.Profile(profName)
+				if strings.EqualFold(prof.Provider, effectiveProvider) && strings.EqualFold(prof.Model, effectiveModel) && strings.TrimSpace(prof.Timeout) != "" {
+					priority := 3 // default: unique match on (provider, model)
+					if effectiveRole != "" && strings.EqualFold(prof.Role, effectiveRole) && strings.EqualFold(prof.Permission, *permission) && (prof.Effort == "" || strings.EqualFold(prof.Effort, effortRes.Applied)) {
+						priority = 0 // (a) exact match on (role == effectiveRole && permission == *permission && effort matches)
+					} else if strings.EqualFold(prof.Permission, *permission) && (prof.Effort == "" || strings.EqualFold(prof.Effort, effortRes.Applied)) {
+						if priority > 1 {
+							priority = 1 // (b) unique match on (permission && effort matches)
+						}
+					} else if strings.EqualFold(prof.Permission, *permission) {
+						if priority > 2 {
+							priority = 2 // (c) unique match on (permission)
+						}
+					}
+					matches = append(matches, profileMatch{name: profName, prof: prof, priority: priority})
+				}
+			}
+			if len(matches) == 1 {
+				matchedTimeout = matches[0].prof.Timeout
+			} else if len(matches) > 1 {
+				// Disambiguate by priority
+				bestPriority := matches[0].priority
+				for _, m := range matches[1:] {
+					if m.priority < bestPriority {
+						bestPriority = m.priority
+					}
+				}
+				var bestMatches []profileMatch
+				for _, m := range matches {
+					if m.priority == bestPriority {
+						bestMatches = append(bestMatches, m)
+					}
+				}
+				if len(bestMatches) == 1 {
+					matchedTimeout = bestMatches[0].prof.Timeout
+				}
+			}
+		}
+		if matchedTimeout != "" {
+			*timeout = matchedTimeout
+		} else {
+			effTimeout := defaultTimeoutForEffort(effortRes.Applied)
+			if effTimeout != "" {
+				*timeout = effTimeout
+			}
+			// Advisory warning for explicit-provider workspace_write with effort-derived default timeout
+			if effectiveProvider != "" && *permission == "workspace_write" {
+				d, _, err := cli.ParseTimeoutDuration(*timeout)
+				if err == nil && d <= 240*time.Second {
+					warnings = append(warnings, fmt.Sprintf("workspace_write task using effort-derived default timeout (%s); pass --timeout or --profile for multi-file authoring tasks", *timeout))
+				}
+			}
 		}
 		d, eff, err := cli.ParseTimeoutDuration(*timeout)
 		if err != nil {
@@ -813,11 +918,9 @@ func matchModelID(candID, targetID string) bool {
 
 func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 	// 0. Manual submits may omit --provider entirely; the model id alone must
-	// decide (issue #568: the realignment never fired for provider-less
-	// submits because this gate required a provider name). Manifest ownership
-	// first — if any manifest provider declares this id, that pairing decides
-	// (the realignment must never move a model onto a provider that does not
-	// declare the target variant). Otherwise the catalog decides.
+	// decide. Manifest ownership first — if any manifest provider declares this id,
+	// that pairing decides (the realignment must never move a model onto a provider
+	// that does not declare the target variant). Otherwise the catalog decides.
 	if provider == "" {
 		if manifest != nil {
 			for _, p := range manifest.Providers {
@@ -877,9 +980,6 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 // must be consulted: either the matched model entry declares no effort style, or
 // the manifest knows the provider but not this model id — platform manifests list
 // one variant of a family while the catalog is the id+style SSoT for the rest
-// (issue #568: gemini-3.7-flash-high in the manifest shadowed the catalog verdict
-// for gemini-3.8-flash-high, so mismatched (model, effort) combos reached the
-// worker CLI and died).
 func manifestBakedNameVerdict(manifest *config.File, provider, modelID string) (baked bool, decided bool) {
 	if manifest == nil {
 		return false, false

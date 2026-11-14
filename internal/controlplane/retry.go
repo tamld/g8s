@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/receipt"
 )
 
@@ -554,9 +555,17 @@ ORDER BY created_at ASC;`
 	if r, ok := payloadMap["role"].(string); ok && r != "" {
 		role = r
 	}
-	model := "gemini-3.8-flash-high"
+	providerName, _ := payloadMap["provider"].(string)
+	model := ""
 	if m, ok := payloadMap["model"].(string); ok && m != "" {
 		model = m
+	}
+	if model == "" {
+		cat, _ := config.LoadDefaultCatalog()
+		model = config.ResolveProviderDefaultModel(nil, cat, providerName)
+		if model == "" {
+			model = "gemini-4-hydrogen-high"
+		}
 	}
 	timeout := ""
 	if t, ok := payloadMap["timeout"].(string); ok {

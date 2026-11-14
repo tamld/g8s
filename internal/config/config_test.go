@@ -283,16 +283,41 @@ func TestInitwizFixturePassesValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(testdata/initwiz.json): %v", err)
 	}
-	if len(f.Providers) != 2 {
-		t.Fatalf("got %d providers, want 2", len(f.Providers))
+	if len(f.Providers) != 4 {
+		t.Fatalf("got %d providers, want 4", len(f.Providers))
 	}
-	agy := f.Providers[0]
-	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 1 || agy.Models[0].ID != "gemini-3.8-flash-high" {
+
+	// Provider 1: 9router (api_call)
+	nineRouter := f.Providers[0]
+	if nineRouter.Class != "api_call" || nineRouter.Name != "9router" || nineRouter.Protocol != "9router" || nineRouter.BaseURL != "http://127.0.0.1:20128/v1" || nineRouter.BaseURLEnv != "NINEROUTER_URL" || nineRouter.AuthEnv != "OPENAI_API_KEY" || !nineRouter.AllowUnlistedModels || len(nineRouter.Models) != 2 || nineRouter.Models[0].ID != "reasoning-high" || nineRouter.Models[1].ID != "fast-agent" {
+		t.Errorf("unexpected 9router provider: %+v", nineRouter)
+	}
+
+	// Provider 2: opencode (platform_dispatch)
+	opencode := f.Providers[1]
+	if opencode.Class != "platform_dispatch" || opencode.Name != "opencode" || len(opencode.Models) != 1 || opencode.Models[0].ID != "9router/reasoning-high" || len(opencode.Args) != 5 || opencode.Args[0] != "opencode" || opencode.Args[1] != "run" || opencode.Args[2] != "-m" || opencode.Args[3] != "{model}" || opencode.Args[4] != "{prompt}" {
+		t.Errorf("unexpected opencode provider: %+v", opencode)
+	}
+
+	// Provider 3: agy (platform_dispatch)
+	agy := f.Providers[2]
+	if agy.Class != "platform_dispatch" || agy.Name != "agy" || len(agy.Models) != 2 || agy.Models[0].ID != "gemini-4-hydrogen-low" || agy.Models[1].ID != "gemini-4-hydrogen-high" || len(agy.Args) != 8 || agy.Args[0] != "agy" || agy.Args[1] != "--print" || agy.Args[2] != "--model" || agy.Args[3] != "{model}" || agy.Args[4] != "--mode" || agy.Args[5] != "agent" || agy.Args[6] != "--prompt" || agy.Args[7] != "{prompt}" {
 		t.Errorf("unexpected agy provider: %+v", agy)
 	}
-	claude := f.Providers[1]
-	if claude.Class != "platform_dispatch" || claude.Name != "claude" || len(claude.Models) != 2 {
+
+	// Provider 4: claude (platform_dispatch)
+	claude := f.Providers[3]
+	if claude.Class != "platform_dispatch" || claude.Name != "claude" || len(claude.Models) != 2 || claude.Models[0].ID != "claude-sonnet-4-6" || claude.Models[1].ID != "claude-haiku-4-5" || len(claude.Args) != 3 || claude.Args[0] != "claude" || claude.Args[1] != "-p" || claude.Args[2] != "{prompt}" {
 		t.Errorf("unexpected claude provider: %+v", claude)
+	}
+
+	// Ensure no gemini-3.8- strings exist
+	for _, p := range f.Providers {
+		for _, m := range p.Models {
+			if strings.Contains(m.ID, "gemini-3.8-") {
+				t.Errorf("found deprecated gemini-3.8- model ID: %s", m.ID)
+			}
+		}
 	}
 }
 

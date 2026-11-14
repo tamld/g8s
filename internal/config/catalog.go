@@ -933,16 +933,19 @@ func ResolveProviderDefaultModel(manifest *File, cat *Catalog, providerName stri
 				}
 			}
 			if cand != "" {
-				// Find the matching ModelEntry in manifest
+				// Find the matching ModelEntry in manifest (copy by value so catalog
+				// enrichment never mutates the caller's manifest slice in-place).
 				var m *ModelEntry
 				for i := range p.Models {
 					if strings.EqualFold(p.Models[i].ID, cand) {
-						m = &p.Models[i]
+						mCopy := p.Models[i]
+						m = &mCopy
 						break
 					}
 				}
 				if m == nil && len(p.Models) > 0 {
-					m = &p.Models[0]
+					mCopy := p.Models[0]
+					m = &mCopy
 				}
 				if m != nil {
 					// Enrich from catalog if needed

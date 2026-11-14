@@ -523,6 +523,45 @@ if err:
     FAILED=$((FAILED + 1))
 fi
 
+# 17. DELTA-48 Declarative Model Adoption: Zero occurrences of 'gemini-3.8-'
+#     in non-test .go files under cmd/g8s/, internal/initwiz/, internal/completion/,
+#     internal/controlplane/, internal/conv/, and internal/harness/.
+echo "--> [17/17] Verifying zero 'gemini-3.8-' in non-test .go files (DELTA-48)..."
+if ! python3 -c "
+import os, sys
+
+target_dirs = [
+    'cmd/g8s',
+    'internal/initwiz',
+    'internal/completion',
+    'internal/controlplane',
+    'internal/conv',
+    'internal/harness',
+]
+
+err = False
+for d in target_dirs:
+    if not os.path.isdir(d):
+        continue
+    for root, dirs, files in os.walk(d):
+        # Skip test files
+        for f in files:
+            if f.endswith('_test.go'):
+                continue
+            if f.endswith('.go'):
+                path = os.path.join(root, f)
+                with open(path, 'r', encoding='utf-8') as fp:
+                    content = fp.read()
+                if 'gemini-3.8-' in content:
+                    print(f'::error::{path} contains deprecated gemini-3.8- reference')
+                    err = True
+
+if err:
+    sys.exit(1)
+"; then
+    FAILED=$((FAILED + 1))
+fi
+
 if [ "$FAILED" -gt 0 ]; then
     echo ""
     echo "[DOC-CONTRACT] FAILED: $FAILED contract violation(s) found."

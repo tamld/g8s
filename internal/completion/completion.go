@@ -59,7 +59,7 @@ _g8s() {
                 '--prompt=[Prompt text for worker]:prompt:' \
                 '--role=[Worker role profile]:role:(collector scout mcp-mapper summarizer verifier test-runner researcher implementer sec-auditor analyst)' \
                 '--permission=[Permission profile]:permission:(read_only automation_read workspace_write)' \
-                '--model=[Target model name]:model:(gemini-3.8-flash-high claude-3-7-sonnet-latest gpt-4o)' \
+                '--model=[Target model name]:model:(reasoning-high fast-agent gemini-4-hydrogen-low claude-sonnet-4-6 gpt-5.4)' \
                 '--timeout=[Execution timeout duration]:timeout:' \
                 '--idempotency-key=[Unique submission key]:key:' \
                 '--add-dir=[Allowed directory path]:dir:_files -/' \

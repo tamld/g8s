@@ -86,7 +86,7 @@ func AuditRefusalEcho(ctx context.Context, stream string) (string, error) {
 	_, err = store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
 		IdempotencyKey: "refusal-echo-audit-task",
 		Payload:        reqPayload,
-		Model:          "gemini-3.8-flash-high",
+		Model:          "gemini-4-hydrogen-high",
 		Role:           "collector",
 		Permission:     "read_only",
 		Timeout:        "10s",
@@ -632,7 +632,7 @@ func AuditF2RecursiveContainment(ctx context.Context) (string, error) {
 	if _, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
 		IdempotencyKey: "f1-unopted-write",
 		Payload:        f1Payload,
-		Model:          "gemini-3.8-flash-high",
+		Model:          "gemini-4-hydrogen-high",
 		Role:           "collector",
 		Permission:     "workspace_write",
 		Timeout:        "30s",
@@ -646,7 +646,7 @@ func AuditF2RecursiveContainment(ctx context.Context) (string, error) {
 	f1Task, err := store.SubmitTask(ctx, controlplane.SubmitTaskRequest{
 		IdempotencyKey: "f1-worker-task",
 		Payload:        f1Payload,
-		Model:          "gemini-3.8-flash-high",
+		Model:          "gemini-4-hydrogen-high",
 		Role:           "collector",
 		Permission:     "workspace_write",
 		Timeout:        "30s",
@@ -666,7 +666,7 @@ func AuditF2RecursiveContainment(ctx context.Context) (string, error) {
 		IdempotencyKey: "f2-subagent-task",
 		ParentTaskID:   &parentID,
 		Payload:        f2Payload,
-		Model:          "gemini-3.8-flash-low",
+		Model:          "gemini-4-hydrogen-low",
 		Role:           "scout",
 		Permission:     "read_only",
 		Timeout:        "15s",

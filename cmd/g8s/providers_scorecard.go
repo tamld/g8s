@@ -238,7 +238,7 @@ func runProvidersEvaluate(args []string) {
 				iterCleanup()
 			}
 			dur := time.Since(start).Milliseconds()
-			errMsg := dispatch.SanitizeOutput(sErr.Error())
+			errMsg := routing.SanitizeScorecardError(dispatch.SanitizeOutput(sErr.Error()))
 			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 				Provider:       entryName,
@@ -273,7 +273,7 @@ func runProvidersEvaluate(args []string) {
 			dur = time.Since(start).Milliseconds()
 		}
 		if wErr != nil {
-			errMsg := dispatch.SanitizeOutput(wErr.Error())
+			errMsg := routing.SanitizeScorecardError(dispatch.SanitizeOutput(wErr.Error()))
 			fc := classifyProbeFailure(false, false, errMsg)
 			_ = routing.RecordModelOutcome(pathutil.DefaultStateDir(), routing.ModelOutcomeRecord{
 				Provider:       entryName,
@@ -315,7 +315,7 @@ func runProvidersEvaluate(args []string) {
 			vCmd.Env = scrubVerifyEnv(os.Environ())
 			if out, vErr := vCmd.CombinedOutput(); vErr != nil {
 				vPassed = false
-				errMsg = dispatch.SanitizeOutput(strings.TrimSpace(string(out)))
+				errMsg = routing.SanitizeScorecardError(dispatch.SanitizeOutput(strings.TrimSpace(string(out))))
 			}
 			vCancel()
 		}

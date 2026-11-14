@@ -2,20 +2,77 @@
   "version": "1.0",
   "providers": [
     {
+      "name": "9router",
+      "class": "api_call",
+      "protocol": "9router",
+      "base_url": "http://127.0.0.1:20128/v1",
+      "base_url_env": "NINEROUTER_URL",
+      "auth_env": "OPENAI_API_KEY",
+      "allow_unlisted_models": true,
+      "models": [
+        {
+          "id": "reasoning-high",
+          "family": "nvidia",
+          "cost_tier": "free",
+          "status": "active"
+        },
+        {
+          "id": "fast-agent",
+          "family": "nvidia",
+          "cost_tier": "free",
+          "status": "active"
+        }
+      ],
+      "slots": 4
+    },
+    {
+      "name": "opencode",
+      "class": "platform_dispatch",
+      "models": [
+        {
+          "id": "9router/reasoning-high",
+          "family": "nvidia",
+          "cost_tier": "free",
+          "status": "active"
+        }
+      ],
+      "slots": 4,
+      "args": [
+        "opencode",
+        "run",
+        "-m",
+        "{model}",
+        "{prompt}"
+      ]
+    },
+    {
       "name": "agy",
       "class": "platform_dispatch",
       "models": [
         {
-          "id": "gemini-3.8-flash-high"
+          "id": "gemini-4-hydrogen-low",
+          "effort_style": "baked-name",
+          "family": "google",
+          "cost_tier": "economy",
+          "status": "active"
+        },
+        {
+          "id": "gemini-4-hydrogen-high",
+          "effort_style": "baked-name",
+          "family": "google",
+          "cost_tier": "economy",
+          "status": "active"
         }
       ],
-      "slots": 8,
+      "slots": 4,
       "args": [
         "agy",
+        "--print",
         "--model",
         "{model}",
         "--mode",
-        "accept-edits",
+        "agent",
+        "--prompt",
         "{prompt}"
       ]
     },
@@ -24,10 +81,16 @@
       "class": "platform_dispatch",
       "models": [
         {
-          "id": "claude-3-7-sonnet-latest"
+          "id": "claude-sonnet-4-6",
+          "family": "anthropic",
+          "cost_tier": "standard",
+          "status": "active"
         },
         {
-          "id": "claude-haiku-4-5"
+          "id": "claude-haiku-4-5",
+          "family": "anthropic",
+          "cost_tier": "economy",
+          "status": "active"
         }
       ],
       "slots": 2,

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/ladder"
@@ -181,7 +182,12 @@ func walkLineage(ctx context.Context, store *controlplane.Store, telemEvents []t
 	if p, ok := rootPayload["permission"].(string); ok && p != "" {
 		perm = p
 	}
-	model := "gemini-3.8-flash-high"
+	prov, _ := rootPayload["provider"].(string)
+	cat, _ := config.LoadDefaultCatalog()
+	model := config.ResolveProviderDefaultModel(nil, cat, prov)
+	if model == "" {
+		model = "gemini-4-hydrogen-high"
+	}
 	if m, ok := rootPayload["model"].(string); ok && m != "" {
 		model = m
 	}
