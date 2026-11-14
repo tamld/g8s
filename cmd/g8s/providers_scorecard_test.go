@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/harness/probe"
 	"github.com/tamld/g8s/internal/provider"
+	"github.com/tamld/g8s/internal/routing"
 )
 
 func TestClassifyProbeFailure(t *testing.T) {
@@ -297,5 +299,68 @@ func TestEvalRun_MultiAdapterResolutionAndContractPrompt(t *testing.T) {
 	}
 	if !strings.Contains(capturedPrompt, "[G8S F1 ZERO-TRUST SECURITY HARNESS CONTRACT]") {
 		t.Fatalf("expected wrapped harness contract prompt, got %q", capturedPrompt)
+	}
+}
+
+func TestRFC1918RedactionOnProbeErrors(t *testing.T) {
+	// Test routing.SanitizeScorecardError directly
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "redact 192.168.x.x",
+			input:    "connection failed to http://192.168.10.25:20128/v1/chat/completions",
+			expected: "connection failed to http://<redacted-lan-ip>:20128/v1/chat/completions",
+		},
+		{
+			name:     "redact 10.x.x.x",
+			input:    "dial tcp 10.0.0.1:8080: connect: connection refused",
+			expected: "dial tcp <redacted-lan-ip>:8080: connect: connection refused",
+		},
+		{
+			name:     "redact 172.16.x.x",
+			input:    "timeout connecting to 172.16.254.1:443",
+			expected: "timeout connecting to <redacted-lan-ip>:443",
+		},
+		{
+			name:     "redact 172.31.x.x",
+			input:    "error: 172.31.0.5 rejected the connection",
+			expected: "error: <redacted-lan-ip> rejected the connection",
+		},
+		{
+			name:     "multiple IPs redacted",
+			input:    "failed over from 192.168.1.1 to 10.0.0.2 then 172.16.0.3",
+			expected: "failed over from <redacted-lan-ip> to <redacted-lan-ip> then <redacted-lan-ip>",
+		},
+		{
+			name:     "public IP not redacted",
+			input:    "connected to 8.8.8.8:53 successfully",
+			expected: "connected to 8.8.8.8:53 successfully",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := routing.SanitizeScorecardError(tt.input)
+			if result != tt.expected {
+				t.Errorf("SanitizeScorecardError(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+
+	// Test that probe error messages go through the redaction pipeline
+	// This tests the full path: dispatch.SanitizeOutput -> routing.SanitizeScorecardError
+	probeError := dispatch.SanitizeOutput("dial tcp 192.168.10.25:20128: connect: connection refused")
+	redacted := routing.SanitizeScorecardError(probeError)
+	expected := "dial tcp <redacted-lan-ip>:20128: connect: connection refused"
+	if redacted != expected {
+		t.Errorf("Full pipeline redacted = %q, want %q", redacted, expected)
 	}
 }

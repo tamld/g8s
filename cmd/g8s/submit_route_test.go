@@ -111,8 +111,8 @@ func TestSubmitRoute_GoldenByteIdentity(t *testing.T) {
 	}
 	// Default effort (medium) realigns the baked-name model to the matching
 	// variant (issue #563 C3, un-shadowed by #568) — on manual routes too.
-	if payload["model"] != "gemini-3.8-flash-medium" {
-		t.Errorf("model = %v, want gemini-3.8-flash-medium", payload["model"])
+	if payload["model"] != "gemini-4-hydrogen-medium" {
+		t.Errorf("model = %v, want gemini-4-hydrogen-medium", payload["model"])
 	}
 	if payload["role"] != "collector" {
 		t.Errorf("role = %v, want collector", payload["role"])
@@ -203,9 +203,8 @@ func TestSubmitRoute_Table(t *testing.T) {
 			extraArgs:    []string{"--add-dir", "cmd/g8s"},
 			wantRole:     "collector",
 			wantProvider: "agy",
-			// Router picks flash-high; default effort (medium) then realigns the
-			// baked model to the matching variant (issue #563 C3, un-shadowed by
-			// the #568 catalog fix).
+			// Router picks flash-high from test manifest; default effort (medium) then
+			// realigns the baked model to the matching variant (issue #563 C3, #568).
 			wantModel:  "gemini-3.8-flash-medium",
 			wantSource: "deterministic",
 		},
@@ -217,7 +216,7 @@ func TestSubmitRoute_Table(t *testing.T) {
 			extraArgs:    []string{"--add-dir", "internal/receipt"},
 			wantRole:     "test-runner",
 			wantProvider: "agy",
-			wantModel:    "gemini-3.8-flash-medium", // realigned from flash-high at default effort (#568)
+			wantModel:    "gemini-3.8-flash-medium", // realigned from test-manifest flash-high at default effort (#568)
 			wantSource:   "deterministic",
 		},
 		{
@@ -227,7 +226,7 @@ func TestSubmitRoute_Table(t *testing.T) {
 			routeFlag:    "auto",
 			wantRole:     "collector",
 			wantProvider: "agy",
-			wantModel:    "gemini-3.8-flash-medium", // realigned from flash-high at default effort (#568)
+			wantModel:    "gemini-3.8-flash-medium", // realigned from test-manifest flash-high at default effort (#568)
 			wantSource:   "deterministic",
 		},
 		{

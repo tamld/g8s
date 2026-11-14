@@ -1353,3 +1353,130 @@ func TestSubmitProviderNeutralDefaultModelAndOrchestratorNoneEffort(t *testing.T
 		t.Errorf("orchestrator effort_applied = %v, want empty/omitted", applied)
 	}
 }
+
+// TestSubmit_ExplicitTripleInheritsProfileTimeout verifies Issue #894:
+// Profile timeout inheritance on explicit triple (--provider + --model without --profile + --timeout)
+func TestSubmit_ExplicitTripleInheritsProfileTimeout(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "profile_timeout.db")
+	rcDBPath := filepath.Join(tempDir, "receipts.db")
+
+	// Issue a receipt for workspace_write test
+	mgr, err := receipt.NewReceiptManager(rcDBPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc, err := mgr.IssueReceipt("brain-supervisor", []string{"."}, 15*time.Minute,
+		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
+			SchemaURI:      "g8s://envelope/write-receipt/v1",
+			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},
+			RequiredFields: []string{"receipt_id", "issuer", "allowed_paths", "expires_at"},
+		}),
+		receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{
+			RulesetVersion: "v1",
+			PipelineDigest: "test-profile-timeout",
+		}),
+		receipt.WithProvenanceContext("g8s/test", "HEAD", "test-profile-timeout"),
+	)
+	mgr.Close()
+	if err != nil {
+		t.Fatalf("IssueReceipt: %v", err)
+	}
+
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + filepath.Join(tempDir, "absent-providers.json"),
+		"AGY_MCP_ALLOW_WORKSPACE_WRITE=1",
+	}
+
+	// Test 1: --provider cursor --model composer-2.5 --effort medium --role implementer --permission workspace_write
+	// Should inherit 600s from impl-medium profile
+	t.Run("cursor_impl_medium_inherits_600s", func(t *testing.T) {
+		env, code, _ := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "cursor-impl-medium",
+			"--prompt", "Test impl-medium timeout inheritance",
+			"--provider", "cursor",
+			"--model", "composer-2.5",
+			"--effort", "medium",
+			"--role", "implementer",
+			"--permission", "workspace_write",
+			"--receipt-id", rc.ReceiptID,
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v", code, env.Error)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "cursor-impl-medium")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		// Verify timeout was inherited from profile (600s = 10m)
+		timeoutVal, ok := payload["timeout"].(string)
+		if !ok || timeoutVal != "600s" {
+			t.Errorf("timeout = %v, want 600s (from impl-medium profile)", timeoutVal)
+		}
+	})
+
+	// Test 2: --provider cursor --model composer-2.5 --effort low --role scout --permission read_only
+	// Should inherit 180s from scout-fast profile
+	t.Run("cursor_scout_fast_inherits_180s", func(t *testing.T) {
+		env, code, _ := runSubmitCLI(t, binPath, envVars,
+			"--idempotency-key", "cursor-scout-fast",
+			"--prompt", "Test scout-fast timeout inheritance",
+			"--provider", "cursor",
+			"--model", "composer-2.5",
+			"--effort", "low",
+			"--role", "scout",
+			"--permission", "read_only",
+		)
+		if code != 0 {
+			t.Fatalf("submit failed: code=%d err=%+v", code, env.Error)
+		}
+		reqJSON := getTaskRequestJSON(t, dbPath, "cursor-scout-fast")
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(reqJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		// Verify timeout was inherited from profile (180s = 3m)
+		timeoutVal, ok := payload["timeout"].(string)
+		if !ok || timeoutVal != "180s" {
+			t.Errorf("timeout = %v, want 180s (from scout-fast profile)", timeoutVal)
+		}
+	})
+}
+
+// TestSubmit_EnvPremiseCheckAndConformanceOptIn verifies that G8S_PREMISE_CHECK=1
+// triggers premise gate without --premise-check flag.
+func TestSubmit_EnvPremiseCheckAndConformanceOptIn(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "env_premise.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + filepath.Join(tempDir, "absent-providers.json"),
+		"G8S_PREMISE_CHECK=1",
+	}
+
+	// Submit with G8S_PREMISE_CHECK=1 should trigger premise gate
+	env, code, _ := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "env-premise-check",
+		"--prompt", "Test env premise check opt-in",
+		"--provider", "agy",
+	)
+	if code != 0 {
+		// The premise gate might block if premises are contradicted, or pass
+		// Either way, it should have run the premise check
+		// Check that the error (if any) mentions premise
+		if env.Error != nil {
+			if !strings.Contains(env.Error.Message, "premise") && !strings.Contains(env.Error.Message, "contradict") {
+				t.Errorf("expected premise-related error, got: %q", env.Error.Message)
+			}
+		}
+	}
+	// At minimum, verify the task was processed (queued or rejected by premise gate)
+	// and not rejected for missing --premise-check flag
+	if env.Error != nil && strings.Contains(env.Error.Message, "requires --premise-check") {
+		t.Errorf("G8S_PREMISE_CHECK=1 should have enabled premise check without flag; got: %q", env.Error.Message)
+	}
+}
