@@ -152,7 +152,7 @@ if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
 fi
 
 # Check for uncommitted changes (excluding release-managed files)
-RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1"
+RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1|packaging/winget/manifest\.yaml|packaging/chocolatey/g8s\.nuspec"
 UNCOMMITTED=$(git status --porcelain | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
 if [ -n "$UNCOMMITTED" ] && [ "$DRY_RUN" -eq 0 ]; then
     echo -e "${RED}Error: Uncommitted changes detected. Commit or stash first.${NC}" >&2
@@ -185,28 +185,55 @@ else
     echo -e "${GREEN}✓ Updated cmd/g8s/version.go${NC}"
 fi
 
-# Update CHANGELOG.md - add new version header if not present
+# Update CHANGELOG.md - promote [Unreleased] section to new version
 DATE=$(date +%Y-%m-%d)
 CHANGELOG_HEADER="## [${NEW_VERSION}] - ${DATE}"
 if grep -q "^## \[${NEW_VERSION}\]" CHANGELOG.md; then
     echo -e "${YELLOW}CHANGELOG.md already has entry for ${NEW_VERSION}${NC}"
 else
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo -e "${YELLOW}Would add to CHANGELOG.md:${NC}"
+        echo -e "${YELLOW}Would promote CHANGELOG.md [Unreleased] to ${NEW_VERSION}:${NC}"
         echo -e "  ${CHANGELOG_HEADER}"
-        echo -e "  "
-        echo -e "  ### Added"
-        echo -e "  - "
     else
-        # Insert after the first line (title)
-        sed -i.bak "3a\\
-\\
-${CHANGELOG_HEADER}\\
-\\
-### Added\\
-- " CHANGELOG.md
-        rm -f CHANGELOG.md.bak
-        echo -e "${GREEN}✓ Added ${NEW_VERSION} entry to CHANGELOG.md${NC}"
+        if grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+            has_unreleased_bullets=$(awk '
+                /^## \[Unreleased\]/ { in_unrel=1; next }
+                in_unrel && /^## \[/ { exit }
+                in_unrel && /^[-*] / { found=1; exit }
+                END { print (found ? 1 : 0) }
+            ' CHANGELOG.md)
+            awk -v hdr="${CHANGELOG_HEADER}" -v ver="${NEW_VERSION}" -v has_b="${has_unreleased_bullets}" '
+                /^## \[Unreleased\]/ && !done_ins {
+                    print $0
+                    print ""
+                    print hdr
+                    if (has_b == 0) {
+                        print ""
+                        print "### Added"
+                        print ""
+                        print "- Release " ver
+                    }
+                    done_ins=1
+                    next
+                }
+                { print $0 }
+            ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+        else
+            awk -v hdr="${CHANGELOG_HEADER}" -v ver="${NEW_VERSION}" '
+                NR == 3 {
+                    print $0
+                    print ""
+                    print hdr
+                    print ""
+                    print "### Added"
+                    print ""
+                    print "- Release " ver
+                    next
+                }
+                { print $0 }
+            ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+        fi
+        echo -e "${GREEN}✓ Promoted CHANGELOG.md [Unreleased] to ${NEW_VERSION}${NC}"
     fi
 fi
 
@@ -268,6 +295,33 @@ else
     echo -e "${YELLOW}Warning: packaging/chocolatey/tools/chocolateyinstall.ps1 not found, skipping chocolatey script update${NC}" >&2
 fi
 
+# Update winget manifest.yaml
+if [ -f "packaging/winget/manifest.yaml" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update packaging/winget/manifest.yaml: PackageVersion and download URL${NC}"
+    else
+        sed -i.bak -E "s/^([[:space:]]*PackageVersion:[[:space:]]*)[^\"]+/\1${NEW_VERSION}/" packaging/winget/manifest.yaml
+        sed -i.bak -E "s|(/download/)v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?/g8s_[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?_windows_|\1v${NEW_VERSION}/g8s_${NEW_VERSION}_windows_|g" packaging/winget/manifest.yaml
+        rm -f packaging/winget/manifest.yaml.bak
+        echo -e "${GREEN}✓ Updated packaging/winget/manifest.yaml${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: packaging/winget/manifest.yaml not found, skipping winget manifest update${NC}" >&2
+fi
+
+# Update chocolatey nuspec
+if [ -f "packaging/chocolatey/g8s.nuspec" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update packaging/chocolatey/g8s.nuspec: version element${NC}"
+    else
+        sed -i.bak -E "s|(<version>)[^<]+(</version>)|\1${NEW_VERSION}\2|" packaging/chocolatey/g8s.nuspec
+        rm -f packaging/chocolatey/g8s.nuspec.bak
+        echo -e "${GREEN}✓ Updated packaging/chocolatey/g8s.nuspec${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: packaging/chocolatey/g8s.nuspec not found, skipping nuspec update${NC}" >&2
+fi
+
 # Build list of release files to stage
 STAGE_FILES=("cmd/g8s/version.go")
 if [ -f "CHANGELOG.md" ]; then
@@ -276,7 +330,7 @@ fi
 if [ -f "manifest.json" ]; then
     STAGE_FILES+=("manifest.json")
 fi
-for pkg_file in "packaging/windows/g8s.nsi" "packaging/windows/g8s.wxs" "packaging/chocolatey/tools/chocolateyinstall.ps1"; do
+for pkg_file in "packaging/windows/g8s.nsi" "packaging/windows/g8s.wxs" "packaging/chocolatey/tools/chocolateyinstall.ps1" "packaging/winget/manifest.yaml" "packaging/chocolatey/g8s.nuspec"; do
     if [ -f "$pkg_file" ]; then
         STAGE_FILES+=("$pkg_file")
     fi

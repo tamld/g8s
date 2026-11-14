@@ -135,7 +135,7 @@ Incoming Task:
 | **DELTA-41** | [`41-feature-map-v2-collision-domains-spec.md`](../spec/openspec/41-feature-map-v2-collision-domains-spec.md) | `internal/featuremap`, `cmd/g8s` | APPLIED |
 | **DELTA-42** | [`42-premise-challenge-and-sycophancy-gate-spec.md`](../spec/openspec/42-premise-challenge-and-sycophancy-gate-spec.md) | `internal/premise`, `internal/harness/probe`, `cmd/g8s` | APPLIED |
 | **DELTA-43** | [`43-provider-conformance-matrix-spec.md`](../spec/openspec/43-provider-conformance-matrix-spec.md) | `internal/provider/conformance`, `cmd/g8s` | APPLIED |
-| **DELTA-44** | — | — | skipped (numbering gap, reserved) |
+| **DELTA-44** | [`44-openspec-tombstone.md`](../spec/openspec/44-openspec-tombstone.md) | — | RESERVED |
 | **DELTA-45** | [`45-five-axis-kaizen-scorecard-spec.md`](../spec/openspec/45-five-axis-kaizen-scorecard-spec.md) | `internal/routing`, `cmd/g8s` | APPLIED |
 | **DELTA-46** | [`46-peer-coordinator-ledger-spec.md`](../spec/openspec/46-peer-coordinator-ledger-spec.md) | `internal/mesh`, `internal/mcp`, `cmd/g8s` | APPLIED |
 | **DELTA-47** | [`47-reach-layer-spec.md`](../spec/openspec/47-reach-layer-spec.md) | `internal/reach`, `cmd/g8s` | APPLIED |
@@ -164,7 +164,7 @@ When orchestrating workers via `agy`, `claude`, or other CLI providers ([`ADR-00
    - **Offer Bundle (`offer/`) & `wiki.py`**: Sibling repositories adopt `g8s` via [`offer/ONBOARDING.md`](../offer/ONBOARDING.md) and return sanitized Mode 3 packets. Align session state with Second Brain governance via `~/.local/bin/wiki.py orient`.
 5. **F0 Cognitive Purity & Information Firewall (`ADR-0033` Phase 06b + Wave B)**:
    - F0 operates strictly as Brain (reasoning, brief authoring, consuming `RoundReceiptSchema` from `g8s verify --task <id> --json`, `watch_verdict` from `g8s watch --pr <N> --json`, `f0 gate check --json`). F0 NEVER manually hunts raw CI logs, scans disk bloat, or runs procedural janitor tasks. All log-hunting, CI failure extraction, and file sync tasks are delegated to F1 workers.
-6. **Universal Config-Driven LLM Call Consumer, `9router` Integration & Zero-Trust Hardening (`DELTA-25..47`, `v0.23.0`)**:
+6. **Universal Config-Driven LLM Call Consumer, `9router` Integration & Zero-Trust Hardening (`DELTA-25..48`, `v0.24.0`)**:
    - Direct synchronous & bounded agentic loop execution: `./bin/g8s llm-call --provider 9router --model <combo> --prompt "..." [--json] [--apply-files] [--max-turns <1..5>] [--verify-cmd "..."]`.
    - Durable worker queue execution, adaptive effort timeout & claim affinity (`DELTA-27..32`): `./bin/g8s submit --provider 9router --model <combo> [--output-schema <schema.json>]` (auto-scales default timeout by effort: `45s`/`90s`/`240s`; enforces `depth <= 2` and parent `add_dirs` jail on `--parent-task-id`) + `./bin/g8s worker --once [--provider <p>] [--model <m>]`.
    - Cross-repository fleet hygiene gate (`DELTA-32`): `./bin/g8s fleet status [--dir <workspace>] [--require-clean] [--json]`.

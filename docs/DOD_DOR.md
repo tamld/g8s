@@ -1,6 +1,6 @@
 # Definition of Done (DoD) & Definition of Ready (DoR)
 
-> **Status**: v0.6.1 governance baseline (see #255 for full overhaul). Sections
+> **Status**: v0.24.0 governance baseline (see #255 for full overhaul). Sections
 > split into **Engineering** (code/feature) and **Agent** (dispatch/run) tracks
 > per the lifecycle governance proposal.
 
@@ -50,7 +50,7 @@ model the project now runs on:
    (Jev sensor + deterministic policy). `instant_kill` abandons; `escalate_hitl`
    with risk ≥ 1.0 routes to operator review via PR — never silent.
 2. **Worker Packet Ceiling**: recon/audit packets bounded well below the
-   measured worker ceiling (~450K tokens for gemini-3.8-flash-high); explicit
+   measured worker ceiling (~450K tokens for catalog-governed models: `9router/reasoning-high`, `gemini-4-hydrogen-high`); explicit
    paths, no blind filesystem searches.
 3. **Scope Roots Declared**: delegated-write submissions declare jail roots
    (`--scope-root`); cross-root access is explicit opt-in (#348).

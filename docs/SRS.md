@@ -70,6 +70,14 @@
   * Context Broker `WorldSnippets` (`world_snippets` JSON): file-backed via `G8S_WORLD_SNIPPETS_PATH` (JSON array of strings, fail-open on missing env/file), per-snippet 512-char rune clamp, max five per source, 4096-char drop order `RecentOutcomes → WorldSnippets → VaultNotes → SomPhase` (ADR-0037 A2).
   * Reach-to-vault promotion (`PromoteReachArtifact`): requires non-empty forensic receipt hash, scrubs credential patterns to `[REDACTED]`, defaults `Status=PROPOSED`, idempotent id `reach:<body_sha256>` (ADR-0037 A3).
 
+* **FR-12 (Declarative Model Adoption & Adapter-Neutral Control Plane, `DELTA-48`)**:
+  * `.g8s/agent-models.yml` catalog v3 with lifecycle fields: `status` (active/deprecated/sunset), `replacement` (model ID), `sunset_at` (ISO timestamp) for declarative model governance.
+  * `config.ResolveProviderDefaultModel`: manifest-first, non-mutating value copy with catalog fallback; purges deprecated `gemini-3.8-*` hardcoded defaults.
+  * Catalog profile timeout inheritance on explicit `(--provider, --model, --effort)` triples (`#894`).
+  * `G8S_PREMISE_CHECK` / `G8S_ENFORCE_CONFORMANCE` env & settings opt-in for premise validation (`#906`).
+  * RFC1918 LAN IP redaction on probe errors (DLP).
+  * Strict adapter neutrality: `agy` treated identically to peer CLI/API adapters (`9router`, `opencode`, `codex`, `claude`, `cursor`, `gemini`, `ollama`).
+
 ## 2. Non-Functional Requirements (NFR)
 * **NFR-1 (Cold Start Latency)**: CLI invocation cold start < 15ms.
 * **NFR-2 (Memory Footprint)**: Idle daemon memory consumption < 15MB RAM.
@@ -85,4 +93,5 @@
 | **`v0.20.0`** (2026-10-22) | **Zero-Trust Execution Hardening, Bounded Agentic Loop & Epistemic Verification** (`DELTA-26..32`, `#661..#664`): Fail-closed worktree isolation (`#656`), Draft-7 `--output-schema` (`#659`), `g8s fleet status` (`DELTA-32`), multi-project Vault grounding (`#661`), fail-closed T3 model-family disjointness (`#662`), non-Markovian loop rollback (`#663`), and `--verify-cmd` DLP scrubbing (`#664`). | **Done** |
 | **`v0.22.0`** (2026-11-01) | **Multi-Coordinator Native Interop Ledger (`RT-MESH v1`, `DELTA-46`) & Reach Layer (`DELTA-47`, [ADR-0037](decisions/0037-reach-layer.md))**: shared SQLite WAL peer ledger (`#700`), `g8s reach` ordered fallback chains (`S1`), health/owned-paths ledgers (`S2`), Context Broker `WorldSnippets` + `PROPOSED` vault promotion (`S3`), and machine-artifact research citations (`S4`). | **Done** |
 | **`v0.23.0`** (2026-11-08) | **Containment Hardened, Mechanized SSoT & Process-Reflective** ([ADR-0038](decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](decisions/0040-mechanized-ssot.md), [ADR-0041](decisions/0041-worker-git-proxy.md)): claim-scoped mutation fence end-to-end, `RT-MESH v1.1` (`A1..A5`), `D-09` reflex cycle (`SENSE->JUDGE->ACT`), provenance honesty ledger, Mechanized SSoT parity gates, and worker git-commit proxy. | **Done** |
+| **`v0.24.0`** (2026-11-15) | **Declarative Model Adoption, Adapter-Neutral Control Plane & Zero-Implicit-Default Closure** (`DELTA-48`, [#893](https://github.com/tamld/g8s/issues/893), [#894](https://github.com/tamld/g8s/issues/894), [#902](https://github.com/tamld/g8s/issues/902), [#904](https://github.com/tamld/g8s/pull/904), [#905](https://github.com/tamld/g8s/issues/905), [#906](https://github.com/tamld/g8s/issues/906), [#907](https://github.com/tamld/g8s/issues/907)): `.g8s/agent-models.yml` catalog v3 (`status`, `replacement`, `sunset_at`), `ResolveProviderDefaultModel` purging `gemini-3.8-*` defaults, catalog profile timeout inheritance on explicit triples, scope-aware `g8s verify` fallback, dynamic MCP server version stamping, mechanized verification skill `gate_command` SSoT, RFC1918 probe error DLP redaction, strict adapter neutrality (`agy` = peer adapters). | **Done** |
 | **`v0.30.0+`** (Planned — Pre-1.0 Burn-In) | **90-Day Multi-Repo Offer Retention** (`SCORECARD.md` M4 across 5 repositories with 0 gate regressions) and formal pre-1.0 API freeze criteria (`v1.0.0` is gated on empirical burn-in evidence, not calendar dates). | **Planned** |

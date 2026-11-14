@@ -362,14 +362,14 @@ When a worker claims a task, it resolves the executable command line from `provi
 ### 1. Legacy Tasks (No Provider Specified)
 - If the task payload has no `provider` (or `provider` is empty `""`):
   1. The worker checks `providers.json` for a `platform_dispatch` args template whose model ID matches the task's `model`.
-  2. If no model match exists, it falls back to the legacy default (`agy` binary with default model `gemini-3.8-flash-high`).
+  2. If no model match exists, it falls back to the legacy default (`agy` binary with default model `gemini-4-hydrogen-high` resolved declaratively via `config.ResolveProviderDefaultModel` from `.g8s/agent-models.yml` (`DELTA-48`), noting `agy` is one platform CLI adapter among peers).
 
 ### 2. Provider-Targeted Tasks (Provider `P` Specified)
 - If the task payload specifies provider `P`:
   1. The worker looks up the `platform_dispatch` entry in `providers.json` where `name == P`.
   2. If found, the worker instantiates the provider's `args` template by replacing `{prompt}`, `{model}`, and `{timeout}` with the task's parameters.
   3. **No Silent Fallback**: If provider `P` is not found among `platform_dispatch` entries, the attempt **fails immediately** with an error listing the available `platform_dispatch` providers from `providers.json`. Under no circumstances will `g8s` fall back to `agy` or another default when a provider was explicitly requested.
-  4. **Queue Path Restriction**: If provider `P` matches an `api_call` entry, the attempt fails with a distinct error stating that `api_call` providers are not executable on the worker queue path.
+  4. **Queue Path Restriction**: If provider `P` matches an `api_call` entry, the attempt fails with a distinct error stating that `api_call` providers are not executable on the worker queue path (they execute via `g8s llm-call` synchronous CLI and the `api_call` bridge, while `platform_dispatch` runs external CLI workers).
 
 ---
 
@@ -384,5 +384,5 @@ Task results recorded by the worker capture provider provenance:
 
 ## Scope & Non-Goals
 
-- **`api_call` on the Queue Path**: `api_call` entries in `providers.json` are designed exclusively for direct HTTP/proxy orchestration calls (via `g8s orchestrate` or REST HTTP endpoints) and cannot be claimed or executed by `g8s worker` subprocess loops.
+- **`api_call` on the Queue Path**: `api_call` entries in `providers.json` are designed exclusively for direct HTTP/proxy orchestration calls via `g8s llm-call` synchronous CLI and the `api_call` bridge (not executable by `g8s worker` subprocess loops; `platform_dispatch` runs external CLI workers).
 - **Repository-Level Config Layering**: Configuration is strictly user-scoped (`~/.config/g8s/providers.json`) or environment-scoped (`G8S_PROVIDERS`). Repository-level overrides (such as `.g8s/providers.json` in project directories) are intentionally unsupported to prevent supply-chain security risks from untrusted repository configuration.

@@ -4,75 +4,102 @@ This document defines the strict, repeatable step-by-step procedure for preparin
 
 ---
 
-## 1. Pre-Release Verification Checklist (The 6-Gate Audit)
+## 1. Pre-Release Verification Checklist
 
-Before cutting any release tag (`vX.Y.Z`), the release manager (Human or Agent) must verify all 6 gates:
+Before cutting any release tag (`vX.Y.Z`), the release manager (Human or Agent) must verify all gates:
 
-- [ ] **Gate 1 (Clean Worktree)**: `git status` reports working tree clean, no untracked files.
-- [ ] **Gate 2 (Test & Race Detector)**: `CGO_ENABLED=0 go test -v -race ./...` passes 100% on all packages.
-- [ ] **Gate 3 (Multi-OS CI)**: GitHub Actions CI workflow on `main` is completely GREEN across macOS, Linux, and Windows.
-- [ ] **Gate 4 (Secret Hygiene)**: Run `gitleaks detect` or `trufflehog` to guarantee 0 secrets in Git history.
-- [ ] **Gate 5 (Spec Parity)**: All OpenSpec deltas targeted for this release in `spec/openspec/` are marked `APPLIED`.
-- [ ] **Gate 6 (Docs & Version Bump)**: Version string in `cmd/g8s/version.go` and `README.md` is updated.
-  - manifest.json version + latest_release are synced with version.go and the latest tag (enforced by the version-sync guard).
-- [ ] **Gate 7 (Red Cell Pass — HARD, ADR-0026 §5.1)**: an independent adversarial pass receives ONLY the public surface (README, release assets, CLI help, offer bundle) and its findings are triaged before the tag. A skip requires a named waiver recorded in the release notes (see `docs/directives.md` D-01).
-- [ ] **Gate 8 (Self-Audit Probes — per-release, ADR-0026 §5.3)**: `g8s eval run --category self-audit` passes and the result is recorded in the release notes (see `docs/directives.md` D-02).
+- [ ] **Clean `main` synced with `origin/main`**: `git status` reports working tree clean; local `main` matches `origin/main`.
+- [ ] **Full test + `-race` suite**: `CGO_ENABLED=0 go test -v -race ./...` passes 100% on all packages.
+- [ ] **Green multi-OS CI**: GitHub Actions workflows `CI`, `Quality`, `Crash-Survival E2E`, and `Windows E2E` on `main` are completely GREEN.
+- [ ] **Secret hygiene**: `gitleaks detect` reports 0 secrets in Git history.
+- [ ] **OpenSpec parity**: All OpenSpec deltas targeted for this release in `spec/openspec/` are marked `APPLIED` (or `RESERVED` for tombstones).
+- [ ] **D-01 Red Cell Pass** (`docs/directives.md`): Independent adversarial surface audit completed across `README.md`, CLI `--help`, and `offer/`; findings triaged before tag.
+- [ ] **D-02 Self-Audit probes** (`docs/directives.md`): `g8s eval run --category self-audit` passes and result recorded in release notes.
+- [ ] **Local pre-tag checks pass**: `./tools/pre_tag.sh` succeeds locally (version sync, changelog content, Go version parity, remote branch status, and `tools/ci_surface_inventory.sh` all green).
 
 ---
 
 ## 2. Release Execution Procedure
 
+### Automated Release via `tools/release.sh`
+
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ 1. BUMP VERSION │ ──► │ 2. RUN TESTS    │ ──► │ 3. GIT TAG      │ ──► │ 4. GORELEASER   │
-│ Update main.go  │     │ Verify -race    │     │ git tag vX.Y.Z  │     │ Publish Binaries│
-└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
+│ 1. DRY-RUN           │   │ 2. REAL RUN          │   │ 3. POST-TAG SYNC     │
+│ ./tools/release.sh   │   │ ./tools/release.sh   │   │ manifest.json amended│
+│ <VERSION> --dry-run  │   │ <VERSION>            │   │ with commit SHA/date │
+└──────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
 
-### Step 1 — Bump Version String
-Edit `cmd/g8s/main.go`:
-```go
-const Version = "0.1.0"
-```
+### Step 1 — Dry Run (Mandatory First)
 
-### Step 2 — Commit Version Bump
 ```bash
-git commit -am "chore(release): bump version to v0.1.0"
-git push origin main
+./tools/release.sh <VERSION> --dry-run
 ```
 
-### Step 3 — Create and Push Annotated Git Tag
+This prints all intended changes without modifying files:
+- Version bump in `cmd/g8s/version.go`
+- `CHANGELOG.md` `[Unreleased]` section promotion
+- `manifest.json` version and `latest_release.tag`
+- Packaging manifests: `packaging/windows/g8s.nsi`, `packaging/windows/g8s.wxs`, `packaging/chocolatey/tools/chocolateyinstall.ps1`, `packaging/winget/manifest.yaml`, `packaging/chocolatey/g8s.nuspec`
+
+### Step 2 — Real Run
+
 ```bash
-git tag -a v0.1.0 -m "Release v0.1.0: Pure-Go SQLite WAL Control Plane & Capability Receipts"
-git push origin v0.1.0
+./tools/release.sh <VERSION>
 ```
 
-### Step 4 — Automated GitHub Release via GoReleaser
-GitHub Actions automatically detects the tag push and executes GoReleaser to:
-1. Compile static binaries for:
-   * `darwin/arm64` (Apple Silicon)
-   * `darwin/amd64` (Intel Mac)
-   * `linux/amd64` (Linux x86_64)
-   * `linux/arm64` (Linux ARM64 / Raspberry Pi / Ampere)
-   * `windows/amd64` (Windows x64)
-2. Generate SHA-256 checksums (`checksums.txt`).
-3. Generate automated Changelog based on Conventional Commits.
-4. Update Homebrew Tap recipe (`tamld/homebrew-tap/g8s.rb`).
+The script executes atomically:
+1. **Pre-tag gates**: Runs `tools/pre_tag.sh` with `G8S_TARGET_VERSION=<VERSION>` (validates version sync, changelog, Go version, CI status, surface inventory).
+2. **Updates version.go**: Bumps `Version` constant in `cmd/g8s/version.go`.
+3. **Promotes `CHANGELOG.md`**: Inserts new version header after `## [Unreleased]`, preserving existing notes.
+4. **Updates `manifest.json`**: Sets `version` and `latest_release.tag` to `v<VERSION>` (does NOT touch `latest_release.commit` or `date` — those are post-tag).
+5. **Updates packaging manifests**:
+   - `packaging/windows/g8s.nsi`: `!define VERSION`
+   - `packaging/windows/g8s.wxs`: `<?define Version?>`
+   - `packaging/chocolatey/tools/chocolateyinstall.ps1`: Download URL and MSI filename
+   - `packaging/winget/manifest.yaml`: `PackageVersion` and download URL path
+   - `packaging/chocolatey/g8s.nuspec`: `<version>` element
+6. **Commits**: Stages all modified files, creates commit `chore: release <VERSION>`.
+7. **Tags**: Creates annotated tag `v<VERSION>` with message `Release <VERSION>`.
+8. **Atomic push**: `git push --atomic origin main v<VERSION>`.
+9. **Post-tag manifest amendment**: Updates `manifest.json` `latest_release.commit` (short SHA of tag commit) and `latest_release.date` (today), commits `chore(release): record v<VERSION> commit/date in manifest latest_release`, pushes to `main`.
+
+### Step 3 — GoReleaser (Triggered by Tag Push)
+
+`.github/workflows/release.yml` executes GoReleaser to:
+- Cross-compile static binaries for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, `windows/arm64`.
+- Generate Linux packages: `.deb`, `.rpm`, `.apk`.
+- Generate SHA-256 `checksums.txt` and Sigstore bundle (`cosign`).
+- Generate SPDX SBOM via `syft`.
+- Update Homebrew tap (`tamld/homebrew-g8s`) and Scoop bucket (`tamld/scoop-bucket`).
 
 ---
 
 ## 3. Post-Release Smoke Test
 
-Run a 60-second end-to-end smoke test on a clean machine:
+Run on a clean machine after assets are published:
 
 ```bash
-# 1. Download & Verify Binary
-./g8s version
+# 1. Version & Build Info
+g8s version
 
-# 2. Check Roles & Permissions
-./g8s roles
-./g8s permissions
+# 2. Roles & Permissions Surface
+g8s roles
+g8s permissions
 
-# 3. Issue & Verify Receipt
-./g8s receipt issue --issuer test --allow "./src/*" --ttl 300
+# 3. Receipt Issuance & Verification
+g8s receipt issue --issuer smoke --path "internal/config/*.go" --ttl 300
 ```
+
+---
+
+## 4. Rollback Procedure
+
+If a release must be reverted, see [`docs/release/ROLLBACK.md`](release/ROLLBACK.md) for the binary revert and tag deletion procedure.
+
+---
+
+## 5. Versioning Policy
+
+`g8s` follows [Semantic Versioning 2.0.0](https://semver.org/). See [`docs/VERSIONING.md`](VERSIONING.md) for milestone gating and pre-release conventions.

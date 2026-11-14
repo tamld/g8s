@@ -150,14 +150,45 @@ EOF
     # 6. packaging/chocolatey/tools/chocolateyinstall.ps1
     if [ "$omit_file" != "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
         cat > "$target_dir/packaging/chocolatey/tools/chocolateyinstall.ps1" <<EOF
-\$url = 'https://github.com/tamld/g8s/releases/download/v${version}/g8s_${version}_windows_amd64.msi'
+\$toolsDir = "\$(Split-Path -Parent \$MyInvocation.MyCommand.Definition)"
+\$url = 'https://github.com/tamld/g8s/releases/download/v${version}/g8s_${version}_windows_amd64.zip'
 \$checksum = '<from checksums.txt>'
 \$packageArgs = @{
   packageName    = 'g8s'
-  fileType       = 'MSI'
+  unzipLocation  = \$toolsDir
   url            = \$url
+  checksum       = \$checksum
+  checksumType   = 'sha256'
 }
-Install-ChocolateyPackage @packageArgs
+Install-ChocolateyZipPackage @packageArgs
+EOF
+    fi
+
+    # 7. packaging/winget/manifest.yaml
+    if [ "$omit_file" != "packaging/winget/manifest.yaml" ]; then
+        mkdir -p "$target_dir/packaging/winget"
+        cat > "$target_dir/packaging/winget/manifest.yaml" <<EOF
+PackageIdentifier: tamld.g8s
+PackageVersion: ${version}
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v${version}/g8s_${version}_windows_amd64.zip
+EOF
+    fi
+
+    # 8. packaging/chocolatey/g8s.nuspec
+    if [ "$omit_file" != "packaging/chocolatey/g8s.nuspec" ]; then
+        mkdir -p "$target_dir/packaging/chocolatey"
+        cat > "$target_dir/packaging/chocolatey/g8s.nuspec" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>g8s</id>
+    <version>${version}</version>
+    <title>g8s (The Gatekeepers)</title>
+  </metadata>
+</package>
 EOF
     fi
 
@@ -293,8 +324,8 @@ else
         echo "  FAIL: chocolatey URL missing 'download/v0.13.0/': $choco_url"
         FAILURES=$((FAILURES + 1))
     fi
-    if ! echo "$choco_url" | grep -q 'g8s_0.13.0_windows_amd64.msi'; then
-        echo "  FAIL: chocolatey URL missing 'g8s_0.13.0_windows_amd64.msi': $choco_url"
+    if ! echo "$choco_url" | grep -q 'g8s_0.13.0_windows_amd64.zip'; then
+        echo "  FAIL: chocolatey URL missing 'g8s_0.13.0_windows_amd64.zip': $choco_url"
         FAILURES=$((FAILURES + 1))
     fi
 
@@ -659,13 +690,115 @@ elif ! echo "$output_10" | grep -iq "Would run pre-tag gates"; then
     echo "$output_10" | sed 's/^/    /'
     FAILURES=$((FAILURES + 1))
 else
-    # Verify files unchanged
-    actual_ver_10=$(grep 'Version' "$FIXTURE_10/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
-    if [ "$actual_ver_10" != "0.12.0" ]; then
-        echo "  FAIL: dry-run modified version.go to '$actual_ver_10'"
+        # Verify files unchanged
+        actual_ver_10=$(grep 'Version' "$FIXTURE_10/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+        if [ "$actual_ver_10" != "0.12.0" ]; then
+            echo "  FAIL: dry-run modified version.go to '$actual_ver_10'"
+            FAILURES=$((FAILURES + 1))
+        else
+            echo "  ok (exit 0, dry-run printed would-run gates, files unchanged)"
+        fi
+    fi
+
+# Case 11: winget/manifest.yaml, chocolatey/g8s.nuspec, and [Unreleased] promotion
+echo "Testing: (11) winget/manifest.yaml, chocolatey/g8s.nuspec, and [Unreleased] promotion pass ci_version_sync_check.sh"
+FIXTURE_11="$TEST_TMP/fixture_11"
+setup_fixture "$FIXTURE_11" "0.12.0"
+
+# Create CHANGELOG.md with [Unreleased] section containing bullets
+cat > "$FIXTURE_11/CHANGELOG.md" <<EOF
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [Unreleased]
+
+### Added
+- New feature A
+- New feature B
+
+### Fixed
+- Bug fix C
+
+## [0.12.0] - 2026-09-27
+
+### Added
+- Initial release notes for 0.12.0
+EOF
+
+(
+    cd "$FIXTURE_11"
+    git add CHANGELOG.md
+    git commit -q -m "chore: update CHANGELOG with Unreleased section"
+    git push -q origin main
+)
+
+output_11=""
+exit_code_11=0
+output_11=$( (cd "$FIXTURE_11" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_11=$?
+
+if [ "$exit_code_11" -ne 0 ]; then
+    echo "  FAIL: release run returned exit code $exit_code_11"
+    echo "$output_11" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Check winget manifest.yaml
+    winget_ver=$(grep 'PackageVersion:' "$FIXTURE_11/packaging/winget/manifest.yaml" | sed -E 's/.*PackageVersion:[[:space:]]*//')
+    winget_url=$(grep 'InstallerUrl:' "$FIXTURE_11/packaging/winget/manifest.yaml" | sed -E 's/.*InstallerUrl:[[:space:]]*//')
+    if [ "$winget_ver" != "0.13.0" ]; then
+        echo "  FAIL: winget manifest.yaml PackageVersion is '$winget_ver', expected '0.13.0'"
         FAILURES=$((FAILURES + 1))
-    else
-        echo "  ok (exit 0, dry-run printed would-run gates, files unchanged)"
+    fi
+    if ! echo "$winget_url" | grep -q "download/v0.13.0/g8s_0.13.0_windows_amd64.zip"; then
+        echo "  FAIL: winget manifest.yaml InstallerUrl not updated: $winget_url"
+        FAILURES=$((FAILURES + 1))
+    fi
+    # Check InstallerType is zip
+    if ! grep -q "InstallerType: zip" "$FIXTURE_11/packaging/winget/manifest.yaml"; then
+        echo "  FAIL: winget manifest.yaml missing InstallerType: zip"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # Check chocolatey nuspec
+    nuspec_ver=$(grep '<version>' "$FIXTURE_11/packaging/chocolatey/g8s.nuspec" | sed -E 's/.*<version>([^<]+)<\/version>.*/\1/')
+    if [ "$nuspec_ver" != "0.13.0" ]; then
+        echo "  FAIL: chocolatey nuspec version is '$nuspec_ver', expected '0.13.0'"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # Check CHANGELOG.md [Unreleased] promotion
+    if ! grep -q "## \[0.13.0\]" "$FIXTURE_11/CHANGELOG.md"; then
+        echo "  FAIL: CHANGELOG.md missing 0.13.0 header"
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! grep -A 10 "## \[0.13.0\]" "$FIXTURE_11/CHANGELOG.md" | grep -q "New feature A"; then
+        echo "  FAIL: CHANGELOG.md [Unreleased] bullets not promoted to 0.13.0"
+        FAILURES=$((FAILURES + 1))
+    fi
+    if grep -q -- "- Release 0.13.0" "$FIXTURE_11/CHANGELOG.md"; then
+        echo "  FAIL: CHANGELOG.md injected fallback '- Release 0.13.0' despite existing [Unreleased] bullets"
+        FAILURES=$((FAILURES + 1))
+    fi
+    # Verify [Unreleased] section still exists (now empty or with remaining content)
+    if ! grep -q "## \[Unreleased\]" "$FIXTURE_11/CHANGELOG.md"; then
+        echo "  FAIL: CHANGELOG.md [Unreleased] section removed"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # Run ci_version_sync_check.sh
+    if [ -f "$FIXTURE_11/tools/ci_version_sync_check.sh" ]; then
+        oracle_out=""
+        oracle_code=0
+        oracle_out=$( (cd "$FIXTURE_11" && bash tools/ci_version_sync_check.sh) 2>&1 ) || oracle_code=$?
+        if [ "$oracle_code" -ne 0 ]; then
+            echo "  FAIL: ci_version_sync_check.sh failed on tree with winget/nuspec/Unreleased"
+            echo "$oracle_out" | sed 's/^/    /'
+            FAILURES=$((FAILURES + 1))
+        fi
+    fi
+
+    if [ "$FAILURES" -eq 0 ]; then
+        echo "  ok (winget/nuspec updated, Unreleased promoted, sync check clean)"
     fi
 fi
 

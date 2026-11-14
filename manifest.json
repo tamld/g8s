@@ -567,6 +567,12 @@
       "status": "APPLIED"
     },
     {
+      "id": "DELTA-44",
+      "title": "OpenSpec Numbering Tombstone (Reserved Gap)",
+      "path": "spec/openspec/44-openspec-tombstone.md",
+      "status": "RESERVED"
+    },
+    {
       "id": "DELTA-45",
       "title": "5-Axis F1/F2/Tool/Skill/Receipt Cross-Evaluation & Kaizen Engine",
       "path": "spec/openspec/45-five-axis-kaizen-scorecard-spec.md",

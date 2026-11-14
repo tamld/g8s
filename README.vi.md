@@ -92,16 +92,67 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 
 ## 4. Cài đặt
 
-`g8s` được phân phối dưới dạng một file binary tĩnh duy nhất (<25MB), không yêu cầu cài thêm runtime nào khác.
+`g8s` được phân phối dưới dạng một file binary tĩnh duy nhất (<25MB), không yêu cầu cài thêm runtime nào khác. Chọn một đường dẫn cài đặt dưới đây; các bản phát hành cũng kèm `checksums.txt`, `checksums.txt.sigstore.json`, và file SPDX SBOM cùng với từng nén ([GitHub Releases](https://github.com/tamld/g8s/releases)).
 
-### Binary biên dịch sẵn (GitHub Releases)
+### Cài đặt một dòng (khuyên dùng)
 
-Tải file chạy trực tiếp từ [GitHub Releases](https://github.com/tamld/g8s/releases):
-- macOS (Apple Silicon `arm64` / Intel `amd64`)
-- Linux (`amd64` / `arm64`)
-- Windows (`amd64`)
+**macOS / Linux:**
 
-### Cài qua Go (`go1.26.11`+)
+```bash
+curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
+```
+
+Bộ cài tự động phát hiện kiến trúc CPU, tải bản phát hành phù hợp, và **thất bại an toàn** về tính toàn vẹn: chúng yêu cầu xác minh SHA-256 dựa trên `checksums.txt` từ bản phát hành (qua `sha256sum` / `shasum` trên Unix, hoặc `Get-FileHash` trên Windows) và từ chối cài đặt nếu không có công cụ checksum hoặc xác minh thất bại. Xem thêm [Hướng dẫn cài đặt Windows](docs/WINDOWS_INSTALL.md).
+
+### Trình quản lý gói
+
+**macOS / Linux (Homebrew):**
+
+```bash
+brew install tamld/g8s/g8s
+```
+
+[Tap tamld/g8s](https://github.com/tamld/homebrew-g8s) cung cấp binary biên dịch sẵn (universal trên macOS; amd64/arm64 trên Linux) và tự động cập nhật trong vòng một giờ sau mỗi bản phát hành, lấy checksum từ `checksums.txt` của bản phát hành.
+
+**Windows (Scoop):**
+
+```powershell
+scoop bucket add tamld https://github.com/tamld/scoop-bucket
+scoop install tamld/g8s
+```
+
+[Bucket Scoop tamld](https://github.com/tamld/scoop-bucket) cung cấp binary Windows amd64/arm64 với hash từ `checksums.txt` của bản phát hành và cùng nhịp tự động cập nhật hàng giờ.
+
+**Gói Linux (từ trang phát hành):** chưa có kho `apt`/`yum`/`apk` chính thức — tải gói cho kiến trúc của bạn từ [trang phát hành](https://github.com/tamld/g8s/releases) và cài đặt cục bộ:
+
+| Kiến trúc | `.deb` | `.rpm` | `.apk` |
+| :--- | :--- | :--- | :--- |
+| `linux/amd64` | `g8s_<version>_linux_amd64.deb` | `g8s_<version>_linux_amd64.rpm` | `g8s_<version>_linux_amd64.apk` |
+| `linux/arm64` | `g8s_<version>_linux_arm64.deb` | `g8s_<version>_linux_arm64.rpm` | `g8s_<version>_linux_arm64.apk` |
+
+```bash
+sudo dpkg -i g8s_*_linux_amd64.deb          # Debian/Ubuntu
+sudo rpm -i g8s_*_linux_amd64.rpm             # RHEL/Fedora
+sudo apk add --allow-untrusted ./g8s_*_linux_amd64.apk   # Alpine
+```
+
+### Nén (tất cả nền tảng)
+
+| Nền tảng | Mẫu file phát hành |
+| :--- | :--- |
+| macOS (universal) | `g8s_<version>_darwin_all.tar.gz` |
+| Linux | `g8s_<version>_linux_{amd64,arm64}.tar.gz` (cùng gói ở trên) |
+| Windows | `g8s_<version>_windows_{amd64,arm64}.zip` |
+
+Giải nén và đặt `g8s` lên `PATH`, hoặc dùng bộ cài một dòng.
+
+### Qua Go Toolchain (`go1.26.11`+)
 
 ```bash
 go install github.com/tamld/g8s/cmd/g8s@latest
@@ -115,6 +166,23 @@ cd g8s
 make local
 ./bin/g8s doctor --json
 ```
+
+### Xác minh tải về
+
+1. **SHA-256 (bắt buộc):** So sánh hash nén với dòng tên file trong `checksums.txt` trên bản phát hành. Bộ cài một dòng thực hiện tự động bước này.
+2. **Chứng thực GitHub (tùy chọn):** `gh attestation verify <asset> -R tamld/g8s --owner tamld` chứng minh artifact phát hành liên kết mật mã với nguồn build của repo này.
+3. **Gói Sigstore (tùy chọn):** `cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt` chứng minh manifest checksum được ký trong gói Sigstore của bản phát hành.
+
+Nếu cài đặt thất bại hoặc cần khôi phục binary, xem [Khôi phục phiên bản (Rollback)](docs/release/ROLLBACK.md).
+
+### Sau khi cài đặt
+
+- **`g8s init`** — thiết lập lần đầu tương tác hoặc headless (đường dẫn, gợi ý MCP).
+- **`g8s doctor`** — kiểm tra sức khỏe binary, cấu hình, môi trường.
+- **`g8s update`** — nâng cấp lên bản phát hành mới hơn với thay thế binary đã xác minh.
+- **`g8s uninstall`** — gỡ binary đã cài (tùy chọn dọn state).
+
+Các bề mặt vòng đời khác bao gồm `g8s service install|start|status` và `g8s version`.
 
 ---
 
@@ -139,7 +207,7 @@ Cấp biên nhận dùng 1 lần khóa chặt đường dẫn trước khi sửa
 
 ```bash
 # 1. Cấp biên nhận ghi có thời hạn cho thư mục chỉ định
-RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select data.receipt_id)
+RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select --selector .data.receipt_id)
 
 # 2. Giao task cho worker kèm mã biên nhận
 g8s submit \
@@ -180,7 +248,7 @@ g8s read internal/provider/registry.go --lines 20:50
 g8s edit internal/config/config.go --old "timeout = 30s" --new "timeout = 60s"
 
 # Trích xuất giá trị JSON dot-path (thay thế jq)
-cat result.json | g8s select data.status
+cat result.json | g8s select --selector .data.status
 ```
 
 ---
@@ -255,7 +323,9 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 
 | Hướng dẫn / Đặc tả | Trọng tâm nội dung |
 | :--- | :--- |
+| [Trang giới thiệu sản phẩm](https://g8s.flowaxon.com) | Landing page, product reel, và The Gate Room demo containment tương tác. |
 | [Hướng dẫn Quickstart](docs/quickstart.md) | Khởi đầu từ cài đặt đến lần ủy quyền thực thi đầu tiên. |
+| [Cài đặt trên Windows](docs/WINDOWS_INSTALL.md) | PowerShell installer, `PATH`, và troubleshooting cài đặt Windows. |
 | [Tra cứu lệnh CLI](docs/user-guide/cli-reference.md) | Sổ tay đầy đủ về mọi lệnh con, cờ tùy chọn và mã thoát. |
 | [Tài liệu MCP Tools](docs/user-guide/mcp-tools.md) | Schema JSON, tham số và kiểu dữ liệu trả về của 23 MCP tool đã đăng ký. |
 | [Hướng dẫn I/O Agent](offer/SEARCH_GUIDE.md) | Tìm kiếm, cắt dòng, sửa nguyên tử và trích xuất JSON dot-path. |
@@ -263,11 +333,12 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..11) và phi chức năng (NFR-1..4). |
 | [Định nghĩa Xong & Sẵn sàng (DOD_DOR)](docs/DOD_DOR.md) | Tiêu chuẩn chất lượng, quy trình xác thực đa vòng và cổng kiểm soát. |
 | [Chuẩn Bảo mật OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Ánh xạ OWASP Top 10 cho LLM/Agent (2025), SLSA v1.0 và SPDX SBOM. |
+| [Khôi phục Phiên bản (Rollback)](docs/release/ROLLBACK.md) | Khôi phục binary bản phát hành trước khi nâng cấp thất bại. |
 | [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0041 (kèm ghi chú tombstone). |
 
 ### 4 trụ cột cổng chất lượng & AppSec
 
-Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec và 57 khẳng định định lượng đăng ký tại [`docs/claims.yml`](docs/claims.yml):
+Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec và các khẳng định định lượng đăng ký tại [`docs/claims.yml`](docs/claims.yml):
 
 | Trụ cột | Cơ chế bảo đảm chất lượng | Mục tiêu kiểm chứng |
 | :--- | :--- | :--- |
@@ -289,8 +360,10 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): sổ cái bằng chứng hash-chain, mandate T0–T4, gates G0–G7, tường lửa verify không suy hao. | **Xong** |
 | **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), đơn giấy phép `MIT`, và `manifest.json` chuẩn hóa. | **Xong** |
 | **`v0.20.0`** (2026-10-25) | **Liên bang Phân tầng Trực giao, Thẻ điểm Chất lượng Model, Hydrate Skill Gắn Mã Băm, Nén Ngữ cảnh AST/Knapsack, Pipeline QA AI 6 Tầng & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): động cơ charter `S0..S3` + `O-Plane`, mở rộng MCP server (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10 role chuẩn, chẩn đoán lỗi `FailureDiagnosis` & tự động cách ly, CAS `deliver --expected-head-oid`, cổng tiền thực thi `Lane F/R/S`, `g8s context-pack`, `g8s qa-report` và `DeviceLeasePool`. | **Xong** |
+| **`v0.21.0`** (2026-10-27) | **Bộ Adapter CLI Agent Toàn Diễn & Tích hợp Cursor Hai Đường** (`DELTA-39..45`, [#672](https://github.com/tamld/g8s/issues/672)): adapter CLI worker hạng nhất cho `opencode`, `commandcode`, `qwen`, `codex`, và `cursor` (khám phá Cursor Cloud REST qua `CURSOR_API_KEY` + `cursor-agent` headless cục bộ), tường lửa `diff_firewall` worktree thất bại an toàn trên đột biến ngoài phạm vi (`E_OUT_OF_SCOPE_MUTATION`), Spec-Kit v2 với 8 spec miền sống (triển khai lò lửa 40-repo), hợp đồng bề mặt CLI generative v2 (`E_UNBOUND_CLI_CLAIM`), bus telemetry thống nhất + thẻ điểm Kaizen 5 trục, nhật ký truy cập doanh nghiệp giao dịch, và nạp skill/MCP theo phạm vi năng lực. | **Xong** |
 | **`v0.22.0`** (2026-11-01) | **Sổ cái Liên hợp Coordinator Đa nền tảng & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): sổ cái SQLite WAL chung cho các coordinator F0 ngang hàng (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` qua CLI + công cụ MCP `g8s_coordinator_mesh`), tin nhắn có kiểu chống trùng lặp (`message_id` UNIQUE + echo theo digest), CAS claim với TTL + hàng rào context-revision, long-poll `wait` có biên, tự báo quota 2 tầng (không biết thì nói không biết), miễn nhiễm whitespace cho layer-gate (A6), workflow full-battery hằng đêm; được phê chuẩn chéo bởi các peer Codex/AGY/ZCode với trao đổi 3 nền tảng thật ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Tầng thu thập dữ liệu đa nền tảng ("reach")** — chuỗi tool fallback có thứ tự theo platform (`g8s reach read`), sổ cái sức khỏe & đường dẫn sở hữu (`S2`), cấp dữ liệu cho Context Broker `WorldSnippets` và thăng cấp vào vault ở trạng thái `PROPOSED` (`S3`), cùng artifact nghiên cứu lấy bằng máy (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Xong** |
-| **`v0.23.0`** (2026-11-08, Hiện tại) | **Gia cố Cô lập, Cơ giới hóa SSoT & Phản tỉnh Quy trình** ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)): hàng rào ghi gắn claim đầu-cuối, `RT-MESH v1.1` (`A1..A5`), khép kín chu trình phản xạ `D-09` (`SENSE->JUDGE->ACT`), sổ cái liêm chính dogfooding, cơ giới hóa kiểm định SSoT và proxy git-commit cho worker. | **Xong** |
+| **`v0.23.0`** (2026-11-08) | **Gia cố Cô lập, Cơ giới hóa SSoT & Phản tỉnh Quy trình** ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)): hàng rào ghi gắn claim đầu-cuối, `RT-MESH v1.1` (`A1..A5`), khép kín chu trình phản xạ `D-09` (`SENSE->JUDGE->ACT`), sổ cái liêm chính dogfooding, cơ giới hóa kiểm định SSoT và proxy git-commit cho worker. | **Xong** |
+| **`v0.24.0`** (2026-11-15, Hiện tại) | **Tiếp nhận Model Khai báo, Control Plane Trung lập Adapter & Đóng gói Zero-Implicit-Default** (`DELTA-48`, [#893](https://github.com/tamld/g8s/issues/893), [#894](https://github.com/tamld/g8s/issues/894), [#902](https://github.com/tamld/g8s/issues/902), [#904](https://github.com/tamld/g8s/pull/904), [#905](https://github.com/tamld/g8s/issues/905), [#906](https://github.com/tamld/g8s/issues/906), [#907](https://github.com/tamld/g8s/issues/907)): Onboarding Gemini 4 Element Series & catalog `.g8s/agent-models.yml` v3 (`status`, `replacement`, `sunset_at`), điều phối adapter-neutral đối xứng qua `9router`/`opencode`/`codex`/`claude`/`cursor`/`agy`, `ResolveProviderDefaultModel` dọn dẹp mặc định `gemini-3.8-*` lỗi thời, kế thừa timeout profile catalog trên triple tường minh, fallback `g8s verify` nhận biết scope, stamping phiên bản MCP server động, skill xác thực cơ giới hóa `gate_command` SSoT, và che giấu DLP lỗi probe RFC1918. | **Xong** |
 | **`v0.30.0`** (Kế hoạch) | **Proxy Phân quyền MCP F0/F1/F2 & Vận hành Thực chiến Offer Đa Repo** ([#672](https://github.com/tamld/g8s/issues/672); các adapter CLI ngoài và tường lửa worktree `read_only` của `DELTA-39` đã phát hành từ `v0.20.0+`): proxy giới hạn năng lực MCP theo biên nhận trong worktree F1/F2 và kiểm chứng giữ chân Offer Bundle 90 ngày trên đa repo. | **Kế hoạch** |
 | **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
 | **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
