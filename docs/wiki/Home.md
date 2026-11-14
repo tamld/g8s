@@ -12,7 +12,7 @@
 | **🏛️ Architecture & Governance** | Foundational Axioms, Two-Tier Hierarchy, Process Group Sandbox | [Two-Tier Governance & Architecture](Two-Tier-Governance-and-Receipt-Engine.md) |
 | **🎟️ Capability Receipts (Schema v3)** | Zero-Trust Write Delegation, Single-Use Invalidation, Path Scoping | [Receipt Engine & Lifecycle](../user-guide/receipt-workflow.md) |
 | **🧠 Supervisor & Self-Healing Loop** | Bounded 3x3 Fix Loops, RCA Confidence, Envelope Gating (DoR/DoD) | [Supervisor & Fix Loop](../designs/supervisor-fix-loop.md) |
-| **🔌 Tool Integrations & MCP** | Claude Desktop, Windsurf, Cursor, AGY integration via 11 Stdio MCP tools | [MCP & Tool Integrations](../user-guide/mcp-tools.md) |
+| **🔌 Tool Integrations & MCP** | Claude Desktop, Windsurf, Cursor, AGY integration via 23 Stdio MCP tools (22 active + g8s_run reserved stub) | [MCP & Tool Integrations](../user-guide/mcp-tools.md) |
 
 ---
 
@@ -25,7 +25,7 @@ Modern agentic coding workflows often suffer from the **Agent Fragility Dilemma*
 `g8s` solves this by introducing a **Zero-Trust Capability Harness**:
 - **Brain Tier (Planner/Governor)**: Retains exclusive authority over architecture, write receipt issuance, and git state promotion.
 - **Worker Tier (Muscle/Executor)**: Executes mechanical sub-tasks inside isolated process groups with deterministic timeouts, blocked commands, and path-scoped write receipts.
-- **Zero CGO, Pure Go**: Single static binary (~15MB), sub-15ms startup, with modern SQLite WAL task queue.
+- **Zero CGO, Pure Go**: Single static binary (<25MB), sub-15ms startup, with modern SQLite WAL task queue.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,7 +41,7 @@ Modern agentic coding workflows often suffer from the **Agent Fragility Dilemma*
 │  │ Role & Perm Gate │  │ Write Receipt DB │  │ WAL Queue │  │
 │  └──────────────────┘  └──────────────────┘  └───────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │   Pluggable CLI Providers: agy │ claude │ gemini │ ... │  │
+│  │   Pluggable CLI Providers: 9router | opencode | codex | claude | cursor | agy | ... │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │   Supervisor Fix Loop (planner→enforcer→reviewer→rca) │  │
@@ -64,7 +64,7 @@ Modern agentic coding workflows often suffer from the **Agent Fragility Dilemma*
 ### 1. Verification
 ```bash
 # Check version and runtime configuration
-g8s --version
+g8s version
 
 # Run system diagnostic self-check
 g8s doctor --json
@@ -73,20 +73,23 @@ g8s doctor --json
 ### 2. Issuing a Single-Use Write Receipt
 ```bash
 # Brain issues a 600-second write receipt scoped strictly to internal/worker/
-g8s receipt-issue \
-  --role test-runner \
-  --allowed-paths "internal/worker/*" \
-  --ttl 600
+g8s receipt issue --issuer f0-supervisor --path "internal/worker/*" --ttl 600
 ```
 
 ### 3. Dispatching a Worker Task
 ```bash
 # Worker executes within sandbox using the receipt
-g8s dispatch \
+RECEIPT_ID=$(g8s receipt issue --issuer f0-supervisor --path "internal/worker/*" --ttl 600 --json | g8s select --selector .data.receipt_id)
+
+g8s submit \
+  --idempotency-key "test-worker-01" \
   --role test-runner \
-  --provider agy \
-  --receipt-id <RECEIPT_ID> \
+  --permission workspace_write \
+  --allow-workspace-write \
+  --receipt-id "$RECEIPT_ID" \
   --prompt "Generate table-driven tests for internal/worker/stream.go"
+
+g8s worker --once --allow-workspace-write
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Release Readiness & Baseline Parity Record
 
-> **Current Status**: Public MIT Repository (`v0.20.0+` live on GitHub Releases).  
+> **Current Status**: Public MIT Repository (`v0.24.0+` live on GitHub Releases).  
 > **Historical Role**: Preserves the side-by-side Go-vs-Python parity matrix and Type-2 dispatch verification record executed at the initial `v0.1.0` cutover (referenced by `spec/openspec/10-two-class-providers-spec.md`).
 
 ## Verification gates (all met at MVP close, 2026-08-24, and enforced continuously in CI)
@@ -25,7 +25,7 @@
 
 ## Post-release
 
-- [x] Publish GitHub Releases with generated archives, Windows installers, SBOMs, and checksums (`v0.1.0` through `v0.20.0`).
+- [x] Publish GitHub Releases with generated archives, Windows installers, SBOMs, and checksums (`v0.1.0` through `v0.24.0`).
 - [x] Announce the MCP tool surface (`g8s_*`) in the README quick-start and `docs/user-guide/mcp-tools.md`.
 
 ## Side-by-side verification assessment (REFACTORING_PLAN line 87)

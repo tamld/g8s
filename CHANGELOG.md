@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Declarative Model Adoption & Adapter-Neutral Control Plane (`DELTA-48`, `#902`, `#904`)**:
+  - Onboarded Gemini 4 Element Series (`gemini-4-hydrogen-{low,medium,high,xhigh}`, `gemini-4-argon-{low,medium,high}`, `gemini-4-carbon-{low,medium,high}`, and `gemini-pro-orchestrator*` with `effort_style: none`), `.g8s/agent-models.yml` `catalog_version: 3` lifecycle fields (`status`, `replacement`, `sunset_at`), `config.ResolveProviderDefaultModel`, `g8s providers eval-combos` & `g8s doctor` deprecated-model advisories, and explicit adapter-neutral governance treating `agy` symmetrically alongside `9router`, `opencode`, `codex`, `claude`, and `cursor`.
+- **Catalog Profile Timeout Inheritance (`#894`)**:
+  - `g8s submit` inherits `.g8s/agent-models.yml` profile timeouts on explicit `(--provider, --model)` triples when `--profile` and `--timeout` are omitted, with advisory envelope warnings when explicit-provider `workspace_write` tasks fall back to `<=240s` effort-derived timeouts.
+- **Declarative Gate Opt-In (`#906`)**:
+  - `G8S_PREMISE_CHECK` / `settings.premise_check` and `G8S_ENFORCE_CONFORMANCE` / `settings.enforce_conformance` opt-in support in `g8s submit`.
+- **Mechanized Verification Skill SSoT (`#893`, `#905`, `#908`)**:
+  - `gate_command` and `args_syntax` contracts across `skills/manifest.json` and `.g8s/verifier-classes.yml`, enforced by `tools/ci_doc_contract_check.sh` Check `[14/17]` & `[17/17]`; `DELTA-44` OpenSpec tombstone (`#907`).
+
+### Changed
+
+- **Zero Hardcoded `gemini-3.8-*` Defaults (`#906`)**:
+  - Replaced legacy `gemini-3.8-*` literals across `cmd/g8s`, `internal/initwiz`, `internal/completion`, `internal/controlplane`, `internal/conv`, and `internal/harness/probe` with declarative catalog/manifest resolution; refreshed architecture, SOP, provider, and Vietnamese documentation (`#907`).
+
+### Fixed
+
+- **Verifier Scope-Root Registry Fallback & Dynamic MCP Version (`#905`, `#908`)**:
+  - `g8s verify` loads `.g8s/verifier-classes.yml` from the task's `scope_root`/worktree when invoked outside the repo root; `g8s mcp` stamps `Version` dynamically via `mcp.WithVersion(Version)`; `claim check` registered in `internal/cli/registry.go`.
+- **Manifest Immutability & Probe Error DLP (`#906`)**:
+  - `ResolveProviderDefaultModel` copies `ModelEntry` by value instead of mutating caller manifests in-place; `g8s providers evaluate` redacts RFC1918 LAN IPs (`<redacted-lan-ip>`) via `routing.SanitizeScorecardError`.
+- **Release Script Packaging Sync (`#907`)**:
+  - `tools/release.sh` now updates `packaging/winget/manifest.yaml`, `packaging/chocolatey/g8s.nuspec`, and promotes `CHANGELOG.md` `[Unreleased]` sections atomically.
+
+### Verification
+
+- **D-01 Red Cell Audit & D-02 Self-Audit Probes**:
+  - Independent adversarial surface audit completed across `README.md`, CLI `--help`, and `offer/`; `g8s eval run --category self-audit` passed `5/5` (`sa-001`..`sa-005`, score `1.0`).
+
 ## [0.23.0] - 2026-11-08
 
 ### Added

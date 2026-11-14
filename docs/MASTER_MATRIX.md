@@ -39,7 +39,7 @@
 │                         │ • Provider Registry Schema        │ • Resource Pool Discovery Engine │ • `gopls` / `pyright` │
 │                         │ • Native Provider Drivers         │   (`internal/mcp`, `provider`)   │ • Local CLI & Ollama  │
 ├─────────────────────────┼───────────────────────────────────┼──────────────────────────────────┼───────────────────────┤
-│ 6. EXPERIENCE (DX / AX) │ • SDE Self-Describing Standard    │ • Interactive Cobra CLI Wizard   │ • Terminal ANSI TUI   │
+│ 6. EXPERIENCE (DX / AX) │ • SDE Self-Describing Standard    │ • Stdlib flag.FlagSet CLI & Onboarding Wizard (`cmd/g8s`, `internal/initwiz`) │ • Terminal ANSI TUI   │
 │    (Human & Agent UX)   │ • Machine Remediation Commands    │ • Health Inspector `g8s doctor`  │ • Shell Tab Auto-Comp │
 │                         │ • Headless Silent Flags (`--agent`)│ • Atomic Config Setters (`set`)  │ • Standard Stdio Pipe │
 │                         │ • Rich Feynman Contextual Errors  │   (`cmd/g8s`)                    │                       │
@@ -52,9 +52,9 @@
 
 | Dimension | Tier 1: Supervisor (Brain) | Tier 2: Worker (Muscle) |
 | :--- | :--- | :--- |
-| **Target Models** | Claude 3.7 Sonnet (Thinking), Claude Opus, GPT-4o, DeepSeek R1 | Gemini 3.8 Flash (High), Claude 3.5 Haiku, DeepSeek V3, Local Ollama |
+| **Target Models** | Claude 3.7 Sonnet (Thinking), Claude Opus, GPT-4o, DeepSeek R1 | Catalog-governed: `9router` SWE combos (`reasoning-high`, `deep-coding`), `opencode`, `gemini-4-hydrogen-high`, `claude-haiku-4-5`, `composer-2.5` |
 | **Cognitive Strengths** | Deep multi-step reasoning, architectural synthesis, risk evaluation. | High token throughput, sub-second latency, ultra-low cost. |
-| **Assigned Roles** | System Architect, Spec Author, Receipt Issuer, PR Gatekeeper. | `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`. |
+| **Assigned Roles** | System Architect, Spec Author, Receipt Issuer, PR Gatekeeper. | `collector`, `scout`, `mcp-mapper`, `summarizer`, `verifier`, `test-runner`, `researcher`, `implementer`, `sec-auditor`, `analyst`. |
 | **Permissions** | Root capability authority, exclusive SSoT & Git commit rights. | `read_only` by default. Can only mutate files matching a valid Write Receipt. |
 | **Blast Radius Policy** | Reviews AST Blast Radius reports before signing receipts. | Hard-jailed inside Process Group; cannot traverse `..` or `.env`. |
 | **Memory Model** | Multi-turn contextual continuity across project milestones. | Stateless single-turn snapshot. Process dies upon completion. |
@@ -80,16 +80,18 @@
 
 | Feature | Human Developer (Human DX) | Autonomous AI Agent (Agent AX) |
 | :--- | :--- | :--- |
-| **Onboarding** | `g8s init` (Interactive TUI Wizard with auto IDE detection). | `g8s init --agent --ide=cursor --json` (Headless 1-shot). |
+| **Onboarding** | `g8s init` (Interactive TUI Wizard with auto IDE detection). | `g8s init --ide cursor --json` (Headless 1-shot). |
 | **Diagnostics** | `g8s doctor` (Formatted healthcheck with color alerts). | `g8s doctor --json` (Includes `remediation_cmd` for self-healing). |
 | **Auto-Repair** | `g8s doctor --fix` (1-click automatic permission and daemon fix). | Agent executes recommended `remediation_cmd` directly. |
-| **Configuration** | Guided prompts during `init` or editing YAML. | `g8s config set <key> <val>` (Atomic CLI key-value setter). |
+| **Configuration** | Guided prompts during `init` or editing YAML. | `g8s settings` / `~/.config/g8s/providers.json` (Persistent atomic config). |
 | **Error Handling** | Feynman-style human-readable explanation (What, Why, Fix). | Deterministic Exit Codes (`0` to `5`) + JSON error objects. |
 | **Shell Integration**| Auto-completion scripts (`g8s completion zsh/bash/fish`). | Standard Unix Stdio stream piping. |
 
 ---
 
-## 5. Strategic Evolution Roadmap (v0.6.1 snapshot)
+## 5. Historical Early-Milestone Evolution Record (v0.6.1–v0.9.1) & Current Roadmap Pointer
+
+> **Note**: For the current grounded release roadmap (`v0.18.0`–`v0.24.0` shipped, `v0.30.0`–`v1.0.0` planned), see [README.md §9](../README.md#grounded-release-roadmap).
 
 ```
   M1-M3 (DONE)         M4 (CURRENT)         M5 (NEXT)              M6 (FUTURE)              v1.0.0 GA
