@@ -164,9 +164,9 @@ func ApplyRoleProfile(r *ProviderReport) {
 		r.RolesEligible = []string{"worker", "scout"}
 		r.RecommendedFor = []string{"f1-scout", "long-context-audit", "multimodal"}
 	case "agy":
-		r.RolesEligible = []string{"brain"}
-		r.RecommendedFor = []string{"f0-interactive-supervisor"}
-		r.Note = "F1 worker spawning forbidden by Lesson #23 (F0 Brain quota protection)"
+		r.RolesEligible = []string{"brain", "worker", "scout"}
+		r.RecommendedFor = []string{"f0-brain", "f1-worker", "f1-scout", "s3a-blind-verifier"}
+		r.Note = "platform_dispatch CLI adapter; pin explicit economy/standard models (gemini-4-hydrogen-*, gemini-4-argon-*) for F1/S3-A to protect F0 Brain quota (Lesson #23)"
 	case "ollama":
 		r.RolesEligible = []string{"compatibility-only"}
 		r.RecommendedFor = []string{"tts", "voice", "light-offline"}

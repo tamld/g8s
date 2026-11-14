@@ -48,11 +48,34 @@ go install github.com/tamld/g8s/cmd/g8s@latest
 ./g8s roles
 ./g8s permissions
 
-# Submit a task for a worker to claim.
+# Submit a task for a worker to claim (multi-adapter examples).
 ./g8s submit \
   --idempotency-key demo-1 \
   --prompt "inventory the module" \
-  --model gemini-3.8-flash-high \
+  --model reasoning-high \
+  --provider 9router \
+  --role collector \
+  --permission read_only \
+  --add-dir . \
+  --timeout 30s
+
+# Alternative: opencode adapter
+./g8s submit \
+  --idempotency-key demo-2 \
+  --prompt "inventory the module" \
+  --model 9router/reasoning-high \
+  --provider opencode \
+  --role collector \
+  --permission read_only \
+  --add-dir . \
+  --timeout 30s
+
+# Alternative: agy adapter (Gemini 4)
+./g8s submit \
+  --idempotency-key demo-3 \
+  --prompt "inventory the module" \
+  --model gemini-4-hydrogen-high \
+  --provider agy \
   --role collector \
   --permission read_only \
   --add-dir . \
@@ -70,3 +93,4 @@ go install github.com/tamld/g8s/cmd/g8s@latest
 - [User guide](user-guide/cli-reference.md) — every subcommand, flag, and exit code.
 - [Receipt delegation workflow](user-guide/receipt-workflow.md) — how write receipts gate mutations.
 - [MCP integration](user-guide/mcp-tools.md) — connect Claude Desktop, Cursor, or any stdio client.
+- [Providers & routing](user-guide/providers.md) — multi-provider fleets and declarative model adoption.

@@ -160,3 +160,47 @@ func TestBlind_BuildBlindReviewPacket(t *testing.T) {
 		t.Errorf("expected [REDACTED] in RawGitDiff, got: %s", packet.RawGitDiff)
 	}
 }
+
+func TestSanitizeDiffForBlindReview_MultiFamilyRedaction(t *testing.T) {
+	raw := `diff --git a/auth/gate.go b/auth/gate.go
+index 1234567..89abcdef 100644
+--- a/auth/gate.go
++++ b/auth/gate.go
+@@ -10,6 +10,12 @@ package auth
++// Model used: gemini-4-hydrogen-high, gemini-pro-orchestrator, composer-2.5, nemotron-3-ultra, mistral-large-2512, grok-4.20, qwen3.6-plus, claude-sonnet-5-5-high, 9router
++func VerifyToken(token string) bool {
++	return token != ""
++}
+`
+
+	sanitized := SanitizeDiffForBlindReview(raw)
+
+	models := []string{
+		"gemini-4-hydrogen-high",
+		"gemini-pro-orchestrator",
+		"composer-2.5",
+		"nemotron-3-ultra",
+		"mistral-large-2512",
+		"grok-4.20",
+		"qwen3.6-plus",
+		"claude-sonnet-5-5-high",
+		"9router",
+	}
+
+	for _, model := range models {
+		if strings.Contains(sanitized, model) {
+			t.Errorf("expected model %q to be redacted, got: %s", model, sanitized)
+		}
+	}
+
+	// Must preserve genuine diff content
+	if !strings.Contains(sanitized, "diff --git a/auth/gate.go b/auth/gate.go") {
+		t.Errorf("expected diff header to be preserved, got: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "func VerifyToken(token string) bool {") {
+		t.Errorf("expected code addition to be preserved, got: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] markers to appear in sanitized diff")
+	}
+}

@@ -38,27 +38,27 @@ $$\text{Explicit Flag (--effort)} > \text{Declared Signals (--blast-radius, --lo
                            +------------------------+
                            |  --effort flag passed? |
                            +-----------+------------+
-                                      / \
-                               (yes) /   \ (no)
-                                    v     v
-              +-----------------------+  +-------------------------------+
-              | Explicit Flag Wins    |  | Declared Signals Passed?      |
-              | (marks effort_override|  | (--blast-radius/--loc-estimate|
-              +-----------------------+  +---------------+---------------+
-                                                        / \
-                                                 (yes) /   \ (no)
-                                                      v     v
-                           +---------------------------+   +---------------------------+
-                           | Evaluate Matrix v1.1      |   | Match Path Class in       |
-                           | blast=high & loc>200->high|   | .g8s/effort-classes.yml   |
-                           | blast=high -> >=medium    |   | (first match wins)        |
-                           | blast=low  -> low         |   +-------------+-------------+
-                           +-------------+-------------+                 |
-                                         |                         (no match)
-                                         v                               v
-                           +---------------------------+   +---------------------------+
-                           | Path class demoted/elevated   | Fail-Open Floor: medium   |
-                           +---------------------------+   +---------------------------+
+                                     / \
+                              (yes) /   \ (no)
+                                   v     v
+                     +-----------------------+  +-------------------------------+
+                     | Explicit Flag Wins    |  | Declared Signals Passed?      |
+                     | (marks effort_override|  | (--blast-radius/--loc-estimate|
+                     +-----------------------+  +---------------+---------------+
+                                                                 / \
+                                                          (yes) /   \ (no)
+                                                               v     v
+                                    +---------------------------+   +---------------------------+
+                                    | Evaluate Matrix v1.1      |   | Match Path Class in       |
+                                    | blast=high & loc>200->high|   | .g8s/effort-classes.yml   |
+                                    | blast=high -> >=medium    |   | (first match wins)        |
+                                    | blast=low  -> low         |   +-------------+-------------+
+                                    +-------------+-------------+                 |
+                                                  |                         (no match)
+                                                  v                               v
+                                    +---------------------------+   +---------------------------+
+                                    | Path class demoted/elevated   | Fail-Open Floor: medium   |
+                                    +---------------------------+   +---------------------------+
 ```
 
 ### 1. Explicit Flag Override (`--effort`)
@@ -81,7 +81,7 @@ If no signals are declared, the target paths specified in `--add-dir` (or the wo
 
 ## Baked-Name Platform Models
 
-Certain platforms encode reasoning effort directly into the model identifier suffix (e.g. `gemini-3.8-flash-low`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-high`).
+Certain platforms encode reasoning effort directly into the model identifier suffix (e.g. `gemini-4-hydrogen-low`, `gemini-4-hydrogen-medium`, `gemini-4-hydrogen-high`, `gemini-4-hydrogen-xhigh`).
 
 ### Resolution Order
 
@@ -91,18 +91,45 @@ To prevent mismatched `(model, effort)` pairs from being rejected at worker exec
    - If the model entry specifies an explicit `effort_style: "baked-name"`, it is treated as baked.
    - If the entry specifies another style or leaves `effort_style: ""` (style-less), the manifest has declared the pairing as non-baked, stopping further resolution.
 2. **Effort Catalog (`.g8s/agent-models.yml`)**: If the manifest does not declare an effort style for the model (or knows the provider but not that specific variant, or if `--provider` was omitted on a manual submit):
-   - The default catalog decides. In `.g8s/agent-models.yml`, `agy` is registered as `effort_style: baked-name` across its variants (`gemini-3.8-flash-low`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-high`).
+   - The default catalog decides. In `.g8s/agent-models.yml` at `catalog_version: 3`, `agy` is registered as `effort_style: baked-name` across its Gemini 4 variants (`gemini-4-hydrogen-{low,medium,high,xhigh}`, `gemini-4-argon-{low,medium,high}`, `gemini-4-carbon-{low,medium,high}`). The `gemini-pro-orchestrator` uses `effort_style: none`.
 
 ### Model Realignment at Submit
 
 When a model is identified as `baked-name` and the decided effort level (from `--effort`, signals, or path class) differs from the model's suffix:
 
-- **The Model Is Realigned**: The model name is rewritten to match the applied effort variant (e.g. requested model `gemini-3.8-flash-high` with class `docs` defaulting to `low` is realigned to `gemini-3.8-flash-low`).
-- **Effort Passes Through Unchanged**: The applied effort level passes through without modification, preserving per-class effort differentiation for accurate telemetry and execution semantics (e.g. docs-class tasks run at `low` on `flash-low`, verified live in task `5c44b300`).
+- **The Model Is Realigned**: The model name is rewritten to match the applied effort variant (e.g. requested model `gemini-4-carbon-high` with class `docs` defaulting to `low` is realigned to `gemini-4-carbon-low` — but clamped to `high` since `carbon` doesn't support `xhigh`).
+- **Effort Passes Through Unchanged**: The applied effort level passes through without modification, preserving per-class effort differentiation for accurate telemetry and execution semantics.
 - **Durable Payload Audit Fields**:
-  - `model_requested`: The original model requested by the operator or routing default (e.g. `gemini-3.8-flash-high`).
+  - `model_requested`: The original model requested by the operator or routing default (e.g. `gemini-4-carbon-high`).
   - `model_realigned`: Boolean flag set to `true` when realignment took place.
-  - `model`: The effective realigned model passed to the worker dispatch (e.g. `gemini-3.8-flash-low`).
+  - `model`: The effective realigned model passed to the worker dispatch (e.g. `gemini-4-carbon-high` clamped from `xhigh`).
+
+### Baked-Family Effort Clamping (DELTA-48)
+
+`BakedFamilyEfforts` clamps unsupported levels per sub-family:
+- **`carbon` + `xhigh` → `high` with `Mismatch: true`** (carbon max is `high`)
+- **`hydrogen` + `xhigh` → `xhigh` with `Mismatch: false`** (hydrogen supports `xhigh`)
+- **`argon` + `xhigh` → `high` with `Mismatch: true`** (argon max is `high`)
+- **`orchestrator` + any effort → `none` with `Mismatch: true`** (fixed reasoning, `effort_style: none`)
+
+`isBakedNameProvider` honors model-level `effort_style` before provider-level style.
+
+### `effort_style: none` — Fixed-Reasoning Orchestrators (DELTA-48)
+
+Models with `effort_style: none` (e.g., `gemini-pro-orchestrator`):
+- Yield empty applied effort
+- Omit `--effort` entirely on `BuildCommand`
+- Are routed for supervisor/brain roles where reasoning is baked into the model
+
+### Element Cost Ranking (DELTA-48)
+
+`modelCostRank` orders tiers for routing decisions:
+- `free` (5) — e.g., `reasoning-free`, `docs-retriever`, `opencode/*-free`
+- `economy hydrogen` (30..40) — `gemini-4-hydrogen-{low,medium,high,xhigh}`
+- `standard argon` (70..75) — `gemini-4-argon-{low,medium,high}`
+- `frontier carbon/orchestrator` (95) — `gemini-4-carbon-{low,medium,high}`, `gemini-pro-orchestrator`
+
+---
 
 ### Inspecting Task Payloads
 
@@ -119,9 +146,9 @@ Every submission persists its resolved effort and model metadata into the task p
   "effort_mismatch": false,
   "effort_override": false,
   "effort_requested": "low",
-  "model": "gemini-3.8-flash-low",
+  "model": "gemini-4-hydrogen-low",
   "model_realigned": true,
-  "model_requested": "gemini-3.8-flash-high",
+  "model_requested": "gemini-4-hydrogen-high",
   "permission": "read_only",
   "prompt": "Update documentation",
   "role": "summarizer"
@@ -206,19 +233,23 @@ Maps target write-scope file paths to reasoning effort defaults and optional lad
 
 ### 2. Supported-Models Effort Catalog (`.g8s/agent-models.yml`)
 
-The research-verified Single Source of Truth (SSoT) for provider effort capabilities across major LLM platforms.
+The research-verified Single Source of Truth (SSoT) for provider effort capabilities across major LLM platforms. **Catalog version 3** (DELTA-48) adds Gemini 4 element series, Orchestrator, and `9router/*` under `opencode`.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `schema_version` | `string` | Catalog schema version (e.g. `agent-models.v1`). |
-| `catalog_version` | `int` | Incremental catalog revision integer. |
+| `catalog_version` | `int` | Incremental catalog revision integer (3 for DELTA-48). |
 | `verified_at` | `string` | ISO date of latest research verification against official provider documentation. |
 | `sources` | `list` | Upstream official documentation URLs consulted for verification. |
-| `providers.<name>.effort_style` | `string` | Adaptation style: `named`, `budget`, `baked-name`, or `toggle`. |
+| `providers.<name>.effort_style` | `string` | Adaptation style: `named`, `budget`, `baked-name`, `toggle`, `none`. |
 | `providers.<name>.field` | `string` | Wire protocol parameter name (e.g. `reasoning_effort`, `thinking_level`). |
 | `providers.<name>.default_effort`| `string`| Provider-wide default effort posture (`medium`, `high`, `adaptive`, `dynamic`). |
 | `providers.<name>.mandatory` | `bool` | If `true`, reasoning cannot be disabled; `none` is rejected. |
 | `models[].id` | `string` | Model identifier string (or prefix pattern). |
+| `models[].family` | `string` | Model family (e.g., `gemini-4-hydrogen`, `gemini-pro-orchestrator`). Required for `status: active`. |
+| `models[].cost_tier` | `string` | One of `free`, `economy`, `standard`, `frontier`. Required for `status: active`. |
+| `models[].status` | `string` | One of `active`, `transitional`, `deprecated`. |
+| `models[].effort_style` | `string` | Model-level effort style override (`named`, `budget`, `baked-name`, `toggle`, `none`). |
 | `models[].supported_efforts`| `list` | Subset of the canonical ladder supported by this model. Empty list indicates no effort control. |
 | `models[].default_effort` | `string` | Model-specific default effort if different from provider default. |
 | `models[].mandatory` | `bool` | Model-level mandatory reasoning override. |

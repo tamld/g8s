@@ -23,6 +23,11 @@ type ModelEntry struct {
 	DefaultEffort    string         `json:"default_effort,omitempty"`
 	Mandatory        bool           `json:"mandatory,omitempty"`
 	EffortBudgetMap  map[string]int `json:"effort_budget_map,omitempty"`
+
+	// Declarative model metadata (issue #902 / Slice WF1)
+	Family   string `json:"family,omitempty"`
+	CostTier string `json:"cost_tier,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 // ProviderEntry is one operator-declared provider in the registry file.
@@ -142,6 +147,7 @@ const (
 	EffortStyleBudget    = "budget"
 	EffortStyleBakedName = "baked-name"
 	EffortStyleToggle    = "toggle"
+	EffortStyleNone      = "none"
 )
 
 // Canonical effort ladder levels (7-level enum: none<minimal<low<medium<high<xhigh<max).
@@ -185,11 +191,65 @@ func IsValidEffortLevel(s string) bool {
 // IsValidEffortStyle reports whether s is one of the recognized effort styles.
 func IsValidEffortStyle(s string) bool {
 	switch s {
-	case EffortStyleNamed, EffortStyleBudget, EffortStyleBakedName, EffortStyleToggle:
+	case EffortStyleNamed, EffortStyleBudget, EffortStyleBakedName, EffortStyleToggle, EffortStyleNone:
 		return true
 	default:
 		return false
 	}
+}
+
+// Cost tier constants (issue #902 / Slice WF1).
+const (
+	CostTierFree     = "free"
+	CostTierEconomy  = "economy"
+	CostTierStandard = "standard"
+	CostTierFrontier = "frontier"
+)
+
+// IsValidCostTier reports whether s is a recognized cost tier.
+func IsValidCostTier(s string) bool {
+	switch s {
+	case CostTierFree, CostTierEconomy, CostTierStandard, CostTierFrontier:
+		return true
+	default:
+		return false
+	}
+}
+
+// Model status constants (issue #902 / Slice WF1).
+const (
+	ModelStatusActive       = "active"
+	ModelStatusTransitional = "transitional"
+	ModelStatusDeprecated   = "deprecated"
+)
+
+// IsValidModelStatus reports whether s is a recognized model status.
+func IsValidModelStatus(s string) bool {
+	switch s {
+	case ModelStatusActive, ModelStatusTransitional, ModelStatusDeprecated:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsValidModelFamily reports whether s is a valid model family slug.
+// Must be non-empty lowercase slug matching ^[a-z0-9][a-z0-9_-]*$.
+func IsValidModelFamily(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		alnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+		} else if !alnum && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateModelEffort validates the effort dimension metadata on a ModelEntry.
@@ -199,6 +259,8 @@ func IsValidEffortStyle(s string) bool {
 //   - default effort not in supported set (unless "adaptive" or "dynamic")
 //   - effort budget map present for non-budget style
 //   - budget map level outside the ladder or tokens <= 0
+//   - invalid family, cost_tier, status
+//   - EffortStyleNone with non-empty default_effort (unless EffortNone)
 func ValidateModelEffort(m *ModelEntry) error {
 	name := m.ID
 	if name == "" {
@@ -215,7 +277,11 @@ func ValidateModelEffort(m *ModelEntry) error {
 		}
 	}
 
-	if m.DefaultEffort != "" {
+	if m.EffortStyle == EffortStyleNone {
+		if m.DefaultEffort != "" && m.DefaultEffort != EffortNone {
+			return fmt.Errorf("model %q: field %q: default_effort %q not allowed with effort_style %s", name, "default_effort", m.DefaultEffort, EffortStyleNone)
+		}
+	} else if m.DefaultEffort != "" {
 		if m.DefaultEffort != EffortAdaptive && m.DefaultEffort != EffortDynamic {
 			found := false
 			for _, lvl := range m.SupportedEfforts {
@@ -242,6 +308,16 @@ func ValidateModelEffort(m *ModelEntry) error {
 				return fmt.Errorf("model %q: field %q: token budget for level %q must be > 0", name, "effort_budget_map", lvl)
 			}
 		}
+	}
+
+	if m.Family != "" && !IsValidModelFamily(m.Family) {
+		return fmt.Errorf("model %q: field %q: invalid family %q", name, "family", m.Family)
+	}
+	if m.CostTier != "" && !IsValidCostTier(m.CostTier) {
+		return fmt.Errorf("model %q: field %q: invalid cost_tier %q", name, "cost_tier", m.CostTier)
+	}
+	if m.Status != "" && !IsValidModelStatus(m.Status) {
+		return fmt.Errorf("model %q: field %q: invalid status %q", name, "status", m.Status)
 	}
 
 	return nil

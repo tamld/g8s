@@ -305,3 +305,94 @@ func TestHandle_ProcessExecutionAndReceipt(t *testing.T) {
 		}
 	}
 }
+
+func TestAgyProvider_DiscoverModelsAndSpawnFlags(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mockBin := filepath.Join(tmpDir, "agy")
+	if runtime.GOOS == "windows" {
+		mockBin += ".bat"
+		script := strings.ReplaceAll(`@echo off
+if "%~1"=="--version" goto ver
+if "%~1"=="models" goto models
+echo %*
+exit /b 0
+:ver
+echo agy v0.7.0
+exit /b 0
+:models
+echo gemini-4-hydrogen-high  Gemini 4 Hydrogen (High)
+echo gemini-4-argon-high    Gemini 4 Argon (High)
+echo gemini-4-carbon-high   Gemini 4 Carbon (High)
+echo gemini-pro-orchestrator  Gemini Pro Orchestrator
+echo available models:
+echo usage: agy models [options]
+exit /b 0
+`, "\n", "\r\n")
+		if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
+			t.Fatalf("failed to write mock script: %v", err)
+		}
+	} else {
+		script := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "agy v0.7.0"; exit 0; fi
+if [ "$1" = "models" ]; then
+  echo "gemini-4-hydrogen-high  Gemini 4 Hydrogen (High)"
+  echo "gemini-4-argon-high    Gemini 4 Argon (High)"
+  echo "gemini-4-carbon-high   Gemini 4 Carbon (High)"
+  echo "gemini-pro-orchestrator  Gemini Pro Orchestrator"
+  echo "available models:"
+  echo "usage: agy models [options]"
+  exit 0
+fi
+echo "$@"
+exit 0
+`
+		if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
+			t.Fatalf("failed to write mock script: %v", err)
+		}
+	}
+
+	t.Setenv("AGY_BIN", mockBin)
+	p := NewAgyProvider()
+
+	ctx := context.Background()
+	models, err := p.DiscoverModels(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverModels failed: %v", err)
+	}
+	expected := []string{"gemini-4-hydrogen-high", "gemini-4-argon-high", "gemini-4-carbon-high", "gemini-pro-orchestrator"}
+	if len(models) != len(expected) {
+		t.Errorf("expected %d models, got %d: %v", len(expected), len(models), models)
+	}
+	for i, m := range expected {
+		if i >= len(models) || models[i] != m {
+			t.Errorf("model[%d]: expected %q, got %q", i, m, models[i])
+		}
+	}
+
+	handle, err := p.Spawn(ctx, Spec{
+		Model:       "gemini-4-hydrogen-high",
+		Brief:       "test prompt",
+		AddDirs:     []string{"/tmp/test"},
+		Effort:      "high",
+		WorktreeDir: tmpDir,
+		Env:         map[string]string{"G8S_SANDBOX": "1", "CUSTOM_VAR": "custom_value"},
+	})
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+
+	receipt, err := handle.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Wait failed: %v", err)
+	}
+
+	if receipt.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", receipt.ExitCode)
+	}
+
+	stdout := strings.TrimSpace(receipt.Stdout)
+	if !strings.Contains(stdout, "test prompt") {
+		t.Errorf("stdout should contain prompt, got: %q", stdout)
+	}
+}

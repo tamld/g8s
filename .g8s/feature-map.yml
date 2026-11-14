@@ -486,6 +486,7 @@ features:
       - "DELTA-36"
       - "DELTA-38"
       - "DELTA-43"
+      - "DELTA-48"
     code_paths:
       - "internal/provider/**"
       - "internal/config/**"

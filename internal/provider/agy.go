@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -58,8 +59,7 @@ func (a *AgyProvider) Available(ctx context.Context) error {
 		bin = p
 	}
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	out, err := cmd.CombinedOutput()
+	out, err := boundedProbe(ctx, bin, "--version")
 	if err != nil {
 		return codedError(codeProbeFailed, "agy --version: %w", err)
 	}
@@ -88,6 +88,57 @@ func (a *AgyProvider) Version(ctx context.Context) (string, error) {
 	return a.version, nil
 }
 
+// DiscoverModels returns the list of available models from agy CLI.
+func (a *AgyProvider) DiscoverModels(ctx context.Context) ([]string, error) {
+	if err := a.Available(ctx); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+	}
+
+	a.mu.RLock()
+	bin := a.binary
+	a.mu.RUnlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, cliProbeTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(probeCtx, bin, "models").Output()
+	if err != nil {
+		return nil, codedError(codeProbeFailed, "agy models: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var models []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "available") || strings.HasPrefix(lower, "usage") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		model := fields[0]
+		modelLower := strings.ToLower(model)
+		if modelLower != model {
+			continue
+		}
+		if !strings.ContainsAny(modelLower, "abcdefghijklmnopqrstuvwxyz0123456789._/-") {
+			continue
+		}
+		if len(model) > 0 && (model[0] < 'a' || model[0] > 'z') && (model[0] < '0' || model[0] > '9') {
+			continue
+		}
+		if !seen[model] {
+			seen[model] = true
+			models = append(models, model)
+		}
+	}
+	return models, nil
+}
+
 // Spawn launches an agy subprocess with the requested spec.
 func (a *AgyProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if err := a.Available(ctx); err != nil {
@@ -108,10 +159,29 @@ func (a *AgyProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	for _, dir := range spec.AddDirs {
 		args = append(args, "--add-dir", dir)
 	}
+	if spec.Effort != "" && !strings.EqualFold(spec.Effort, "none") {
+		args = append(args, "--effort", spec.Effort)
+	}
+	if spec.Env != nil {
+		if v, ok := spec.Env["G8S_SANDBOX"]; ok && v == "1" {
+			args = append(args, "--sandbox")
+		}
+	}
 
 	cmd := exec.Command(bin, args...)
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
+	}
+	if len(spec.Env) > 0 {
+		cmd.Env = append([]string{}, os.Environ()...)
+		keys := make([]string, 0, len(spec.Env))
+		for k := range spec.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			cmd.Env = append(cmd.Env, k+"="+spec.Env[k])
+		}
 	}
 	configureSysProcAttr(cmd)
 

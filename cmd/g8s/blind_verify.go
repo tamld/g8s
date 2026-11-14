@@ -18,7 +18,9 @@ import (
 	"github.com/tamld/g8s/internal/brief"
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/provider"
+	"github.com/tamld/g8s/internal/verifier"
 )
 
 // BlindReviewPacket is the g8s-blind-verifier input payload (DELTA-34).
@@ -263,6 +265,181 @@ func parseBlindVerdict(raw string) (BlindVerdict, error) {
 	return v, nil
 }
 
+const (
+	// maxBlindPromptBytes bounds each individual verifier prompt safely below
+	// Linux kernel MAX_ARG_STRLEN (131072 bytes) and CLI adapter user-message
+	// intake limits (~200KB) so large multi-file diffs are never silently truncated.
+	maxBlindPromptBytes = 100 * 1024
+	maxBlindTestBytes   = 24 * 1024
+)
+
+func boundMechanicalTestOutput(out string, limit int) string {
+	if limit <= 0 || len(out) <= limit {
+		return out
+	}
+	headLen := limit / 3
+	tailLen := limit - headLen - 96
+	if tailLen < 0 {
+		return out[:limit]
+	}
+	head := out[:headLen]
+	if nl := strings.LastIndexByte(head, '\n'); nl > 0 {
+		head = head[:nl]
+	}
+	tail := out[len(out)-tailLen:]
+	if nl := strings.IndexByte(tail, '\n'); nl >= 0 && nl+1 < len(tail) {
+		tail = tail[nl+1:]
+	}
+	return head + "\n...[middle mechanical test lines omitted; final summary preserved below]...\n" + tail
+}
+
+func splitOversizedFileBlock(block string, maxBytes int) []string {
+	if len(block) <= maxBytes {
+		return []string{block}
+	}
+	firstHunk := strings.Index(block, "\n@@ ")
+	var header, body string
+	if firstHunk > 0 {
+		header = block[:firstHunk]
+		body = block[firstHunk+1:]
+	} else {
+		body = block
+	}
+	budget := maxBytes - len(header) - 1
+	if budget < 1024 {
+		budget = 1024
+	}
+
+	// Split along hunk boundaries first, then line boundaries if a single hunk is huge.
+	var rawHunks []string
+	rem := body
+	for {
+		idx := strings.Index(rem, "\n@@ ")
+		if idx < 0 {
+			rawHunks = append(rawHunks, rem)
+			break
+		}
+		rawHunks = append(rawHunks, rem[:idx])
+		rem = rem[idx+1:]
+	}
+
+	var pieces []string
+	for _, h := range rawHunks {
+		if len(h) <= budget {
+			pieces = append(pieces, h)
+			continue
+		}
+		var lineBuf strings.Builder
+		for _, ln := range strings.Split(h, "\n") {
+			for len(ln) > budget {
+				if lineBuf.Len() > 0 {
+					pieces = append(pieces, lineBuf.String())
+					lineBuf.Reset()
+				}
+				pieces = append(pieces, ln[:budget])
+				ln = ln[budget:]
+			}
+			if lineBuf.Len() > 0 && lineBuf.Len()+1+len(ln) > budget {
+				pieces = append(pieces, lineBuf.String())
+				lineBuf.Reset()
+			}
+			if lineBuf.Len() > 0 {
+				lineBuf.WriteByte('\n')
+			}
+			lineBuf.WriteString(ln)
+		}
+		if lineBuf.Len() > 0 {
+			pieces = append(pieces, lineBuf.String())
+		}
+	}
+
+	var chunks []string
+	var cur strings.Builder
+	for _, p := range pieces {
+		if cur.Len() > 0 && cur.Len()+1+len(p) > budget {
+			if header != "" {
+				chunks = append(chunks, header+"\n"+cur.String())
+			} else {
+				chunks = append(chunks, cur.String())
+			}
+			cur.Reset()
+		}
+		if cur.Len() > 0 {
+			cur.WriteByte('\n')
+		}
+		cur.WriteString(p)
+	}
+	if cur.Len() > 0 {
+		if header != "" {
+			chunks = append(chunks, header+"\n"+cur.String())
+		} else {
+			chunks = append(chunks, cur.String())
+		}
+	}
+	return chunks
+}
+
+func splitDiffIntoFileShards(rawDiff string, maxDiffBytes int) []string {
+	if maxDiffBytes < 4096 {
+		maxDiffBytes = 4096
+	}
+	if len(rawDiff) <= maxDiffBytes {
+		return []string{rawDiff}
+	}
+
+	var fileBlocks []string
+	rem := rawDiff
+	for {
+		idx := strings.Index(rem, "\ndiff --git ")
+		if idx < 0 {
+			fileBlocks = append(fileBlocks, rem)
+			break
+		}
+		fileBlocks = append(fileBlocks, rem[:idx])
+		rem = rem[idx+1:]
+	}
+
+	var normalized []string
+	for _, fb := range fileBlocks {
+		normalized = append(normalized, splitOversizedFileBlock(fb, maxDiffBytes)...)
+	}
+
+	var shards []string
+	var cur strings.Builder
+	for _, blk := range normalized {
+		if cur.Len() > 0 && cur.Len()+1+len(blk) > maxDiffBytes {
+			shards = append(shards, cur.String())
+			cur.Reset()
+		}
+		if cur.Len() > 0 {
+			cur.WriteByte('\n')
+		}
+		cur.WriteString(blk)
+	}
+	if cur.Len() > 0 {
+		shards = append(shards, cur.String())
+	}
+	if len(shards) == 0 {
+		return []string{rawDiff}
+	}
+	return shards
+}
+
+func validateDisjointVerifierFamily(authorFamily, verifierFamily string) error {
+	af := strings.ToLower(strings.TrimSpace(authorFamily))
+	if af == "" {
+		return nil
+	}
+	vf := strings.ToLower(strings.TrimSpace(verifierFamily))
+	if vf == "" {
+		return fmt.Errorf("E_DISJOINT_FAMILY: verifier model family is unknown; declare family in catalog/providers.json to verify against author family %q", af)
+	}
+	if vf != "multi" && af == vf {
+		return fmt.Errorf("E_DISJOINT_FAMILY: S3-A verifier family %q must be disjoint from author family %q", vf, af)
+	}
+	return nil
+}
+
 func executeBlindVerify(
 	ctx context.Context,
 	httpProv provider.Provider,
@@ -290,12 +467,25 @@ func executeBlindVerify(
 		return BlindVerdict{}, errors.New("hydrate g8s-blind-verifier skill returned empty block")
 	}
 
-	var sb strings.Builder
-	sb.WriteString(skillBlock)
-	sb.WriteString("\n\n")
-	sb.WriteString(`You are an S3-A Double-Blind Falsification & Counterexample Verifier (g8s-blind-verifier).
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+	boundedTestOutput := boundMechanicalTestOutput(packet.MechanicalTestOutput, maxBlindTestBytes)
+	overhead := len(skillBlock) + len(packet.SpecContract) + len(packet.Invariants) + len(boundedTestOutput) + 2048
+	maxDiffBytes := maxBlindPromptBytes - overhead
+	if maxDiffBytes < 24*1024 {
+		maxDiffBytes = 24 * 1024
+	}
+	shards := splitDiffIntoFileShards(packet.RawGitDiff, maxDiffBytes)
+
+	runShard := func(shardDiff string, shardIdx, shardCount int) (BlindVerdict, error) {
+		var sb strings.Builder
+		sb.WriteString(skillBlock)
+		sb.WriteString("\n\n")
+		sb.WriteString(`You are an S3-A Double-Blind Falsification & Counterexample Verifier (g8s-blind-verifier).
 Your input is a BlindReviewPacket containing ONLY SpecContract, Invariants, RawGitDiff (untruncated), and MechanicalTestOutput.
 Worker self-reports, commit messages, and authoring model identity are stripped to defeat reviewer sycophancy.
+Do NOT invoke any tools, shell commands, or file reads; evaluate ONLY the BlindReviewPacket supplied inline below and emit ONLY the JSON object.
 
 Respond with a JSON object matching:
 {
@@ -305,45 +495,121 @@ Respond with a JSON object matching:
   "findings": ["specific finding"],
   "counterexamples": ["concrete counterexample when REJECTED"]
 }
-
-=== SPEC CONTRACT ===
 `)
-	sb.WriteString(packet.SpecContract)
-	sb.WriteString("\n\n=== INVARIANTS ===\n")
-	sb.WriteString(packet.Invariants)
-	sb.WriteString("\n\n=== RAW GIT DIFF ===\n")
-	sb.WriteString(packet.RawGitDiff)
-	sb.WriteString("\n\n=== MECHANICAL TEST OUTPUT ===\n")
-	sb.WriteString(packet.MechanicalTestOutput)
-	sb.WriteString("\n=== END PACKET ===\n")
+		if shardCount > 1 {
+			fmt.Fprintf(&sb, "\nNOTE: RawGitDiff is partitioned cleanly along file/hunk boundaries into %d untruncated shards (this is Shard %d of %d) to prevent CLI/OS prompt truncation.\nEvaluate ONLY whether the diff hunks present in Shard %d/%d introduce bugs, regressions, security/concurrency flaws, or violate SpecContract/Invariants.\nDo NOT reject solely because other files named in SpecContract reside in sibling shards; all %d shards are combined via fail-closed AND conjunction.\n", shardCount, shardIdx+1, shardCount, shardIdx+1, shardCount, shardCount)
+		}
+		sb.WriteString("\n=== SPEC CONTRACT ===\n")
+		sb.WriteString(packet.SpecContract)
+		sb.WriteString("\n\n=== INVARIANTS ===\n")
+		sb.WriteString(packet.Invariants)
+		sb.WriteString("\n\n=== RAW GIT DIFF ===\n")
+		sb.WriteString(shardDiff)
+		sb.WriteString("\n\n=== MECHANICAL TEST OUTPUT ===\n")
+		sb.WriteString(boundedTestOutput)
+		sb.WriteString("\n=== END PACKET ===\n")
 
-	if maxTokens <= 0 {
-		maxTokens = 4096
+		spec := provider.Spec{
+			Brief:     sb.String(),
+			Model:     model,
+			Effort:    effort,
+			MaxTokens: maxTokens,
+			Timeout:   timeout,
+			TraceID:   traceID,
+		}
+		var cleanup func()
+		if _, isHTTP := httpProv.(*provider.OpenAIProvider); !isHTTP {
+			hookDir, _, cl, wsErr := dispatch.SetupToolPolicyNoneWorkspace()
+			if wsErr != nil {
+				return BlindVerdict{}, fmt.Errorf("setup tool-denied verifier workspace: %w", wsErr)
+			}
+			cleanup = cl
+			spec.WorktreeDir = hookDir
+			spec.AddDirs = []string{hookDir}
+			spec.Env = map[string]string{"G8S_SANDBOX": "1"}
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+
+		start := time.Now()
+		handle, err := httpProv.Spawn(ctx, spec)
+		if err != nil {
+			return BlindVerdict{}, fmt.Errorf("spawn verifier failed: %w", err)
+		}
+		res, err := handle.Wait(ctx)
+		if err != nil {
+			return BlindVerdict{}, fmt.Errorf("verifier call failed: %w", err)
+		}
+		v, err := parseBlindVerdict(res.Stdout)
+		if err != nil {
+			return BlindVerdict{}, err
+		}
+		v.ModelResolved = res.ModelResolved
+		v.DurationMs = time.Since(start).Milliseconds()
+		v.TraceID = traceID
+		return v, nil
 	}
-	start := time.Now()
-	handle, err := httpProv.Spawn(ctx, provider.Spec{
-		Brief:     sb.String(),
-		Model:     model,
-		Effort:    effort,
-		MaxTokens: maxTokens,
-		Timeout:   timeout,
-		TraceID:   traceID,
-	})
-	if err != nil {
-		return BlindVerdict{}, fmt.Errorf("spawn verifier failed: %w", err)
+
+	if len(shards) == 1 {
+		return runShard(shards[0], 0, 1)
 	}
-	res, err := handle.Wait(ctx)
-	if err != nil {
-		return BlindVerdict{}, fmt.Errorf("verifier call failed: %w", err)
+
+	allPassed := true
+	var (
+		summaries       []string
+		findings        []string
+		counterexamples []string
+		seenFinding     = make(map[string]bool)
+		seenCE          = make(map[string]bool)
+		modelResolved   string
+		totalDurationMs int64
+	)
+	for i, shardDiff := range shards {
+		v, sErr := runShard(shardDiff, i, len(shards))
+		if sErr != nil {
+			return BlindVerdict{}, fmt.Errorf("shard %d/%d: %w", i+1, len(shards), sErr)
+		}
+		totalDurationMs += v.DurationMs
+		if modelResolved == "" && v.ModelResolved != "" {
+			modelResolved = v.ModelResolved
+		}
+		if !v.Passed || v.Verdict != "ACCEPTED" {
+			allPassed = false
+		}
+		if strings.TrimSpace(v.Summary) != "" {
+			summaries = append(summaries, fmt.Sprintf("[shard %d/%d %s] %s", i+1, len(shards), v.Verdict, strings.TrimSpace(v.Summary)))
+		}
+		for _, f := range v.Findings {
+			tag := fmt.Sprintf("[shard %d/%d] %s", i+1, len(shards), f)
+			if !seenFinding[tag] {
+				seenFinding[tag] = true
+				findings = append(findings, tag)
+			}
+		}
+		for _, ce := range v.Counterexamples {
+			tag := fmt.Sprintf("[shard %d/%d] %s", i+1, len(shards), ce)
+			if !seenCE[tag] {
+				seenCE[tag] = true
+				counterexamples = append(counterexamples, tag)
+			}
+		}
 	}
-	verdict, err := parseBlindVerdict(res.Stdout)
-	if err != nil {
-		return BlindVerdict{}, err
+
+	verdictStr := "ACCEPTED"
+	if !allPassed {
+		verdictStr = "REJECTED"
 	}
-	verdict.ModelResolved = res.ModelResolved
-	verdict.DurationMs = time.Since(start).Milliseconds()
-	verdict.TraceID = traceID
-	return verdict, nil
+	return BlindVerdict{
+		Verdict:         verdictStr,
+		Passed:          allPassed,
+		Summary:         strings.Join(summaries, "; "),
+		Findings:        findings,
+		Counterexamples: counterexamples,
+		ModelResolved:   modelResolved,
+		DurationMs:      totalDurationMs,
+		TraceID:         traceID,
+	}, nil
 }
 
 func runBlindVerify(args []string) {
@@ -364,12 +630,13 @@ func runBlindVerify(args []string) {
 	maxTokensFlag := fs.Int("max-tokens", 4096, "maximum output tokens for verifier response")
 	timeoutFlag := fs.String("timeout", "180s", "verification timeout")
 	providerFlag := fs.String("provider", "9router", "provider to use for verification")
+	authorFamilyFlag := fs.String("author-family", "", "optional author model family slug (e.g. google, nvidia, anthropic, openai) to enforce disjoint S3-A verification")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
-		exitUsage("blind-verify", "", *traceID, err.Error(), "usage: g8s blind-verify [--base origin/main] [--spec <path>|--spec-text <text>] [--test-output <path>] [--json]", *jsonl)
+		exitUsage("blind-verify", "", *traceID, err.Error(), "usage: g8s blind-verify [--base origin/main] [--spec <path>|--spec-text <text>] [--test-output <path>] [--author-family <slug>] [--json]", *jsonl)
 	}
 
 	timeoutDur, err := time.ParseDuration(*timeoutFlag)
@@ -452,6 +719,8 @@ func runBlindVerify(args []string) {
 		testOutput = "PASS (mechanical test output not supplied; evaluate diff directly against SpecContract and Invariants)"
 	}
 
+	rawDiff = verifier.SanitizeDiffForBlindReview(rawDiff)
+
 	packet := BlindReviewPacket{
 		SpecContract:         specContract,
 		Invariants:           invariants,
@@ -459,48 +728,38 @@ func runBlindVerify(args []string) {
 		MechanicalTestOutput: testOutput,
 	}
 
-	providersPath := os.Getenv("G8S_PROVIDERS")
-	if providersPath == "" {
-		if home, hErr := os.UserHomeDir(); hErr == nil && home != "" {
-			providersPath = filepath.Join(home, ".config", "g8s", "providers.json")
+	modelExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelExplicit = true
 		}
-	}
-	var cfgFile *config.File
-	if providersPath != "" {
-		if _, statErr := os.Stat(providersPath); statErr == nil {
-			cfgFile, _ = config.Load(providersPath)
-		}
-	}
+	})
 
-	var entry config.ProviderEntry
-	found := false
-	if cfgFile != nil {
-		if p, ok := config.FindProvider(cfgFile, *providerFlag); ok && p.Class == "api_call" {
-			entry = *p
-			found = true
-		}
-	}
-	if !found && strings.EqualFold(*providerFlag, "9router") {
-		entry = config.ProviderEntry{
-			Class:               "api_call",
-			Name:                "9router",
-			Protocol:            "9router",
-			BaseURL:             "http://127.0.0.1:20128/v1",
-			BaseURLEnv:          "NINEROUTER_URL",
-			AuthEnv:             "OPENAI_API_KEY",
-			AllowUnlistedModels: true,
-		}
-		found = true
-	}
-	if !found {
-		exitUsage("blind-verify", "", *traceID, fmt.Sprintf("provider %q not found", *providerFlag), "Configure provider in providers.json", *jsonl)
-	}
-
-	httpProv := provider.NewHTTPProviderFromConfig(entry)
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
 	defer cancel()
 
-	verdict, vErr := executeBlindVerify(ctx, httpProv, packet, *modelFlag, *effortFlag, *maxTokensFlag, timeoutDur, *traceID)
+	resolvedProv, err := resolveCallableProvider(ctx, *providerFlag)
+	if err != nil {
+		exitUsage("blind-verify", "", *traceID, fmt.Sprintf("provider %q: %v", *providerFlag, err), "Configure provider in providers.json or use a registered platform_dispatch provider (agy, claude, opencode, codex, cursor)", *jsonl)
+	}
+
+	cfgFile := loadProvidersManifestFile()
+	cat, _ := config.LoadDefaultCatalog()
+	modelID := *modelFlag
+	if !modelExplicit && !strings.EqualFold(resolvedProv.Name(), "9router") {
+		if defModel := config.ResolveProviderDefaultModel(cfgFile, cat, resolvedProv.Name()); defModel != "" {
+			modelID = defModel
+		}
+	}
+
+	if strings.TrimSpace(*authorFamilyFlag) != "" {
+		vFam, _, _ := lookupDeclarativeModelMeta(cfgFile, cat, resolvedProv.Name(), modelID)
+		if dErr := validateDisjointVerifierFamily(*authorFamilyFlag, vFam); dErr != nil {
+			exitUsage("blind-verify", "", *traceID, dErr.Error(), "Select a verifier --provider/--model from a vendor family disjoint from --author-family", *jsonl)
+		}
+	}
+
+	verdict, vErr := executeBlindVerify(ctx, resolvedProv, packet, modelID, *effortFlag, *maxTokensFlag, timeoutDur, *traceID)
 	if vErr != nil {
 		exitRuntime("blind-verify", "", *traceID, cli.CodeRuntime, vErr, "Ensure verifier model returns valid S3-A verdict JSON", *jsonl)
 	}

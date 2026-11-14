@@ -10,6 +10,8 @@ Under **ADR-0030**, the router acts as the factory's distributor: orchestrators 
 
 By default, task submission operates in `manual` mode for strict backward compatibility. Specifying `--route auto` enables the context-aware routing pipeline at task submission time.
 
+**DELTA-48** extends routing with declarative provider defaults (`ResolveProviderDefaultModel`) and cost-tier awareness across free, economy, standard, and frontier model tiers.
+
 ---
 
 ## The `--route` Flag
@@ -46,35 +48,35 @@ The router follows a two-tier design ensuring that installations without externa
                            +----------------------+
                            |      g8s submit      |
                            +----------+-----------+
-                                      |
-                              --route auto ?
-                             /              \
-                        (no) /                \ (yes)
-                            v                  v
-                   +----------------+   +-------------------------------+
-                   |  Manual Route  |   | Layer 1: Deterministic Policy |
-                   |  CLI defaults  |   | (Always active, zero network) |
-                   +----------------+   +---------------+---------------+
-                                                        |
-                                            G8S_ROUTER_MODE=jev_assisted?
-                                            and valid API keys present?
-                                               /                 \
-                                         (yes)/                   \(no)
-                                             v                     v
-                                    +-----------------+    +---------------+
-                                    | Layer 2: Jev    |    | Final Layer 1 |
-                                    | Suggestion      |    | Decision      |
-                                    +--------+--------+    +---------------+
-                                             |
-                                    Validated against
-                                    manifest & roles?
-                                       /           \
-                                 (yes)/             \(no: fallback)
-                                     v               v
-                             +-------------+  +---------------+
-                             | Jev Decision|  | Layer 1 with  |
-                             | Source: jev |  | IsFallback: t |
-                             +-------------+  +---------------+
+                                     |
+                               --route auto ?
+                              /              \
+                          (no) /                \ (yes)
+                              v                  v
+                     +----------------+   +-------------------------------+
+                     |  Manual Route  |   | Layer 1: Deterministic Policy |
+                     |  CLI defaults  |   | (Always active, zero network) |
+                     +----------------+   +---------------+---------------+
+                                                         |
+                                             G8S_ROUTER_MODE=jev_assisted?
+                                             and valid API keys present?
+                                                /                 \
+                                          (yes)/                   \(no)
+                                              v                     v
+                                     +-----------------+    +---------------+
+                                     | Layer 2: Jev    |    | Final Layer 1 |
+                                     | Suggestion      |    | Decision      |
+                                     +--------+--------+    +---------------+
+                                              |
+                                     Validated against
+                                     manifest & roles?
+                                        /           \
+                                  (yes)/             \(no: fallback)
+                                      v               v
+                              +-------------+  +---------------+
+                              | Jev Decision|  | Layer 1 with  |
+                              | Source: jev |  | IsFallback: t |
+                              +-------------+  +---------------+
 ```
 
 ### Layer 1: Deterministic Policy (Always Active, Zero Network)
@@ -90,7 +92,7 @@ Layer 1 executes locally with **zero network requests**. It applies prioritized 
 4. **Extended Execution Windows**:
    - Tasks with timeout hints $\ge 30\text{m}$ route to high-capacity models with the **`collector`** role.
 5. **Manifest Default Fallback**:
-   - Tasks that do not trigger specialized rules route to the manifest default provider and role (in the shipped default catalog that is `agy` / `gemini-3.8-flash-high` / `collector`; operators override it via `providers.json` / `default_provider` — `agy` is the out-of-box default, not the only supported provider).
+   - Tasks that do not trigger specialized rules route to the manifest default provider and model via `ResolveProviderDefaultModel(manifest, cat, providerName)`. Operators override defaults via `providers.json` / `default_provider` — `agy` is the out-of-box default, not the only supported provider.
 
 ### Layer 2: Jev-Assisted Routing (Optional, Benchmark-Gated)
 
@@ -107,9 +109,33 @@ Auto-routing resolves candidate models and providers from the same Single Source
 
 1. **`G8S_PROVIDERS`**: If set, loads provider definitions from this path.
 2. **Canonical Config**: If `G8S_PROVIDERS` is unset, checks `~/.config/g8s/providers.json`.
-3. **Built-in Defaults**: If neither file exists, the router falls back to catalog defaults (`agy` with `gemini-3.8-flash-high`, `claude` with `claude-haiku-4-5`, `ollama` with `llama3.1`).
+3. **Built-in Defaults**: If neither file exists, the router falls back to catalog defaults (`agy` with `gemini-4-hydrogen-high`, `claude` with `claude-haiku-4-5`, `ollama` with `llama3.1`, `9router` with `reasoning-high`, `opencode` with `9router/reasoning-high`).
 
 If a provider config file exists at the specified location but fails validation (e.g. invalid JSON syntax), submission exits with a runtime error (`cli.CodeRuntime`) before queueing the task.
+
+---
+
+## Declarative Provider Defaults (DELTA-48)
+
+`ResolveProviderDefaultModel(manifest, cat, providerName)` selects the default model per provider using declared metadata (`family`, `cost_tier`, `status: active`). The resolver prefers:
+- Lowest `cost_tier` for the task class (`free` > `economy` > `standard` > `frontier`)
+- Highest `context_window` within the tier
+- `effort_style` compatibility with the task class
+
+This enables operator-neutral defaults across all adapters (`9router`, `opencode`, `codex`, `claude`, `agy`, `cursor`, `commandcode`, `qwen`).
+
+---
+
+## Cost-Tier Aware Routing (DELTA-48)
+
+The router now considers model `cost_tier` when selecting defaults:
+
+| Tier | Rank | Example Models | Use Case |
+| :--- | :--- | :--- | :--- |
+| `free` | 5 | `reasoning-free`, `docs-retriever`, `opencode/*-free` | Scout, summarizer, low-blast tasks |
+| `economy` | 30..40 | `gemini-4-hydrogen-{low,medium,high,xhigh}` | Standard worker tasks, collector |
+| `standard` | 70..75 | `gemini-4-argon-{low,medium,high}` | Complex analysis, high-blast tasks |
+| `frontier` | 95 | `gemini-4-carbon-{low,medium,high}`, `gemini-pro-orchestrator`, `claude-sonnet-5-5`, `gpt-5.4` | Brain/orchestrator, critical paths |
 
 ---
 

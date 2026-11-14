@@ -10,7 +10,9 @@ import (
 
 	"github.com/pterm/pterm"
 	"github.com/tamld/g8s/internal/cli"
+	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/harness/probe"
+	"github.com/tamld/g8s/internal/provider"
 )
 
 // runEval is the adversarial evaluation harness (#254): list the probe
@@ -68,7 +70,7 @@ func runEvalRun(args []string) {
 	fs := flag.NewFlagSet("eval run", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, true)
 	_ = actor
-	providerName := fs.String("provider", "mock-compliant", "provider: mock-compliant, mock-defiant, agy, claude (live = operator-invoked)")
+	providerName := fs.String("provider", "mock-compliant", "provider: mock-compliant, mock-defiant, or any configured/registered provider (9router, agy, claude, cursor, etc.)")
 	model := fs.String("model", "", "model id for live providers (default per provider)")
 	category := fs.String("category", "", "filter by probe category")
 	probeIDs := fs.String("probes", "", "comma-separated probe IDs")
@@ -77,28 +79,39 @@ func runEvalRun(args []string) {
 		exitUsage("eval", "run", *traceID, err.Error(), "", *jsonl)
 	}
 
-	var provider probe.WorkerProvider
+	var evalProv probe.WorkerProvider
+	ctx := context.Background()
+
 	switch strings.ToLower(*providerName) {
 	case "mock-compliant":
-		provider = &probe.StaticProvider{Compliant: true}
+		evalProv = &probe.StaticProvider{Compliant: true}
 	case "mock-defiant":
-		provider = &probe.StaticProvider{Compliant: false}
-	case "agy", "claude":
-		// #379: live WorkerProvider adapter — read_only dispatch, bounded
-		// per-probe timeout, redacted capture. Naming a live provider here
-		// IS the operator invocation.
-		modelID := *model
+		evalProv = &probe.StaticProvider{Compliant: false}
+	default:
+		resolvedProv, err := resolveCallableProvider(ctx, *providerName)
+		if err != nil {
+			exitUsage("eval", "run", *traceID, fmt.Sprintf("provider %q: %v", *providerName, err), "Configure provider in providers.json or use a registered platform_dispatch provider (agy, claude, opencode, codex, cursor)", *jsonl)
+			return
+		}
+		_, isHTTP := resolvedProv.(*provider.OpenAIProvider)
+		isCLI := !isHTTP
+		provName := resolvedProv.Name()
+
+		modelID := strings.TrimSpace(*model)
 		if modelID == "" {
-			if strings.ToLower(*providerName) == "agy" {
-				modelID = "gemini-3.8-flash-high"
-			} else {
-				modelID = "claude-sonnet-4-5"
+			cfgFile := loadProvidersManifestFile()
+			cat, _ := config.LoadDefaultCatalog()
+			modelID = config.ResolveProviderDefaultModel(cfgFile, cat, provName)
+			if modelID == "" {
+				if strings.EqualFold(provName, "claude") {
+					modelID = "claude-sonnet-4-5"
+				} else {
+					modelID = "gemini-4-hydrogen-high"
+				}
 			}
 		}
-		provider = probe.NewLiveWorkerProvider(strings.ToLower(*providerName), modelID, *timeoutPerProbe)
-	default:
-		exitUsage("eval", "run", *traceID, fmt.Sprintf("unknown provider %q (mock-compliant, mock-defiant, agy, claude)", *providerName), "g8s eval run --provider mock-compliant", *jsonl)
-		return
+
+		evalProv = probe.NewProviderWorkerAdapter(resolvedProv, modelID, isCLI, *timeoutPerProbe)
 	}
 
 	suite := probe.FilterSuite(probe.DefaultSuite(), splitComma(*probeIDs), *category)
@@ -110,7 +123,7 @@ func runEvalRun(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeoutPerProbe*time.Duration(len(suite.Probes)))
 	defer cancel()
 
-	pri, err := probe.RunSuite(ctx, suite, provider)
+	pri, err := probe.RunSuite(ctx, suite, evalProv)
 	if err != nil {
 		exitRuntime("eval", "run", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		return

@@ -1534,3 +1534,78 @@ func TestNormalProfilesRetainBehaviorWithoutToolPolicyEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCommand_OmitsNoneEffortAndSupportsXHigh(t *testing.T) {
+	tests := []struct {
+		name       string
+		effort     string
+		wantEffort string
+		wantFlag   bool
+	}{
+		{
+			name:       "effort none is omitted",
+			effort:     "none",
+			wantEffort: "",
+			wantFlag:   false,
+		},
+		{
+			name:       "effort empty is omitted",
+			effort:     "",
+			wantEffort: "",
+			wantFlag:   false,
+		},
+		{
+			name:       "effort low is included",
+			effort:     "low",
+			wantEffort: "low",
+			wantFlag:   true,
+		},
+		{
+			name:       "effort medium is included",
+			effort:     "medium",
+			wantEffort: "medium",
+			wantFlag:   true,
+		},
+		{
+			name:       "effort high is included",
+			effort:     "high",
+			wantEffort: "high",
+			wantFlag:   true,
+		},
+		{
+			name:       "effort xhigh is included (new level)",
+			effort:     "xhigh",
+			wantEffort: "xhigh",
+			wantFlag:   true,
+		},
+		{
+			name:       "effort max is included",
+			effort:     "max",
+			wantEffort: "max",
+			wantFlag:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := BuildCommand(CommandOptions{
+				Binary:  "/fake/agy",
+				Prompt:  "test prompt",
+				Model:   "test-model",
+				Timeout: "5m0s",
+				Effort:  tt.effort,
+			})
+
+			joined := strings.Join(cmd, " ")
+			if tt.wantFlag {
+				if !strings.Contains(joined, "--effort "+tt.wantEffort) {
+					t.Errorf("expected --effort %q in command, got %q", tt.wantEffort, joined)
+				}
+			} else {
+				if strings.Contains(joined, "--effort") {
+					t.Errorf("expected no --effort flag, got %q", joined)
+				}
+			}
+		})
+	}
+}

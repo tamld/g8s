@@ -89,6 +89,11 @@ type ProviderCatalog struct {
 	Mandatory     bool           `json:"mandatory,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Models        []ModelCatalog `json:"models"`
+
+	// Declarative model metadata (issue #902 / Slice WF1)
+	Family   string `json:"family,omitempty"`
+	CostTier string `json:"cost_tier,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 // FindModel searches for a model by ID within the provider catalog (case-insensitive).
@@ -110,6 +115,11 @@ type ModelCatalog struct {
 	Mandatory        bool           `json:"mandatory,omitempty"`
 	EffortBudgetMap  map[string]int `json:"effort_budget_map,omitempty"`
 	Notes            string         `json:"notes,omitempty"`
+
+	// Declarative model metadata (issue #902 / Slice WF1)
+	Family   string `json:"family,omitempty"`
+	CostTier string `json:"cost_tier,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 // MergeReport records the outcome of merging a Catalog into a File manifest.
@@ -264,6 +274,31 @@ func (c *Catalog) MergeInto(manifest *File) MergeReport {
 					m.EffortBudgetMap[k] = v
 				}
 				filled = true
+			}
+
+			// Family: empty = fill from catalog model or provider
+			if m.Family == "" {
+				if catModel.Family != "" {
+					m.Family = catModel.Family
+				} else if catProv.Family != "" {
+					m.Family = catProv.Family
+				}
+			}
+			// CostTier: empty = fill from catalog model or provider
+			if m.CostTier == "" {
+				if catModel.CostTier != "" {
+					m.CostTier = catModel.CostTier
+				} else if catProv.CostTier != "" {
+					m.CostTier = catProv.CostTier
+				}
+			}
+			// Status: empty = fill from catalog model or provider
+			if m.Status == "" {
+				if catModel.Status != "" {
+					m.Status = catModel.Status
+				} else if catProv.Status != "" {
+					m.Status = catProv.Status
+				}
 			}
 
 			if filled {
@@ -653,6 +688,15 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 						case "notes":
 							currentModel.Notes = cleanYAMLValue(propVal)
 							continue
+						case "family":
+							currentModel.Family = cleanYAMLValue(propVal)
+							continue
+						case "cost_tier":
+							currentModel.CostTier = cleanYAMLValue(propVal)
+							continue
+						case "status":
+							currentModel.Status = cleanYAMLValue(propVal)
+							continue
 						}
 					}
 				}
@@ -691,6 +735,12 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 					currentProvider.Mandatory = b
 				case "notes":
 					currentProvider.Notes = pVal
+				case "family":
+					currentProvider.Family = pVal
+				case "cost_tier":
+					currentProvider.CostTier = pVal
+				case "status":
+					currentProvider.Status = pVal
 				}
 				continue
 			}
@@ -728,6 +778,15 @@ func (c *Catalog) validate() error {
 		if prov.EffortStyle != "" && !IsValidEffortStyle(prov.EffortStyle) {
 			return &ValidationError{Provider: provName, Field: "effort_style", Msg: fmt.Sprintf("unknown style %q", prov.EffortStyle)}
 		}
+		if prov.Family != "" && !IsValidModelFamily(prov.Family) {
+			return &ValidationError{Provider: provName, Field: "family", Msg: fmt.Sprintf("invalid family %q", prov.Family)}
+		}
+		if prov.CostTier != "" && !IsValidCostTier(prov.CostTier) {
+			return &ValidationError{Provider: provName, Field: "cost_tier", Msg: fmt.Sprintf("invalid cost_tier %q", prov.CostTier)}
+		}
+		if prov.Status != "" && !IsValidModelStatus(prov.Status) {
+			return &ValidationError{Provider: provName, Field: "status", Msg: fmt.Sprintf("invalid status %q", prov.Status)}
+		}
 
 		for _, m := range prov.Models {
 			name := m.ID
@@ -750,7 +809,11 @@ func (c *Catalog) validate() error {
 				}
 			}
 
-			if m.DefaultEffort != "" {
+			if effectiveStyle == EffortStyleNone {
+				if m.DefaultEffort != "" && m.DefaultEffort != EffortNone {
+					return &ValidationError{Provider: provName, Model: name, Field: "default_effort", Msg: fmt.Sprintf("default_effort %q not allowed with effort_style %s", m.DefaultEffort, EffortStyleNone)}
+				}
+			} else if m.DefaultEffort != "" {
 				if m.DefaultEffort != EffortAdaptive && m.DefaultEffort != EffortDynamic {
 					found := false
 					for _, lvl := range m.SupportedEfforts {
@@ -777,6 +840,16 @@ func (c *Catalog) validate() error {
 						return &ValidationError{Provider: provName, Model: name, Field: "effort_budget_map", Msg: fmt.Sprintf("token budget for level %q must be > 0", lvl)}
 					}
 				}
+			}
+
+			if m.Family != "" && !IsValidModelFamily(m.Family) {
+				return &ValidationError{Provider: provName, Model: name, Field: "family", Msg: fmt.Sprintf("invalid family %q", m.Family)}
+			}
+			if m.CostTier != "" && !IsValidCostTier(m.CostTier) {
+				return &ValidationError{Provider: provName, Model: name, Field: "cost_tier", Msg: fmt.Sprintf("invalid cost_tier %q", m.CostTier)}
+			}
+			if m.Status != "" && !IsValidModelStatus(m.Status) {
+				return &ValidationError{Provider: provName, Model: name, Field: "status", Msg: fmt.Sprintf("invalid status %q", m.Status)}
 			}
 		}
 	}
@@ -826,4 +899,189 @@ func findFile(relPath string) (string, error) {
 		dir = parent
 	}
 	return "", os.ErrNotExist
+}
+
+// ResolveProviderDefaultModel resolves the default model for a provider,
+// checking manifest first, then catalog, with baked-name suffix expansion.
+func ResolveProviderDefaultModel(manifest *File, cat *Catalog, providerName string) string {
+	trimmed := strings.TrimSpace(providerName)
+	if trimmed == "" {
+		return ""
+	}
+
+	// 1. Check manifest first
+	if manifest != nil {
+		if p, ok := FindProvider(manifest, trimmed); ok {
+			cand := strings.TrimSpace(p.DefaultModel)
+			if cand == "" && len(p.Models) > 0 {
+				for i := range p.Models {
+					if p.Models[i].Status == ModelStatusActive {
+						cand = strings.TrimSpace(p.Models[i].ID)
+						break
+					}
+				}
+				if cand == "" {
+					for i := range p.Models {
+						if p.Models[i].Status != ModelStatusDeprecated {
+							cand = strings.TrimSpace(p.Models[i].ID)
+							break
+						}
+					}
+				}
+				if cand == "" {
+					cand = strings.TrimSpace(p.Models[0].ID)
+				}
+			}
+			if cand != "" {
+				// Find the matching ModelEntry in manifest
+				var m *ModelEntry
+				for i := range p.Models {
+					if strings.EqualFold(p.Models[i].ID, cand) {
+						m = &p.Models[i]
+						break
+					}
+				}
+				if m == nil && len(p.Models) > 0 {
+					m = &p.Models[0]
+				}
+				if m != nil {
+					// Enrich from catalog if needed
+					if cat != nil {
+						if catProv, ok := cat.FindProvider(p.Name); ok {
+							if catModel, ok := catProv.FindModel(m.ID); ok {
+								if m.EffortStyle == "" {
+									if catModel.EffortStyle != "" {
+										m.EffortStyle = catModel.EffortStyle
+									} else if catProv.EffortStyle != "" {
+										m.EffortStyle = catProv.EffortStyle
+									}
+								}
+								if m.DefaultEffort == "" {
+									if catModel.DefaultEffort != "" {
+										m.DefaultEffort = catModel.DefaultEffort
+									} else if catProv.DefaultEffort != "" {
+										m.DefaultEffort = catProv.DefaultEffort
+									}
+								}
+							}
+						}
+					}
+
+					effectiveStyle := m.EffortStyle
+					defEffort := m.DefaultEffort
+
+					// Handle baked-name suffix expansion
+					if effectiveStyle == EffortStyleBakedName {
+						hasSuffix := false
+						for _, lvl := range EffortLadder {
+							if strings.HasSuffix(cand, "-"+lvl) {
+								hasSuffix = true
+								break
+							}
+						}
+						if !hasSuffix {
+							// Strip optional -{effort} suffix
+							base := strings.TrimSuffix(cand, "-{effort}")
+							// Pick default effort
+							if defEffort == "" && len(m.SupportedEfforts) > 0 {
+								for _, s := range m.SupportedEfforts {
+									if IsValidEffortLevel(s) {
+										defEffort = s
+										break
+									}
+								}
+							}
+							if IsValidEffortLevel(defEffort) {
+								return base + "-" + defEffort
+							}
+						}
+					}
+					return cand
+				}
+			}
+			return cand
+		}
+	}
+
+	// 2. Fall back to catalog (with canonical CLI-to-vendor catalog aliases
+	// for codex -> openai, claude -> anthropic, gemini -> google).
+	if cat != nil {
+		catProv, ok := cat.FindProvider(trimmed)
+		if !ok {
+			switch strings.ToLower(trimmed) {
+			case "codex":
+				if op, found := cat.FindProvider("openai"); found {
+					if _, has54 := op.FindModel("gpt-5.4"); has54 {
+						return "gpt-5.4"
+					}
+					catProv, ok = op, true
+				} else {
+					return "gpt-5.4"
+				}
+			case "claude":
+				catProv, ok = cat.FindProvider("anthropic")
+			case "gemini":
+				catProv, ok = cat.FindProvider("google")
+			}
+		}
+		if ok {
+			// Prefer active model first, then non-deprecated (transitional/unset), then first model.
+			var chosen *ModelCatalog
+			for i := range catProv.Models {
+				if catProv.Models[i].Status == ModelStatusActive {
+					chosen = &catProv.Models[i]
+					break
+				}
+			}
+			if chosen == nil {
+				for i := range catProv.Models {
+					if catProv.Models[i].Status != ModelStatusDeprecated {
+						chosen = &catProv.Models[i]
+						break
+					}
+				}
+			}
+			if chosen == nil && len(catProv.Models) > 0 {
+				chosen = &catProv.Models[0]
+			}
+			if chosen != nil {
+				cand := chosen.ID
+				// Handle baked-name suffix expansion for catalog
+				effectiveStyle := chosen.EffortStyle
+				if effectiveStyle == "" {
+					effectiveStyle = catProv.EffortStyle
+				}
+				if effectiveStyle == EffortStyleBakedName {
+					hasSuffix := false
+					for _, lvl := range EffortLadder {
+						if strings.HasSuffix(cand, "-"+lvl) {
+							hasSuffix = true
+							break
+						}
+					}
+					if !hasSuffix {
+						base := strings.TrimSuffix(cand, "-{effort}")
+						defEffort := chosen.DefaultEffort
+						if defEffort == "" {
+							defEffort = catProv.DefaultEffort
+						}
+						if defEffort == "" && len(chosen.SupportedEfforts) > 0 {
+							for _, s := range chosen.SupportedEfforts {
+								if IsValidEffortLevel(s) {
+									defEffort = s
+									break
+								}
+							}
+						}
+						if IsValidEffortLevel(defEffort) {
+							return base + "-" + defEffort
+						}
+					}
+				}
+				return cand
+			}
+		}
+	}
+
+	return ""
 }

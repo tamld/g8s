@@ -133,6 +133,34 @@ func DefaultConfigs() []Config {
 			MaxConcurrency: 10,
 			Models: []ModelDescriptor{
 				{
+					ID:              "gemini-4-hydrogen-high",
+					Name:            "Gemini 4 Hydrogen (High)",
+					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier", "researcher", "implementer", "sec-auditor", "analyst"},
+					ContextWindow:   1000000,
+					MaxOutputTokens: 65536,
+				},
+				{
+					ID:              "gemini-4-argon-high",
+					Name:            "Gemini 4 Argon (High)",
+					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier", "researcher", "implementer", "sec-auditor", "analyst"},
+					ContextWindow:   1000000,
+					MaxOutputTokens: 65536,
+				},
+				{
+					ID:              "gemini-4-carbon-high",
+					Name:            "Gemini 4 Carbon (High)",
+					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier", "researcher", "implementer", "sec-auditor", "analyst"},
+					ContextWindow:   1000000,
+					MaxOutputTokens: 65536,
+				},
+				{
+					ID:              "gemini-pro-orchestrator",
+					Name:            "Gemini Pro Orchestrator",
+					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier", "researcher", "implementer", "sec-auditor", "analyst"},
+					ContextWindow:   1000000,
+					MaxOutputTokens: 65536,
+				},
+				{
 					ID:              "gemini-3.8-flash-high",
 					Name:            "Gemini 3.8 Flash (High)",
 					SupportedRoles:  []string{"collector", "scout", "mcp-mapper", "summarizer", "test-runner", "verifier", "researcher", "implementer", "sec-auditor", "analyst"},

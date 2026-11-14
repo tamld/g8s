@@ -3,11 +3,11 @@
 # (3 agents against official docs; tables in
 # plans/261004-effort-optimization/brief-AM1-catalog.md).
 # Consumed later by the config.File loader (#550 DoD).
-# probed live 2026-11-07, combo audit PR #786
+# probed live 2026-11-14, combo audit PR #786, Gemini 4 element series onboarding
 
 schema_version: agent-models.v1
-catalog_version: 2
-verified_at: "2026-11-11"
+catalog_version: 3
+verified_at: "2026-11-14"
 sources:
   - https://developers.openai.com/api/docs/models
   - https://developers.openai.com/api/docs/guides/reasoning
@@ -20,14 +20,19 @@ sources:
 
 # Dispatch presets for `g8s submit -profile <name>` (#725).
 profiles:
-  impl-medium:    {provider: cursor, model: composer-2.5, effort: medium, timeout: 600s, role: implementer, permission: workspace_write}
-  scout-fast:     {provider: cursor, model: composer-2.5, effort: low, timeout: 180s, role: scout, permission: read_only}
-  verifier:       {provider: cursor, model: composer-2.5, effort: high, timeout: 420s, role: verifier, permission: read_only}
-  docs-retriever: {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
-  nim-scout:      {provider: 9router, model: fast-agent, effort: low, timeout: 180s, role: scout, permission: read_only}
-  nim-verifier:   {provider: 9router, model: reasoning-high, effort: high, timeout: 300s, role: verifier, permission: read_only}
-  nim-coding:     {provider: 9router, model: deep-coding, effort: high, timeout: 420s, role: implementer, permission: workspace_write}
-  nim-docs:       {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
+  impl-medium:       {provider: cursor, model: composer-2.5, effort: medium, timeout: 600s, role: implementer, permission: workspace_write}
+  scout-fast:        {provider: cursor, model: composer-2.5, effort: low, timeout: 180s, role: scout, permission: read_only}
+  verifier:          {provider: cursor, model: composer-2.5, effort: high, timeout: 420s, role: verifier, permission: read_only}
+  docs-retriever:    {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
+  nim-scout:         {provider: 9router, model: fast-agent, effort: low, timeout: 180s, role: scout, permission: read_only}
+  nim-verifier:      {provider: 9router, model: reasoning-high, effort: high, timeout: 300s, role: verifier, permission: read_only}
+  nim-coding:        {provider: 9router, model: deep-coding, effort: high, timeout: 420s, role: implementer, permission: workspace_write}
+  nim-docs:          {provider: 9router, model: docs-retriever, effort: low, timeout: 120s, role: researcher, permission: read_only}
+  agy-scout:         {provider: agy, model: gemini-4-hydrogen-low, effort: low, timeout: 120s, role: scout, permission: read_only}
+  agy-impl:          {provider: agy, model: gemini-4-hydrogen-high, effort: high, timeout: 420s, role: implementer, permission: workspace_write}
+  agy-blind-verifier: {provider: agy, model: gemini-4-hydrogen-high, effort: high, timeout: 300s, role: verifier, permission: supplied_text}
+  agy-sec-auditor:   {provider: agy, model: gemini-4-carbon-high, effort: high, timeout: 420s, role: sec-auditor, permission: read_only}
+  opencode-nim-impl: {provider: opencode, model: 9router/reasoning-high, effort: high, timeout: 420s, role: implementer, permission: workspace_write}
 
 providers:
   openai:
@@ -40,32 +45,65 @@ providers:
       - id: gpt-6-astra
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: adaptive
+        family: openai
+        cost_tier: frontier
+        status: active
         notes: "no none; Chat Completions lacks function calling for this model — use Responses"
       - id: gpt-6.1-sol
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: frontier
+        status: active
       - id: gpt-6-luna
         supported_efforts: [none, low, medium, high, xhigh, max]
         default_effort: adaptive
+        family: openai
+        cost_tier: standard
+        status: active
         notes: "only current model supporting none"
       - id: gpt-5.5
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: standard
+        status: active
+      - id: gpt-5.4
+        supported_efforts: [none, minimal, low, medium, high, xhigh, max]
+        default_effort: medium
+        family: openai
+        cost_tier: standard
+        status: active
       - id: gpt-5.5-pro
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: frontier
+        status: active
       - id: gpt-5.6-sol
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: frontier
+        status: active
       - id: gpt-5.6-terra
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: standard
+        status: active
       - id: gpt-5.6-luna
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: standard
+        status: active
       - id: gpt-5.6-cyber
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
+        family: openai
+        cost_tier: standard
+        status: active
 
   anthropic:
     effort_style: named
@@ -77,16 +115,28 @@ providers:
       - id: claude-opus-5-5
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: medium
+        family: anthropic
+        cost_tier: frontier
+        status: active
         notes: "adaptive always on; thinking cannot be disabled"
       - id: claude-sonnet-5-5
         supported_efforts: [low, medium, high, xhigh]
         default_effort: high
+        family: anthropic
+        cost_tier: standard
+        status: active
         notes: "thinking between_tools 400s at xhigh/max combos"
       - id: claude-fable-5-1
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: high
+        family: anthropic
+        cost_tier: standard
+        status: active
       - id: claude-haiku-4-5
         supported_efforts: []
+        family: anthropic
+        cost_tier: economy
+        status: active
         notes: "no effort support"
 
   google:
@@ -94,29 +144,68 @@ providers:
     field: thinking_level
     default_effort: dynamic
     mandatory: false
-    notes: "dynamic = model-decided when omitted; thinkingBudget integer is legacy (do not set both)"
+    notes: "dynamic = model-decided when omitted; thinkingBudget integer is legacy (do not set both); Gemini 4 element series: hydrogen (economy), argon (standard), carbon (frontier)"
     models:
-      - id: gemini-3.1-pro-preview
-        supported_efforts: [minimal, low, medium, high]
-        default_effort: dynamic
+      - id: gemini-4-hydrogen
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+        family: google
+        cost_tier: economy
+        status: active
+      - id: gemini-4-argon
+        supported_efforts: [low, medium, high]
+        default_effort: high
+        family: google
+        cost_tier: standard
+        status: active
+      - id: gemini-4-carbon
+        supported_efforts: [low, medium, high]
+        default_effort: high
+        family: google
+        cost_tier: frontier
+        status: active
       - id: gemini-3.8-flash
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: google
+        cost_tier: economy
+        status: deprecated
+      - id: gemini-3.1-pro-preview
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: dynamic
+        family: google
+        cost_tier: standard
+        status: transitional
       - id: gemini-3.5-flash
         supported_efforts: [minimal, low, medium, high]
         default_effort: dynamic
+        family: google
+        cost_tier: standard
+        status: transitional
       - id: gemini-3.6-flash
         supported_efforts: [minimal, low, medium, high]
         default_effort: dynamic
+        family: google
+        cost_tier: standard
+        status: transitional
       - id: gemini-3.7-flash
         supported_efforts: [minimal, low, medium, high]
         default_effort: dynamic
+        family: google
+        cost_tier: standard
+        status: transitional
       - id: gemini-3.5-flash-lite
         supported_efforts: [minimal, high]
         default_effort: minimal
+        family: google
+        cost_tier: economy
+        status: transitional
       - id: gemini-3.1-flash-lite
         supported_efforts: [minimal, high]
         default_effort: minimal
+        family: google
+        cost_tier: economy
+        status: transitional
 
   xai:
     effort_style: named
@@ -128,12 +217,21 @@ providers:
       - id: grok-4.7
         supported_efforts: [low, medium, high, xhigh]
         default_effort: high
+        family: xai
+        cost_tier: frontier
+        status: active
       - id: grok-4.6
         supported_efforts: [low, medium, high, xhigh]
         default_effort: high
+        family: xai
+        cost_tier: frontier
+        status: active
       - id: grok-4.5
         supported_efforts: [low, medium, high]
         default_effort: high
+        family: xai
+        cost_tier: standard
+        status: active
         notes: "xhigh silently treated as high on this model"
 
   deepseek:
@@ -146,9 +244,15 @@ providers:
       - id: deepseek-flash
         supported_efforts: [medium, high]
         default_effort: medium
+        family: deepseek
+        cost_tier: economy
+        status: active
       - id: deepseek-v4-pro
         supported_efforts: [medium, high]
         default_effort: medium
+        family: deepseek
+        cost_tier: standard
+        status: active
 
   mistral:
     effort_style: named
@@ -160,11 +264,20 @@ providers:
       - id: mistral-medium-3.5
         supported_efforts: [high, none]
         default_effort: high
+        family: mistral
+        cost_tier: standard
+        status: active
       - id: mistral-small-latest
         supported_efforts: [high, none]
         default_effort: high
+        family: mistral
+        cost_tier: economy
+        status: active
       - id: zai-glm-5-3
         supported_efforts: [low, high, max]
+        family: zhipu
+        cost_tier: economy
+        status: active
         notes: "hosted; output always chunk-list; none unsupported"
 
   ollama:
@@ -183,17 +296,134 @@ providers:
     # - providers.json model list (observed variants: gemini-3.8-flash-low, gemini-3.8-flash-medium, gemini-3.8-flash-high)
     # - agy --help effort levels (low|medium|high|xhigh|max)
     # - live task evidence 237be821 (worker CLI accepts --effort matching suffix; refuses mismatches with "invalid model selection")
-    notes: "model ids carry the effort suffix; the worker CLI accepts --effort only when it equals the id suffix; mismatched combos are refused (\"invalid model selection\")"
+    # - Gemini 4 element series + orchestrator (effort_style: none)
+    notes: "model ids carry the effort suffix; the worker CLI accepts --effort only when it equals the id suffix; mismatched combos are refused (\"invalid model selection\"); Gemini 4 hydrogen/argon/carbon families + orchestrator (effort_style: none)"
     models:
+      - id: gemini-4-hydrogen-high
+        supported_efforts: [high]
+        default_effort: high
+        family: google
+        cost_tier: economy
+        status: active
+      - id: gemini-4-hydrogen-xhigh
+        supported_efforts: [xhigh]
+        default_effort: xhigh
+        family: google
+        cost_tier: economy
+        status: active
+      - id: gemini-4-hydrogen-medium
+        supported_efforts: [medium]
+        default_effort: medium
+        family: google
+        cost_tier: economy
+        status: active
+      - id: gemini-4-hydrogen-low
+        supported_efforts: [low]
+        default_effort: low
+        family: google
+        cost_tier: economy
+        status: active
+      - id: gemini-4-argon-high
+        supported_efforts: [high]
+        default_effort: high
+        family: google
+        cost_tier: standard
+        status: active
+      - id: gemini-4-argon-medium
+        supported_efforts: [medium]
+        default_effort: medium
+        family: google
+        cost_tier: standard
+        status: active
+      - id: gemini-4-argon-low
+        supported_efforts: [low]
+        default_effort: low
+        family: google
+        cost_tier: standard
+        status: active
+      - id: gemini-4-carbon-high
+        supported_efforts: [high]
+        default_effort: high
+        family: google
+        cost_tier: frontier
+        status: active
+      - id: gemini-4-carbon-medium
+        supported_efforts: [medium]
+        default_effort: medium
+        family: google
+        cost_tier: frontier
+        status: active
+      - id: gemini-4-carbon-low
+        supported_efforts: [low]
+        default_effort: low
+        family: google
+        cost_tier: frontier
+        status: active
+      - id: gemini-pro-orchestrator
+        effort_style: none
+        supported_efforts: []
+        family: google
+        cost_tier: frontier
+        status: active
+      - id: gemini-pro-orchestrator-argon
+        effort_style: none
+        supported_efforts: []
+        family: google
+        cost_tier: standard
+        status: active
+      - id: claude-sonnet-5-5-high
+        supported_efforts: [high]
+        family: anthropic
+        cost_tier: standard
+        status: active
+      - id: claude-sonnet-5-5-medium
+        supported_efforts: [medium]
+        family: anthropic
+        cost_tier: standard
+        status: active
+      - id: claude-sonnet-5-5-low
+        supported_efforts: [low]
+        family: anthropic
+        cost_tier: standard
+        status: active
+      - id: claude-opus-5-5-high
+        supported_efforts: [high]
+        family: anthropic
+        cost_tier: frontier
+        status: active
+      - id: claude-opus-5-5-medium
+        supported_efforts: [medium]
+        family: anthropic
+        cost_tier: frontier
+        status: active
+      - id: claude-opus-5-5-low
+        supported_efforts: [low]
+        family: anthropic
+        cost_tier: frontier
+        status: active
+      - id: gpt-oss-120b-medium
+        supported_efforts: [medium]
+        family: openai
+        cost_tier: economy
+        status: active
       - id: gemini-3.8-flash-low
         supported_efforts: [low]
         default_effort: low
+        family: google
+        cost_tier: economy
+        status: deprecated
       - id: gemini-3.8-flash-medium
         supported_efforts: [medium]
         default_effort: medium
+        family: google
+        cost_tier: economy
+        status: deprecated
       - id: gemini-3.8-flash-high
         supported_efforts: [high]
         default_effort: high
+        family: google
+        cost_tier: economy
+        status: deprecated
 
   9router:
     effort_style: named
@@ -202,46 +432,82 @@ providers:
     mandatory: false
     notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* ROUTING IDS are DOUBLE-PREFIX nvidia/nvidia/<model> — the single-prefix ids shown in /v1/models do not route (catalog display mismatch, cosmetic); audit combo/model liveness regularly via 'g8s providers eval-combos --provider 9router --json' (retired upstream NIM direct IDs return HTTP 410 MODEL_EOL_410)"
     models:
-      - id: reasoning-free
-        supported_efforts: [low, medium, high]
-        default_effort: high
-        notes: "~24s first-candidate failover lag observed 2026-11-11; prefer fast-agent, reasoning-high, or deep-coding"
       - id: reasoning-high
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
+      - id: reasoning-free
+        supported_efforts: [low, medium, high]
+        default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
+        notes: "~24s first-candidate failover lag observed 2026-11-11; prefer fast-agent, reasoning-high, or deep-coding"
       - id: deep-coding
         supported_efforts: [low, medium, high, xhigh]
         default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
       - id: fast-agent
         supported_efforts: [minimal, low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: docs-retriever
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: butler-free-sre
         supported_efforts: [low, medium]
         default_effort: low
+        family: multi
+        cost_tier: free
+        status: active
       - id: xoai-reflex
         supported_efforts: [low]
         default_effort: low
+        family: multi
+        cost_tier: free
+        status: active
       - id: xoai-reasoning
         supported_efforts: [high]
         default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
       - id: nvidia/nvidia/nemotron-3-ultra-550b-a55b
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: nvidia
+        cost_tier: free
+        status: active
         notes: "NIM flagship 550B/55B MoE 1M ctx — routing id is DOUBLE-PREFIX nvidia/nvidia/<model>; verified live 2026-11-07"
       - id: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
         supported_efforts: [low, medium, high]
         default_effort: low
+        family: nvidia
+        cost_tier: free
+        status: active
         notes: "NIM fast lane — verified live + worker-dispatch proven 2026-11-07"
       - id: nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: nvidia
+        cost_tier: free
+        status: active
         notes: "NIM mid tier — verified live 2026-11-07"
       - id: nvidia/mistralai/mistral-large-4-1t-a52b
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: mistral
+        cost_tier: free
+        status: active
         notes: "NIM mistral-large — verified live 2026-11-07"
 
   opencode:
@@ -249,29 +515,74 @@ providers:
     field: reasoning_effort
     default_effort: medium
     mandatory: false
-    notes: "OpenCode CLI built-in zero-cost (*free*) models verified live via opencode run"
+    notes: "OpenCode CLI built-in zero-cost (*free*) models verified live via opencode run; includes 9router combos via BYOK"
     models:
+      - id: 9router/reasoning-high
+        supported_efforts: [low, medium, high, xhigh, max]
+        default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
+      - id: 9router/deep-coding
+        supported_efforts: [low, medium, high, xhigh]
+        default_effort: high
+        family: multi
+        cost_tier: free
+        status: active
+      - id: 9router/fast-agent
+        supported_efforts: [minimal, low, medium, high]
+        default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
+      - id: 9router/docs-retriever
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/beam-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/deepseek-v4.1-flash-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/flint-40b-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/glm-5.3-flash-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/mimo-v2.6-flash-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
       - id: opencode/nemotron-3.5-lightning-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: nvidia
+        cost_tier: free
+        status: active
       - id: opencode/nemotron-3.5-super-vl-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: nvidia
+        cost_tier: free
+        status: active
 
   commandcode:
     effort_style: named
@@ -283,25 +594,43 @@ providers:
       - id: reflection/beam:free
         supported_efforts: [low, medium, high, xhigh, max]
         default_effort: medium
+        family: commandcode
+        cost_tier: free
+        status: active
         notes: "Beam 1.0 (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
       - id: poolside/laguna-s-2.1-free
         supported_efforts: []
+        family: commandcode
+        cost_tier: free
+        status: active
         notes: "Laguna S 2.1 (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
       - id: stealth/glyph-cluster:free
         supported_efforts: [low, medium, high, xhigh]
         default_effort: medium
+        family: commandcode
+        cost_tier: free
+        status: active
         notes: "Glyph Cluster (FREE) — $0/$0 token rate (requires Command Code Go+ plan or active credit balance)"
       - id: 9router/docs-retriever
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
         notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
       - id: 9router/reasoning-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
         notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
       - id: 9router/fast-agent
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: multi
+        cost_tier: free
+        status: active
         notes: "Zero-cost BYOK via ~/.commandcode/providers.json -> 9router"
 
   qwen:
@@ -314,9 +643,15 @@ providers:
       - id: docs-retriever
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: qwen
+        cost_tier: free
+        status: active
       - id: reasoning-free
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: qwen
+        cost_tier: free
+        status: active
 
   cursor:
     effort_style: named
@@ -328,31 +663,61 @@ providers:
       - id: composer-2.5
         supported_efforts: [low, medium, high]
         default_effort: high
+        family: cursor
+        cost_tier: standard
+        status: active
       - id: composer-2.5-fast
         supported_efforts: [low, medium, high]
         default_effort: medium
+        family: cursor
+        cost_tier: standard
+        status: active
       - id: claude-opus-5-thinking-high
         supported_efforts: [high]
         default_effort: high
+        family: anthropic
+        cost_tier: frontier
+        status: active
       - id: claude-sonnet-5-thinking-high
         supported_efforts: [high]
         default_effort: high
+        family: anthropic
+        cost_tier: standard
+        status: active
       - id: claude-fable-5-thinking-high
         supported_efforts: [high]
         default_effort: high
+        family: anthropic
+        cost_tier: standard
+        status: active
       - id: gpt-5.6-sol-high
         supported_efforts: [high]
         default_effort: high
+        family: openai
+        cost_tier: frontier
+        status: active
       - id: gpt-5.6-luna-high
         supported_efforts: [high]
         default_effort: high
+        family: openai
+        cost_tier: standard
+        status: active
       - id: gemini-4-argon-high
         supported_efforts: [high]
         default_effort: high
+        family: google
+        cost_tier: standard
+        status: active
       - id: gemini-3.7-flash-high
         supported_efforts: [high]
         default_effort: high
+        family: google
+        cost_tier: standard
+        status: transitional
       - id: cursor-grok-4.6-high
         supported_efforts: [high]
         default_effort: high
+        family: xai
+        cost_tier: frontier
+        status: active
 

@@ -291,7 +291,7 @@ if err:
 fi
 
 # 15. MCP Tool Inventory & Harness Roles SSoT Parity (DELTA-34/35):
-echo "--> [15/15] Verifying MCP Tool Inventory & Harness Roles SSoT parity..."
+echo "--> [15/16] Verifying MCP Tool Inventory & Harness Roles SSoT parity..."
 if ! python3 -c "
 import json, re, sys
 
@@ -321,6 +321,136 @@ manifest_roles = sorted(r.get('name') for r in manifest_data.get('roles', []) if
 if code_roles != manifest_roles:
     print(f'::error::Role mismatch between internal/harness/roles.go ({code_roles}) and manifest.json ({manifest_roles})')
     err = True
+
+if err:
+    sys.exit(1)
+"; then
+    FAILED=$((FAILED + 1))
+fi
+
+# 16. DELTA-48 Declarative Model Adoption & Adapter-Neutrality Contract:
+echo "--> [16/16] Verifying DELTA-48 Declarative Model Adoption & Adapter-Neutrality contract..."
+if ! python3 -c "
+import json, re, sys
+
+err = False
+
+with open('.g8s/agent-models.yml', 'r', encoding='utf-8') as f:
+    cat_text = f.read()
+
+m_ver = re.search(r'^catalog_version:\s*(\d+)', cat_text, re.M)
+if not m_ver or int(m_ver.group(1)) < 3:
+    print('::error::.g8s/agent-models.yml catalog_version must be >= 3 for DELTA-48')
+    err = True
+
+# Parse providers & models and profiles from .g8s/agent-models.yml (stdlib only)
+section = None
+cur_prov = None
+cur_model = None
+cur_prof = None
+prov_models = {}
+active_models = []
+profiles = {}
+
+for raw in cat_text.splitlines():
+    line = raw.split('#', 1)[0].rstrip()
+    if not line.strip():
+        continue
+    indent = len(line) - len(line.lstrip(' '))
+    stripped = line.strip()
+    if indent == 0:
+        if stripped == 'providers:':
+            section = 'providers'
+        elif stripped == 'profiles:':
+            section = 'profiles'
+        else:
+            section = None
+        continue
+    if section == 'providers':
+        if indent == 2 and stripped.endswith(':'):
+            cur_prov = stripped[:-1].strip().strip('\"')
+            prov_models.setdefault(cur_prov, [])
+            cur_model = None
+        elif indent == 6 and stripped.startswith('- id:'):
+            mid = stripped.split(':', 1)[1].strip().strip('\"')
+            cur_model = {'provider': cur_prov, 'id': mid, 'family': '', 'cost_tier': '', 'status': ''}
+            prov_models[cur_prov].append(mid)
+            active_models.append(cur_model)
+        elif indent == 8 and cur_model is not None and ':' in stripped:
+            k, v = stripped.split(':', 1)
+            k = k.strip()
+            v = v.strip().strip('\"')
+            if k in ('family', 'cost_tier', 'status'):
+                cur_model[k] = v
+    elif section == 'profiles':
+        if indent == 2 and stripped.endswith(':'):
+            cur_prof = stripped[:-1].strip().strip('\"')
+            profiles[cur_prof] = {'provider': '', 'model': ''}
+        elif indent == 4 and cur_prof is not None and ':' in stripped:
+            k, v = stripped.split(':', 1)
+            k = k.strip()
+            v = v.strip().strip('\"')
+            if k in ('provider', 'model'):
+                profiles[cur_prof][k] = v
+
+def match_model(pattern, mid):
+    if pattern == mid:
+        return True
+    if pattern.endswith('/*') and mid.startswith(pattern[:-1]):
+        return True
+    return False
+
+for pname, pdata in profiles.items():
+    prov = pdata['provider']
+    mod = pdata['model']
+    if prov not in prov_models:
+        print(f'::error::Profile {pname} references undeclared provider {prov}')
+        err = True
+    elif not any(match_model(pat, mod) for pat in prov_models[prov]):
+        print(f'::error::Profile {pname} references undeclared model {mod} under provider {prov}')
+        err = True
+
+for m in active_models:
+    if m['status'] == 'active' and (not m['family'] or not m['cost_tier']):
+        print(f\"::error::Active catalog model {m['provider']}/{m['id']} must declare both family and cost_tier\")
+        err = True
+
+with open('offer/templates/providers.example.json', 'r', encoding='utf-8') as f:
+    tpl = json.load(f)
+pd_provs = [p for p in tpl.get('providers', []) if p.get('class') == 'platform_dispatch']
+if len(pd_provs) < 3:
+    print(f'::error::offer/templates/providers.example.json must declare >= 3 peer platform_dispatch providers (found {len(pd_provs)})')
+    err = True
+for p in pd_provs:
+    if p.get('name') == 'agy' and p.get('default_model') != 'gemini-4-hydrogen-high':
+        print(f\"::error::offer/templates/providers.example.json agy default_model must be gemini-4-hydrogen-high (found {p.get('default_model')})\")
+        err = True
+
+banned_phrases = [
+    'natively designed to supervise and isolate',
+    'agy subdispatch',
+    'AGY_MCP_ALLOW_WORKSPACE_WRITE=1',
+]
+target_docs = [
+    'docs/integrations/antigravity.md',
+    'docs/quickstart.md',
+    'docs/user-guide/providers.md',
+    'docs/user-guide/effort.md',
+    'docs/user-guide/cli-reference.md',
+    'offer/ONBOARDING.md',
+    'offer/templates/providers.example.json',
+]
+for doc in target_docs:
+    with open(doc, 'r', encoding='utf-8') as df:
+        txt = df.read()
+    for phrase in banned_phrases:
+        if phrase in txt:
+            print(f'::error::{doc} contains banned adapter-exclusivity phrase: {phrase}')
+            err = True
+    for lineno, line in enumerate(txt.splitlines(), 1):
+        if 'gemini-3.8-flash' in line and 'deprecated' not in line.lower() and 'legacy' not in line.lower():
+            print(f'::error::{doc}:{lineno} recommends deprecated gemini-3.8-flash without legacy/deprecated qualifier')
+            err = True
 
 if err:
     sys.exit(1)

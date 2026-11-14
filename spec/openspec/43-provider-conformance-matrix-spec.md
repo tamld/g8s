@@ -37,7 +37,7 @@
 ### R2 — Quota Protection & Role-Tier Profile (`policy.go`, `types.go`)
 - Static mode (`default`) MUST consume zero paid tokens (`--version` / `--help` for CLI agents, `GET /models` for HTTP gateways).
 - Live mode (`--live`) enforces `DecideLive`:
-  - `agy` is `PolicyForbidden` (`E_LIVE_FORBIDDEN`, protecting F0 Brain quota per Lesson #23).
+  - **DELTA-48**: `agy` is unified under `PolicyPaid` (`DefaultModel: gemini-4-hydrogen-low`, `roles_eligible: ["brain", "worker", "scout"]`) alongside `claude` and `codex`. `PolicyForbidden` (`E_LIVE_FORBIDDEN`) remains supported for operator-locked adapters.
   - Paid providers (`claude`, `codex`, `gemini`, `commandcode`) require explicit `--allow-paid <provider>`.
   - `9router` and `opencode` only run live probes without `--allow-paid` when using cheapest/free-tier models (`fast-agent`, `reasoning-free`, `docs-retriever`, `*free*`).
 - Every `ProviderReport` carries `roles_eligible` (`brain` | `worker` | `scout` | `compatibility-only`), `recommended_for`, and `note`. `ollama` is classified `compatibility-only` (`recommended_for: ["tts", "voice", "light-offline"]`).

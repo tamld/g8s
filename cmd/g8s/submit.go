@@ -35,7 +35,7 @@ func runSubmit(args []string) {
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
 	_ = jsonMode
 	key := fs.String("idempotency-key", "", "unique idempotency key for this submission")
-	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to gemini-3.8-flash-high)")
+	model := fs.String("model", "gemini-3.8-flash-high", "target worker model (defaults to provider's configured/catalog default)")
 	providerFlag := fs.String("provider", "", "target worker provider (e.g. codex, agy)")
 	effortFlag := fs.String("effort", config.EffortMedium, "target worker effort level (none|minimal|low|medium|high|xhigh|max, defaults to medium)")
 	priority := fs.Int("priority", 0, "queue priority (-100..100)")
@@ -142,6 +142,7 @@ func runSubmit(args []string) {
 	var appliedProfile string
 	var timeoutFromProfile bool
 	var effortFromProfile bool
+	var modelFromProfile bool
 	profileName := strings.TrimSpace(*profileFlag)
 	if profileName != "" {
 		catalog, catErr := config.LoadDefaultCatalog()
@@ -162,6 +163,7 @@ func runSubmit(args []string) {
 		}
 		if !modelPassed && strings.TrimSpace(prof.Model) != "" {
 			*model = prof.Model
+			modelFromProfile = true
 		}
 		if !effortPassed && strings.TrimSpace(prof.Effort) != "" {
 			*effortFlag = prof.Effort
@@ -346,6 +348,13 @@ func runSubmit(args []string) {
 			} else {
 				manifest = cfgFile
 			}
+		}
+	}
+
+	if !modelPassed && !modelFromProfile && effectiveProvider != "" && *routeFlag != "auto" {
+		cat, _ := config.LoadDefaultCatalog()
+		if resolved := config.ResolveProviderDefaultModel(manifest, cat, effectiveProvider); resolved != "" {
+			effectiveModel = resolved
 		}
 	}
 
@@ -641,6 +650,9 @@ func runSubmit(args []string) {
 	if appliedProfile != "" {
 		payloadMap["profile"] = appliedProfile
 	}
+	if modelFromProfile {
+		payloadMap["model_from_profile"] = true
+	}
 	if *receiptID != "" {
 		payloadMap["receipt_id"] = *receiptID
 		if claimBinding != nil {
@@ -840,17 +852,19 @@ func isBakedNameProvider(manifest *config.File, provider, modelID string) bool {
 	// shadowed the catalog's baked-name verdict, so mismatched (model, effort)
 	// combos reached the worker CLI and died.)
 
-	// 2. Check default catalog for the provider
+	// 2. Check default catalog for the provider (model-level effort_style takes
+	// precedence over provider-level style so fixed-reasoning orchestrators with
+	// effort_style: none are never suffixed).
 	cat, err := config.LoadDefaultCatalog()
 	if err == nil && cat != nil {
 		if cp, ok := cat.FindProvider(provider); ok {
-			if cp.EffortStyle == config.EffortStyleBakedName {
-				return true
-			}
 			for _, m := range cp.Models {
-				if matchModelID(m.ID, modelID) {
+				if matchModelID(m.ID, modelID) && m.EffortStyle != "" {
 					return m.EffortStyle == config.EffortStyleBakedName
 				}
+			}
+			if cp.EffortStyle == config.EffortStyleBakedName {
+				return true
 			}
 		}
 	}

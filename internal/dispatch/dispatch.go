@@ -371,6 +371,7 @@ type CommandOptions struct {
 // BuildCommand constructs the AGY argv. The sandbox stays enabled unless the
 // caller explicitly disables it; skip-permissions adds
 // --dangerously-skip-permissions without ever removing --sandbox here.
+// Effort "none" or empty is omitted (maps to no --effort flag).
 func BuildCommand(opts CommandOptions) []string {
 	command := []string{
 		opts.Binary,
@@ -378,7 +379,7 @@ func BuildCommand(opts CommandOptions) []string {
 		"--model", opts.Model,
 		"--print-timeout", opts.Timeout,
 	}
-	if opts.Effort != "" {
+	if opts.Effort != "" && opts.Effort != "none" {
 		command = append(command, "--effort", opts.Effort)
 	}
 	if opts.SkipPermissions {

@@ -14,13 +14,20 @@
         {
           "id": "gemini-2.5-pro",
           "context_window": 1000000,
+          "family": "google",
+          "cost_tier": "standard",
+          "status": "active",
           "effort_style": "named",
           "supported_efforts": ["low", "medium", "high"],
           "default_effort": "high"
         },
         {
           "id": "claude-sonnet-4-5",
-          "context_window": 200000
+          "context_window": 200000,
+          "family": "anthropic",
+          "cost_tier": "frontier",
+          "status": "active",
+          "effort_style": "named"
         }
       ]
     },
@@ -38,6 +45,9 @@
         {
           "id": "reasoning-high",
           "context_window": 200000,
+          "family": "multi",
+          "cost_tier": "standard",
+          "status": "active",
           "effort_style": "named",
           "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
           "default_effort": "high"
@@ -45,6 +55,9 @@
         {
           "id": "reasoning-free",
           "context_window": 128000,
+          "family": "multi",
+          "cost_tier": "free",
+          "status": "active",
           "effort_style": "named",
           "supported_efforts": ["low", "medium", "high"],
           "default_effort": "high"
@@ -63,11 +76,17 @@
       "models": [
         {
           "id": "anthropic/claude-sonnet-4.5",
-          "context_window": 200000
+          "context_window": 200000,
+          "family": "anthropic",
+          "cost_tier": "frontier",
+          "status": "active"
         },
         {
           "id": "deepseek/deepseek-r1",
-          "context_window": 128000
+          "context_window": 128000,
+          "family": "deepseek",
+          "cost_tier": "free",
+          "status": "active"
         }
       ]
     },
@@ -84,6 +103,9 @@
         {
           "id": "gpt-5.5",
           "context_window": 200000,
+          "family": "openai",
+          "cost_tier": "frontier",
+          "status": "active",
           "effort_style": "named",
           "supported_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
           "default_effort": "medium"
@@ -103,6 +125,9 @@
         {
           "id": "claude-sonnet-5-5",
           "context_window": 200000,
+          "family": "anthropic",
+          "cost_tier": "frontier",
+          "status": "active",
           "effort_style": "named",
           "supported_efforts": ["low", "medium", "high", "xhigh"],
           "default_effort": "high"
@@ -117,21 +142,92 @@
       "models": [
         {
           "id": "claude-sonnet-5-5",
-          "context_window": 200000
+          "context_window": 200000,
+          "family": "anthropic",
+          "cost_tier": "frontier",
+          "status": "active",
+          "effort_style": "named",
+          "supported_efforts": ["low", "medium", "high", "xhigh"],
+          "default_effort": "high"
+        }
+      ]
+    },
+    {
+      "class": "platform_dispatch",
+      "name": "opencode",
+      "default_model": "9router/reasoning-high",
+      "allow_unlisted_models": true,
+      "models": [
+        {
+          "id": "9router/reasoning-high",
+          "context_window": 200000,
+          "family": "multi",
+          "cost_tier": "standard",
+          "status": "active",
+          "effort_style": "named"
+        }
+      ]
+    },
+    {
+      "class": "platform_dispatch",
+      "name": "codex",
+      "default_model": "gpt-5.4",
+      "allow_unlisted_models": true,
+      "models": [
+        {
+          "id": "gpt-5.4",
+          "context_window": 200000,
+          "family": "openai",
+          "cost_tier": "frontier",
+          "status": "active",
+          "effort_style": "named",
+          "supported_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+          "default_effort": "medium"
         }
       ]
     },
     {
       "class": "platform_dispatch",
       "name": "agy",
-      "default_model": "gemini-3.8-flash-high",
+      "default_model": "gemini-4-hydrogen-high",
       "models": [
         {
-          "id": "gemini-3.8-flash-high",
+          "id": "gemini-4-hydrogen-high",
           "context_window": 1000000,
+          "family": "google",
+          "cost_tier": "economy",
+          "status": "active",
           "effort_style": "baked-name",
           "supported_efforts": ["high"],
           "default_effort": "high"
+        },
+        {
+          "id": "gemini-4-argon-high",
+          "context_window": 1000000,
+          "family": "google",
+          "cost_tier": "standard",
+          "status": "active",
+          "effort_style": "baked-name",
+          "supported_efforts": ["high"],
+          "default_effort": "high"
+        },
+        {
+          "id": "gemini-4-carbon-high",
+          "context_window": 1000000,
+          "family": "google",
+          "cost_tier": "frontier",
+          "status": "active",
+          "effort_style": "baked-name",
+          "supported_efforts": ["high"],
+          "default_effort": "high"
+        },
+        {
+          "id": "gemini-pro-orchestrator",
+          "context_window": 1000000,
+          "family": "google",
+          "cost_tier": "frontier",
+          "status": "active",
+          "effort_style": "none"
         }
       ]
     }

@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/harness/probe"
 	"github.com/tamld/g8s/internal/provider"
 )
 
@@ -213,5 +217,85 @@ func TestEvalCombosDiscoverCombos(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "READY_OK") {
 		t.Errorf("expected READY_OK in response, got %q", res.Stdout)
+	}
+}
+
+func TestResolveCallableProviderAndCatalogMetadata(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("G8S_PROVIDERS", filepath.Join(t.TempDir(), "absent-providers.json"))
+
+	// 1. Default 9router resolution
+	prov, err := resolveCallableProvider(ctx, "9router")
+	if err != nil {
+		t.Fatalf("resolveCallableProvider(9router) failed: %v", err)
+	}
+	if prov == nil || prov.Name() != "9router" {
+		t.Fatalf("expected 9router provider, got %+v", prov)
+	}
+
+	// 2. Declarative catalog metadata lookup (Gemini 4 active vs Gemini 3.8 deprecated)
+	cat, err := config.LoadDefaultCatalog()
+	if err != nil {
+		t.Fatalf("LoadDefaultCatalog: %v", err)
+	}
+	fam, tier, st := lookupDeclarativeModelMeta(nil, cat, "agy", "gemini-4-hydrogen-high")
+	if fam != "google" || tier != "economy" || st != "active" {
+		t.Errorf("gemini-4-hydrogen-high meta = (%q, %q, %q), want (google, economy, active)", fam, tier, st)
+	}
+	_, _, depStatus := lookupDeclarativeModelMeta(nil, cat, "agy", "gemini-3.8-flash-high")
+	if depStatus != "deprecated" {
+		t.Errorf("gemini-3.8-flash-high status = %q, want deprecated", depStatus)
+	}
+
+	// 3. Unknown provider fails closed
+	if _, err := resolveCallableProvider(ctx, "unknown-provider-xyz"); err == nil {
+		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestEvalRun_MultiAdapterResolutionAndContractPrompt(t *testing.T) {
+	var capturedPrompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" || r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-high"}]}`))
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if msgs, ok := body["messages"].([]any); ok && len(msgs) > 0 {
+			if m0, ok := msgs[len(msgs)-1].(map[string]any); ok {
+				capturedPrompt, _ = m0["content"].(string)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"eval-1","model":"reasoning-high","choices":[{"message":{"content":"BLOCKED: request refused under zero-trust WriteReceipt contract."}}]}`))
+	}))
+	defer srv.Close()
+
+	manifestPath := filepath.Join(t.TempDir(), "providers.json")
+	manifestJSON := `{"providers":[{"class":"api_call","name":"9router","protocol":"9router","base_url":"` + srv.URL + `","auth_env":"OPENAI_API_KEY","default_model":"reasoning-high","slots":4,"allow_unlisted_models":true,"models":[{"id":"reasoning-high","context_window":200000}]}]}`
+	if err := os.WriteFile(manifestPath, []byte(manifestJSON), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	t.Setenv("G8S_PROVIDERS", manifestPath)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	ctx := context.Background()
+	resolved, err := resolveCallableProvider(ctx, "9router")
+	if err != nil {
+		t.Fatalf("resolveCallableProvider(9router): %v", err)
+	}
+	adapter := probe.NewProviderWorkerAdapter(resolved, "reasoning-high", false, 5*time.Second)
+	suite := probe.FilterSuite(probe.DefaultSuite(), []string{"pi-001", "re-001"}, "")
+	pri, err := probe.RunSuite(ctx, suite, adapter)
+	if err != nil {
+		t.Fatalf("RunSuite: %v", err)
+	}
+	if pri.Score != 1.0 || pri.PassedProbes != 2 {
+		t.Fatalf("expected 100%% PRI score across pi-001 and re-001, got score=%v passed=%d details=%+v", pri.Score, pri.PassedProbes, pri.Details)
+	}
+	if !strings.Contains(capturedPrompt, "[G8S F1 ZERO-TRUST SECURITY HARNESS CONTRACT]") {
+		t.Fatalf("expected wrapped harness contract prompt, got %q", capturedPrompt)
 	}
 }

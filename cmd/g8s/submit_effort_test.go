@@ -578,7 +578,7 @@ func TestSubmitEffort_BakedNameAlignmentMatrix(t *testing.T) {
 		}
 	})
 
-	// 2b. Default model (gemini-3.8-flash-high) with default effort (medium) realigns to medium
+	// 2b. Default model (gemini-3.8-flash-high from test manifest) with default effort (medium) realigns to medium
 	t.Run("default_model_and_effort_realigns", func(t *testing.T) {
 		env, code, raw := runSubmitCLI(t, binPath, envVars,
 			"--idempotency-key", "default-realign-task",
@@ -663,12 +663,12 @@ func TestBakedNameAlignmentHelpers(t *testing.T) {
 	}
 
 	// 2. isBakedNameProvider
-	if !isBakedNameProvider(nil, "agy", "gemini-3.8-flash-low") {
+	if !isBakedNameProvider(nil, "agy", "gemini-4-hydrogen-low") {
 		t.Errorf("expected isBakedNameProvider for agy to be true")
 	}
 	// Provider-less submits decide from the model id alone (issue #568): the
-	// catalog carries the agy baked-name variants, so flash-low resolves true.
-	if !isBakedNameProvider(nil, "", "gemini-3.8-flash-low") {
+	// catalog carries the agy baked-name variants, so hydrogen-low resolves true.
+	if !isBakedNameProvider(nil, "", "gemini-4-hydrogen-low") {
 		t.Errorf("expected isBakedNameProvider for empty provider with a catalog baked id to be true")
 	}
 	if isBakedNameProvider(nil, "openai", "gpt-5.5-low") {
@@ -1275,5 +1275,81 @@ func TestSubmitEffort_StaleProvidersManifestProviderlessRealigns(t *testing.T) {
 	}
 	if payload["model_realigned"] != true {
 		t.Errorf("model_realigned = %v, want true", payload["model_realigned"])
+	}
+}
+
+// TestSubmitProviderNeutralDefaultModelAndOrchestratorNoneEffort verifies DELTA-48:
+// 1. Passing --provider codex without --model resolves catalog default gpt-5.4 (never agy's model).
+// 2. Passing --provider agy without --model resolves catalog default gemini-4-hydrogen-high (realigned to medium at default effort).
+// 3. Passing --provider agy --model gemini-pro-orchestrator --effort high honors effort_style: none without suffixing -high.
+func TestSubmitProviderNeutralDefaultModelAndOrchestratorNoneEffort(t *testing.T) {
+	binPath := buildG8sBinary(t)
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "provider_neutral_none.db")
+	envVars := []string{
+		"G8S_DB=" + dbPath,
+		"G8S_PROVIDERS=" + filepath.Join(tempDir, "absent-providers.json"),
+	}
+
+	// 1. codex default model resolution
+	env, code, raw := runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "codex-default-model",
+		"--prompt", "Inspect repository packages",
+		"--provider", "codex",
+	)
+	if code != 0 {
+		t.Fatalf("codex submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+	var codexPayload map[string]any
+	if err := json.Unmarshal([]byte(getTaskRequestJSON(t, dbPath, "codex-default-model")), &codexPayload); err != nil {
+		t.Fatalf("unmarshal codex payload: %v", err)
+	}
+	if codexPayload["model"] != "gpt-5.4" {
+		t.Errorf("codex default model = %v, want gpt-5.4", codexPayload["model"])
+	}
+
+	// 2. agy default model resolution from catalog v3 (gemini-4-hydrogen-high -> realigned to medium)
+	env, code, raw = runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "agy-default-model",
+		"--prompt", "Inspect repository packages",
+		"--provider", "agy",
+	)
+	if code != 0 {
+		t.Fatalf("agy submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+	var agyPayload map[string]any
+	if err := json.Unmarshal([]byte(getTaskRequestJSON(t, dbPath, "agy-default-model")), &agyPayload); err != nil {
+		t.Fatalf("unmarshal agy payload: %v", err)
+	}
+	if agyPayload["model"] != "gemini-4-hydrogen-medium" {
+		t.Errorf("agy default model = %v, want gemini-4-hydrogen-medium", agyPayload["model"])
+	}
+	if agyPayload["model_requested"] != "gemini-4-hydrogen-high" {
+		t.Errorf("agy model_requested = %v, want gemini-4-hydrogen-high", agyPayload["model_requested"])
+	}
+
+	// 3. gemini-pro-orchestrator has effort_style: none -> never suffixed and applied effort omitted
+	env, code, raw = runSubmitCLI(t, binPath, envVars,
+		"--idempotency-key", "agy-orchestrator-none",
+		"--prompt", "Coordinate architectural review",
+		"--provider", "agy",
+		"--model", "gemini-pro-orchestrator",
+		"--effort", "high",
+	)
+	if code != 0 {
+		t.Fatalf("orchestrator submit failed: code=%d err=%+v raw=%s", code, env.Error, raw)
+	}
+	var orchPayload map[string]any
+	if err := json.Unmarshal([]byte(getTaskRequestJSON(t, dbPath, "agy-orchestrator-none")), &orchPayload); err != nil {
+		t.Fatalf("unmarshal orchestrator payload: %v", err)
+	}
+	if orchPayload["model"] != "gemini-pro-orchestrator" {
+		t.Errorf("orchestrator model = %v, want gemini-pro-orchestrator", orchPayload["model"])
+	}
+	if orchPayload["model_realigned"] == true {
+		t.Errorf("orchestrator model must not be realigned: %+v", orchPayload)
+	}
+	if applied, exists := orchPayload["effort_applied"]; exists && applied != "" {
+		t.Errorf("orchestrator effort_applied = %v, want empty/omitted", applied)
 	}
 }
