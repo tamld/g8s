@@ -165,11 +165,22 @@ func ParseRegistry(data []byte) (*Registry, error) {
 		checks        []rawCheck
 	}
 
+	type rawVerificationSkill struct {
+		name        string
+		entry       string
+		layer       string
+		gateCommand string
+	}
+
 	var rawClasses []rawClass
 	var currentClass *rawClass
 	var currentCheck *rawCheck
 
+	var rawSkills []rawVerificationSkill
+	var currentSkill *rawVerificationSkill
+
 	inClassesSection := false
+	inSkillsSection := false
 	inPathsSection := false
 	inChecksSection := false
 	inPackagesSection := false
@@ -190,20 +201,71 @@ func ParseRegistry(data []byte) (*Registry, error) {
 		if leadingSpaces == 0 {
 			if trimmed == "classes:" {
 				inClassesSection = true
+				inSkillsSection = false
 				inPathsSection = false
 				inChecksSection = false
 				inPackagesSection = false
 				continue
 			}
-			// Another top-level section: end classes
+			if trimmed == "verification_skills:" {
+				inSkillsSection = true
+				inClassesSection = false
+				inPathsSection = false
+				inChecksSection = false
+				inPackagesSection = false
+				continue
+			}
+			// Another top-level section: end classes/skills
 			inClassesSection = false
+			inSkillsSection = false
 			inPathsSection = false
 			inChecksSection = false
 			inPackagesSection = false
 			continue
 		}
 
-		if !inClassesSection {
+		if !inClassesSection && !inSkillsSection {
+			continue
+		}
+
+		// Handle verification_skills section BEFORE class list matching
+		if inSkillsSection {
+			if leadingSpaces >= 1 && leadingSpaces <= 3 && strings.HasPrefix(trimmed, "- ") {
+				if currentSkill != nil {
+					rawSkills = append(rawSkills, *currentSkill)
+				}
+				currentSkill = &rawVerificationSkill{}
+
+				itemContent := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+				if strings.HasPrefix(itemContent, "name:") {
+					val := strings.TrimPrefix(itemContent, "name:")
+					currentSkill.name = cleanYAMLValue(val)
+				}
+				continue
+			}
+
+			if currentSkill != nil {
+				if strings.HasPrefix(trimmed, "name:") {
+					val := strings.TrimPrefix(trimmed, "name:")
+					currentSkill.name = cleanYAMLValue(val)
+					continue
+				}
+				if strings.HasPrefix(trimmed, "entry:") {
+					val := strings.TrimPrefix(trimmed, "entry:")
+					currentSkill.entry = cleanYAMLValue(val)
+					continue
+				}
+				if strings.HasPrefix(trimmed, "layer:") {
+					val := strings.TrimPrefix(trimmed, "layer:")
+					currentSkill.layer = cleanYAMLValue(val)
+					continue
+				}
+				if strings.HasPrefix(trimmed, "gate_command:") {
+					val := strings.TrimPrefix(trimmed, "gate_command:")
+					currentSkill.gateCommand = cleanYAMLValue(val)
+					continue
+				}
+			}
 			continue
 		}
 
@@ -435,6 +497,21 @@ func ParseRegistry(data []byte) (*Registry, error) {
 			Paths:         rc.paths,
 			Checks:        checks,
 		})
+	}
+
+	// Parse verification skills
+	if currentSkill != nil {
+		rawSkills = append(rawSkills, *currentSkill)
+	}
+	for _, rs := range rawSkills {
+		if rs.name != "" {
+			reg.skills = append(reg.skills, VerificationSkill{
+				Name:        rs.name,
+				Entry:       rs.entry,
+				Layer:       rs.layer,
+				GateCommand: rs.gateCommand,
+			})
+		}
 	}
 
 	return reg, nil

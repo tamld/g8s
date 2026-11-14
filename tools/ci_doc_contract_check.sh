@@ -244,10 +244,10 @@ if ! bash "$SCRIPT_DIR/ci_feature_map_sync.sh" >/dev/null 2>&1; then
     FAILED=$((FAILED + 1))
 fi
 
-# 14. Verification Skills Suite Contract (Issue #651):
-echo "--> [14/14] Verifying Verification Skills Suite (skills/manifest.json) contract (#651)..."
+# 14. Verification Skills Suite & Gate Command Contract (Issues #651, #905):
+echo "--> [14/16] Verifying Verification Skills Suite & gate_command/args_syntax contract (#651, #905)..."
 if ! python3 -c "
-import json, os, sys
+import json, os, re, sys
 
 manifest_path = 'skills/manifest.json'
 if not os.path.exists(manifest_path):
@@ -274,15 +274,80 @@ for req in required_skills:
         print(f'::error::skills/manifest.json is missing required verification skill: {req}')
         err = True
 
+valid_commands = set()
+cli_registry_path = 'internal/cli/registry.go'
+if os.path.exists(cli_registry_path):
+    with open(cli_registry_path, 'r', encoding='utf-8') as f:
+        reg_src = f.read()
+    for m in re.finditer(r'Name:\s*\"([a-z0-9-]+)\"', reg_src):
+        valid_commands.add(m.group(1))
+
 for s in skills:
-    if isinstance(s, dict):
-        entry = s.get('entry')
-        if not entry:
-            print(f'::error::Skill {s.get(\"name\", \"unknown\")} missing entry path')
+    if not isinstance(s, dict):
+        continue
+    sname = s.get('name', 'unknown')
+    entry = s.get('entry')
+    if not entry:
+        print(f'::error::Skill {sname} missing entry path')
+        err = True
+    elif not os.path.exists(entry):
+        print(f'::error::Skill {sname} entry does not exist on disk: {entry}')
+        err = True
+
+    args_syntax = s.get('args_syntax', '').strip()
+    if args_syntax.startswith('./bin/g8s ') or args_syntax.startswith('g8s '):
+        parts = args_syntax.split()
+        if len(parts) >= 2 and parts[1] not in valid_commands:
+            print(f'::error::Skill {sname} args_syntax references unknown g8s subcommand: {parts[1]}')
             err = True
-        elif not os.path.exists(entry):
-            print(f'::error::Skill {s.get(\"name\", \"unknown\")} entry does not exist on disk: {entry}')
+    elif args_syntax.startswith('g8s-'):
+        skill_tok = args_syntax.split()[0]
+        if not os.path.exists(f'skills/{skill_tok}/SKILL.md'):
+            print(f'::error::Skill {sname} args_syntax references missing skill directory: skills/{skill_tok}/SKILL.md')
             err = True
+
+verifier_classes_path = '.g8s/verifier-classes.yml'
+if not os.path.exists(verifier_classes_path):
+    print(f'::error::{verifier_classes_path} does not exist')
+    err = True
+else:
+    with open(verifier_classes_path, 'r', encoding='utf-8') as f:
+        vc_src = f.read()
+    in_vs = False
+    cur_skill = 'unknown'
+    seen_gate_cmds = 0
+    for raw in vc_src.splitlines():
+        line = raw.split('#', 1)[0].rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(' '))
+        stripped = line.strip()
+        if indent == 0:
+            in_vs = (stripped == 'verification_skills:')
+            continue
+        if not in_vs:
+            continue
+        if stripped.startswith('- name:'):
+            cur_skill = stripped.split(':', 1)[1].strip().strip('\"')
+        elif stripped.startswith('gate_command:'):
+            seen_gate_cmds += 1
+            gate_cmd = stripped.split(':', 1)[1].strip().strip('\"')
+            if gate_cmd.startswith('./bin/g8s ') or gate_cmd.startswith('g8s '):
+                parts = gate_cmd.split()
+                if len(parts) >= 2 and parts[1] not in valid_commands:
+                    print(f'::error::.g8s/verifier-classes.yml skill {cur_skill} gate_command references unknown subcommand: {parts[1]}')
+                    err = True
+            elif gate_cmd.startswith('skill-protocol:'):
+                target_path = gate_cmd[len('skill-protocol:'):].strip()
+                if not os.path.exists(target_path):
+                    print(f'::error::.g8s/verifier-classes.yml skill {cur_skill} skill-protocol target missing: {target_path}')
+                    err = True
+            else:
+                print(f'::error::.g8s/verifier-classes.yml skill {cur_skill} has unrecognized gate_command format: {gate_cmd}')
+                err = True
+    if seen_gate_cmds != len(required_skills):
+        print(f'::error::.g8s/verifier-classes.yml expected {len(required_skills)} verification_skills gate_command entries, got {seen_gate_cmds}')
+        err = True
 
 if err:
     sys.exit(1)

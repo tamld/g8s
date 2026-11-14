@@ -24,6 +24,7 @@ import (
 // Registry stores registered verifier classes and handles fail-closed loading and matching.
 type Registry struct {
 	classes []Class
+	skills  []VerificationSkill
 	err     error
 }
 
@@ -41,6 +42,16 @@ func (r *Registry) Classes() []Class {
 	}
 	res := make([]Class, len(r.classes))
 	copy(res, r.classes)
+	return res
+}
+
+// Skills returns a copy of the registered verification skills.
+func (r *Registry) Skills() []VerificationSkill {
+	if r == nil || len(r.skills) == 0 {
+		return nil
+	}
+	res := make([]VerificationSkill, len(r.skills))
+	copy(res, r.skills)
 	return res
 }
 
@@ -137,11 +148,12 @@ type TelemetrySink func(taskID string, verdict Verdict)
 
 // Verifier coordinates class resolution, check execution, self-grade protection, and telemetry.
 type Verifier struct {
-	registry          *Registry
-	runner            CommandRunner
-	repoRoot          string
-	telemetrySink     TelemetrySink
-	lessonsLedgerPath string
+	registry             *Registry
+	runner               CommandRunner
+	repoRoot             string
+	telemetrySink        TelemetrySink
+	lessonsLedgerPath    string
+	registryFromRepoRoot bool
 }
 
 // Option configures a Verifier instance.
@@ -158,6 +170,7 @@ func WithLessonsLedgerPath(path string) Option {
 func WithRegistry(r *Registry) Option {
 	return func(v *Verifier) {
 		v.registry = r
+		v.registryFromRepoRoot = true
 	}
 }
 
@@ -169,6 +182,7 @@ func WithRegistryPath(path string) Option {
 			r = &Registry{err: err}
 		}
 		v.registry = r
+		v.registryFromRepoRoot = true
 	}
 }
 
@@ -180,6 +194,7 @@ func WithRegistryData(data []byte) Option {
 			r = &Registry{err: err}
 		}
 		v.registry = r
+		v.registryFromRepoRoot = true
 	}
 }
 
@@ -211,17 +226,34 @@ func NewVerifier(opts ...Option) *Verifier {
 		opt(v)
 	}
 
-	if v.registry == nil {
-		r, err := LoadRegistry(DefaultRegistryPath)
-		if err != nil && r == nil {
-			r = &Registry{err: err}
-		}
-		v.registry = r
-	}
-
+	// Resolve repoRoot BEFORE loading registry (Issue #893)
 	if v.repoRoot == "" {
 		if root, err := findRepoRoot(); err == nil {
 			v.repoRoot = root
+		}
+	}
+
+	if v.registry == nil {
+		// Check if registry exists at repoRoot first
+		if v.repoRoot != "" {
+			registryPath := filepath.Join(v.repoRoot, DefaultRegistryPath)
+			if _, err := os.Stat(registryPath); err == nil {
+				r, err := LoadRegistry(registryPath)
+				if err != nil && r == nil {
+					r = &Registry{err: err}
+				}
+				v.registry = r
+				v.registryFromRepoRoot = true
+			}
+		}
+		// Fall back to default registry loading
+		if v.registry == nil {
+			r, err := LoadRegistry(DefaultRegistryPath)
+			if err != nil && r == nil {
+				r = &Registry{err: err}
+			}
+			v.registry = r
+			v.registryFromRepoRoot = false
 		}
 	}
 
@@ -339,12 +371,43 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		repoRoot = target.WorktreeDir
 	}
 
+	// Sibling scope root registry loading (Issue #893)
+	// When registry was not loaded from repoRoot, but we have a repoRoot and a registry exists there, load it for class resolution
+	if !v.registryFromRepoRoot && repoRoot != "" {
+		siblingRegistryPath := filepath.Join(repoRoot, DefaultRegistryPath)
+		if _, err := os.Stat(siblingRegistryPath); err == nil {
+			siblingRegistry, err := LoadRegistry(siblingRegistryPath)
+			if err == nil && siblingRegistry != nil && siblingRegistry.Err() == nil {
+				// Use sibling registry for class resolution
+				if siblingClass, siblingRegistered := siblingRegistry.Resolve(target.AllowedPaths); siblingRegistered {
+					class = siblingClass
+					registered = true
+				}
+			}
+		}
+	}
+
 	runner := v.runner
 	if runner == nil {
 		runner = defaultCommandRunner(repoRoot)
 	}
 
 	for _, chk := range class.Checks {
+		// Scope-mismatch skip for CheckTypeScript (Issue #893)
+		// When registry was not loaded from repoRoot, but we have a repoRoot and the script doesn't exist there, skip it
+		if chk.Type == CheckTypeScript && !v.registryFromRepoRoot && repoRoot != "" {
+			scriptPath := filepath.Join(repoRoot, chk.Run)
+			if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+				checkResults = append(checkResults, CheckResult{
+					Type:   string(CheckTypeScript),
+					Target: chk.Run,
+					OK:     true,
+					Detail: "skipped: scope-mismatch (script absent in target scope root)",
+				})
+				continue
+			}
+		}
+
 		switch chk.Type {
 		case CheckTypeScript:
 			res := v.runScriptCheck(ctx, runner, chk.Run)

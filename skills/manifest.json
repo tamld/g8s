@@ -11,7 +11,7 @@
       "domain": "orchestration",
       "risk_level": "medium",
       "evidence_level": "runtime_required",
-      "description": "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting.",
+      "description": "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (across CLI & HTTP adapters) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting.",
       "args_syntax": "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]",
       "references": [
         "references/hard-boundary.md",
@@ -45,7 +45,7 @@
       "risk_level": "medium",
       "evidence_level": "runtime_required",
       "description": "Double-blind counterexample & falsification review operating exclusively on BlindReviewPacket (SpecContract + Invariants + RawGitDiff + MechanicalTestOutput), stripping worker self-report and model identity to defeat reviewer sycophancy.",
-      "args_syntax": "g8s-blind-verifier [review|falsify|audit] --packet <path-or-json> [--task <id>] [--json]"
+      "args_syntax": "g8s blind-verify --spec <path> --invariants <list> --diff <path> --test-output <path> [--json]"
     },
     {
       "name": "g8s-red-prove",
@@ -55,7 +55,7 @@
       "risk_level": "medium",
       "evidence_level": "runtime_required",
       "description": "Mechanical Red -> Green reproduction + property/mutation proof + Seeded Mutant Canary verification (--canary-mutant) to eliminate vacuous tests and phantom bugfixes.",
-      "args_syntax": "g8s-red-prove [repro|prove|canary] --repro <test> [--patch <file>] [--canary-mutant <file>] [--json]"
+      "args_syntax": "g8s verify --task <id> --canary-mutant [--json]"
     },
     {
       "name": "g8s-scenario-matrix",
@@ -65,7 +65,7 @@
       "risk_level": "medium",
       "evidence_level": "runtime_required",
       "description": "12-dimension edge-case, concurrency, and failure-injection generator and holdout verifier defeating test suite overfitting and AI blindspots.",
-      "args_syntax": "g8s matrix [gen|verify|inspect] --spec <spec_path> [--holdout-dir <dir>] [--dimensions <d1,d2...>] [--seed <seed>] [--json]"
+      "args_syntax": "g8s verify --task <id> --holdout-dir <dir> [--json]"
     },
     {
       "name": "g8s-ux-visual-gate",
@@ -75,7 +75,7 @@
       "risk_level": "medium",
       "evidence_level": "runtime_required",
       "description": "Headless browser DOM bounding-box collision, computed typography/contrast, console runtime error, keyboard navigation, and media playback contract verifier.",
-      "args_syntax": "g8s verify-ux --url <target_url> [--viewport <WxH>] [--wcag-level <AA|AAA>] [--media-selector <sel>] [--json]"
+      "args_syntax": "g8s-ux-visual-gate --url <target_url> [--viewport <WxH>] [--wcag-level <AA|AAA>] [--media-selector <sel>] [--json]"
     },
     {
       "name": "g8s-sec-gate",
@@ -85,7 +85,7 @@
       "risk_level": "high",
       "evidence_level": "runtime_required",
       "description": "Zero-trust SAST and live DAST probe runner enforcing SSRF private-IP blocking, path traversal containment, CSP/XSS sanitization, auth bypass probing, and trust boundary integrity.",
-      "args_syntax": "g8s sec probe [--targets <paths>] [--endpoint <url>] [--config .g8s/trust-boundaries.yml] [--json]"
+      "args_syntax": "g8s eval run [--category <cat>] [--json]"
     },
     {
       "name": "g8s-epistemic-audit",
@@ -95,7 +95,7 @@
       "risk_level": "medium",
       "evidence_level": "runtime_required",
       "description": "Claim decomposition and evidence-tier classifier (MECHANICAL_VERIFIED, OBSERVATIONAL_TELEMETRY, UNVERIFIED_PROSE), enforcing the 4 epistemic laws across supervisor handoffs and receipts.",
-      "args_syntax": "g8s-epistemic-audit [audit|decompose|classify] --input <file.md> [--threshold <ratio>] [--json]"
+      "args_syntax": "g8s claim check --file <path> [--json]"
     },
     {
       "name": "g8s-mobile-gate",

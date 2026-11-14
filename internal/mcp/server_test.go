@@ -1350,3 +1350,52 @@ func TestMCPContextPackTool(t *testing.T) {
 		t.Fatalf("expected sample.go in packed output, got: %s", res)
 	}
 }
+
+func TestServer_WithVersionDynamicBinding(t *testing.T) {
+	dir := t.TempDir()
+	receiptDbPath := filepath.Join(dir, "receipts.db")
+	receipts, err := receipt.NewReceiptManager(receiptDbPath, nil)
+	if err != nil {
+		t.Fatalf("create receipt manager: %v", err)
+	}
+	defer receipts.Close()
+
+	cp := &fakeControlPlane{}
+	providers := &fakeProviders{infos: []provider.ProviderInfo{{Name: "agy", Status: provider.StatusReady}}}
+	s := NewServer(strings.NewReader(""), &bytes.Buffer{}, cp, receipts, providers, WithVersion("0.99.1"))
+
+	// 1. Verify initialize serverInfo.version reflects WithVersion
+	resp := s.handleLine(context.Background(), requestLine("initialize", map[string]any{}))
+	if resp.Error != nil {
+		t.Fatalf("initialize failed: %+v", resp.Error)
+	}
+	var initResult struct {
+		ServerInfo struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"serverInfo"`
+	}
+	if err := json.Unmarshal(resp.Result, &initResult); err != nil {
+		t.Fatalf("decode initialize: %v", err)
+	}
+	if initResult.ServerInfo.Version != "0.99.1" {
+		t.Fatalf("serverInfo.version = %q, want 0.99.1", initResult.ServerInfo.Version)
+	}
+
+	// 2. Verify g8s_receipt_issue provenance context reflects WithVersion
+	result, rpcErr := callTool(t, s, "g8s_receipt_issue", map[string]any{
+		"allowed_paths": []string{"src/**"},
+		"ttl_seconds":   600,
+	})
+	if rpcErr != nil {
+		t.Fatalf("g8s_receipt_issue rpc error: %+v", rpcErr)
+	}
+	var rc receipt.WriteReceipt
+	if err := json.Unmarshal(result, &rc); err != nil {
+		t.Fatalf("decode receipt: %v", err)
+	}
+	// The provenance lineage tool_version should contain "g8s/0.99.1"
+	if rc.ProvenanceLineage == nil || !strings.Contains(rc.ProvenanceLineage.ToolVersion, "g8s/0.99.1") {
+		t.Fatalf("receipt provenance lineage missing g8s/0.99.1: %+v", rc.ProvenanceLineage)
+	}
+}
