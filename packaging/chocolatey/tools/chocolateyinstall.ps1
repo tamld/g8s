@@ -1,5 +1,5 @@
 $toolsDir = "$(Split-Path -Parent $MyInvocation.MyCommand.Definition)"
-$url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip'
+$url = 'https://github.com/tamld/g8s/releases/download/v0.24.0/g8s_0.24.0_windows_amd64.zip'
 $checksum = '<from checksums.txt>'
 $packageArgs = @{
   packageName    = 'g8s'
