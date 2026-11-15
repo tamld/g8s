@@ -58,6 +58,10 @@ const (
 	codeInternal       = -32603
 )
 
+// defaultServerVersion is the fallback server version when none is provided via WithVersion.
+// Kept at "0.23.0" on main until tools/release.sh bumps it during the release cut.
+const defaultServerVersion = "0.23.0"
+
 // jsonRPCRequest is one inbound JSON-RPC 2.0 request or notification.
 type jsonRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -133,7 +137,7 @@ func WithDispatcher(d SyncDispatcher) Option { return func(s *Server) { s.dispat
 func WithBinaryProber(p BinaryProber) Option { return func(s *Server) { s.prober = p } }
 
 // WithVersion sets the server version reported in initialize and receipt provenance.
-// If v is empty, defaults to "0.23.0". Leading "v" is stripped (e.g. "v0.24.0" -> "0.24.0").
+// If v is empty, defaults to defaultServerVersion. Leading "v" is stripped (e.g. "v0.24.0" -> "0.24.0").
 func WithVersion(v string) Option {
 	return func(s *Server) {
 		s.version = strings.TrimPrefix(strings.TrimSpace(v), "v")
@@ -156,7 +160,7 @@ func NewServer(in io.Reader, out io.Writer, cp ControlPlaneAPI, receipts Receipt
 		s.prober = defaultBinaryProber
 	}
 	if s.version == "" {
-		s.version = "0.23.0"
+		s.version = defaultServerVersion
 	}
 	_ = s.RegisterTools()
 	return s
