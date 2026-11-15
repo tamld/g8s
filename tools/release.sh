@@ -152,7 +152,7 @@ if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
 fi
 
 # Check for uncommitted changes (excluding release-managed files)
-RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1|packaging/winget/manifest\.yaml|packaging/chocolatey/g8s\.nuspec"
+RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|internal/mcp/server\.go|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1|packaging/winget/manifest\.yaml|packaging/chocolatey/g8s\.nuspec"
 UNCOMMITTED=$(git status --porcelain | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
 if [ -n "$UNCOMMITTED" ] && [ "$DRY_RUN" -eq 0 ]; then
     echo -e "${RED}Error: Uncommitted changes detected. Commit or stash first.${NC}" >&2
@@ -235,6 +235,18 @@ else
         fi
         echo -e "${GREEN}✓ Promoted CHANGELOG.md [Unreleased] to ${NEW_VERSION}${NC}"
     fi
+fi
+
+# Update internal/mcp/server.go (defaultServerVersion constant)
+if [ -f "internal/mcp/server.go" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo -e "${YELLOW}Would update internal/mcp/server.go: defaultServerVersion = \"${NEW_VERSION}\"${NC}"
+    else
+        awk -v ver="${NEW_VERSION}" '/^const defaultServerVersion = / { sub(/"[^"]+"/, "\"" ver "\""); print; next } { print }' internal/mcp/server.go > internal/mcp/server.go.tmp && mv internal/mcp/server.go.tmp internal/mcp/server.go
+        echo -e "${GREEN}✓ Updated internal/mcp/server.go${NC}"
+    fi
+else
+    echo -e "${YELLOW}Warning: internal/mcp/server.go not found, skipping server version update${NC}" >&2
 fi
 
 # Update manifest.json (version and latest_release.tag)
@@ -330,6 +342,9 @@ fi
 if [ -f "manifest.json" ]; then
     STAGE_FILES+=("manifest.json")
 fi
+if [ -f "internal/mcp/server.go" ]; then
+    STAGE_FILES+=("internal/mcp/server.go")
+fi
 for pkg_file in "packaging/windows/g8s.nsi" "packaging/windows/g8s.wxs" "packaging/chocolatey/tools/chocolateyinstall.ps1" "packaging/winget/manifest.yaml" "packaging/chocolatey/g8s.nuspec"; do
     if [ -f "$pkg_file" ]; then
         STAGE_FILES+=("$pkg_file")
@@ -340,7 +355,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo -e "${YELLOW}Would run: git add ${STAGE_FILES[*]}${NC}"
     echo -e "${YELLOW}Would run: git commit -m \"chore: release ${NEW_VERSION}\"${NC}"
     echo -e "${YELLOW}Would run: git tag -a v${NEW_VERSION} -m \"Release ${NEW_VERSION}\"${NC}"
-    echo -e "${YELLOW}Would run: git push origin main --tags${NC}"
+    echo -e "${YELLOW}Would amend manifest.json with tag commit/date${NC}"
+    echo -e "${YELLOW}Would run: git push --atomic origin main v${NEW_VERSION}${NC}"
     exit 0
 fi
 
@@ -360,30 +376,28 @@ else
     git tag -a "v${NEW_VERSION}" -m "Release ${NEW_VERSION}"
 fi
 
+# Release-metadata amendment: latest_release.commit/date now have their
+# final values (the tag exists), so a follow-up commit records them.
+# The sync checker compares manifest.commit against the TAG's commit —
+# not HEAD — so this amendment keeps both green.
+if [ -f "manifest.json" ]; then
+    RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}^{commit}")
+    RELEASE_DATE=$(git show -s --format=%cs "v${NEW_VERSION}^{commit}")
+    sed -i.bak -E "s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
+    sed -i.bak -E "s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
+    rm -f manifest.json.bak
+    git add manifest.json
+    if ! git diff --staged --quiet; then
+        git commit -m "chore(release): record v${NEW_VERSION} commit/date in manifest latest_release" -m "Provenance: F0-direct — automated release manifest metadata sync via tools/release.sh"
+    fi
+fi
+
 # Push
 if [ "$NO_PUSH" -eq 1 ]; then
     echo -e "${YELLOW}Skipping push (--no-push)${NC}"
 else
     echo -e "${BLUE}Pushing to origin...${NC}"
     git push --atomic origin main "v${NEW_VERSION}"
-
-    # Release-metadata amendment: latest_release.commit/date now have their
-    # final values (the tag exists), so a follow-up commit records them.
-    # The sync checker compares manifest.commit against the TAG's commit —
-    # not HEAD — so this amendment keeps both green.
-    if [ -f "manifest.json" ]; then
-        RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}^{commit}")
-        RELEASE_DATE=$(date +%Y-%m-%d)
-        sed -i.bak -E "s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
-        sed -i.bak -E "s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
-        rm -f manifest.json.bak
-        git add manifest.json
-        if ! git diff --staged --quiet; then
-            git commit -m "chore(release): record v${NEW_VERSION} commit/date in manifest latest_release" -m "Provenance: F0-direct — automated release manifest metadata sync via tools/release.sh"
-            git push origin main
-            echo -e "${GREEN}✓ manifest latest_release amended to ${RELEASE_SHA} / ${RELEASE_DATE}${NC}"
-        fi
-    fi
 fi
 
 echo -e "${GREEN}✓ Release ${NEW_VERSION} created and pushed!${NC}"

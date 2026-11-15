@@ -121,7 +121,17 @@ EOF
 }
 EOF
 
-    # 4. packaging/windows/g8s.nsi
+    # 4. internal/mcp/server.go
+    if [ "$omit_file" != "internal/mcp/server.go" ]; then
+        mkdir -p "$target_dir/internal/mcp"
+        cat > "$target_dir/internal/mcp/server.go" <<EOF
+package mcp
+
+const defaultServerVersion = "${version}"
+EOF
+    fi
+
+    # 5. packaging/windows/g8s.nsi
     if [ "$omit_file" != "packaging/windows/g8s.nsi" ]; then
         cat > "$target_dir/packaging/windows/g8s.nsi" <<EOF
 ; g8s (The Gatekeepers) - Windows installer
@@ -233,7 +243,7 @@ mkdir -p "$SNAPSHOT_1"
     cd "$FIXTURE_1"
     git status --porcelain > "$SNAPSHOT_1/status.before"
     git rev-parse HEAD > "$SNAPSHOT_1/head.before"
-    shasum cmd/g8s/version.go CHANGELOG.md manifest.json packaging/windows/g8s.nsi packaging/windows/g8s.wxs packaging/chocolatey/tools/chocolateyinstall.ps1 > "$SNAPSHOT_1/checksums.before"
+    shasum cmd/g8s/version.go CHANGELOG.md manifest.json internal/mcp/server.go packaging/windows/g8s.nsi packaging/windows/g8s.wxs packaging/chocolatey/tools/chocolateyinstall.ps1 > "$SNAPSHOT_1/checksums.before"
 )
 
 output_1=""
@@ -254,7 +264,7 @@ else
     # Verify files are byte-identical
     (
         cd "$FIXTURE_1"
-        shasum cmd/g8s/version.go CHANGELOG.md manifest.json packaging/windows/g8s.nsi packaging/windows/g8s.wxs packaging/chocolatey/tools/chocolateyinstall.ps1 > "$SNAPSHOT_1/checksums.after"
+        shasum cmd/g8s/version.go CHANGELOG.md manifest.json internal/mcp/server.go packaging/windows/g8s.nsi packaging/windows/g8s.wxs packaging/chocolatey/tools/chocolateyinstall.ps1 > "$SNAPSHOT_1/checksums.after"
     )
     if ! diff -u "$SNAPSHOT_1/checksums.before" "$SNAPSHOT_1/checksums.after" >/dev/null; then
         echo "  FAIL: dry-run modified repository files!"
@@ -799,6 +809,60 @@ else
 
     if [ "$FAILURES" -eq 0 ]; then
         echo "  ok (winget/nuspec updated, Unreleased promoted, sync check clean)"
+    fi
+fi
+
+# Case 12: internal/mcp/server.go defaultServerVersion update and manifest commit sync
+echo "Testing: (12) internal/mcp/server.go defaultServerVersion updated to 0.13.0 in tagged commit, manifest latest_release.commit records v0.13.0 SHA, passes ci_version_sync_check.sh"
+FIXTURE_12="$TEST_TMP/fixture_12"
+setup_fixture "$FIXTURE_12" "0.12.0"
+
+output_12=""
+exit_code_12=0
+output_12=$( (cd "$FIXTURE_12" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_12=$?
+
+if [ "$exit_code_12" -ne 0 ]; then
+    echo "  FAIL: release run returned exit code $exit_code_12"
+    echo "$output_12" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # 12a. Verify internal/mcp/server.go defaultServerVersion updated to 0.13.0 in the tagged commit
+    server_ver=$(cd "$FIXTURE_12" && git show "v0.13.0:internal/mcp/server.go" 2>/dev/null | grep 'defaultServerVersion' | sed -E 's/.*= "([^"]+)".*/\1/')
+    if [ "$server_ver" != "0.13.0" ]; then
+        echo "  FAIL: internal/mcp/server.go defaultServerVersion in tagged commit is '$server_ver', expected '0.13.0'"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # 12b. Verify manifest.json latest_release.commit matches v0.13.0 tag commit SHA
+    tag_sha=$(cd "$FIXTURE_12" && git rev-parse --short=7 "v0.13.0^{commit}")
+    manifest_commit=$(cd "$FIXTURE_12" && git show "HEAD:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$manifest_commit" != "$tag_sha" ]; then
+        echo "  FAIL: manifest.json latest_release.commit is '$manifest_commit', expected tag SHA '$tag_sha'"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # 12c. Verify manifest.json latest_release.date matches tag commit date
+    tag_date=$(cd "$FIXTURE_12" && git show -s --format=%cs "v0.13.0^{commit}")
+    manifest_date=$(cd "$FIXTURE_12" && git show "HEAD:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"date":' | head -1 | sed -E 's/.*"date":[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$manifest_date" != "$tag_date" ]; then
+        echo "  FAIL: manifest.json latest_release.date is '$manifest_date', expected tag date '$tag_date'"
+        FAILURES=$((FAILURES + 1))
+    fi
+
+    # 12d. Run ci_version_sync_check.sh
+    if [ -f "$FIXTURE_12/tools/ci_version_sync_check.sh" ]; then
+        oracle_out=""
+        oracle_code=0
+        oracle_out=$( (cd "$FIXTURE_12" && bash tools/ci_version_sync_check.sh) 2>&1 ) || oracle_code=$?
+        if [ "$oracle_code" -ne 0 ]; then
+            echo "  FAIL: ci_version_sync_check.sh failed on tree with server.go update"
+            echo "$oracle_out" | sed 's/^/    /'
+            FAILURES=$((FAILURES + 1))
+        fi
+    fi
+
+    if [ "$FAILURES" -eq 0 ]; then
+        echo "  ok (server.go updated in tag, manifest commit/date synced, sync check clean)"
     fi
 fi
 
