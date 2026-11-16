@@ -479,6 +479,7 @@ features:
       direct_consumers:
         - "FEAT-LLMCALL-01"
         - "FEAT-VERIFY-01"
+        - "FEAT-DOCTOR-DIAG-01"
         - "FEAT-PLATFORM-CLI-01"
 
   - id: "FEAT-LLMCALL-01"
@@ -1013,6 +1014,7 @@ features:
     blast_radius:
       depends_on:
         - "FEAT-CONTROLPLANE-01"
+        - "FEAT-WORKER-01"
       direct_consumers:
         - "FEAT-PLATFORM-CLI-01"
         - "FEAT-REFLECTION-01"
@@ -1035,6 +1037,7 @@ features:
       - "internal/completion/**"
       - "internal/lifecycle/**"
       - "internal/testenv/**"
+      - "tools/faultworker/**"
     collision_domain: "cli-surface"
     owned_paths:
       - "cmd/g8s/**"
@@ -1061,6 +1064,7 @@ features:
       - "internal/initwiz/**"
       - "internal/completion/**"
       - "internal/lifecycle/**"
+      - "tools/faultworker/**"
       - "offer/**"
       - "!offer/SEARCH_GUIDE.md"
       - "!offer/templates/providers.example.json"
@@ -1116,6 +1120,8 @@ features:
     visible_tests:
       - "cmd/g8s/main_test.go"
       - "cmd/g8s/envelope_commands_test.go"
+      - "cmd/g8s/fault_injection_e2e_test.go"
+      - "tools/faultworker/main_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on:

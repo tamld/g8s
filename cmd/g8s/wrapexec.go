@@ -42,7 +42,9 @@ func runWrapExec(argv []string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	unlockThread := configureWrapExecChild(cmd)
 	runErr := cmd.Run()
+	unlockThread()
 	code := 0
 	if runErr != nil {
 		var ee *exec.ExitError

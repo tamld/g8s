@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/tamld/g8s/internal/heartbeat"
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/sandbox"
 	_ "modernc.org/sqlite"
 )
 
@@ -306,16 +308,20 @@ func TestEvaluateCapabilitiesNonBreaking(t *testing.T) {
 	if status != "PARTIAL" && status != "MINIMAL" {
 		t.Fatalf("expected PARTIAL or MINIMAL when optional CLIs/rg absent, got %s", status)
 	}
-	if len(caps) != 5 {
-		t.Fatalf("expected 5 capability entries, got %d: %+v", len(caps), caps)
+	if len(caps) != 6 {
+		t.Fatalf("expected 6 capability entries, got %d: %+v", len(caps), caps)
+	}
+	if caps[5].Name != "os_sandbox" || caps[5].Available || caps[5].VerificationState != "absent" {
+		t.Fatalf("expected absent os_sandbox when check missing, got %+v", caps[5])
 	}
 
-	// 2. Full capability checks
+	// 2. Full capability checks including live OS Sandbox probe
 	checksFull := []DiagnosticResult{
 		{Name: "Database Connectivity", Status: "OK", Message: "SQLite WAL database healthy"},
 		{Name: "Search Engine", Status: "OK", Message: "Native Go search engine active; ripgrep turbo available at /usr/bin/rg"},
 		{Name: "Worker CLI (agy)", Status: "OK", Message: "Available in PATH at /usr/local/bin/agy"},
 		{Name: "Providers File", Status: "OK", Message: "1 provider(s) loaded cleanly from providers.json"},
+		{Name: "OS Sandbox", Status: "OK", Message: "Containment active (mode=kernel_enforced, backend=seatbelt)", Details: "mode=kernel_enforced backend=seatbelt"},
 	}
 	statusFull, capsFull := EvaluateCapabilities(checksFull)
 	if statusFull != "FULL" {
@@ -328,5 +334,96 @@ func TestEvaluateCapabilitiesNonBreaking(t *testing.T) {
 		if c.Name == "sqlite_wal" && c.VerificationState != "probed" {
 			t.Fatalf("expected sqlite_wal VerificationState='probed', got %q", c.VerificationState)
 		}
+		if c.Name == "os_sandbox" {
+			if !c.Available || c.VerificationState != "probed" || !strings.Contains(c.Detail, "mode=kernel_enforced") {
+				t.Fatalf("expected probed kernel_enforced os_sandbox, got %+v", c)
+			}
+		}
+	}
+}
+
+func TestProbeOSSandboxAndCapabilityModes(t *testing.T) {
+	liveRes := checkOSSandbox()
+	if liveRes.Name != "OS Sandbox" {
+		t.Fatalf("check Name = %q, want OS Sandbox", liveRes.Name)
+	}
+	if liveRes.Status != "OK" {
+		t.Fatalf("live checkOSSandbox Status = %s (%s), want OK", liveRes.Status, liveRes.Message)
+	}
+	if !strings.Contains(liveRes.Details, "mode=") || !strings.Contains(liveRes.Details, "backend=") {
+		t.Fatalf("expected mode and backend in Details, got %q", liveRes.Details)
+	}
+
+	cleaned := false
+	winRes := probeOSSandbox(func(cfg sandbox.Config) (*sandbox.PreparedLaunch, error) {
+		return &sandbox.PreparedLaunch{
+			Mode:    sandbox.ModeJobObjectEnvScrubbed,
+			Backend: "windows_job_object",
+			Cleanup: func() { cleaned = true },
+		}, nil
+	})
+	if !cleaned || winRes.Status != "OK" {
+		t.Fatalf("unexpected winRes cleaned=%v res=%+v", cleaned, winRes)
+	}
+	_, winCaps := EvaluateCapabilities([]DiagnosticResult{winRes})
+	osCap := winCaps[len(winCaps)-1]
+	if !osCap.Available || osCap.VerificationState != "probed" {
+		t.Fatalf("expected probed Available os_sandbox for job_object_env_scrubbed, got %+v", osCap)
+	}
+
+	policyRes := probeOSSandbox(func(cfg sandbox.Config) (*sandbox.PreparedLaunch, error) {
+		return &sandbox.PreparedLaunch{
+			Mode:    sandbox.ModePolicyOnly,
+			Backend: "linux_policy_only",
+		}, nil
+	})
+	if policyRes.Status != "OK" {
+		t.Fatalf("expected OK diagnostic with fallback note for policy_only, got %+v", policyRes)
+	}
+	_, policyCaps := EvaluateCapabilities([]DiagnosticResult{policyRes})
+	policyCap := policyCaps[len(policyCaps)-1]
+	if policyCap.Available || policyCap.VerificationState != "policy_only" {
+		t.Fatalf("expected Available=false VerificationState='policy_only', got %+v", policyCap)
+	}
+
+	errRes := probeOSSandbox(func(sandbox.Config) (*sandbox.PreparedLaunch, error) {
+		return nil, errors.New("boom")
+	})
+	if errRes.Status != "WARN" {
+		t.Fatalf("expected WARN on probe error, got %+v", errRes)
+	}
+	_, errCaps := EvaluateCapabilities([]DiagnosticResult{errRes})
+	if errCaps[len(errCaps)-1].Available || errCaps[len(errCaps)-1].VerificationState != "absent" {
+		t.Fatalf("expected absent os_sandbox on probe error, got %+v", errCaps[len(errCaps)-1])
+	}
+
+	nilRes := probeOSSandbox(func(sandbox.Config) (*sandbox.PreparedLaunch, error) {
+		return nil, nil
+	})
+	if nilRes.Status != "WARN" {
+		t.Fatalf("expected WARN on nil launch, got %+v", nilRes)
+	}
+
+	// Cover PATH fallback (exec.LookPath("true") fails -> os.Executable()) and empty Details branch.
+	t.Setenv("PATH", "")
+	fallbackRes := probeOSSandbox(func(cfg sandbox.Config) (*sandbox.PreparedLaunch, error) {
+		if len(cfg.Argv) == 0 || cfg.Argv[0] == "" {
+			t.Fatal("expected fallback Argv[0]")
+		}
+		return &sandbox.PreparedLaunch{
+			Mode:    sandbox.ModeKernelEnforced,
+			Backend: "seatbelt",
+		}, nil
+	})
+	if fallbackRes.Status != "OK" {
+		t.Fatalf("expected OK fallbackRes, got %+v", fallbackRes)
+	}
+	_, fallbackCaps := EvaluateCapabilities([]DiagnosticResult{{
+		Name:    "OS Sandbox",
+		Status:  "OK",
+		Message: "Containment active (mode=kernel_enforced, backend=seatbelt)",
+	}})
+	if fallbackCaps[len(fallbackCaps)-1].Detail == "" || !fallbackCaps[len(fallbackCaps)-1].Available {
+		t.Fatalf("expected populated fallback Detail when Details omitted, got %+v", fallbackCaps[len(fallbackCaps)-1])
 	}
 }

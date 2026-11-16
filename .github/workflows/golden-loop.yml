@@ -1,7 +1,8 @@
 name: Golden-Loop E2E
+
 on:
   schedule:
-    - cron: '0 6 * * *'  # daily at 6am UTC
+    - cron: '0 6 * * *' # daily at 6am UTC
   workflow_dispatch:    # manual trigger
   pull_request:
     branches: [ main ]
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   golden-loop:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -25,15 +26,18 @@ jobs:
 
       - name: Detect CI Lane
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.before }}
         run: |
-          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if ! lane=$(bash tools/ci_lane_detect.sh origin/main "$BASE_SHA" 2>/dev/null); then
+            lane="build"
+          fi
           if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
             CI_LANE="docs"
           else
             CI_LANE="build"
           fi
           echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
-          export CI_LANE
           echo "Detected lane: $CI_LANE"
 
       - name: Early exit for docs lane
@@ -48,33 +52,117 @@ jobs:
         if: env.CI_LANE != 'docs'
         with:
           go-version: '1.26.11'
-      - name: Build g8s from this exact commit
+
+      - name: Build g8s and faultworker from this exact commit
         if: env.CI_LANE != 'docs'
-        run: go build -o /tmp/g8s ./cmd/g8s
-      - name: Install latest g8s release
-        if: env.CI_LANE != 'docs'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          VERSION=$(gh release view --repo tamld/g8s --json tagName --jq .tagName 2>/dev/null || echo "v0.5.0")
-          URL="https://github.com/tamld/g8s/releases/download/${VERSION}/g8s_${VERSION#v}_linux_amd64.tar.gz"
-          curl -sSL "$URL" | tar xz -C /tmp || true
-      - name: Submit a fixed task via latest release
+          CGO_ENABLED=0 go build -o /tmp/g8s ./cmd/g8s
+          CGO_ENABLED=0 go build -o /tmp/faultworker ./tools/faultworker
+          chmod +x /tmp/g8s /tmp/faultworker
+
+      - name: Run live Golden-Loop E2E (happy deliver and error envelope rc=0)
         if: env.CI_LANE != 'docs'
-        run: /tmp/g8s submit --role scout --permission read_only --prompt "find ./internal/orchestrator/agy_worker.go" --idempotency-key golden-$(date +%s)
-      - name: Run worker once
-        if: env.CI_LANE != 'docs'
-        run: /tmp/g8s worker --once || true
-      - name: Verify receipt state is FAILED if stdout is error envelope
-        if: env.CI_LANE != 'docs'
+        shell: bash
         run: |
-          TASK_ID=$(/tmp/g8s tasks --state SUCCEEDED --limit 1 --json | jq -r '.[0].id // empty' 2>/dev/null || true)
-          if [ -n "$TASK_ID" ]; then
-            /tmp/g8s get "$TASK_ID" | tee /tmp/receipt.json
-            STDOUT_KIND=$(jq -r '.data.stdout_kind // .stdout_kind // empty' /tmp/receipt.json)
-            STATE=$(jq -r '.data.state // .state // empty' /tmp/receipt.json)
-            if [ "$STDOUT_KIND" = "error" ] && [ "$STATE" = "SUCCEEDED" ]; then
-              echo "::error::GOLDEN LOOP REGRESSION: state=SUCCEEDED but stdout is error envelope"
-              exit 1
-            fi
+          set -euo pipefail
+          SANDBOX_ROOT="$(mktemp -d)"
+          trap 'rm -rf "$SANDBOX_ROOT"' EXIT
+
+          export G8S_STATE_DIR="$SANDBOX_ROOT/state"
+          export G8S_PROVIDERS="$SANDBOX_ROOT/providers.json"
+          mkdir -p "$G8S_STATE_DIR"
+
+          cat >"$G8S_PROVIDERS" <<'EOF'
+          {
+            "providers": [
+              {
+                "class": "platform_dispatch",
+                "name": "faultworker",
+                "default_model": "mock-v1",
+                "args": ["/tmp/faultworker", "--prompt", "{prompt}"],
+                "models": [{"id": "mock-v1"}]
+              }
+            ]
+          }
+          EOF
+
+          WORK_REPO="$SANDBOX_ROOT/repo"
+          mkdir -p "$WORK_REPO/pkg" "$WORK_REPO/.g8s"
+          cat >"$WORK_REPO/go.mod" <<'EOF'
+          module example.com/goldenloop
+
+          go 1.22
+          EOF
+          cat >"$WORK_REPO/pkg/base_test.go" <<'EOF'
+          package pkg
+
+          import "testing"
+
+          func TestBase(t *testing.T) {}
+          EOF
+          cat >"$WORK_REPO/.g8s/verifier-classes.yml" <<'EOF'
+          schema_version: "verifier-classes.v1"
+
+          classes:
+            - name: test
+              status: hard
+              founding_catch: "#920 (golden-loop test class)"
+              priority: 10
+              paths:
+                - "pkg/**"
+              checks:
+                - type: go-test
+                  packages:
+                    - "./pkg"
+          EOF
+
+          git -C "$WORK_REPO" init
+          git -C "$WORK_REPO" config user.email "ci@example.com"
+          git -C "$WORK_REPO" config user.name "CI Runner"
+          git -C "$WORK_REPO" add go.mod pkg/base_test.go .g8s/verifier-classes.yml
+          git -C "$WORK_REPO" commit -m "init golden-loop fixture"
+          BASE_SHA="$(git -C "$WORK_REPO" rev-parse HEAD)"
+
+          cd "$WORK_REPO"
+
+          # 1. Golden happy path: receipt -> submit -> worker -> tasks list -> verify -> deliver -> file on disk
+          RCPT=$(/tmp/g8s receipt issue --actor f0-supervisor --path "pkg/**" --ttl 600 --json | jq -er '.data.receipt_id')
+          TASK_OK=$(/tmp/g8s submit \
+            --provider faultworker \
+            --model mock-v1 \
+            --role implementer \
+            --permission workspace_write \
+            --allow-workspace-write \
+            --receipt-id "$RCPT" \
+            --idempotency-key golden-pass-1 \
+            --timeout 30s \
+            --prompt 'FAULTWORKER_SPEC:{"mode":"clean-write","target":"pkg/golden.go","content":"package pkg\n\nfunc Golden() int { return 42 }\n"}' \
+            --json | jq -er '.data.task_id')
+
+          /tmp/g8s worker --once --provider faultworker --model mock-v1 --json
+
+          LIST_ID=$(/tmp/g8s tasks --state WORKER_COMPLETED --limit 10 --json | jq -er --arg id "$TASK_OK" '.data[] | select(.task_id == $id) | .task_id')
+          /tmp/g8s verify --task "$LIST_ID" --json | jq -e '.data.outcome == "pass"'
+          /tmp/g8s deliver "$LIST_ID" --expected-head-oid "$BASE_SHA" --prune-worktree --json | jq -e '.data.pruned_worktree == true and (.data.applied == ["pkg/golden.go"])'
+          /tmp/g8s get "$LIST_ID" --json | jq -e '.data.state == "SUPERVISOR_ACCEPTED"'
+          test -f "$WORK_REPO/pkg/golden.go"
+
+          # 2. Negative path: stdout error envelope with exit code 0 must exit worker non-zero and never reach SUCCEEDED
+          TASK_ERR=$(/tmp/g8s submit \
+            --provider faultworker \
+            --model mock-v1 \
+            --role scout \
+            --permission read_only \
+            --idempotency-key golden-err-1 \
+            --timeout 15s \
+            --prompt 'FAULTWORKER_SPEC:{"mode":"stdout-error-rc0","message":"golden error probe"}' \
+            --json | jq -er '.data.task_id')
+
+          if /tmp/g8s worker --once --provider faultworker --model mock-v1 --json; then
+            echo "::error::GOLDEN LOOP REGRESSION: worker returned exit 0 on stdout error envelope"
+            exit 1
           fi
+
+          /tmp/g8s get "$TASK_ERR" --json | tee /tmp/golden-receipt.json
+          jq -e '.data.state != "SUCCEEDED" and .data.state != "SUPERVISOR_ACCEPTED" and .data.result.ok == false and (.data.last_error | contains("golden error probe"))' /tmp/golden-receipt.json
