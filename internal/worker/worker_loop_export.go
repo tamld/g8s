@@ -662,11 +662,29 @@ func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
 	return env
 }
 
-// verifyExecutableIdentity checks if the executable is what it claims to be.
+// needsInterpreterIdentityCheck reports whether path names an interpreter
+// binary whose version output is checked by dispatch.VerifyExecutableIdentity.
+func needsInterpreterIdentityCheck(path string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(path)))
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".cmd")
+	base = strings.TrimSuffix(base, ".bat")
+	switch base {
+	case "python3", "python", "python2", "node", "npm", "npx", "go", "golang", "ruby", "java":
+		return true
+	default:
+		return false
+	}
+}
+
 // verifyExecutableIdentity checks if the executable is what it claims to be.
 // It detects fake scripts (e.g., python3 that's actually a Node script) by delegating
-// to dispatch.VerifyExecutableIdentity.
+// to dispatch.VerifyExecutableIdentity for known interpreter basenames without
+// executing arbitrary non-interpreter binaries (such as *.test) before sandboxing.
 func verifyExecutableIdentity(path string) error {
+	if !needsInterpreterIdentityCheck(path) {
+		return nil
+	}
 	return dispatch.VerifyExecutableIdentity(path)
 }
 

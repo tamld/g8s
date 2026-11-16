@@ -25,6 +25,7 @@ import (
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/reflex"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -112,6 +113,7 @@ type SpawnOptions struct {
 	ResultPath string
 	RunDir     string
 	Timeout    time.Duration
+	Sandbox    *sandbox.Config
 }
 
 // Runner spawns worker processes; tests inject fakes so no real binaries run.
@@ -725,7 +727,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if spawnDir != "" {
 		childEnv = append(childEnv, "G8S_SCOPE_ROOT="+spawnDir)
 	}
-	childArgv := resolvedArgv
+	childArgv := sanitizeReadOnlyCLIArgv(resolvedArgv, resolvedTaskProvider.Name, req.Permission)
 	if len(childArgv) == 0 {
 		childArgv = s.buildArgv(req, promptPath, resultPath)
 	}
@@ -737,6 +739,24 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			childArgv = wrapped
 		}
 	}
+	var extraWriteDirs []string
+	if strings.TrimSpace(req.ToolPolicyEvidenceLog) != "" {
+		extraWriteDirs = append(extraWriteDirs, filepath.Dir(req.ToolPolicyEvidenceLog))
+	}
+	stateDir := s.scorecardStateDir()
+	if strings.TrimSpace(stateDir) == "" {
+		stateDir = filepath.Dir(pathutil.DefaultDatabasePath())
+	}
+	sbxCfg := &sandbox.Config{
+		WorktreeDir:    spawnDir,
+		RunDir:         runDir,
+		StateDir:       stateDir,
+		Permission:     req.Permission,
+		ProviderName:   resolvedTaskProvider.Name,
+		AddDirs:        req.AddDirs,
+		ExtraWriteDirs: extraWriteDirs,
+		NoSandbox:      req.NoSandbox,
+	}
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,
@@ -746,6 +766,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		ResultPath: resultPath,
 		RunDir:     runDir,
 		Timeout:    cmdTimeout,
+		Sandbox:    sbxCfg,
 	})
 
 	if spawnErr != nil {

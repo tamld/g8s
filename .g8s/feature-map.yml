@@ -406,7 +406,9 @@ features:
       - "DELTA-29"
       - "DELTA-30"
       - "DELTA-39"
+      - "DELTA-49"
     code_paths:
+      - "internal/sandbox/**"
       - "internal/worker/**"
       - "internal/process/**"
       - "internal/harness/**"
@@ -416,6 +418,7 @@ features:
       - "internal/sleep/**"
     collision_domain: "worker-runtime"
     owned_paths:
+      - "internal/sandbox/**"
       - "internal/worker/**"
       - "internal/process/**"
       - "internal/harness/**"
@@ -449,6 +452,7 @@ features:
         - "sleep_state"
         - "wake_summary"
       go_packages:
+        - "internal/sandbox"
         - "internal/worker"
         - "internal/process"
         - "internal/harness"
@@ -461,7 +465,9 @@ features:
       - "Sensitive token sanitization"
       - "Fail-closed worktree isolation for workspace_write tasks (#656)"
       - "Draft-7 output_schema validation & provider/model claim affinity (#657, #659)"
+      - "OS kernel subprocess containment (Seatbelt, bwrap/Landlock, JobObject) & ambient secret scrubbing (DELTA-49)"
     visible_tests:
+      - "internal/sandbox/escape_test.go"
       - "internal/worker/worker_test.go"
       - "internal/process/lister_test.go"
     verifier_class: "test"

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // processChild wraps an exec.Cmd whose process group the supervisor owns.
@@ -23,18 +24,43 @@ type processChild struct {
 	code int
 	// job holds the Windows Job Object handle (KILL_ON_JOB_CLOSE, #415
 	// PR-2); 0 on POSIX where containment is the process group.
-	job      uintptr
-	jobClose sync.Once
+	job             uintptr
+	jobClose        sync.Once
+	containmentMode string
+	sandboxBackend  string
+	sandboxCleanup  func()
+	cleanupOnce     sync.Once
 }
 
-func newProcessChild(cmd *exec.Cmd, job uintptr) *processChild {
-	c := &processChild{cmd: cmd, done: make(chan struct{}), job: job}
+func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend string, cleanup func()) *processChild {
+	c := &processChild{
+		cmd:             cmd,
+		done:            make(chan struct{}),
+		job:             job,
+		containmentMode: containmentMode,
+		sandboxBackend:  sandboxBackend,
+		sandboxCleanup:  cleanup,
+	}
 	go func() {
 		err := cmd.Wait()
 		c.code = exitCodeOf(err)
+		c.closeSandbox()
 		close(c.done)
 	}()
 	return c
+}
+
+// ContainmentInfo returns the truthful OS containment mode and sandbox backend.
+func (c *processChild) ContainmentInfo() (string, string) {
+	return c.containmentMode, c.sandboxBackend
+}
+
+func (c *processChild) closeSandbox() {
+	c.cleanupOnce.Do(func() {
+		if c.sandboxCleanup != nil {
+			c.sandboxCleanup()
+		}
+	})
 }
 
 func exitCodeOf(err error) int {
@@ -78,6 +104,7 @@ func (c *processChild) Terminate(grace time.Duration) {
 	// every process still in the job (KILL_ON_JOB_CLOSE) — the belt to the
 	// taskkill suspenders. POSIX no-op.
 	c.closeJob()
+	c.closeSandbox()
 }
 
 // processRunner is the production Runner: exec with POSIX process groups.
@@ -93,22 +120,50 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		return nil, err
 	}
 
+	argv := opts.Argv
+	var cmdEnv []string
+	var containmentMode, sandboxBackend string
+	var sandboxCleanup func()
+
+	if opts.Sandbox != nil {
+		sbxCfg := *opts.Sandbox
+		sbxCfg.Argv = append([]string{}, opts.Argv...)
+		sbxCfg.TaskEnv = append([]string{}, opts.Env...)
+		if strings.TrimSpace(sbxCfg.RunDir) == "" {
+			sbxCfg.RunDir = opts.RunDir
+		}
+		prep, serr := sandbox.Prepare(sbxCfg)
+		if serr != nil {
+			return nil, serr
+		}
+		argv = prep.Argv
+		cmdEnv = prep.Env
+		containmentMode = string(prep.Mode)
+		sandboxBackend = prep.Backend
+		sandboxCleanup = prep.Cleanup
+	} else if len(opts.Env) > 0 {
+		cmdEnv = append(os.Environ(), opts.Env...)
+	}
+
 	var cmd *exec.Cmd
 	if opts.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
-		cmd = exec.CommandContext(ctx, opts.Argv[0], opts.Argv[1:]...)
+		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
 		_ = cancel
 	} else {
-		cmd = exec.Command(opts.Argv[0], opts.Argv[1:]...)
+		cmd = exec.Command(argv[0], argv[1:]...)
 	}
 	configureSysProcAttr(cmd)
 	cmd.Dir = opts.Dir
-	if len(opts.Env) > 0 {
-		cmd.Env = append(os.Environ(), opts.Env...)
+	if len(cmdEnv) > 0 {
+		cmd.Env = cmdEnv
 	}
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	if err := cmd.Start(); err != nil {
+		if sandboxCleanup != nil {
+			sandboxCleanup()
+		}
 		return nil, err
 	}
 	pidPath := filepath.Join(opts.RunDir, "child.pid")
@@ -123,7 +178,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	if jerr != nil {
 		fmt.Fprintf(os.Stderr, "[warn] worker: job object containment unavailable: %v\n", jerr)
 	}
-	return newProcessChild(cmd, job), nil
+	return newProcessChild(cmd, job, containmentMode, sandboxBackend, sandboxCleanup), nil
 }
 
 func isAttemptResultOK(raw json.RawMessage) bool {

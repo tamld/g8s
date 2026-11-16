@@ -25,6 +25,7 @@ import (
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/routing"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/telemetry"
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -354,6 +355,17 @@ func (s *Supervisor) collect(
 	if jc, ok := child.(interface{ closeJob() }); ok {
 		jc.closeJob()
 	}
+	if cc, ok := child.(interface{ closeSandbox() }); ok {
+		cc.closeSandbox()
+	}
+	containmentMode := string(sandbox.ModePolicyOnly)
+	sandboxBackend := ""
+	if ci, ok := child.(interface{ ContainmentInfo() (string, string) }); ok {
+		if m, b := ci.ContainmentInfo(); m != "" {
+			containmentMode = m
+			sandboxBackend = b
+		}
+	}
 
 	stdoutRaw, _ := os.ReadFile(stdoutPath)
 	stderrRaw, _ := os.ReadFile(stderrPath)
@@ -382,6 +394,10 @@ func (s *Supervisor) collect(
 		env := outcomeEnvelope(false, "cancelled", stdoutText, stderrText)
 		env["duration"] = durationSec
 		env["duration_seconds"] = durationSec
+		env["containment_mode"] = containmentMode
+		if sandboxBackend != "" {
+			env["sandbox_backend"] = sandboxBackend
+		}
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
 		}
@@ -406,6 +422,10 @@ func (s *Supervisor) collect(
 		env := outcomeEnvelope(false, "timeout", stdoutText, stderrText)
 		env["duration"] = durationSec
 		env["duration_seconds"] = durationSec
+		env["containment_mode"] = containmentMode
+		if sandboxBackend != "" {
+			env["sandbox_backend"] = sandboxBackend
+		}
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
 		}
@@ -607,6 +627,10 @@ func (s *Supervisor) collect(
 			"input_tokens":     inTokens,
 			"output_tokens":    outTokens,
 			"duration_seconds": durationSec,
+			"containment_mode": containmentMode,
+		}
+		if sandboxBackend != "" {
+			telemetryPayload["sandbox_backend"] = sandboxBackend
 		}
 		if req.EffortMismatch {
 			telemetryPayload["effort_mismatch"] = true
@@ -771,6 +795,10 @@ func (s *Supervisor) collect(
 			}
 			m["duration"] = durationSec
 			m["duration_seconds"] = durationSec
+			m["containment_mode"] = containmentMode
+			if sandboxBackend != "" {
+				m["sandbox_backend"] = sandboxBackend
+			}
 			if wr.ProviderDurationSeconds > 0 {
 				m["provider_duration_seconds"] = wr.ProviderDurationSeconds
 			}

@@ -422,6 +422,7 @@ g8s/
 │   ├── review/ — parses, validates, and aggregates code review findings from verifier workers into structured summaries
 │   ├── routing/ — CI workflow run history for reflex scorecard (D9-S1, #714)
 │   ├── runtime/ — provides runtime verification utilities for executable identity and process management
+│   ├── sandbox/ — enforces OS-level subprocess containment and environment secret scrubbing for worker execution
 │   ├── search/ — implements a native cross-platform file discovery and content search engine
 │   ├── server/ — implements the g8s daemon mode with HTTP API server
 │   ├── service/ — manages the g8s background worker as an OS daemon

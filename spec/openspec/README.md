@@ -57,6 +57,7 @@ This directory contains the **Technical Delta Specifications (OpenSpec)** govern
 | **[`DELTA-46`](46-peer-coordinator-ledger-spec.md)** | Peer Coordinator Ledger | `internal/mesh`, `internal/mcp`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-47`](47-reach-layer-spec.md)** | Reach Layer — Read-Only Platform Data Acquisition | `internal/reach`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
 | **[`DELTA-48`](48-declarative-model-adoption-and-adapter-neutrality-spec.md)** | Declarative Model Adoption & Adapter-Neutral Control Plane | `internal/config`, `internal/routing`, `internal/provider`, `internal/provider/conformance`, `internal/harness/probe`, `internal/verifier`, `cmd/g8s` | M6 (LLM Consumer & Fleet) | `APPLIED` |
+| **[`DELTA-49`](49-os-subprocess-sandbox-spec.md)** | OS-Level Subprocess Containment, Secret Scrubbing & Escape Verification | `internal/sandbox`, `internal/worker`, `internal/provider` | M6 (Safety Hardening) | `APPLIED` |
 
 ---
 

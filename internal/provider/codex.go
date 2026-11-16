@@ -383,6 +383,9 @@ func (c *CodexProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	c.mu.RUnlock()
 
 	args := []string{"exec"}
+	if strings.EqualFold(strings.TrimSpace(spec.Permission), "read_only") {
+		args = append(args, "--sandbox", "read-only")
+	}
 	if spec.Model != "" {
 		args = append(args, "--model", spec.Model)
 	}
@@ -394,6 +397,7 @@ func (c *CodexProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	cmd.Env = scrubProviderEnv("codex", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer

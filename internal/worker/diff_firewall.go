@@ -16,6 +16,22 @@ import (
 // DefaultCLIProviderTemplates returns built-in non-interactive CLI invocation templates
 // for external coding agents (DELTA-39: opencode, commandcode, qwen, codex).
 func DefaultCLIProviderTemplates() map[string][]string {
+	return DefaultCLIProviderTemplatesForPermission("workspace_write")
+}
+
+// DefaultCLIProviderTemplatesForPermission returns built-in non-interactive CLI
+// invocation templates tailored to permission (suppressing --yolo on read_only
+// permissions per DELTA-49).
+func DefaultCLIProviderTemplatesForPermission(permission string) map[string][]string {
+	if isDiffFirewallReadPermission(permission) {
+		return map[string][]string{
+			"opencode":    {"opencode", "run", "--model", "{model}", "{prompt}"},
+			"commandcode": {"commandcode", "--no-session", "--skip-onboarding", "--no-auto-update", "--model", "{model}", "-p", "{prompt}"},
+			"qwen":        {"qwen", "--approval-mode", "plan", "--model", "{model}", "-p", "{prompt}"},
+			"codex":       {"codex", "exec", "--sandbox", "read-only", "--model", "{model}", "{prompt}"},
+			"cursor":      {"cursor-agent", "--print", "--trust", "--mode", "plan", "--model", "{model}", "{prompt}"},
+		}
+	}
 	return map[string][]string{
 		"opencode":    {"opencode", "run", "--model", "{model}", "{prompt}"},
 		"commandcode": {"commandcode", "--no-session", "--skip-onboarding", "--no-auto-update", "--yolo", "--model", "{model}", "-p", "{prompt}"},
@@ -23,6 +39,61 @@ func DefaultCLIProviderTemplates() map[string][]string {
 		"codex":       {"codex", "exec", "--model", "{model}", "{prompt}"},
 		"cursor":      {"cursor-agent", "--print", "--trust", "--yolo", "--model", "{model}", "{prompt}"},
 	}
+}
+
+func argvHasFlag(argv []string, flag string) bool {
+	for _, a := range argv {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeReadOnlyCLIArgv(argv []string, providerName, permission string) []string {
+	if len(argv) == 0 || !isDiffFirewallReadPermission(permission) {
+		return argv
+	}
+	out := make([]string, 0, len(argv)+2)
+	for _, arg := range argv {
+		if arg == "--yolo" || arg == "--dangerously-skip-permissions" {
+			continue
+		}
+		out = append(out, arg)
+	}
+	if len(out) == 0 {
+		return out
+	}
+	prov := strings.ToLower(strings.TrimSpace(providerName))
+	switch prov {
+	case "qwen":
+		if !argvHasFlag(out, "--approval-mode") {
+			withMode := make([]string, 0, len(out)+2)
+			withMode = append(withMode, out[0], "--approval-mode", "plan")
+			withMode = append(withMode, out[1:]...)
+			out = withMode
+		}
+	case "cursor":
+		if !argvHasFlag(out, "--mode") {
+			withMode := make([]string, 0, len(out)+2)
+			withMode = append(withMode, out[0], "--mode", "plan")
+			withMode = append(withMode, out[1:]...)
+			out = withMode
+		}
+	case "codex":
+		if !argvHasFlag(out, "--sandbox") {
+			insertAt := 1
+			if len(out) > 1 && out[1] == "exec" {
+				insertAt = 2
+			}
+			withSandbox := make([]string, 0, len(out)+2)
+			withSandbox = append(withSandbox, out[:insertAt]...)
+			withSandbox = append(withSandbox, "--sandbox", "read-only")
+			withSandbox = append(withSandbox, out[insertAt:]...)
+			out = withSandbox
+		}
+	}
+	return out
 }
 
 func resolveDefaultCLITemplate(provider, prompt, model, timeout string) ([]string, bool) {
