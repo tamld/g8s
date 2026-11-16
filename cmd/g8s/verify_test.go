@@ -255,8 +255,8 @@ func TestVerifyCLI_DocsTaskResolution(t *testing.T) {
 	if v.Registered != true {
 		t.Errorf("verdict.Registered = %v, want true", v.Registered)
 	}
-	if v.Status != verifier.StatusAdvisory {
-		t.Errorf("verdict.Status = %q, want advisory", v.Status)
+	if v.Status != verifier.StatusHard {
+		t.Errorf("verdict.Status = %q, want hard", v.Status)
 	}
 }
 

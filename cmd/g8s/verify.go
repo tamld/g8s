@@ -45,6 +45,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	briefFlag := fs.String("brief", "", "brief ID to load Definition of Done items from")
 	featureFlag := fs.String("feature", "", "feature ID from .g8s/feature-map.yml to verify (includes blast_radius.direct_consumers)")
 	repoFlag := fs.String("repo", "", "repository or worktree root directory")
+	worktreeFlag := fs.String("worktree", "", "explicit worktree directory for verification")
 	holdoutDirFlag := fs.String("holdout-dir", "", "out-of-worktree holdout test directory")
 	blindPacketFlag := fs.Bool("blind-packet", false, "generate sanitized Double-Blind Review Packet")
 	canaryMutantFlag := fs.Bool("canary-mutant", false, "run Seeded Mutant Canary sensitivity check")
@@ -76,6 +77,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	var target verifier.TaskRef
 	var targetRepoDir string
 	var verifiedTask *controlplane.Task
+	var cpStore *controlplane.Store
 
 	if isStandaloneFeature {
 		target = verifier.TaskRef{
@@ -125,6 +127,7 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 			return 1
 		}
 		defer store.Close()
+		cpStore = store
 
 		ctx := context.Background()
 		task, err := store.GetTask(ctx, taskID)
@@ -258,6 +261,12 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 		}
 
 	}
+	if wt := strings.TrimSpace(*worktreeFlag); wt != "" {
+		if fi, err := os.Stat(wt); err == nil && fi.IsDir() {
+			target.WorktreeDir = wt
+			targetRepoDir = wt
+		}
+	}
 
 	if claimFenceCheck != nil {
 		if err := claimFenceCheck(); err != nil {
@@ -387,6 +396,22 @@ func runVerifyWithIO(args []string, stdout, stderr io.Writer, dbPathOverride str
 	passedVerify := verdict.Outcome == verifier.OutcomePass && verdict.VetoReason == "" && (verdict.HoldoutChecksOK == nil || *verdict.HoldoutChecksOK)
 	if !isUnregisteredClean {
 		recordVerifyTaskTelemetry(verifiedTask, passedVerify, dbPathOverride, target.AllowedPaths)
+		if cpStore != nil && verifiedTask != nil && verifiedTask.State == controlplane.StateWorkerCompleted {
+			hardFail := verdict.Status == verifier.StatusHard && verdict.Outcome == verifier.OutcomeFail
+			verifyAccepted := passedVerify && !hardFail
+			if verifyAccepted {
+				if err := cpStore.AcceptResult(context.Background(), verifiedTask.TaskID, "g8s-verify"); err != nil {
+					exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+					return 1
+				}
+			} else {
+				failureSummary := verifyHardFailureSummary(verdict)
+				if err := cpStore.RejectResult(context.Background(), verifiedTask.TaskID, "g8s-verify", "verification failed", failureSummary); err != nil {
+					exitRuntimeWithWriter(stderr, "verify", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
+					return 1
+				}
+			}
+		}
 	}
 	if os.Getenv("G8S_JIT_WHISPER") != "0" {
 		if passedVerify {
@@ -446,4 +471,35 @@ func exitRuntimeWithWriter(w io.Writer, cmd, sub, traceID, code string, err erro
 func fileExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && !fi.IsDir()
+}
+
+func verifyHardFailureSummary(v verifier.Verdict) string {
+	if v.Status != verifier.StatusHard || v.Outcome != verifier.OutcomeFail {
+		return ""
+	}
+	var parts []string
+	if v.Class != "" {
+		parts = append(parts, "class="+v.Class)
+	}
+	for _, c := range v.Checks {
+		if c.OK {
+			continue
+		}
+		detail := strings.TrimSpace(c.Detail)
+		if detail == "" {
+			detail = "failed"
+		}
+		target := strings.TrimSpace(c.Target)
+		if target == "" {
+			target = c.Type
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", target, detail))
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return "hard verification failed"
+	}
+	return strings.Join(parts, "; ")
 }

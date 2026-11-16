@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,12 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/lockfile"
 	"github.com/tamld/g8s/internal/receipt"
 )
 
@@ -28,14 +30,25 @@ type deliverableResult struct {
 }
 
 type deliverData struct {
-	TaskID         string   `json:"task_id"`
-	DeliverableDir string   `json:"deliverable_dir"`
-	Applied        []string `json:"applied"`
-	Deleted        []string `json:"deleted,omitempty"`
-	Skipped        []string `json:"skipped"`
-	ReceiptID      string   `json:"receipt_id"`
-	HeadOID        string   `json:"head_oid,omitempty"`
-	PrunedWorktree bool     `json:"pruned_worktree,omitempty"`
+	TaskID            string   `json:"task_id"`
+	DeliverableDir    string   `json:"deliverable_dir"`
+	Applied           []string `json:"applied"`
+	Deleted           []string `json:"deleted,omitempty"`
+	Skipped           []string `json:"skipped"`
+	ReceiptID         string   `json:"receipt_id"`
+	HeadOID           string   `json:"head_oid,omitempty"`
+	PrunedWorktree    bool     `json:"pruned_worktree,omitempty"`
+	OverrideReason    string   `json:"override_reason,omitempty"`
+	VerificationState string   `json:"verification_state,omitempty"`
+}
+
+type deliverRenameOp struct {
+	oldPath string
+	newPath string
+}
+
+type deliverCopyOp struct {
+	newPath string
 }
 
 func runDeliver(args []string) {
@@ -50,6 +63,8 @@ func runDeliver(args []string) {
 	receiptIDFlag := fs.String("receipt-id", "", "explicit receipt ID override for delivering preserved worktrees")
 	receiptAliasFlag := fs.String("receipt", "", "explicit receipt ID override (canonical alias for --receipt-id)")
 	expectedHeadOID := fs.String("expected-head-oid", "", "optional expected git HEAD SHA in target workspace (CAS STALE_HEAD guard; DELTA-34)")
+	allowUnverifiedOverride := fs.Bool("allow-unverified-override", false, "allow F0 override to deliver unverified or rejected tasks (requires --override-reason)")
+	overrideReason := fs.String("override-reason", "", "mandatory audit rationale when --allow-unverified-override is used")
 
 	// Allow flags to appear before or after positional task-id
 	var positional []string
@@ -58,7 +73,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--task" || arg == "-task" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--receipt" || arg == "-receipt" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--task" || arg == "-task" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--receipt" || arg == "-receipt" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--override-reason" || arg == "-override-reason" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -85,6 +100,9 @@ func runDeliver(args []string) {
 	if taskID == "" {
 		exitUsage("deliver", "", *traceID, "usage: g8s deliver <task-id> [--worktree <dir>] [--prune-worktree] [--dry-run]", "Provide a task ID", *jsonl)
 	}
+	if *allowUnverifiedOverride && strings.TrimSpace(*overrideReason) == "" {
+		exitUsage("deliver", "", *traceID, "--allow-unverified-override requires a non-empty --override-reason", "Provide an audit rationale for the override", *jsonl)
+	}
 
 	// 1. Resolve the task from the control plane
 	dbPath, err := databasePath()
@@ -105,6 +123,83 @@ func runDeliver(args []string) {
 		exitRuntime("deliver", "", *traceID, cli.CodeNotFound, fmt.Errorf("unknown task: %s", taskID), "Verify the task ID with 'g8s tasks'", *jsonl)
 	}
 
+	verifiedOK := task.State == controlplane.StateSupervisorAccepted || task.State == controlplane.StateSucceeded
+	isPreservedWorktreeRecovery := strings.TrimSpace(*worktreeFlag) != "" && task.State != controlplane.StateSupervisorRejected
+	var recordedOverrideReason string
+	var recordedVerificationState string
+	if !verifiedOK {
+		if *allowUnverifiedOverride {
+			recordedOverrideReason = strings.TrimSpace(*overrideReason)
+			recordedVerificationState = task.State
+			fmt.Fprintf(os.Stderr, "warning: delivering task %s in state %s via --allow-unverified-override (reason: %s)\n",
+				taskID, task.State, recordedOverrideReason)
+		} else if isPreservedWorktreeRecovery {
+			// #427 preserved-worktree recovery
+		} else {
+			exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+				fmt.Errorf("task %s is in state %s; must be SUPERVISOR_ACCEPTED before deliver (run 'g8s verify --task %s' or pass --allow-unverified-override --override-reason)", taskID, task.State, taskID),
+				"", *jsonl)
+		}
+	}
+
+	var payload struct {
+		ReceiptID string   `json:"receipt_id"`
+		AddDirs   []string `json:"add_dirs"`
+	}
+	var wrapper struct {
+		Payload struct {
+			ReceiptID string   `json:"receipt_id"`
+			AddDirs   []string `json:"add_dirs"`
+		} `json:"payload"`
+	}
+	if len(task.Request) > 0 {
+		if err := json.Unmarshal(task.Request, &payload); err != nil {
+			exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
+				fmt.Errorf("corrupt request payload JSON for task %s: %w", taskID, err),
+				"Task request payload is not valid JSON", *jsonl)
+		}
+		_ = json.Unmarshal(task.Request, &wrapper)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("resolve current working directory: %w", err), "", *jsonl)
+	}
+	addDirs := payload.AddDirs
+	if len(addDirs) == 0 {
+		addDirs = wrapper.Payload.AddDirs
+	}
+	if len(addDirs) > 0 && strings.TrimSpace(addDirs[0]) != "" {
+		if fi, statErr := os.Stat(strings.TrimSpace(addDirs[0])); statErr == nil && fi.IsDir() {
+			cwd = strings.TrimSpace(addDirs[0])
+		}
+	}
+	cwd, err = filepath.Abs(cwd)
+	if err != nil {
+		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("resolve absolute workspace path: %w", err), "", *jsonl)
+	}
+
+	lockKey := filepath.Clean(cwd)
+	if eval, evalErr := filepath.EvalSymlinks(lockKey); evalErr == nil {
+		lockKey = eval
+	}
+	sum := sha256.Sum256([]byte(lockKey))
+	lockPath := filepath.Join(filepath.Dir(dbPath), fmt.Sprintf("deliver-%x.lock", sum[:8]))
+	wsLock, err := lockfile.TryLock(lockPath)
+	if err != nil {
+		if errors.Is(err, lockfile.ErrContended) {
+			exitRuntime("deliver", "", *traceID, cli.CodeConflict,
+				fmt.Errorf("deliver workspace lock held: %s", lockPath),
+				"Another deliver is in progress for this workspace; retry when it completes", *jsonl)
+		}
+		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("acquire deliver workspace lock %s: %w", lockPath, err), "", *jsonl)
+	}
+	defer func() {
+		if relErr := wsLock.Release(); relErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: release deliver workspace lock %s: %v\n", lockPath, relErr)
+		}
+	}()
+
 	// 2. Read the task's result JSON (or explicit --worktree override for #427 preserved worktrees)
 	var res deliverableResult
 	if len(task.Result) > 0 {
@@ -124,8 +219,8 @@ func runDeliver(args []string) {
 			"Pass --worktree <dir> to deliver a preserved worktree after supervisor inspection", *jsonl)
 	}
 
-	// 3. In the pointer dir, run `git status --porcelain`
-	cmd := exec.Command("git", "status", "--porcelain")
+	// 3. In the pointer dir, run `git status --porcelain -z`
+	cmd := exec.Command("git", "status", "--porcelain", "-z")
 	cmd.Dir = deliverableDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -136,56 +231,58 @@ func runDeliver(args []string) {
 
 	var rawCandidates []string
 	var deletedCandidates []string
+	var renameOps []deliverRenameOp
+	var copyOps []deliverCopyOp
 	seenDeleted := make(map[string]bool)
 	skipped := []string{}
 	seenSkipped := make(map[string]bool)
 
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
-		if len(line) < 3 {
+	entries := bytes.Split(out, []byte{0})
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) == 0 {
 			continue
 		}
-		x := line[0]
-		y := line[1]
-		rawPath := strings.TrimSpace(line[3:])
-		if len(rawPath) >= 2 && rawPath[0] == '"' && rawPath[len(rawPath)-1] == '"' {
-			if unquoted, uerr := strconv.Unquote(rawPath); uerr == nil {
-				rawPath = unquoted
-			}
+		if len(entry) < 4 {
+			continue
+		}
+		x := entry[0]
+		y := entry[1]
+		rawPath := string(entry[3:])
+
+		if deliverStatusConflict(x, y) {
+			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
+			exitRuntime("deliver", "", *traceID, cli.CodeConflict,
+				fmt.Errorf("conflict status %c%c on %s blocks deliver", x, y, cleanTarget),
+				"Resolve merge/type/unmerged conflicts in the deliverable worktree before delivering", *jsonl)
 		}
 
 		if x == 'R' || y == 'R' {
-			parts := strings.Split(rawPath, " -> ")
-			target := strings.TrimSpace(parts[len(parts)-1])
-			if len(target) >= 2 && target[0] == '"' && target[len(target)-1] == '"' {
-				if unquoted, uerr := strconv.Unquote(target); uerr == nil {
-					target = unquoted
-				}
+			newPath := string(entry[3:])
+			i++
+			if i >= len(entries) {
+				exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
+					fmt.Errorf("truncated rename entry in git status for %s", newPath), "", *jsonl)
 			}
-			cleanTarget := filepath.ToSlash(filepath.Clean(target))
-			if !seenSkipped[cleanTarget] {
-				seenSkipped[cleanTarget] = true
-				skipped = append(skipped, cleanTarget)
-			}
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model rename in v1\n", rawPath)
+			oldPath := string(entries[i])
+			renameOps = append(renameOps, deliverRenameOp{
+				oldPath: filepath.ToSlash(filepath.Clean(oldPath)),
+				newPath: filepath.ToSlash(filepath.Clean(newPath)),
+			})
 			continue
 		}
 
 		if x == 'C' || y == 'C' {
-			parts := strings.Split(rawPath, " -> ")
-			target := strings.TrimSpace(parts[len(parts)-1])
-			if len(target) >= 2 && target[0] == '"' && target[len(target)-1] == '"' {
-				if unquoted, uerr := strconv.Unquote(target); uerr == nil {
-					target = unquoted
-				}
+			newPath := string(entry[3:])
+			i++
+			if i >= len(entries) {
+				exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
+					fmt.Errorf("truncated copy entry in git status for %s", newPath), "", *jsonl)
 			}
-			cleanTarget := filepath.ToSlash(filepath.Clean(target))
-			if !seenSkipped[cleanTarget] {
-				seenSkipped[cleanTarget] = true
-				skipped = append(skipped, cleanTarget)
-			}
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model copy in v1\n", rawPath)
+			_ = entries[i]
+			copyOps = append(copyOps, deliverCopyOp{
+				newPath: filepath.ToSlash(filepath.Clean(newPath)),
+			})
 			continue
 		}
 
@@ -195,26 +292,6 @@ func runDeliver(args []string) {
 				seenDeleted[cleanTarget] = true
 				deletedCandidates = append(deletedCandidates, cleanTarget)
 			}
-			continue
-		}
-
-		if x == 'T' || y == 'T' {
-			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
-			if !seenSkipped[cleanTarget] {
-				seenSkipped[cleanTarget] = true
-				skipped = append(skipped, cleanTarget)
-			}
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model typechange in v1\n", rawPath)
-			continue
-		}
-
-		if x == 'U' || y == 'U' {
-			cleanTarget := filepath.ToSlash(filepath.Clean(rawPath))
-			if !seenSkipped[cleanTarget] {
-				seenSkipped[cleanTarget] = true
-				skipped = append(skipped, cleanTarget)
-			}
-			fmt.Fprintf(os.Stderr, "warning: skipping %s: copy-apply does not model unmerged in v1\n", rawPath)
 			continue
 		}
 
@@ -261,24 +338,6 @@ func runDeliver(args []string) {
 	}
 
 	// 4. Receipt gate (the enforcement moment)
-	var payload struct {
-		ReceiptID string   `json:"receipt_id"`
-		AddDirs   []string `json:"add_dirs"`
-	}
-	var wrapper struct {
-		Payload struct {
-			ReceiptID string   `json:"receipt_id"`
-			AddDirs   []string `json:"add_dirs"`
-		} `json:"payload"`
-	}
-	if len(task.Request) > 0 {
-		if err := json.Unmarshal(task.Request, &payload); err != nil {
-			exitRuntime("deliver", "", *traceID, cli.CodeRuntime,
-				fmt.Errorf("corrupt request payload JSON for task %s: %w", taskID, err),
-				"Task request payload is not valid JSON", *jsonl)
-		}
-		_ = json.Unmarshal(task.Request, &wrapper)
-	}
 	receiptID := strings.TrimSpace(payload.ReceiptID)
 	if receiptID == "" {
 		receiptID = strings.TrimSpace(wrapper.Payload.ReceiptID)
@@ -324,6 +383,35 @@ func runDeliver(args []string) {
 			"A valid write receipt is required to deliver workspace changes", *jsonl)
 	}
 
+	matchReceiptPath := func(file string) bool {
+		return deliverPathMatchesScope(file, rc.AllowedPaths)
+	}
+
+	for _, op := range renameOps {
+		if !deliverPathSafe(op.oldPath) || !deliverPathSafe(op.newPath) {
+			exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+				fmt.Errorf("unsafe rename path(s) %s -> %s", op.oldPath, op.newPath),
+				"All paths must be repo-relative and outside .git/", *jsonl)
+		}
+		if !matchReceiptPath(op.oldPath) || !matchReceiptPath(op.newPath) {
+			exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+				fmt.Errorf("rename path(s) %s -> %s not covered by receipt %s", op.oldPath, op.newPath, receiptID),
+				"All modified files must be covered by receipt allowed_paths", *jsonl)
+		}
+	}
+	for _, op := range copyOps {
+		if !deliverPathSafe(op.newPath) {
+			exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+				fmt.Errorf("unsafe copy path %s", op.newPath),
+				"All paths must be repo-relative and outside .git/", *jsonl)
+		}
+		if !matchReceiptPath(op.newPath) {
+			exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+				fmt.Errorf("copy path %s not covered by receipt %s", op.newPath, receiptID),
+				"All modified files must be covered by receipt allowed_paths", *jsonl)
+		}
+	}
+
 	var filteredCandidates []string
 	var offending []string
 	for _, file := range candidates {
@@ -352,27 +440,18 @@ func runDeliver(args []string) {
 			"All modified files must be covered by receipt allowed_paths", *jsonl)
 	}
 
-	// 5. Apply
-	cwd, err := os.Getwd()
-	if err != nil {
-		exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("resolve current working directory: %w", err), "", *jsonl)
-	}
-	addDirs := payload.AddDirs
-	if len(addDirs) == 0 {
-		addDirs = wrapper.Payload.AddDirs
-	}
-	if len(addDirs) > 0 && strings.TrimSpace(addDirs[0]) != "" {
-		if fi, statErr := os.Stat(strings.TrimSpace(addDirs[0])); statErr == nil && fi.IsDir() {
-			cwd = strings.TrimSpace(addDirs[0])
-		}
-	}
-
-	// DELTA-34: CAS Head Check (--expected-head-oid / STALE_HEAD protection)
+	// 5. Apply — DELTA-34: CAS Head Check (--expected-head-oid / STALE_HEAD protection)
 	var currentHeadOID string
 	headCmd := exec.Command("git", "rev-parse", "HEAD")
 	headCmd.Dir = cwd
 	if headOut, headErr := headCmd.Output(); headErr == nil {
 		currentHeadOID = strings.TrimSpace(string(headOut))
+	}
+	var wtHeadOID string
+	wtHeadCmd := exec.Command("git", "rev-parse", "HEAD")
+	wtHeadCmd.Dir = deliverableDir
+	if wtHeadOut, wtHeadErr := wtHeadCmd.Output(); wtHeadErr == nil {
+		wtHeadOID = strings.TrimSpace(string(wtHeadOut))
 	}
 	wantHeadOID := strings.TrimSpace(*expectedHeadOID)
 	if wantHeadOID == "" {
@@ -389,9 +468,28 @@ func runDeliver(args []string) {
 				fmt.Errorf("STALE_HEAD: expected target HEAD %s, got %s", wantHeadOID, currentHeadOID),
 				"Re-verify or rebase against the current target HEAD before delivering", *jsonl)
 		}
+	} else {
+		baseSHA := extractDeliverBaseSHA(task.Request, task.Result)
+		if baseSHA != "" && currentHeadOID != "" && !strings.EqualFold(currentHeadOID, baseSHA) {
+			exitRuntime("deliver", "stale-head", *traceID, cli.CodeConflict,
+				fmt.Errorf("STALE_HEAD: workspace HEAD %s differs from task base_sha %s", currentHeadOID, baseSHA),
+				"Pass --expected-head-oid to acknowledge the current target HEAD before delivering", *jsonl)
+		} else if currentHeadOID != "" && wtHeadOID != "" && !strings.EqualFold(currentHeadOID, wtHeadOID) {
+			mbCmd := exec.Command("git", "merge-base", "HEAD", wtHeadOID)
+			mbCmd.Dir = cwd
+			if mbOut, mbErr := mbCmd.Output(); mbErr == nil {
+				mergeBase := strings.TrimSpace(string(mbOut))
+				if mergeBase != "" && !strings.EqualFold(mergeBase, currentHeadOID) {
+					exitRuntime("deliver", "stale-head", *traceID, cli.CodeConflict,
+						fmt.Errorf("STALE_HEAD: workspace HEAD %s diverged from worktree base commit %s (merge-base %s)", currentHeadOID, wtHeadOID, mergeBase),
+						"Pass --expected-head-oid to acknowledge the current target HEAD before delivering", *jsonl)
+				}
+			}
+		}
 	}
 
 	var toApply []string
+	seenToApply := make(map[string]bool)
 	for _, rel := range candidates {
 		destPath := filepath.Join(cwd, filepath.FromSlash(rel))
 		if fi, err := os.Lstat(destPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
@@ -402,7 +500,53 @@ func runDeliver(args []string) {
 			fmt.Fprintf(os.Stderr, "warning: skipping %s: destination is a symlink\n", rel)
 			continue
 		}
-		toApply = append(toApply, rel)
+		if !seenToApply[rel] {
+			seenToApply[rel] = true
+			toApply = append(toApply, rel)
+		}
+	}
+
+	for _, op := range copyOps {
+		destPath := filepath.Join(cwd, filepath.FromSlash(op.newPath))
+		if fi, err := os.Lstat(destPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			if !seenSkipped[op.newPath] {
+				seenSkipped[op.newPath] = true
+				skipped = append(skipped, op.newPath)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: destination is a symlink\n", op.newPath)
+			continue
+		}
+		if !seenToApply[op.newPath] {
+			seenToApply[op.newPath] = true
+			toApply = append(toApply, op.newPath)
+		}
+	}
+
+	var validRenameOps []deliverRenameOp
+	for _, op := range renameOps {
+		newDest := filepath.Join(cwd, filepath.FromSlash(op.newPath))
+		oldDest := filepath.Join(cwd, filepath.FromSlash(op.oldPath))
+		newSymlink := false
+		if fi, err := os.Lstat(newDest); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			newSymlink = true
+		}
+		oldSymlink := false
+		if fi, err := os.Lstat(oldDest); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			oldSymlink = true
+		}
+		if newSymlink || oldSymlink {
+			if !seenSkipped[op.newPath] {
+				seenSkipped[op.newPath] = true
+				skipped = append(skipped, op.newPath)
+			}
+			fmt.Fprintf(os.Stderr, "warning: skipping %s -> %s: destination or source is a symlink\n", op.oldPath, op.newPath)
+			continue
+		}
+		validRenameOps = append(validRenameOps, op)
+		if !seenToApply[op.newPath] {
+			seenToApply[op.newPath] = true
+			toApply = append(toApply, op.newPath)
+		}
 	}
 
 	var toDelete []string
@@ -531,6 +675,25 @@ func runDeliver(args []string) {
 			applied = append(applied, s.rel)
 		}
 
+		for _, op := range validRenameOps {
+			newDest := filepath.Join(cwd, filepath.FromSlash(op.newPath))
+			oldDest := filepath.Join(cwd, filepath.FromSlash(op.oldPath))
+			oldInfo, oldErr := os.Lstat(oldDest)
+			if oldErr != nil {
+				if os.IsNotExist(oldErr) {
+					continue
+				}
+				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("stat old path %s after rename: %w", op.oldPath, oldErr), "", *jsonl)
+			}
+			newInfo, newErr := os.Lstat(newDest)
+			if newErr == nil && os.SameFile(newInfo, oldInfo) {
+				continue
+			}
+			if err := os.Remove(oldDest); err != nil && !os.IsNotExist(err) {
+				exitRuntime("deliver", "", *traceID, cli.CodeIO, fmt.Errorf("remove old path %s after rename: %w", op.oldPath, err), "", *jsonl)
+			}
+		}
+
 		for _, rel := range toDelete {
 			destPath := filepath.Join(cwd, filepath.FromSlash(rel))
 			if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
@@ -560,14 +723,16 @@ func runDeliver(args []string) {
 	recordDeliverTaskTelemetry(task, len(applied)+len(deleted), len(rc.AllowedPaths), 0, true)
 
 	data := deliverData{
-		TaskID:         taskID,
-		DeliverableDir: deliverableDir,
-		Applied:        applied,
-		Deleted:        deleted,
-		Skipped:        skipped,
-		ReceiptID:      receiptID,
-		HeadOID:        currentHeadOID,
-		PrunedWorktree: pruned,
+		TaskID:            taskID,
+		DeliverableDir:    deliverableDir,
+		Applied:           applied,
+		Deleted:           deleted,
+		Skipped:           skipped,
+		ReceiptID:         receiptID,
+		HeadOID:           currentHeadOID,
+		PrunedWorktree:    pruned,
+		OverrideReason:    recordedOverrideReason,
+		VerificationState: recordedVerificationState,
 	}
 
 	if *jsonMode || *jsonl {
@@ -596,6 +761,53 @@ func runDeliver(args []string) {
 	for _, rel := range skipped {
 		fmt.Printf("skipped: %s\n", rel)
 	}
+}
+
+func deliverStatusConflict(x, y byte) bool {
+	if x == 'T' || y == 'T' || x == 'U' || y == 'U' {
+		return true
+	}
+	switch string([]byte{x, y}) {
+	case "AA", "DD", "AU", "UA", "DU", "UD":
+		return true
+	}
+	return false
+}
+
+func deliverPathSafe(relSlash string) bool {
+	p := filepath.ToSlash(filepath.Clean(relSlash))
+	if p == ".." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") || deliverIsWindowsDrive(p) {
+		return false
+	}
+	if p == ".git" || strings.HasPrefix(p, ".git/") || strings.Contains(p, "/.git/") {
+		return false
+	}
+	return true
+}
+
+func extractDeliverBaseSHA(requestJSON, resultJSON []byte) string {
+	for _, raw := range [][]byte{requestJSON, resultJSON} {
+		if len(raw) == 0 {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			continue
+		}
+		if v, ok := m["base_sha"].(string); ok {
+			if s := strings.TrimSpace(v); s != "" {
+				return s
+			}
+		}
+		if d, ok := m["deliverable"].(map[string]any); ok {
+			if v, ok := d["base_sha"].(string); ok {
+				if s := strings.TrimSpace(v); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func isEphemeralCLIAgentArtifact(relSlash string) bool {

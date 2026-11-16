@@ -310,7 +310,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			if len(pkgs) > 0 {
 				class = Class{
 					Name:   "worktree-go-test",
-					Status: StatusAdvisory,
+					Status: StatusHard,
 					Checks: []Check{
 						{Type: CheckTypeGoTest, Packages: pkgs},
 					},
@@ -325,7 +325,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		if !registered {
 			registered = true
 			class.Name = "feature-verify"
-			class.Status = StatusAdvisory
+			class.Status = StatusHard
 		}
 	}
 
@@ -335,7 +335,7 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			class.Name = "feature-verify"
 		}
 		if class.Status == "" {
-			class.Status = StatusAdvisory
+			class.Status = StatusHard
 		}
 	}
 

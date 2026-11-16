@@ -82,15 +82,19 @@ func setupDeliverTask(t *testing.T, dbPath string, receiptID string, wtDir strin
 		t.Fatalf("SubmitTask: %v", err)
 	}
 
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
 	if wtDir != "" {
 		resultJSON := fmt.Sprintf(`{"status":"succeeded","deliverable":{"mode":"worktree","dir":%q}}`, wtDir)
-		db, err := sql.Open("sqlite", dbPath)
-		if err != nil {
-			t.Fatalf("open db: %v", err)
-		}
-		defer db.Close()
-		if _, err := db.Exec("UPDATE tasks SET result_json = ? WHERE task_id = ?", resultJSON, task.TaskID); err != nil {
+		if _, err := db.Exec("UPDATE tasks SET state = 'SUPERVISOR_ACCEPTED', result_json = ? WHERE task_id = ?", resultJSON, task.TaskID); err != nil {
 			t.Fatalf("update task result: %v", err)
+		}
+	} else {
+		if _, err := db.Exec("UPDATE tasks SET state = 'SUPERVISOR_ACCEPTED' WHERE task_id = ?", task.TaskID); err != nil {
+			t.Fatalf("update task state: %v", err)
 		}
 	}
 	return task.TaskID
@@ -364,7 +368,7 @@ func TestDeliverMissingReceiptID(t *testing.T) {
 	}
 }
 
-// 6. Untracked file in scope is applied; renamed entry reported + skipped.
+// 6. Rename is fail-closed when out of receipt scope, and applied atomically (deleting old path) when in scope.
 func TestDeliverUntrackedAppliedRenamedSkipped(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	repoDir := initGitRepo(t)
@@ -404,35 +408,49 @@ func TestDeliverUntrackedAppliedRenamedSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Part A: receipt covers only untracked.txt -> out-of-scope rename must fail closed without applying anything.
 	rcID := issueTestReceipt(t, rcDbPath, []string{"untracked.txt"})
 	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
 
 	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
-	if res.exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	if res.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code for out-of-scope rename, got 0. stdout: %s, stderr: %s", res.stdout, res.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "untracked.txt")); !os.IsNotExist(err) {
+		t.Errorf("untracked.txt should not have been copied when pre-flight fails")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "renamed.txt")); !os.IsNotExist(err) {
+		t.Errorf("renamed.txt should not have been copied when pre-flight fails")
+	}
+	if _, err := os.Stat(origFile); err != nil {
+		t.Errorf("original.txt should still exist when pre-flight fails: %v", err)
+	}
+
+	// Part B: receipt covers original.txt, renamed.txt, and untracked.txt -> both applied and original.txt removed.
+	rcID2 := issueTestReceipt(t, rcDbPath, []string{"original.txt", "renamed.txt", "untracked.txt"})
+	taskID2 := setupDeliverTask(t, dbPath, rcID2, wtDir)
+
+	res2 := runDeliverCmd(t, binPath, repoDir, dbPath, taskID2)
+	if res2.exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res2.exitCode, res2.stderr, res2.stdout)
 	}
 
 	var data deliverData
-	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+	if err := json.Unmarshal(res2.envelope.Data, &data); err != nil {
 		t.Fatalf("unmarshal envelope data: %v", err)
 	}
 
-	// Untracked file applied
-	if len(data.Applied) != 1 || data.Applied[0] != "untracked.txt" {
-		t.Errorf("expected Applied to contain ['untracked.txt'], got: %v", data.Applied)
+	appliedSet := make(map[string]bool)
+	for _, a := range data.Applied {
+		appliedSet[a] = true
+	}
+	if !appliedSet["untracked.txt"] || !appliedSet["renamed.txt"] || len(data.Applied) != 2 {
+		t.Errorf("expected Applied to contain ['untracked.txt', 'renamed.txt'], got: %v", data.Applied)
+	}
+	if len(data.Skipped) != 0 {
+		t.Errorf("expected Skipped to be empty, got: %v", data.Skipped)
 	}
 
-	// Renamed entry skipped
-	if len(data.Skipped) != 1 || data.Skipped[0] != "renamed.txt" {
-		t.Errorf("expected Skipped to contain ['renamed.txt'], got: %v", data.Skipped)
-	}
-
-	// Verify stderr reported the skip warning
-	if !strings.Contains(res.stderr, "skipping") || !strings.Contains(res.stderr, "rename") {
-		t.Errorf("expected skip warning in stderr, got: %s", res.stderr)
-	}
-
-	// Verify untracked.txt copied to repoDir
 	c, err := os.ReadFile(filepath.Join(repoDir, "untracked.txt"))
 	if err != nil {
 		t.Fatalf("untracked.txt not copied to cwd: %v", err)
@@ -441,9 +459,16 @@ func TestDeliverUntrackedAppliedRenamedSkipped(t *testing.T) {
 		t.Errorf("untracked.txt content mismatch: %q", string(c))
 	}
 
-	// Verify renamed.txt NOT copied to repoDir
-	if _, err := os.Stat(filepath.Join(repoDir, "renamed.txt")); !os.IsNotExist(err) {
-		t.Errorf("renamed.txt should not have been copied")
+	rcContent, err := os.ReadFile(filepath.Join(repoDir, "renamed.txt"))
+	if err != nil {
+		t.Fatalf("renamed.txt not copied to cwd: %v", err)
+	}
+	if string(rcContent) != "initial" {
+		t.Errorf("renamed.txt content mismatch: %q", string(rcContent))
+	}
+
+	if _, err := os.Stat(origFile); !os.IsNotExist(err) {
+		t.Errorf("original.txt should have been removed on rename delivery")
 	}
 }
 
@@ -573,51 +598,56 @@ func TestDeliverCTUEntriesReportedSkipped(t *testing.T) {
 	rcID := issueTestReceipt(t, rcDbPath, []string{"*"})
 	taskID := setupDeliverTask(t, dbPath, rcID, wtDir)
 
+	// Part A: T (typechange) and U (unmerged) fail closed without applying normal_good.txt or copied.txt.
 	res := runDeliverCmd(t, binPath, repoDir, dbPath, taskID)
-	if res.exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", res.exitCode, res.stderr, res.stdout)
+	if res.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code when T/U entries exist, got 0. stdout: %s, stderr: %s", res.stdout, res.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "normal_good.txt")); !os.IsNotExist(err) {
+		t.Errorf("normal_good.txt should not have been copied when T/U fail closed")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "copied.txt")); !os.IsNotExist(err) {
+		t.Errorf("copied.txt should not have been copied when T/U fail closed")
+	}
+
+	// Part B: Clean worktree with C (copy) applies copied.txt atomically within receipt scope.
+	wtCopyDir := createWorktree(t, repoDir, "case-copy-only")
+	if err := os.WriteFile(filepath.Join(wtCopyDir, "copied.txt"), []byte(copyContent.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtCopyDir, "orig_copy.txt"), []byte(copyContent.String()+"extra line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addCOnly := exec.Command("git", "add", "copied.txt", "orig_copy.txt")
+	addCOnly.Dir = wtCopyDir
+	if out, err := addCOnly.CombinedOutput(); err != nil {
+		t.Fatalf("git add copy-only: %v\n%s", err, out)
+	}
+
+	rcID2 := issueTestReceipt(t, rcDbPath, []string{"*"})
+	taskID2 := setupDeliverTask(t, dbPath, rcID2, wtCopyDir)
+	res2 := runDeliverCmd(t, binPath, repoDir, dbPath, taskID2)
+	if res2.exitCode != 0 {
+		t.Fatalf("expected exit code 0 for clean C delivery, got %d. stderr: %s, stdout: %s", res2.exitCode, res2.stderr, res2.stdout)
 	}
 
 	var data deliverData
-	if err := json.Unmarshal(res.envelope.Data, &data); err != nil {
+	if err := json.Unmarshal(res2.envelope.Data, &data); err != nil {
 		t.Fatalf("unmarshal envelope data: %v", err)
 	}
-
-	// Verify normal_good.txt applied
-	foundNormal := false
+	appliedSet := make(map[string]bool)
 	for _, a := range data.Applied {
-		if a == "normal_good.txt" {
-			foundNormal = true
-		}
+		appliedSet[a] = true
 	}
-	if !foundNormal {
-		t.Errorf("expected normal_good.txt in Applied, got: %v", data.Applied)
+	if !appliedSet["copied.txt"] {
+		t.Errorf("expected copied.txt in Applied, got: %v", data.Applied)
 	}
-
-	// Verify skipped contains copied.txt, typechange.txt, unmerged.txt
-	skippedMap := make(map[string]bool)
-	for _, s := range data.Skipped {
-		skippedMap[s] = true
+	gotCopied, err := os.ReadFile(filepath.Join(repoDir, "copied.txt"))
+	if err != nil {
+		t.Fatalf("copied.txt not written to repoDir: %v", err)
 	}
-	if !skippedMap["copied.txt"] {
-		t.Errorf("expected copied.txt in Skipped, got: %v", data.Skipped)
-	}
-	if !skippedMap["typechange.txt"] {
-		t.Errorf("expected typechange.txt in Skipped, got: %v", data.Skipped)
-	}
-	if !skippedMap["unmerged.txt"] {
-		t.Errorf("expected unmerged.txt in Skipped, got: %v", data.Skipped)
-	}
-
-	// Verify warnings in stderr
-	if !strings.Contains(res.stderr, "copy") {
-		t.Errorf("expected copy skip warning in stderr: %s", res.stderr)
-	}
-	if !strings.Contains(res.stderr, "typechange") {
-		t.Errorf("expected typechange skip warning in stderr: %s", res.stderr)
-	}
-	if !strings.Contains(res.stderr, "unmerged") {
-		t.Errorf("expected unmerged skip warning in stderr: %s", res.stderr)
+	if string(gotCopied) != copyContent.String() {
+		t.Errorf("copied.txt content mismatch")
 	}
 }
 
