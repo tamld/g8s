@@ -44,7 +44,6 @@ func probeBwrap() (string, bool) {
 			"--ro-bind", "/", "/",
 			"--dev", "/dev",
 			"--proc", "/proc",
-			"--tmpfs", "/tmp",
 			"--", trueBin,
 		)
 		if runErr := cmd.Run(); runErr == nil {

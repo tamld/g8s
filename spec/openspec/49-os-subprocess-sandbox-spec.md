@@ -33,7 +33,7 @@ On macOS (`darwin`), unless `NoSandbox` is set, worker subprocesses MUST launch 
 ### R2 — Linux `bwrap` / Landlock LSM + Subreaper Containment (`linux`)
 
 On Linux (`linux`), unless `NoSandbox` is set:
-- Probe live `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp -- /bin/true` once; when supported, execute inside `bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp` with `--bind` strictly for writable directories, `--tmpfs` masking existing credential directories, and `--ro-bind /dev/null <file>` masking existing credential files.
+- Probe live `bwrap --ro-bind / / --dev /dev --proc /proc -- /bin/true` once; when supported, execute inside `bwrap --die-with-parent --ro-bind / / --dev /dev --proc /proc` (which mounts `/`, including host `/tmp`, read-only so test/toolchain paths stay readable while out-of-worktree writes fail `EROFS`) with `--bind` strictly for isolated per-attempt `TMPDIR` and `writableDirs`, `--tmpfs` masking existing credential directories, and `--ro-bind /dev/null <file>` masking existing credential regular files.
 - When `bwrap` is unavailable or blocked (for example AppArmor userns restriction), fall back fail-closed to a pure-Go Landlock LSM self-executable trampoline (`G8S_INTERNAL_SANDBOX_EXEC=1`, ABI v1+, `PR_SET_NO_NEW_PRIVS` + `SYS_LANDLOCK_RESTRICT_SELF` across all OS threads via `syscall.AllThreadsSyscall`) paired with `PR_SET_CHILD_SUBREAPER` and `PR_SET_PDEATHSIG=SIGKILL` to reap detached `setsid()` grandchildren.
 
 ### R3 — Cross-Platform Environment Scrubbing & `read_only` `--yolo` Suppression

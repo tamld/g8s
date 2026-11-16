@@ -267,6 +267,9 @@ func TestBuildSeatbeltBwrapAndLandlockPaths(t *testing.T) {
 	if strings.Contains(joined, ".missing") {
 		t.Fatalf("bwrap args should skip non-existent deny path: %s", joined)
 	}
+	if strings.Contains(joined, "--tmpfs /tmp") {
+		t.Fatalf("bwrap args must not shadow host /tmp with empty tmpfs: %s", joined)
+	}
 	if strings.Contains(joined, "--tmpfs /work ") {
 		t.Fatalf("bwrap args should skip overlapping parent dir /work: %s", joined)
 	}

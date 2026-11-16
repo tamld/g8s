@@ -194,7 +194,13 @@ func BuildBwrapArgs(
 			if err != nil {
 				return false, false
 			}
-			return fi.IsDir(), true
+			if fi.IsDir() {
+				return true, true
+			}
+			if !fi.Mode().IsRegular() {
+				return false, false
+			}
+			return false, true
 		}
 	}
 
@@ -204,7 +210,6 @@ func BuildBwrapArgs(
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
-		"--tmpfs", "/tmp",
 	}
 
 	for _, w := range writableDirs {
