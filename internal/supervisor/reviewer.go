@@ -7,6 +7,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,6 +98,21 @@ func ReviewReceipt(receipt orchestrator.Receipt, envelope TaskEnvelope, r Review
 		}
 	}
 
+	keys := make([]string, 0, len(validated))
+	for k := range validated {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !validated[k] {
+			return ReviewOutcome{
+				Verdict:   VerdictRevise,
+				Reason:    "validation failed: " + k,
+				Validated: validated,
+			}
+		}
+	}
+
 	if !receipt.OK || receipt.ReturnCode != 0 || receipt.CommitSHA == "" {
 		reason := "receipt not OK"
 		if receipt.ReturnCode != 0 {
@@ -150,10 +166,16 @@ func (r *RealReviewer) Validate(env TaskEnvelope, receipt orchestrator.Receipt) 
 	}
 
 	if !testPassed {
+		if len(out) == 0 {
+			out["test_gate"] = false
+		}
 		return out, nil
 	}
 
 	// All gates passed
+	if len(out) == 0 {
+		out["test_gate"] = true
+	}
 	for _, f := range env.SelectedFields {
 		out[f] = true
 	}
@@ -169,18 +191,25 @@ func (r *RealReviewer) runTestGate(receipt orchestrator.Receipt) (bool, error) {
 		return true, nil // No Go files to test
 	}
 
+	rootDir := strings.TrimSpace(receipt.WorktreePath)
+	if rootDir == "" {
+		rootDir = "."
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
 	defer cancel()
 
 	for _, pkg := range packages {
-		cmd := exec.CommandContext(ctx, "go", "test", pkg)
-		cmd.Dir = filepath.Dir(pkg) // Run from package directory
+		targetPkg := "."
+		if pkg != "." {
+			targetPkg = "./" + filepath.ToSlash(pkg)
+		}
+		cmd := exec.CommandContext(ctx, "go", "test", targetPkg)
+		cmd.Dir = rootDir
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			// Test failed
 			return false, nil
 		}
-		// Check output size
 		if int64(len(output)) > r.MaxOutputSize {
 			return false, nil
 		}
@@ -190,11 +219,13 @@ func (r *RealReviewer) runTestGate(receipt orchestrator.Receipt) (bool, error) {
 
 // collectPackages extracts unique package paths from modified .go files.
 // A package path is the directory containing the .go file.
+// Returns deterministic sorted relative directory paths.
 func (r *RealReviewer) collectPackages(files []string) []string {
 	pkgSet := make(map[string]struct{})
 	for _, f := range files {
 		if strings.HasSuffix(f, ".go") {
-			dir := filepath.Dir(f)
+			clean := filepath.Clean(f)
+			dir := filepath.Dir(clean)
 			if dir != "." {
 				pkgSet[dir] = struct{}{}
 			}
@@ -204,5 +235,6 @@ func (r *RealReviewer) collectPackages(files []string) []string {
 	for p := range pkgSet {
 		pkgs = append(pkgs, p)
 	}
+	sort.Strings(pkgs)
 	return pkgs
 }

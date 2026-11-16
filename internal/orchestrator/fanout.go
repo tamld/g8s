@@ -23,9 +23,25 @@ func FanOut(ctx context.Context, plan []TaskSpec, opts FanOutOptions) ([]Receipt
 	if opts.Registry == nil || opts.Pool == nil {
 		return nil, fmt.Errorf("orchestrator: Registry and Pool required")
 	}
-	worker, err := opts.Registry.Pick(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("orchestrator: pick worker: %w", err)
+
+	needPick := false
+	for _, spec := range plan {
+		if spec.WorkerName == "" {
+			needPick = true
+			break
+		}
+		if _, ok := opts.Registry.Get(spec.WorkerName); !ok {
+			needPick = true
+			break
+		}
+	}
+	var defaultWorker Worker
+	if needPick {
+		var err error
+		defaultWorker, err = opts.Registry.Pick(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("orchestrator: pick worker: %w", err)
+		}
 	}
 
 	maxPar := opts.MaxParallel
@@ -56,14 +72,33 @@ func FanOut(ctx context.Context, plan []TaskSpec, opts FanOutOptions) ([]Receipt
 				_ = opts.Pool.Release(ctx, wt, results[i].OK, protected...)
 			}()
 			task.Worktree = wt
+
+			var worker Worker
+			if spec.WorkerName != "" {
+				if w, ok := opts.Registry.Get(spec.WorkerName); ok {
+					if err := w.Available(ctx); err != nil {
+						errs[i] = fmt.Errorf("orchestrator: worker %q unavailable: %w", spec.WorkerName, err)
+						return
+					}
+					worker = w
+				} else {
+					worker = defaultWorker
+				}
+			} else {
+				worker = defaultWorker
+			}
+
 			handle, err := worker.Spawn(ctx, task)
 			if err != nil {
 				errs[i] = fmt.Errorf("spawn worker: %w", err)
 				return
 			}
 			receipt, werr := handle.Wait(ctx)
+			receipt.WorktreePath = wt.Path
 			verifier := &StdoutEnvelopeVerifier{}
-			_ = verifier.VerifyReceipt(ctx, &receipt)
+			if vErr := applyReceiptVerifier(ctx, verifier, &receipt); vErr != nil {
+				receipt.Violations = append(receipt.Violations, "verifier_error: "+vErr.Error())
+			}
 			receipt.FilesModified, receipt.CommitSHA = gitDiffNameOnly(opts.Pool.repo, wt.BaseSHA)
 			receipt.ScopeViolations = diffScope(receipt.FilesModified, task.AllowedFiles)
 

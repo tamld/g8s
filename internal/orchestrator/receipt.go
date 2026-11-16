@@ -9,6 +9,7 @@ type Receipt struct {
 	OK              bool
 	OrchestratorID  string
 	WorktreeID      string
+	WorktreePath    string
 	WorkerName      string
 	Iter            int
 	TaskID          string
