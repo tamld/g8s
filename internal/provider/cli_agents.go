@@ -14,7 +14,25 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
 )
+
+func scrubProviderEnv(providerName string, specEnv map[string]string, extraEnv ...string) []string {
+	merged := make([]string, 0, len(specEnv)+len(extraEnv))
+	if len(specEnv) > 0 {
+		keys := make([]string, 0, len(specEnv))
+		for k := range specEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			merged = append(merged, k+"="+specEnv[k])
+		}
+	}
+	merged = append(merged, extraEnv...)
+	return sandbox.ScrubEnv(os.Environ(), merged, providerName, "", "", "")
+}
 
 // OpenCodeProvider manages OpenCode CLI worker execution (DELTA-39).
 type OpenCodeProvider struct {
@@ -127,6 +145,7 @@ func (o *OpenCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error)
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	cmd.Env = scrubProviderEnv("opencode", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -245,6 +264,7 @@ func (c *CommandCodeProvider) Spawn(ctx context.Context, spec Spec) (Handle, err
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	cmd.Env = scrubProviderEnv("commandcode", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -362,6 +382,7 @@ func (q *QwenProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	cmd.Env = scrubProviderEnv("qwen", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -653,11 +674,13 @@ func (c *CursorProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	var cursorExtra []string
 	if os.Getenv("CURSOR_API_KEY") == "" {
 		if apiKey := ResolveCursorAPIKey(); apiKey != "" {
-			cmd.Env = append(os.Environ(), "CURSOR_API_KEY="+apiKey)
+			cursorExtra = append(cursorExtra, "CURSOR_API_KEY="+apiKey)
 		}
 	}
+	cmd.Env = scrubProviderEnv("cursor", spec.Env, cursorExtra...)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
