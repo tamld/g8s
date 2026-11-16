@@ -416,8 +416,8 @@ func TestSeededRegistry(t *testing.T) {
 	if !exists {
 		t.Fatal("seeded registry missing 'docs' class")
 	}
-	if docs.Status != StatusAdvisory {
-		t.Errorf("docs status = %q, want advisory", docs.Status)
+	if docs.Status != StatusHard {
+		t.Errorf("docs status = %q, want hard", docs.Status)
 	}
 	if !isValidCitation(docs.FoundingCatch) {
 		t.Errorf("docs founding catch %q is not a valid citation", docs.FoundingCatch)
@@ -437,8 +437,8 @@ func TestSeededRegistry(t *testing.T) {
 	if !exists {
 		t.Fatal("seeded registry missing 'test' class")
 	}
-	if testCls.Status != StatusAdvisory {
-		t.Errorf("test status = %q, want advisory", testCls.Status)
+	if testCls.Status != StatusHard {
+		t.Errorf("test status = %q, want hard", testCls.Status)
 	}
 	if !isValidCitation(testCls.FoundingCatch) {
 		t.Errorf("test founding catch %q is not a valid citation", testCls.FoundingCatch)
