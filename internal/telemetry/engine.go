@@ -47,6 +47,9 @@ func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
 		return nil, err
 	}
 
+	if err := pathutil.PrepareSQLiteFile(config.DBPath); err != nil {
+		return nil, fmt.Errorf("prepare telemetry db: %w", err)
+	}
 	dsn := pathutil.SQLiteURI(config.DBPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -65,6 +68,10 @@ func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
 	if err := engine.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init telemetry schema: %w", err)
+	}
+	if err := pathutil.HardenSQLiteFiles(config.DBPath); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("harden telemetry db: %w", err)
 	}
 
 	engine.wg.Add(1)

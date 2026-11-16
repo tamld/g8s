@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 func TestFenceEditOutsideClaimPathsRejected(t *testing.T) {
@@ -27,6 +28,7 @@ func TestFenceEditOutsideClaimPathsRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			state := t.TempDir()
+			t.Setenv("G8S_TIER", "")
 			t.Setenv("G8S_STATE_DIR", state)
 			dbPath := filepath.Join(state, "receipts.db")
 			m, err := receipt.NewReceiptManager(dbPath, nil)
@@ -53,7 +55,18 @@ func TestFenceEditOutsideClaimPathsRejected(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer db.Close()
-				if _, err := db.Exec("UPDATE write_receipts SET claim_binding_json = ? WHERE receipt_id = ?", string(raw), r.ReceiptID); err != nil {
+				var pathsJSON string
+				var expiresAt, createdAt float64
+				if err := db.QueryRow("SELECT allowed_paths_json, expires_at, created_at FROM write_receipts WHERE receipt_id = ?", r.ReceiptID).
+					Scan(&pathsJSON, &expiresAt, &createdAt); err != nil {
+					t.Fatal(err)
+				}
+				priv, _, err := signing.EnsureOrLoadF0Signer(state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sigTag := receipt.FormatMonotoneReceiptSig(priv, r.ReceiptID, r.Issuer, pathsJSON, expiresAt, createdAt, string(raw))
+				if _, err := db.Exec("UPDATE write_receipts SET claim_binding_json = ?, sig_tag = ? WHERE receipt_id = ?", string(raw), sigTag, r.ReceiptID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -87,4 +100,52 @@ func TestFenceEditOutsideClaimPathsRejected(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("unsigned claim tamper rejected", func(t *testing.T) {
+		root := t.TempDir()
+		state := t.TempDir()
+		t.Setenv("G8S_TIER", "")
+		t.Setenv("G8S_STATE_DIR", state)
+		dbPath := filepath.Join(state, "receipts.db")
+		m, err := receipt.NewReceiptManager(dbPath, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		r, err := m.IssueReceipt("brain", []string{"src/**"}, time.Minute,
+			receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{SchemaURI: "g8s://envelope/write-receipt/v1", FieldOrder: []string{"receipt_id"}}),
+			receipt.WithRuleGraph(&receipt.RuleGraphSnapshot{RulesetVersion: "v1", PipelineDigest: "test", ADRRef: "ADR-0038"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := receipt.ClaimBinding{TaskID: "task", NodeID: "node", Incarnation: "inc", Resource: "repo", Paths: []string{"src/a.go"}, ExpiresAt: time.Now().Add(time.Minute)}
+		raw, err := json.Marshal(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec("UPDATE write_receipts SET claim_binding_json = ? WHERE receipt_id = ?", string(raw), r.ReceiptID); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("G8S_RECEIPT_ID", r.ReceiptID)
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(root, "src", "a.go")
+		if err := os.WriteFile(p, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = Edit(context.Background(), EditOptions{Path: p, ScopeRoot: root, AllowedPaths: []string{"src/**"}, OldString: "old", NewString: "new"})
+		if !errors.Is(err, signing.ErrInvalidSignature) {
+			t.Fatalf("tampered edit error = %v, want %v", err, signing.ErrInvalidSignature)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil || string(data) != "old" {
+			t.Fatalf("content = %q err=%v, want old untouched", data, err)
+		}
+	})
 }

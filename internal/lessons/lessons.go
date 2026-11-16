@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -526,12 +527,12 @@ func (l *Ledger) Append(lesson Lesson) error {
 
 	dir := filepath.Dir(l.path)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := pathutil.EnsureStateDir(dir); err != nil {
 			return fmt.Errorf("create ledger dir: %w", err)
 		}
 	}
 
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open ledger file: %w", err)
 	}

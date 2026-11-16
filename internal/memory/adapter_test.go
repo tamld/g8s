@@ -16,6 +16,11 @@ import (
 	"github.com/tamld/g8s/internal/vault"
 )
 
+func TestMain(m *testing.M) {
+	os.Unsetenv("G8S_TIER")
+	os.Exit(m.Run())
+}
+
 func setupTestAdapter(t *testing.T) (*LocalSQLiteMemoryAdapter, string) {
 	t.Helper()
 	dir := t.TempDir()

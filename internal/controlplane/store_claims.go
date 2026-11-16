@@ -679,11 +679,11 @@ func (s *Store) appendTaskSignal(taskID, from, to string, ts time.Time) {
 
 	if s.signalFile == nil {
 		dir := filepath.Dir(s.signalPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := pathutil.EnsureStateDir(dir); err != nil {
 			fmt.Fprintf(os.Stderr, "[warn] controlplane: mkdir signals dir %s: %v\n", dir, err)
 			return
 		}
-		f, err := os.OpenFile(s.signalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(s.signalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[warn] controlplane: open signals file %s: %v\n", s.signalPath, err)
 			return

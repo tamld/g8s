@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -56,18 +55,8 @@ func NewLocalSQLiteMemoryAdapter(opts AdapterOptions) (*LocalSQLiteMemoryAdapter
 		dbPath = ":memory:"
 	}
 
-	// Enforce POSIX 0600 file permissions for SQLite databases created on disk
-	if dbPath != ":memory:" {
-		f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600)
-		if err != nil {
-			return nil, fmt.Errorf("memory: enforce 0600 permissions on %s: %w", dbPath, err)
-		}
-		if err := f.Close(); err != nil {
-			return nil, fmt.Errorf("memory: close file %s: %w", dbPath, err)
-		}
-		if err := os.Chmod(dbPath, 0o600); err != nil {
-			return nil, fmt.Errorf("memory: chmod 0600 on %s: %w", dbPath, err)
-		}
+	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
+		return nil, fmt.Errorf("memory: prepare sqlite %s: %w", dbPath, err)
 	}
 
 	// #380: use pathutil.SQLiteURI for cross-platform path escaping (was raw
@@ -94,6 +83,10 @@ func NewLocalSQLiteMemoryAdapter(opts AdapterOptions) (*LocalSQLiteMemoryAdapter
 	if err := adapter.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("memory: init schema: %w", err)
+	}
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("memory: harden sqlite %s: %w", dbPath, err)
 	}
 
 	if adapter.sinkFn == nil {

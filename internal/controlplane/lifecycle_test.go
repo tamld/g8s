@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 func TestValidateSubmitRequestWorkspaceWriteRejectionHint(t *testing.T) {
@@ -35,6 +39,40 @@ func TestValidateSubmitRequestWorkspaceWriteRejectionHint(t *testing.T) {
 	}
 }
 
+func seedSignedLegacyReceipt(t *testing.T, cp *Store, receiptID, issuer, pathsJSON string, expiresAt, createdAt float64, consumed int, consumerTask string) {
+	t.Helper()
+	stateDir := filepath.Dir(cp.dbPath)
+	priv, _, err := signing.EnsureOrLoadF0Signer(stateDir)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	tag := receipt.FormatMonotoneReceiptSig(priv, receiptID, issuer, pathsJSON, expiresAt, createdAt, "")
+	if _, err := cp.db.Exec(
+		`INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at, sig_tag)
+		 VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
+		receiptID, issuer, pathsJSON, expiresAt, consumed, consumerTask, createdAt, tag); err != nil {
+		t.Fatalf("seed receipt: %v", err)
+	}
+}
+
+func TestConsumeWriteReceiptRejectsUnsignedMirrorRow(t *testing.T) {
+	cp, _ := newTestStore(t)
+	ctx := context.Background()
+	now := float64(cp.clock().UnixNano()) / 1e9
+	if _, err := cp.db.Exec(writeReceiptsEnsureDDL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cp.db.Exec(
+		`INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at, consumed)
+		 VALUES (?, 'issuer', '[]', ?, ?, 0)`, "rcpt-unsigned", now+500, now); err != nil {
+		t.Fatal(err)
+	}
+	err := cp.ConsumeWriteReceipt(ctx, "rcpt-unsigned", "task-x")
+	if err == nil || !errors.Is(err, signing.ErrInvalidSignature) {
+		t.Fatalf("expected ErrInvalidSignature, got %v", err)
+	}
+}
+
 // #346: delegated-write receipts consume exactly once; replay by another
 // task trips ErrReceiptAlreadyConsumed; re-consume by the owner is
 // idempotent; unknown receipts trip ErrReceiptUnknownOrExpired.
@@ -49,12 +87,7 @@ func TestConsumeWriteReceipt(t *testing.T) {
 	}
 
 	now := float64(cp.clock().UnixNano()) / 1e9
-	if _, err := cp.db.Exec(
-		`INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at)
-		 VALUES (?, ?, ?, ?, 0, NULL, ?)`,
-		"rcpt-test-1", "brain", `["README.vi.md"]`, now+600, now); err != nil {
-		t.Fatalf("seed receipt: %v", err)
-	}
+	seedSignedLegacyReceipt(t, cp, "rcpt-test-1", "brain", `["README.vi.md"]`, now+600, now, 0, "")
 
 	if err := cp.ConsumeWriteReceipt(ctx, "rcpt-test-1", "task-A"); err != nil {
 		t.Fatalf("first consume should succeed: %v", err)

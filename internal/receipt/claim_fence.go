@@ -9,6 +9,7 @@ import (
 
 	"github.com/tamld/g8s/internal/mesh"
 	"github.com/tamld/g8s/internal/search"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 var (
@@ -120,13 +121,31 @@ func (m *Manager) RenewClaimBinding(id string, b *ClaimBinding) error {
 	if err := b.Validate(m.clock()); err != nil {
 		return err
 	}
+	priv, _, err := signing.EnsureOrLoadF0Signer(m.stateDir)
+	if err != nil {
+		return err
+	}
 	data, err := json.Marshal(b)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	result, err := m.db.Exec("UPDATE write_receipts SET claim_binding_json = ?, expires_at = ? WHERE receipt_id = ? AND consumed = 0 AND expires_at >= ?", string(data), timeToUnix(b.ExpiresAt), id, timeToUnix(m.clock()))
+	nowUnix := timeToUnix(m.clock())
+	var pathsJSON string
+	var createdAt float64
+	if err := m.db.QueryRow(
+		"SELECT allowed_paths_json, created_at FROM write_receipts WHERE receipt_id = ? AND consumed = 0 AND expires_at >= ?",
+		id, nowUnix,
+	).Scan(&pathsJSON, &createdAt); err != nil {
+		return ErrClaimFenceStale
+	}
+	newExpiresUnix := timeToUnix(b.ExpiresAt)
+	newSig := FormatMonotoneReceiptSig(priv, id, old.Issuer, pathsJSON, newExpiresUnix, createdAt, string(data))
+	result, err := m.db.Exec(
+		"UPDATE write_receipts SET claim_binding_json = ?, expires_at = ?, sig_tag = ? WHERE receipt_id = ? AND consumed = 0 AND expires_at >= ?",
+		string(data), newExpiresUnix, newSig, id, nowUnix,
+	)
 	if err != nil {
 		return err
 	}

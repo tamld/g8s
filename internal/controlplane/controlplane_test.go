@@ -19,6 +19,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMain(m *testing.M) {
+	os.Unsetenv("G8S_TIER")
+	os.Exit(m.Run())
+}
+
 func newTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "control-plane.sqlite3")

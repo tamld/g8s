@@ -98,8 +98,18 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 	if clock == nil {
 		clock = time.Now
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create vault directory: %w", err)
+	trimmedDB := strings.TrimSpace(dbPath)
+	if trimmedDB != "" && trimmedDB != ":memory:" && !strings.Contains(trimmedDB, "mode=memory") {
+		cleanDB := strings.TrimPrefix(trimmedDB, "file:")
+		if idx := strings.Index(cleanDB, "?"); idx >= 0 {
+			cleanDB = cleanDB[:idx]
+		}
+		if err := pathutil.EnsureStateDir(filepath.Dir(cleanDB)); err != nil {
+			return nil, fmt.Errorf("create vault directory: %w", err)
+		}
+	}
+	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
+		return nil, fmt.Errorf("prepare vault database: %w", err)
 	}
 
 	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
@@ -116,6 +126,10 @@ func NewVault(dbPath string, clock func() time.Time) (*Vault, error) {
 	if err := v.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init vault schema: %w", err)
+	}
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("harden vault database: %w", err)
 	}
 	return v, nil
 }

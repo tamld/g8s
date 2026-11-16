@@ -59,7 +59,7 @@ func (s *FileStore) RecordSleep(_ context.Context, state *SleepState) error {
 		state.SleepStart = time.Now().UTC()
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.filePath), 0o755); err != nil {
+	if err := pathutil.EnsureStateDir(filepath.Dir(s.filePath)); err != nil {
 		return fmt.Errorf("sleep: mkdir state dir: %w", err)
 	}
 

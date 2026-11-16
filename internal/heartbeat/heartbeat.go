@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/state"
 )
 
@@ -256,7 +257,7 @@ func (s *Store) Record(sessionID string, payload any, extra ...any) (*Heartbeat,
 		hb.Metadata = make(map[string]any)
 	}
 
-	if err := os.MkdirAll(s.baseDir, 0o755); err != nil {
+	if err := pathutil.EnsureStateDir(s.baseDir); err != nil {
 		return nil, fmt.Errorf("create heartbeat dir: %w", err)
 	}
 
@@ -272,7 +273,7 @@ func (s *Store) Record(sessionID string, payload any, extra ...any) (*Heartbeat,
 	_, _ = rand.Read(randBytes[:])
 	tmpPath := filepath.Join(s.baseDir, fmt.Sprintf("%s.tmp.%s", sessionID, hex.EncodeToString(randBytes[:])))
 
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("create temp heartbeat file: %w", err)
 	}

@@ -9,12 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/pathutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -41,7 +42,7 @@ func Open(dir string) (*Store, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("directory path must not be empty")
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := pathutil.EnsureStateDir(dir); err != nil {
 		return nil, fmt.Errorf("create dir: %w", err)
 	}
 	dbPath := filepath.Join(dir, "ledger.db")
@@ -61,9 +62,9 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	if err := os.Chmod(dbPath, 0o600); err != nil {
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("chmod ledger db: %w", err)
+		return nil, fmt.Errorf("harden mesh ledger: %w", err)
 	}
 	return &Store{db: db, now: time.Now}, nil
 }

@@ -12,17 +12,21 @@ package receipt
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/signing"
 
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver; Zero-CGO constitution axiom.
 )
@@ -41,7 +45,8 @@ const (
 //	(canonical_envelope, rule_graph_snapshot, provenance_lineage).
 //
 // Version 4: persisted mesh claim projection (ADR-0038).
-const SchemaVersion = 4
+// Version 5: Ed25519 monotone ceiling sig_tag (issue #919).
+const SchemaVersion = 5
 
 // Sentinel errors returned wrapped by typed errors below.
 var (
@@ -139,6 +144,7 @@ type WriteReceipt struct {
 	CanonicalEnvelope *CanonicalEnvelope `json:"canonical_envelope,omitempty"`
 	RuleGraphSnapshot *RuleGraphSnapshot `json:"rule_graph_snapshot,omitempty"`
 	ProvenanceLineage *ProvenanceLineage `json:"provenance_lineage,omitempty"`
+	Signature         string             `json:"signature,omitempty"`
 }
 
 // IssueOption configures optional receipt issuance attributes.
@@ -218,9 +224,11 @@ type ReceiptManager interface {
 
 // Manager is the SQLite-backed ReceiptManager implementation.
 type Manager struct {
-	db    *sql.DB
-	mu    sync.Mutex
-	clock func() time.Time
+	db       *sql.DB
+	mu       sync.Mutex
+	clock    func() time.Time
+	stateDir string
+	pubKey   ed25519.PublicKey
 }
 
 const schema = `
@@ -246,7 +254,9 @@ CREATE TABLE IF NOT EXISTS write_receipts (
 	tool_version                  TEXT,
 	trace_id                      TEXT,
 	actor_chain_json              TEXT,
-	source_commit                 TEXT
+	source_commit                 TEXT,
+	claim_binding_json            TEXT,
+	sig_tag                       TEXT
 );`
 
 // NewReceiptManager opens (or creates) the receipt database at dbPath and
@@ -257,6 +267,17 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	if clock == nil {
 		clock = time.Now
 	}
+	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
+		return nil, fmt.Errorf("prepare receipt database %q: %w", dbPath, err)
+	}
+	stateDir := ""
+	if !signing.IsInMemorySQLitePath(dbPath) {
+		stateDir = filepath.Dir(signing.CleanSQLiteFilePath(dbPath))
+	}
+	pubKey, err := signing.LoadF0Verifier(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("load F0 verifier for %q: %w", dbPath, err)
+	}
 	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -266,14 +287,14 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	db.SetMaxOpenConns(5)
 	db.SetMaxIdleConns(3)
 	db.SetConnMaxLifetime(5 * time.Minute)
-	m := &Manager{db: db, clock: clock}
+	m := &Manager{db: db, clock: clock, stateDir: stateDir, pubKey: pubKey}
 	if err := m.initialize(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize receipt schema in %q: %w", dbPath, err)
 	}
-	if err := os.Chmod(dbPath, 0o600); err != nil {
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("restrict receipt database permissions %q: %w", dbPath, err)
+		return nil, fmt.Errorf("harden receipt database %q: %w", dbPath, err)
 	}
 	return m, nil
 }
@@ -299,6 +320,11 @@ func (m *Manager) initialize() error {
 		return nil
 	}
 
+	var priorVersion int
+	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&priorVersion); err != nil {
+		return fmt.Errorf("read schema version before migration: %w", err)
+	}
+
 	if _, err := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
 		return fmt.Errorf("begin exclusive schema transaction: %w", err)
 	}
@@ -316,6 +342,10 @@ func (m *Manager) initialize() error {
 		return err
 	}
 	if err := migrateConcernBSchema(conn); err != nil {
+		rollbackInit(conn)
+		return err
+	}
+	if err := migrateSignatureSchema(conn, m.stateDir, priorVersion); err != nil {
 		rollbackInit(conn)
 		return err
 	}
@@ -437,11 +467,142 @@ func migrateConcernBSchema(conn *sql.Conn) error {
 	return nil
 }
 
+func migrateSignatureSchema(conn *sql.Conn, stateDir string, priorVersion int) error {
+	present := map[string]struct{}{}
+	rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info(write_receipts)")
+	if err != nil {
+		return fmt.Errorf("inspect write_receipts for sig_tag: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		present[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, ok := present["sig_tag"]; !ok {
+		if _, err := conn.ExecContext(context.Background(),
+			`ALTER TABLE write_receipts ADD COLUMN sig_tag TEXT`); err != nil {
+			return fmt.Errorf("migrate write_receipts.sig_tag: %w", err)
+		}
+	}
+	if priorVersion >= 1 && priorVersion < 5 {
+		priv, _, err := signing.EnsureOrLoadF0Signer(stateDir)
+		if err != nil {
+			return err
+		}
+		dataRows, err := conn.QueryContext(context.Background(),
+			`SELECT receipt_id, issuer, allowed_paths_json, expires_at, created_at, COALESCE(claim_binding_json,''), COALESCE(sig_tag,'')
+			 FROM write_receipts WHERE sig_tag IS NULL OR sig_tag = ''`)
+		if err != nil {
+			return err
+		}
+		defer dataRows.Close()
+		for dataRows.Next() {
+			var receiptID, issuer, pathsJSON, claimJSON, existingSig string
+			var expiresAt, createdAt float64
+			if err := dataRows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &createdAt, &claimJSON, &existingSig); err != nil {
+				return err
+			}
+			if existingSig != "" {
+				continue
+			}
+			tag := FormatMonotoneReceiptSig(priv, receiptID, issuer, pathsJSON, expiresAt, createdAt, claimJSON)
+			if _, err := conn.ExecContext(context.Background(),
+				`UPDATE write_receipts SET sig_tag = ? WHERE receipt_id = ?`, tag, receiptID); err != nil {
+				return err
+			}
+		}
+		return dataRows.Err()
+	}
+	return nil
+}
+
+// FormatMonotoneReceiptSig signs a write receipt row with an expires-at monotone ceiling.
+func FormatMonotoneReceiptSig(priv ed25519.PrivateKey, receiptID, issuer, pathsJSON string, issuedExpiresUnix, createdUnix float64, claimBindingJSON string) string {
+	bits := math.Float64bits(issuedExpiresUnix)
+	hexCeiling := fmt.Sprintf("%016x", bits)
+	domainSig := signing.SignDomain(priv, "g8s.write_receipt.v1",
+		receiptID, issuer, pathsJSON, hexCeiling,
+		fmt.Sprintf("%016x", math.Float64bits(createdUnix)), claimBindingJSON)
+	return fmt.Sprintf("rc1:%s:%s", hexCeiling, domainSig)
+}
+
+// VerifyMonotoneReceiptSig verifies a monotone receipt signature tag.
+func VerifyMonotoneReceiptSig(pub ed25519.PublicKey, sigTag, receiptID, issuer, pathsJSON string, dbExpiresUnix, createdUnix float64, claimBindingJSON string) error {
+	if !strings.HasPrefix(sigTag, "rc1:") {
+		return signing.ErrInvalidSignature
+	}
+	rest := strings.TrimPrefix(sigTag, "rc1:")
+	colon := strings.Index(rest, ":")
+	if colon < 0 {
+		return signing.ErrInvalidSignature
+	}
+	hexCeiling := rest[:colon]
+	domainSig := rest[colon+1:]
+	bits, err := strconvParseHexU64(hexCeiling)
+	if err != nil {
+		return signing.ErrInvalidSignature
+	}
+	issuedExpires := math.Float64frombits(bits)
+	if dbExpiresUnix > issuedExpires+1e-6 {
+		return signing.ErrInvalidSignature
+	}
+	return signing.VerifyDomain(pub, domainSig, "g8s.write_receipt.v1",
+		receiptID, issuer, pathsJSON, hexCeiling,
+		fmt.Sprintf("%016x", math.Float64bits(createdUnix)), claimBindingJSON)
+}
+
+func strconvParseHexU64(s string) (uint64, error) {
+	if len(s) != 16 {
+		return 0, fmt.Errorf("bad hex ceiling")
+	}
+	var bits uint64
+	for i := 0; i < 16; i++ {
+		c := s[i]
+		var nibble uint64
+		switch {
+		case c >= '0' && c <= '9':
+			nibble = uint64(c - '0')
+		case c >= 'a' && c <= 'f':
+			nibble = uint64(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			nibble = uint64(c-'A') + 10
+		default:
+			return 0, fmt.Errorf("bad hex")
+		}
+		bits = (bits << 4) | nibble
+	}
+	return bits, nil
+}
+
+func (m *Manager) checkReceiptSignature(receiptID, issuer, pathsJSON string, expiresAt, createdAt float64, sigTag string, claimBindingJSON sql.NullString) error {
+	if strings.TrimSpace(sigTag) == "" {
+		return signing.ErrInvalidSignature
+	}
+	claimJSON := ""
+	if claimBindingJSON.Valid {
+		claimJSON = claimBindingJSON.String
+	}
+	return VerifyMonotoneReceiptSig(m.pubKey, sigTag, receiptID, issuer, pathsJSON, expiresAt, createdAt, claimJSON)
+}
+
 // IssueReceipt mints a single-use receipt scoped to allowedPaths with the
 // given TTL. Optional supervisor metadata can be attached via WithSupervisorMeta.
 // The caller identity is recorded verbatim; the engine performs no internal
 // authentication (trust boundary is filesystem permissions and upstream harness gating).
 func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Duration, opts ...IssueOption) (*WriteReceipt, error) {
+	if signingWorkerTierForbidden() {
+		return nil, signing.ErrF0KeyAccessDenied
+	}
 	if len(allowedPaths) == 0 {
 		return nil, ErrEmptyPaths
 	}
@@ -585,26 +746,44 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 	}
 	r.ProvenanceLineage = provenance
 
+	priv, _, err := signing.EnsureOrLoadF0Signer(m.stateDir)
+	if err != nil {
+		return nil, err
+	}
+	expiresUnix := timeToUnix(r.ExpiresAt)
+	createdUnix := timeToUnix(r.CreatedAt)
+	claimStr := ""
+	if claimBindingJSON.Valid {
+		claimStr = claimBindingJSON.String
+	}
+	sigTag := FormatMonotoneReceiptSig(priv, r.ReceiptID, r.Issuer, string(pathsJSON), expiresUnix, createdUnix, claimStr)
+	r.Signature = sigTag
+
 	if _, err := m.db.Exec(
 		`INSERT INTO write_receipts
 			(receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at,
 			 approach_idx, attempt_idx, rca_confidence, adr_path,
 			 envelope_schema_uri, envelope_field_order_json, envelope_required_fields_json,
 			 ruleset_version, pipeline_digest, adr_ref,
-			 issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json)
+			 issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json, sig_tag)
 		 VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?,
 		 ?, ?, ?,
 		 ?, ?, ?,
-		 ?, ?, ?, ?, ?, ?)`,
-		r.ReceiptID, r.Issuer, string(pathsJSON), timeToUnix(r.ExpiresAt), timeToUnix(r.CreatedAt),
+		 ?, ?, ?, ?, ?, ?, ?)`,
+		r.ReceiptID, r.Issuer, string(pathsJSON), expiresUnix, createdUnix,
 		approachIdx, attemptIdx, rcaConfidence, adrPath,
 		envelopeSchemaURI, envelopeFieldOrder, envelopeRequiredFlds,
 		rulesetVersion, pipelineDigest, adrRefVal,
-		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON,
+		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON, sigTag,
 	); err != nil {
 		return nil, fmt.Errorf("insert receipt %q: %w", r.ReceiptID, err)
 	}
 	return r, nil
+}
+
+func signingWorkerTierForbidden() bool {
+	tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER")))
+	return tier == "F1" || tier == "F2"
 }
 
 // validateCanonicalEnvelope enforces mandatory invariants when a Brain-tier
@@ -663,18 +842,23 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 		actorChainJSON         sql.NullString
 		sourceCommit           sql.NullString
 		claimBindingJSON       sql.NullString
+		sigTag                 string
 	)
 	scanErr := row.Scan(&issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 		&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 		&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 		&rulesetVersion, &pipelineDigest, &adrRefVal,
 		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
+		&sigTag,
 	)
 	switch {
 	case errors.Is(scanErr, sql.ErrNoRows):
 		return nil, &NotFoundError{ReceiptID: receiptID}
 	case scanErr != nil:
 		return nil, fmt.Errorf("load receipt %q: %w", receiptID, scanErr)
+	}
+	if err := m.checkReceiptSignature(receiptID, issuer, pathsJSON, expiresAt, createdAt, sigTag, claimBindingJSON); err != nil {
+		return nil, err
 	}
 	if consumed == 1 {
 		return nil, &AlreadyConsumedError{ReceiptID: receiptID}
@@ -724,6 +908,7 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 	}
 
 	r.Issuer = issuer
+	r.Signature = sigTag
 	r.Consumed = true
 	taskID := consumerTaskID
 	r.ConsumerTaskID = &taskID
@@ -791,12 +976,14 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 			actorChainJSON         sql.NullString
 			sourceCommit           sql.NullString
 			claimBindingJSON       sql.NullString
+			sigTag                 string
 		)
 		if err := rows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 			&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 			&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 			&rulesetVersion, &pipelineDigest, &adrRefVal,
 			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
+			&sigTag,
 		); err != nil {
 			return nil, fmt.Errorf("scan active receipt: %w", err)
 		}
@@ -810,6 +997,7 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 			return nil, err
 		}
 		r.Issuer = issuer
+		r.Signature = sigTag
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -875,12 +1063,14 @@ func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) (
 			actorChainJSON         sql.NullString
 			sourceCommit           sql.NullString
 			claimBindingJSON       sql.NullString
+			sigTag                 string
 		)
 		if err := rows.Scan(&receiptID, &issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 			&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 			&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 			&rulesetVersion, &pipelineDigest, &adrRefVal,
 			&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
+			&sigTag,
 		); err != nil {
 			return nil, fmt.Errorf("scan receipt: %w", err)
 		}
@@ -894,6 +1084,7 @@ func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) (
 			return nil, err
 		}
 		r.Issuer = issuer
+		r.Signature = sigTag
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -939,18 +1130,23 @@ func (m *Manager) VerifyReceipt(receiptID string) (*WriteReceipt, error) {
 		actorChainJSON         sql.NullString
 		sourceCommit           sql.NullString
 		claimBindingJSON       sql.NullString
+		sigTag                 string
 	)
 	scanErr := row.Scan(&issuer, &pathsJSON, &expiresAt, &consumed, &storedTask, &createdAt,
 		&approachIdx, &attemptIdx, &rcaConfidence, &adrPath,
 		&envelopeSchemaURI, &envelopeFieldOrderJSON, &envelopeRequiredJSON,
 		&rulesetVersion, &pipelineDigest, &adrRefVal,
 		&issuedBy, &toolVersion, &traceID, &actorChainJSON, &sourceCommit, &claimBindingJSON,
+		&sigTag,
 	)
 	switch {
 	case errors.Is(scanErr, sql.ErrNoRows):
 		return nil, &NotFoundError{ReceiptID: receiptID}
 	case scanErr != nil:
 		return nil, fmt.Errorf("load receipt %q: %w", receiptID, scanErr)
+	}
+	if err := m.checkReceiptSignature(receiptID, issuer, pathsJSON, expiresAt, createdAt, sigTag, claimBindingJSON); err != nil {
+		return nil, err
 	}
 
 	now := m.clock()
@@ -969,6 +1165,7 @@ func (m *Manager) VerifyReceipt(receiptID string) (*WriteReceipt, error) {
 		return nil, err
 	}
 	r.Issuer = issuer
+	r.Signature = sigTag
 	if r.ClaimBinding != nil {
 		if err := r.ClaimBinding.Validate(m.clock()); err != nil {
 			return nil, err
@@ -996,7 +1193,8 @@ const receiptSelectColumns = `issuer, allowed_paths_json, expires_at, consumed, 
 		approach_idx, attempt_idx, rca_confidence, adr_path,
 		envelope_schema_uri, envelope_field_order_json, envelope_required_fields_json,
 		ruleset_version, pipeline_digest, adr_ref,
-		issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json`
+		issued_by, tool_version, trace_id, actor_chain_json, source_commit, claim_binding_json,
+		COALESCE(sig_tag, '')`
 
 // scanIntoReceipt hydrates a WriteReceipt from the already-scanned column
 // values. Caller is responsible for executing the SELECT and passing the
