@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/state"
 )
@@ -64,6 +65,9 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
+		return nil, fmt.Errorf("prepare control-plane database: %w", err)
+	}
 	dsn := fmt.Sprintf(
 		"file:%s?_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)&_pragma=synchronous(FULL)",
 		sqlitePathEscape(dbPath),
@@ -84,9 +88,9 @@ func NewControlPlane(dbPath string, clock func() time.Time) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := os.Chmod(dbPath, 0o600); err != nil {
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("restrict control-plane database permissions: %w", err)
+		return nil, fmt.Errorf("harden control-plane database: %w", err)
 	}
 	return s, nil
 }

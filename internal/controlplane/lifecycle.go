@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 // ErrUnknownTask reports operations addressing a task id that does not exist.
@@ -55,6 +57,8 @@ CREATE TABLE IF NOT EXISTS write_receipts (
 	trace_id                      TEXT,
 	actor_chain_json              TEXT,
 	source_commit                 TEXT,
+	claim_binding_json            TEXT,
+	sig_tag                       TEXT,
 	session_id                    TEXT
 )`
 
@@ -92,6 +96,42 @@ func (s *Store) ConsumeWriteReceipt(ctx context.Context, receiptID, consumerTask
 	// created it), then consume conditionally.
 	if _, err := s.db.ExecContext(ctx, writeReceiptsEnsureDDL); err != nil {
 		return fmt.Errorf("ensure write_receipts schema: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE write_receipts ADD COLUMN claim_binding_json TEXT`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("ensure claim_binding_json: %w", err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE write_receipts ADD COLUMN sig_tag TEXT`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("ensure sig_tag: %w", err)
+		}
+	}
+	var (
+		issuer, pathsJSON, sigTag, claimJSON string
+		expiresAt, createdAt                 float64
+		rowConsumed                          int
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT issuer, allowed_paths_json, expires_at, created_at, COALESCE(sig_tag,''), COALESCE(claim_binding_json,''), consumed
+		   FROM write_receipts WHERE receipt_id = ?`, receiptID).
+		Scan(&issuer, &pathsJSON, &expiresAt, &createdAt, &sigTag, &claimJSON, &rowConsumed)
+	if err == sql.ErrNoRows {
+		return ErrReceiptUnknownOrExpired
+	}
+	if err != nil {
+		return fmt.Errorf("load legacy receipt: %w", err)
+	}
+	stateDir := ""
+	if !signing.IsInMemorySQLitePath(s.dbPath) {
+		stateDir = filepath.Dir(signing.CleanSQLiteFilePath(s.dbPath))
+	}
+	pubKey, err := signing.LoadF0Verifier(stateDir)
+	if err != nil {
+		return fmt.Errorf("load F0 verifier: %w", err)
+	}
+	if err := receipt.VerifyMonotoneReceiptSig(pubKey, sigTag, receiptID, issuer, pathsJSON, expiresAt, createdAt, claimJSON); err != nil {
+		return err
 	}
 	now := float64(s.clock().UnixNano()) / 1e9
 	res, err := s.db.ExecContext(ctx,

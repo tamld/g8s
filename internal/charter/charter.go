@@ -6,6 +6,7 @@
 package charter
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -15,12 +16,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver (Zero-CGO constitution).
 
 	"github.com/tamld/g8s/internal/pathutil"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 // Ring identifies the physical containment sandbox tier (ADR-0032).
@@ -66,6 +69,7 @@ var (
 	ErrCharterRepoMismatch       = errors.New("E_CHARTER_REPO_MISMATCH: charter repo_id does not match target repository")
 	ErrCharterDigestMismatch     = errors.New("E_CHARTER_DIGEST_MISMATCH: stored charter digest failed integrity check")
 	ErrInvalidCharterRequest     = errors.New("E_INVALID_CHARTER_REQUEST: invalid charter parameters")
+	ErrCharterTampered           = errors.New("charter: invalid or missing cryptographic signature")
 )
 
 // ParseStratum normalizes and validates a stratum identifier. When raw is empty,
@@ -164,6 +168,7 @@ type Charter struct {
 	UpdatedAt         int64        `json:"updated_at"`
 	RevokeReason      string       `json:"revoke_reason,omitempty"`
 	SealedReceiptHash string       `json:"sealed_receipt_hash,omitempty"`
+	Signature         string       `json:"signature,omitempty"`
 }
 
 // IssueRequest holds the parameters for minting a new S2 DomainGovernor Charter.
@@ -222,8 +227,10 @@ func ComputeDigest(c *Charter) string {
 
 // Store persists charters in a Pure-Go SQLite WAL database.
 type Store struct {
-	db    *sql.DB
-	clock func() time.Time
+	db       *sql.DB
+	clock    func() time.Time
+	stateDir string
+	pubKey   ed25519.PublicKey
 }
 
 // Open opens or initializes the SQLite WAL charter store inside stateDir/charters.db.
@@ -240,8 +247,13 @@ func NewStore(dbPath string, clock func() time.Time) (*Store, error) {
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, fmt.Errorf("%w: empty db path", ErrInvalidCharterRequest)
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create charter dir: %w", err)
+	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
+		return nil, fmt.Errorf("prepare charter db: %w", err)
+	}
+	stateDir := filepath.Dir(signing.CleanSQLiteFilePath(dbPath))
+	pubKey, err := signing.LoadF0Verifier(stateDir)
+	if err != nil {
+		return nil, err
 	}
 	if clock == nil {
 		clock = time.Now
@@ -251,8 +263,11 @@ func NewStore(dbPath string, clock func() time.Time) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open charter sqlite: %w", err)
 	}
-	s := &Store{db: db, clock: clock}
+	s := &Store{db: db, clock: clock, stateDir: stateDir, pubKey: pubKey}
 	if err := s.initSchema(); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
@@ -278,7 +293,8 @@ func (s *Store) initSchema() error {
 			expires_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
 			revoke_reason TEXT NOT NULL DEFAULT '',
-			sealed_receipt_hash TEXT NOT NULL DEFAULT ''
+			sealed_receipt_hash TEXT NOT NULL DEFAULT '',
+			sig_tag TEXT NOT NULL DEFAULT ''
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_charters_repo_state ON charters(repo_id, state);`,
 	}
@@ -287,7 +303,112 @@ func (s *Store) initSchema() error {
 			return fmt.Errorf("init charter schema: %w", err)
 		}
 	}
+
+	present := map[string]struct{}{}
+	rows, err := s.db.Query(`PRAGMA table_info(charters)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hadTable := false
+	for rows.Next() {
+		hadTable = true
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		present[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, ok := present["sig_tag"]; !ok && hadTable {
+		if _, err := s.db.Exec(`ALTER TABLE charters ADD COLUMN sig_tag TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		needsBackfill := false
+		br, err := s.db.Query(`SELECT COUNT(*) FROM charters WHERE sig_tag = ''`)
+		if err == nil && br.Next() {
+			var n int
+			_ = br.Scan(&n)
+			needsBackfill = n > 0
+		}
+		if br != nil {
+			br.Close()
+		}
+		if needsBackfill {
+			priv, _, err := signing.EnsureOrLoadF0Signer(s.stateDir)
+			if err != nil {
+				return err
+			}
+			dataRows, err := s.db.Query(
+				`SELECT charter_id, issuer_stratum, target_stratum, repo_id, scope_root,
+				        allowed_paths_json, outcome_mandate, budget_tokens, epoch, fence,
+				        charter_digest, issued_at, expires_at
+				   FROM charters WHERE sig_tag = ''`)
+			if err != nil {
+				return err
+			}
+			defer dataRows.Close()
+			for dataRows.Next() {
+				var c Charter
+				var issuer, target, pathsJSON string
+				if err := dataRows.Scan(
+					&c.CharterID, &issuer, &target, &c.RepoID, &c.ScopeRoot,
+					&pathsJSON, &c.OutcomeMandate, &c.BudgetTokens, &c.Epoch, &c.Fence,
+					&c.CharterDigest, &c.IssuedAt, &c.ExpiresAt,
+				); err != nil {
+					return err
+				}
+				c.IssuerStratum = Stratum(issuer)
+				c.TargetStratum = Stratum(target)
+				tag := signCharterFields(priv, &c, pathsJSON)
+				if _, err := s.db.Exec(`UPDATE charters SET sig_tag = ? WHERE charter_id = ?`, tag, c.CharterID); err != nil {
+					return err
+				}
+			}
+			if err := dataRows.Err(); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func charterDomainFields(c *Charter, pathsJSON string) []string {
+	return []string{
+		c.CharterID, string(c.IssuerStratum), string(c.TargetStratum), c.RepoID, c.ScopeRoot,
+		pathsJSON, c.OutcomeMandate, strconv.Itoa(c.BudgetTokens),
+		c.CharterDigest, strconv.FormatInt(c.IssuedAt, 10), strconv.FormatInt(c.ExpiresAt, 10),
+	}
+}
+
+func signCharterFields(priv ed25519.PrivateKey, c *Charter, pathsJSON string) string {
+	return signing.SignDomain(priv, "g8s.charter.v1", charterDomainFields(c, pathsJSON)...)
+}
+
+func verifyCharterSig(pub ed25519.PublicKey, c *Charter, pathsJSON, sigTag string) error {
+	if strings.TrimSpace(sigTag) == "" {
+		return ErrCharterTampered
+	}
+	return signing.VerifyDomain(pub, sigTag, "g8s.charter.v1", charterDomainFields(c, pathsJSON)...)
+}
+
+// VerifyStratumEnv resolves the caller stratum and optionally validates a stratum token.
+func VerifyStratumEnv(pub ed25519.PublicKey, now time.Time) (Stratum, error) {
+	stratum := CurrentStratum()
+	if os.Getenv("G8S_STRATUM_TOKEN") != "" {
+		if err := signing.VerifyStratumToken(pub, os.Getenv("G8S_STRATUM_TOKEN"), string(stratum), now.Unix()); err != nil {
+			return "", err
+		}
+	} else if os.Getenv("G8S_STRATUM_REQUIRE_TOKEN") == "1" {
+		return "", signing.ErrInvalidSignature
+	}
+	return stratum, nil
 }
 
 // Close closes the underlying SQLite connection.
@@ -300,6 +421,9 @@ func (s *Store) Close() error {
 
 // Issue mints a new S2 DomainGovernor Charter after validating S0/S1 -> S2 adjacency.
 func (s *Store) Issue(req IssueRequest) (*Charter, error) {
+	if _, err := VerifyStratumEnv(s.pubKey, s.clock().UTC()); err != nil {
+		return nil, err
+	}
 	if cur := CurrentStratum(); cur == StratumS3Mutator || cur == StratumS3Adjudicator || cur == StratumOPlane {
 		return nil, fmt.Errorf("%w: process in stratum %s (F1/F2 or receipt-bound) cannot issue charters", ErrStratumAdjacencyViolation, cur)
 	}
@@ -375,16 +499,22 @@ func (s *Store) Issue(req IssueRequest) (*Charter, error) {
 	if err != nil {
 		return nil, err
 	}
+	priv, _, err := signing.EnsureOrLoadF0Signer(s.stateDir)
+	if err != nil {
+		return nil, err
+	}
+	sigTag := signCharterFields(priv, c, string(pathsJSON))
+	c.Signature = sigTag
 	_, err = s.db.Exec(
 		`INSERT INTO charters (
 			charter_id, issuer_stratum, target_stratum, repo_id, scope_root,
 			allowed_paths_json, outcome_mandate, budget_tokens, epoch, fence,
 			charter_digest, state, issued_at, expires_at, updated_at,
-			revoke_reason, sealed_receipt_hash
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')`,
+			revoke_reason, sealed_receipt_hash, sig_tag
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?)`,
 		c.CharterID, string(c.IssuerStratum), string(c.TargetStratum), c.RepoID, c.ScopeRoot,
 		string(pathsJSON), c.OutcomeMandate, c.BudgetTokens, c.Epoch, c.Fence,
-		c.CharterDigest, string(c.State), c.IssuedAt, c.ExpiresAt, c.UpdatedAt,
+		c.CharterDigest, string(c.State), c.IssuedAt, c.ExpiresAt, c.UpdatedAt, sigTag,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert charter: %w", err)
@@ -398,25 +528,25 @@ func (s *Store) Get(charterID string) (*Charter, error) {
 		`SELECT charter_id, issuer_stratum, target_stratum, repo_id, scope_root,
 		        allowed_paths_json, outcome_mandate, budget_tokens, epoch, fence,
 		        charter_digest, state, issued_at, expires_at, updated_at,
-		        revoke_reason, sealed_receipt_hash
+		        revoke_reason, sealed_receipt_hash, COALESCE(sig_tag, '')
 		   FROM charters WHERE charter_id = ?`,
 		strings.TrimSpace(charterID),
 	)
-	return scanCharter(row)
+	return scanCharterWithKey(row, s.pubKey)
 }
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanCharter(sc rowScanner) (*Charter, error) {
+func scanCharterWithKey(sc rowScanner, pub ed25519.PublicKey) (*Charter, error) {
 	var c Charter
-	var issuer, target, state, pathsJSON string
+	var issuer, target, state, pathsJSON, sigTag string
 	err := sc.Scan(
 		&c.CharterID, &issuer, &target, &c.RepoID, &c.ScopeRoot,
 		&pathsJSON, &c.OutcomeMandate, &c.BudgetTokens, &c.Epoch, &c.Fence,
 		&c.CharterDigest, &state, &c.IssuedAt, &c.ExpiresAt, &c.UpdatedAt,
-		&c.RevokeReason, &c.SealedReceiptHash,
+		&c.RevokeReason, &c.SealedReceiptHash, &sigTag,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCharterNotFound
@@ -432,6 +562,13 @@ func scanCharter(sc rowScanner) (*Charter, error) {
 	}
 	if ComputeDigest(&c) != c.CharterDigest {
 		return nil, ErrCharterDigestMismatch
+	}
+	c.Signature = sigTag
+	if pub == nil {
+		return nil, ErrCharterTampered
+	}
+	if err := verifyCharterSig(pub, &c, pathsJSON, sigTag); err != nil {
+		return nil, ErrCharterTampered
 	}
 	return &c, nil
 }
@@ -521,7 +658,7 @@ func (s *Store) List(repoIDFilter string) ([]*Charter, error) {
 			`SELECT charter_id, issuer_stratum, target_stratum, repo_id, scope_root,
 			        allowed_paths_json, outcome_mandate, budget_tokens, epoch, fence,
 			        charter_digest, state, issued_at, expires_at, updated_at,
-			        revoke_reason, sealed_receipt_hash
+			        revoke_reason, sealed_receipt_hash, COALESCE(sig_tag, '')
 			   FROM charters WHERE repo_id = ? ORDER BY issued_at DESC`,
 			strings.TrimSpace(repoIDFilter),
 		)
@@ -530,7 +667,7 @@ func (s *Store) List(repoIDFilter string) ([]*Charter, error) {
 			`SELECT charter_id, issuer_stratum, target_stratum, repo_id, scope_root,
 			        allowed_paths_json, outcome_mandate, budget_tokens, epoch, fence,
 			        charter_digest, state, issued_at, expires_at, updated_at,
-			        revoke_reason, sealed_receipt_hash
+			        revoke_reason, sealed_receipt_hash, COALESCE(sig_tag, '')
 			   FROM charters ORDER BY issued_at DESC`,
 		)
 	}
@@ -541,7 +678,7 @@ func (s *Store) List(repoIDFilter string) ([]*Charter, error) {
 
 	var out []*Charter
 	for rows.Next() {
-		c, err := scanCharter(rows)
+		c, err := scanCharterWithKey(rows, s.pubKey)
 		if err != nil {
 			return nil, err
 		}

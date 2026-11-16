@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,8 +25,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tamld/g8s/internal/harness"
+	"github.com/tamld/g8s/internal/signing"
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver (Zero-CGO constitution axiom).
 )
+
+func TestMain(m *testing.M) {
+	os.Unsetenv("G8S_TIER")
+	os.Exit(m.Run())
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -650,6 +657,7 @@ func TestFreshDatabaseSchemaColumnTypesExact(t *testing.T) {
 		"actor_chain_json":              "TEXT",
 		"source_commit":                 "TEXT",
 		"claim_binding_json":            "TEXT",
+		"sig_tag":                       "TEXT",
 	}
 
 	raw := openRawDB(t, dbPath)
@@ -1201,21 +1209,13 @@ func TestValidateAndConsumeReportsTamperedJSON(t *testing.T) {
 	defer m2.Close()
 
 	_, err = m2.ValidateAndConsume(rc.ReceiptID, "worker")
-	if err == nil {
-		t.Fatal("ValidateAndConsume must surface corrupted JSON")
-	}
-	if !strings.Contains(err.Error(), rc.ReceiptID) {
-		t.Errorf("error %q must mention the failing receipt id", err.Error())
+	if !errors.Is(err, signing.ErrInvalidSignature) {
+		t.Fatalf("tampered paths must fail signature verification, got %v", err)
 	}
 
-	// B3 fix: the row must NOT be consumed when JSON parse fails, so the
-	// retry should also surface the deserialize error (not AlreadyConsumedError).
 	_, err = m2.ValidateAndConsume(rc.ReceiptID, "worker")
-	if err == nil {
-		t.Errorf("retry after deserialize failure must keep the receipt live, got nil error")
-	}
-	if !strings.Contains(err.Error(), "deserialize allowed_paths") {
-		t.Errorf("retry must surface deserialize error, got %v", err)
+	if !errors.Is(err, signing.ErrInvalidSignature) {
+		t.Errorf("retry must still fail closed on signature, got %v", err)
 	}
 }
 
@@ -1325,12 +1325,15 @@ func TestReceiptNullHandling(t *testing.T) {
 	raw := openRawDB(t, dbPath)
 	nullRcID := uuid.NewString()
 	pathsJSON, _ := json.Marshal([]string{"null-test/**"})
+	exp := timeToUnix(now.Add(time.Hour))
+	crt := timeToUnix(now)
+	sigTag := seedReceiptSigTag(t, filepath.Dir(dbPath), nullRcID, "null-issuer", string(pathsJSON), exp, crt, "")
 	if _, err := raw.Exec(
 		`INSERT INTO write_receipts
 			(receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at,
-			 approach_idx, attempt_idx, rca_confidence, adr_path)
-		 VALUES (?, ?, ?, ?, 0, NULL, ?, NULL, NULL, NULL, NULL)`,
-		nullRcID, "null-issuer", string(pathsJSON), timeToUnix(now.Add(time.Hour)), timeToUnix(now),
+			 approach_idx, attempt_idx, rca_confidence, adr_path, sig_tag)
+		 VALUES (?, ?, ?, ?, 0, NULL, ?, NULL, NULL, NULL, NULL, ?)`,
+		nullRcID, "null-issuer", string(pathsJSON), exp, crt, sigTag,
 	); err != nil {
 		t.Fatalf("insert explicit NULL row: %v", err)
 	}
@@ -1646,9 +1649,10 @@ func TestNewReceiptManagerInvalidPath(t *testing.T) {
 		t.Error("NewReceiptManager with invalid path must return error")
 	}
 
-	// In-memory path fails os.Chmod.
-	if _, err := NewReceiptManager(":memory:", nil); err == nil {
-		t.Error("NewReceiptManager(':memory:') must return error on chmod")
+	if m, err := NewReceiptManager(":memory:", nil); err != nil {
+		t.Errorf("NewReceiptManager(':memory:') should succeed with ephemeral signer: %v", err)
+	} else if err := m.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1979,5 +1983,101 @@ func TestPurgeExpiredRejectsBadArgs(t *testing.T) {
 	}
 	if _, err := m.PurgeExpired(-time.Second, 10); err == nil {
 		t.Error("PurgeExpired(negative maxAge) must error")
+	}
+}
+
+func seedReceiptSigTag(t *testing.T, stateDir, receiptID, issuer, pathsJSON string, expiresAt, createdAt float64, claimJSON string) string {
+	t.Helper()
+	priv, _, err := signing.EnsureOrLoadF0Signer(stateDir)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	return FormatMonotoneReceiptSig(priv, receiptID, issuer, pathsJSON, expiresAt, createdAt, claimJSON)
+}
+
+func TestIssueReceiptRejectsWorkerTier(t *testing.T) {
+	m := newTestManager(t)
+	t.Setenv("G8S_TIER", "F1")
+	_, err := m.IssueReceipt("worker", []string{"x/**"}, time.Minute, withConcernBDisabled())
+	if !errors.Is(err, signing.ErrF0KeyAccessDenied) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestReceiptRejectsForgedSQLiteRow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "forged.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"z/**"}, time.Minute)
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(`UPDATE write_receipts SET issuer = 'forged' WHERE receipt_id = ?`, rc.ReceiptID); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m2.Close()
+	_, err = m2.VerifyReceipt(rc.ReceiptID)
+	if !errors.Is(err, signing.ErrInvalidSignature) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestReceiptRejectsExtendedExpiresTamper(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "extend.sqlite3")
+	now := time.Now().UTC()
+	m, err := NewReceiptManager(dbPath, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"t/**"}, time.Minute)
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(`UPDATE write_receipts SET expires_at = expires_at + 3600 WHERE receipt_id = ?`, rc.ReceiptID); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m2, err := NewReceiptManager(dbPath, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m2.Close()
+	_, err = m2.VerifyReceipt(rc.ReceiptID)
+	if !errors.Is(err, signing.ErrInvalidSignature) {
+		t.Fatalf("extended expires must fail monotone ceiling, got %v", err)
+	}
+}
+
+func TestReceiptDatabaseFileMode0600(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix perm test")
+	}
+	dbPath := filepath.Join(t.TempDir(), "perms.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("db mode %o", fi.Mode().Perm())
 	}
 }

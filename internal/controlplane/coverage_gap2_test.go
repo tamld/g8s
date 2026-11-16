@@ -711,12 +711,7 @@ func TestConsumeWriteReceipt_LegacyFallback(t *testing.T) {
 	if _, err := store.db.Exec(writeReceiptsEnsureDDL); err != nil {
 		t.Fatalf("ensure write_receipts: %v", err)
 	}
-	if _, err := store.db.Exec(
-		`INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at, consumed, consumer_task_id)
-		 VALUES (?, 'issuer-1', '[]', ?, ?, 1, ?)`, "rcpt-legacy-consumed", now+1000, now, "task-other",
-	); err != nil {
-		t.Fatalf("insert legacy consumed: %v", err)
-	}
+	seedSignedLegacyReceipt(t, store, "rcpt-legacy-consumed", "issuer-1", "[]", now+1000, now, 1, "task-other")
 
 	// Consumed by different task -> ErrReceiptAlreadyConsumed
 	if err := store.ConsumeWriteReceipt(ctx, "rcpt-legacy-consumed", "task-me"); !errors.Is(err, ErrReceiptAlreadyConsumed) {
@@ -728,13 +723,8 @@ func TestConsumeWriteReceipt_LegacyFallback(t *testing.T) {
 		t.Fatalf("expected nil for idempotent consume, got %v", err)
 	}
 
-	// Expired receipt
-	if _, err := store.db.Exec(
-		`INSERT INTO write_receipts (receipt_id, issuer, allowed_paths_json, expires_at, created_at, consumed)
-		 VALUES (?, 'issuer-1', '[]', ?, ?, 0)`, "rcpt-legacy-expired", now-1000, now,
-	); err != nil {
-		t.Fatalf("insert legacy expired: %v", err)
-	}
+	// Expired receipt (signed so verification passes before expiry gate)
+	seedSignedLegacyReceipt(t, store, "rcpt-legacy-expired", "issuer-1", "[]", now-1000, now, 0, "")
 	if err := store.ConsumeWriteReceipt(ctx, "rcpt-legacy-expired", "task-me"); !errors.Is(err, ErrReceiptUnknownOrExpired) {
 		t.Fatalf("expected ErrReceiptUnknownOrExpired for expired receipt, got %v", err)
 	}

@@ -1,10 +1,16 @@
 package charter
 
 import (
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
+
+	"github.com/tamld/g8s/internal/signing"
+	_ "modernc.org/sqlite"
 )
 
 func TestCharterLifecycleAndCanonicalDigest(t *testing.T) {
@@ -199,5 +205,109 @@ func TestCharterFenceRejectsStaleEpoch(t *testing.T) {
 	// Ensure persistence on disk
 	if _, err := os.Stat(filepath.Join(tmp, "charters.db")); err != nil {
 		t.Fatalf("expected charters.db on disk: %v", err)
+	}
+}
+
+func TestCharterRejectsForgedSQLiteRow(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := Open(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.Issue(IssueRequest{
+		IssuerStratum:  StratumS1,
+		RepoID:         "tamld/g8s",
+		OutcomeMandate: "signed mandate",
+		TTL:            time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(tmp, "charters.db")
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`UPDATE charters SET sig_tag = 'ed25519:v1:deadbeef' WHERE charter_id = ?`, c.CharterID); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store2, err := Open(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store2.Close()
+	if _, err := store2.Get(c.CharterID); !errors.Is(err, ErrCharterTampered) {
+		t.Fatalf("expected ErrCharterTampered, got %v", err)
+	}
+}
+
+func TestCharterStratumTokenVerification(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := Open(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	priv, pub, err := signing.EnsureOrLoadF0Signer(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	tok := signing.SignStratumToken(priv, string(StratumS2), now.Add(time.Hour).Unix())
+	t.Setenv("G8S_STRATUM_TOKEN", tok)
+	_, err = store.Issue(IssueRequest{
+		IssuerStratum:  StratumS1,
+		RepoID:         "tamld/g8s",
+		OutcomeMandate: "token ok",
+		TTL:            time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("valid token: %v", err)
+	}
+	bad := signing.SignStratumToken(priv, string(StratumS3Mutator), now.Add(time.Hour).Unix())
+	t.Setenv("G8S_STRATUM_TOKEN", bad)
+	if _, err := store.Issue(IssueRequest{IssuerStratum: StratumS1, RepoID: "tamld/g8s", OutcomeMandate: "wrong", TTL: time.Hour}); err == nil {
+		t.Fatal("wrong stratum token must fail")
+	}
+	expired := signing.SignStratumToken(priv, string(StratumS2), now.Add(-time.Hour).Unix())
+	t.Setenv("G8S_STRATUM_TOKEN", expired)
+	if _, err := store.Issue(IssueRequest{IssuerStratum: StratumS1, RepoID: "tamld/g8s", OutcomeMandate: "expired", TTL: time.Hour}); err == nil {
+		t.Fatal("expired token must fail")
+	}
+	t.Setenv("G8S_STRATUM_TOKEN", "")
+	t.Setenv("G8S_STRATUM_REQUIRE_TOKEN", "1")
+	if _, err := store.Issue(IssueRequest{IssuerStratum: StratumS1, RepoID: "tamld/g8s", OutcomeMandate: "missing", TTL: time.Hour}); err == nil {
+		t.Fatal("missing required token must fail")
+	}
+	_ = pub
+}
+
+func TestCharterStateDirPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix perm test")
+	}
+	tmp := t.TempDir()
+	if _, err := Open(tmp); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(tmp, "charters.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("charters.db mode %o", fi.Mode().Perm())
+	}
+	dirFi, err := os.Stat(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirFi.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("state dir mode %o", dirFi.Mode().Perm())
 	}
 }
