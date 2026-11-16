@@ -69,6 +69,28 @@ func TestCanonicalPathAndWorktreeAdmin(t *testing.T) {
 	if got, want := ResolveGitWorktreeAdminDir(wtAbs), CanonicalPath(adminDir); got != want {
 		t.Fatalf("absolute gitdir ResolveGitWorktreeAdminDir = %q, want %q", got, want)
 	}
+
+	wtEmpty := filepath.Join(host, "wt-empty-gitdir")
+	if err := os.MkdirAll(wtEmpty, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtEmpty, ".git"), []byte("gitdir:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveGitWorktreeAdminDir(wtEmpty); got != "" {
+		t.Fatalf("empty gitdir ResolveGitWorktreeAdminDir = %q, want empty", got)
+	}
+
+	wtInvalid := filepath.Join(host, "wt-invalid-gitdir")
+	if err := os.MkdirAll(wtInvalid, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtInvalid, ".git"), []byte("not-a-gitdir\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveGitWorktreeAdminDir(wtInvalid); got != "" {
+		t.Fatalf("invalid gitdir ResolveGitWorktreeAdminDir = %q, want empty", got)
+	}
 }
 
 func TestScrubEnvAndProviderAllowlist(t *testing.T) {
@@ -83,6 +105,7 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 		"G8S_F0_PRIVATE_SECRET=f0-secret",
 		"G8S_SERVE_TOKEN=serve-secret",
 		"G8S_STRATUM_TOKEN=st1:S2:999:sig",
+		"GOCOVERDIR=/tmp/host-cov",
 		"RANDOM_VENDOR_API_KEY=vendor-secret",
 		"SERVICE_DB_PASSWORD=pw-secret",
 		"OPENAI_API_KEY=sk-openai",
@@ -104,7 +127,7 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 	for _, stripped := range []string{
 		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "GH_TOKEN",
 		"NPM_TOKEN", "SSH_AUTH_SOCK", "G8S_F0_PRIVATE_SECRET", "G8S_SERVE_TOKEN",
-		"G8S_STRATUM_TOKEN", "RANDOM_VENDOR_API_KEY", "SERVICE_DB_PASSWORD", "CURSOR_API_KEY",
+		"G8S_STRATUM_TOKEN", "GOCOVERDIR", "RANDOM_VENDOR_API_KEY", "SERVICE_DB_PASSWORD", "CURSOR_API_KEY",
 	} {
 		if _, exists := codexMap[stripped]; exists {
 			t.Fatalf("expected %s to be stripped for codex, got value", stripped)
@@ -407,5 +430,15 @@ func TestRunContainedTimeoutAndNonZeroExit(t *testing.T) {
 	}, &stdout, &stderr)
 	if errNonZero != nil || codeNonZero == 0 {
 		t.Fatalf("expected non-zero exit without transport err, got code=%d err=%v", codeNonZero, errNonZero)
+	}
+
+	if got := exitCodeFromWait(nil, nil); got != 0 {
+		t.Fatalf("exitCodeFromWait(nil, nil) = %d, want 0", got)
+	}
+	if got := exitCodeFromWait(errors.New("boom"), context.Canceled); got != -1 {
+		t.Fatalf("exitCodeFromWait(err, Canceled) = %d, want -1", got)
+	}
+	if got := exitCodeFromWait(errors.New("boom"), nil); got != 1 {
+		t.Fatalf("exitCodeFromWait(err, nil) = %d, want 1", got)
 	}
 }

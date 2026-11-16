@@ -43,4 +43,10 @@ func TestVerifyExecutableIdentity_Disguise(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected identity error for fake node disguised as python, got nil")
 	}
+
+	// 3. Non-interpreter binaries (e.g., compiled Go test binaries) bypass the
+	// pre-spawn probe so verifyExecutableIdentity never runs them unsandboxed.
+	if err := verifyExecutableIdentity("/nonexistent/worker.test"); err != nil {
+		t.Errorf("expected non-interpreter binary to skip probe without error, got %v", err)
+	}
 }

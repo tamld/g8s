@@ -51,6 +51,7 @@ var exactSensitiveEnvKeys = map[string]bool{
 	"G8S_API_TOKEN":                  true,
 	"G8S_SIGNING_KEY":                true,
 	"G8S_STRATUM_TOKEN":              true,
+	"GOCOVERDIR":                     true,
 }
 
 var sensitiveEnvSuffixes = []string{

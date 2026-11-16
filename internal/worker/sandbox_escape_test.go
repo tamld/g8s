@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ const workerSandboxHelperEnv = "GO_WANT_WORKER_SANDBOX_HELPER"
 // TestWorkerSandboxHelper executes in a child process during real Supervisor
 // RunOnce containment integration tests.
 func TestWorkerSandboxHelper(t *testing.T) {
-	if os.Getenv(workerSandboxHelperEnv) != "1" {
+	if os.Getenv(workerSandboxHelperEnv) != "1" || !slices.Contains(os.Args, "-test.run=^TestWorkerSandboxHelper$") {
 		return
 	}
 	insidePath := os.Getenv("INSIDE_PATH")
@@ -103,11 +104,19 @@ func TestWorkerRecordsContainmentModeAndSuppressesReadOnlyYolo(t *testing.T) {
 			t.Fatalf("expected non-empty sandbox_backend, got %v", resultMap["sandbox_backend"])
 		}
 		if _, statErr := os.Stat(insideFile); statErr != nil {
-			t.Fatalf("expected inside file created: %v", statErr)
+			t.Fatalf("expected inside file created: %v (result=%s)", statErr, string(task.Result))
 		}
 		if runtime.GOOS != "windows" {
+			stdoutStr, _ := resultMap["stdout"].(string)
+			var helperRes struct {
+				InsideErr  string `json:"inside_err"`
+				OutsideErr string `json:"outside_err"`
+			}
+			if uerr := json.Unmarshal([]byte(stdoutStr), &helperRes); uerr != nil || helperRes.OutsideErr == "" {
+				t.Fatalf("expected kernel sandbox outside_err in stdout (%q, decodeErr=%v, result=%s)", stdoutStr, uerr, string(task.Result))
+			}
 			if _, statErr := os.Stat(outsideFile); !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("expected outside file blocked by kernel sandbox, stat=%v", statErr)
+				t.Fatalf("expected outside file blocked by kernel sandbox, stat=%v (result=%s)", statErr, string(task.Result))
 			}
 		}
 	})

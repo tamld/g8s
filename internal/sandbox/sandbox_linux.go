@@ -28,28 +28,35 @@ var (
 	landlockABI  int
 )
 
+func probeBwrapWith(lookPath func(string) (string, error)) (string, bool) {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	bin, err := lookPath("bwrap")
+	if err != nil {
+		return "", false
+	}
+	trueBin := "/bin/true"
+	if resolved, tErr := lookPath("true"); tErr == nil {
+		trueBin = resolved
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--", trueBin,
+	)
+	if runErr := cmd.Run(); runErr != nil {
+		return "", false
+	}
+	return bin, true
+}
+
 func probeBwrap() (string, bool) {
 	bwrapOnce.Do(func() {
-		bin, err := exec.LookPath("bwrap")
-		if err != nil {
-			return
-		}
-		trueBin := "/bin/true"
-		if resolved, tErr := exec.LookPath("true"); tErr == nil {
-			trueBin = resolved
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, bin,
-			"--ro-bind", "/", "/",
-			"--dev", "/dev",
-			"--proc", "/proc",
-			"--", trueBin,
-		)
-		if runErr := cmd.Run(); runErr == nil {
-			bwrapPath = bin
-			bwrapOK = true
-		}
+		bwrapPath, bwrapOK = probeBwrapWith(exec.LookPath)
 	})
 	return bwrapPath, bwrapOK
 }
@@ -64,60 +71,80 @@ func probeLandlockABI() int {
 	return landlockABI
 }
 
-func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, ownTmp bool) (*PreparedLaunch, error) {
-	writableDirs := WritableDirsForConfig(cfg, tmpDir, gocacheDir)
-	denyDirs, denyFiles := SensitiveDenySpec(resolveHomeDir(cfg), cfg.StateDir, resolveSSHAuthSock(cfg))
-	cleanup := makeLinuxCleanup(sandboxID, tmpDir, ownTmp)
-
-	if bwrapBin, ok := probeBwrap(); ok {
-		args := BuildBwrapArgs(bwrapBin, cfg.Argv, cfg.WorktreeDir, writableDirs, denyDirs, denyFiles, nil)
-		return &PreparedLaunch{
-			Argv:      args,
-			Env:       env,
-			Mode:      ModeKernelEnforced,
-			Backend:   "bwrap",
-			TempDir:   tmpDir,
-			SandboxID: sandboxID,
-			Cleanup:   cleanup,
-		}, nil
+func buildBwrapLaunch(
+	bwrapBin string,
+	cfg Config,
+	env []string,
+	tmpDir string,
+	writableDirs, denyDirs, denyFiles []string,
+	sandboxID string,
+	cleanup func(),
+) *PreparedLaunch {
+	args := BuildBwrapArgs(bwrapBin, cfg.Argv, cfg.WorktreeDir, writableDirs, denyDirs, denyFiles, nil)
+	return &PreparedLaunch{
+		Argv:      args,
+		Env:       env,
+		Mode:      ModeKernelEnforced,
+		Backend:   "bwrap",
+		TempDir:   tmpDir,
+		SandboxID: sandboxID,
+		Cleanup:   cleanup,
 	}
+}
 
-	if abi := probeLandlockABI(); abi >= 1 {
-		selfExe, err := os.Executable()
+func buildLandlockLaunch(
+	selfExe string,
+	abi int,
+	cfg Config,
+	env []string,
+	tmpDir string,
+	writableDirs, denyDirs, denyFiles []string,
+	sandboxID string,
+	cleanup func(),
+) (*PreparedLaunch, error) {
+	if selfExe == "" {
+		var err error
+		selfExe, err = os.Executable()
 		if err != nil {
-			cleanup()
+			if cleanup != nil {
+				cleanup()
+			}
 			return nil, fmt.Errorf("sandbox: resolve executable for landlock trampoline: %w", err)
 		}
-		payload := landlockPayload{
-			Argv:         append([]string{}, cfg.Argv...),
-			WorktreeDir:  CanonicalPath(cfg.WorktreeDir),
-			WritableDirs: writableDirs,
-			DenyDirs:     denyDirs,
-			DenyFiles:    denyFiles,
-			SandboxID:    sandboxID,
-			ABI:          abi,
-		}
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("sandbox: encode landlock payload: %w", err)
-		}
-		envWithCfg := append([]string{}, env...)
-		envWithCfg = append(envWithCfg,
-			internalExecEnvKey+"=1",
-			internalCfgEnvKey+"="+string(raw),
-		)
-		return &PreparedLaunch{
-			Argv:      []string{selfExe},
-			Env:       envWithCfg,
-			Mode:      ModeKernelEnforced,
-			Backend:   "landlock",
-			TempDir:   tmpDir,
-			SandboxID: sandboxID,
-			Cleanup:   cleanup,
-		}, nil
 	}
+	payload := landlockPayload{
+		Argv:         append([]string{}, cfg.Argv...),
+		WorktreeDir:  CanonicalPath(cfg.WorktreeDir),
+		WritableDirs: writableDirs,
+		DenyDirs:     denyDirs,
+		DenyFiles:    denyFiles,
+		SandboxID:    sandboxID,
+		ABI:          abi,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, fmt.Errorf("sandbox: encode landlock payload: %w", err)
+	}
+	envWithCfg := append([]string{}, env...)
+	envWithCfg = append(envWithCfg,
+		internalExecEnvKey+"=1",
+		internalCfgEnvKey+"="+string(raw),
+	)
+	return &PreparedLaunch{
+		Argv:      []string{selfExe},
+		Env:       envWithCfg,
+		Mode:      ModeKernelEnforced,
+		Backend:   "landlock",
+		TempDir:   tmpDir,
+		SandboxID: sandboxID,
+		Cleanup:   cleanup,
+	}, nil
+}
 
+func buildLinuxPolicyOnlyLaunch(cfg Config, env []string, tmpDir, sandboxID string, cleanup func()) *PreparedLaunch {
 	return &PreparedLaunch{
 		Argv:      append([]string{}, cfg.Argv...),
 		Env:       env,
@@ -126,7 +153,23 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 		TempDir:   tmpDir,
 		SandboxID: sandboxID,
 		Cleanup:   cleanup,
-	}, nil
+	}
+}
+
+func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, ownTmp bool) (*PreparedLaunch, error) {
+	writableDirs := WritableDirsForConfig(cfg, tmpDir, gocacheDir)
+	denyDirs, denyFiles := SensitiveDenySpec(resolveHomeDir(cfg), cfg.StateDir, resolveSSHAuthSock(cfg))
+	cleanup := makeLinuxCleanup(sandboxID, tmpDir, ownTmp)
+
+	if bwrapBin, ok := probeBwrap(); ok {
+		return buildBwrapLaunch(bwrapBin, cfg, env, tmpDir, writableDirs, denyDirs, denyFiles, sandboxID, cleanup), nil
+	}
+
+	if abi := probeLandlockABI(); abi >= 1 {
+		return buildLandlockLaunch("", abi, cfg, env, tmpDir, writableDirs, denyDirs, denyFiles, sandboxID, cleanup)
+	}
+
+	return buildLinuxPolicyOnlyLaunch(cfg, env, tmpDir, sandboxID, cleanup), nil
 }
 
 func makeLinuxCleanup(sandboxID, tmpDir string, ownTmp bool) func() {
