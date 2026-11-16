@@ -3,6 +3,7 @@ package signing
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,8 +70,10 @@ func TestF0KeyDiskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("key file too permissive: %o", fi.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		if fi.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("key file too permissive: %o", fi.Mode().Perm())
+		}
 	}
 }
 

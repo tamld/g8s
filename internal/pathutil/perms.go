@@ -1,11 +1,37 @@
 package pathutil
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+func tightenExistingDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	// Never attempt to chmod shared sticky temp dirs (e.g. /tmp, /var/tmp) or os.TempDir().
+	if fi.Mode()&os.ModeSticky != 0 || filepath.Clean(dir) == filepath.Clean(os.TempDir()) {
+		return nil
+	}
+	perm := fi.Mode().Perm()
+	if perm&0o077 != 0 {
+		if err := os.Chmod(dir, perm&^0o077); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
+}
 
 // EnsureStateDir creates dir with mode 0o700 and strips group/other permission bits.
 func EnsureStateDir(dir string) error {
@@ -16,18 +42,7 @@ func EnsureStateDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	fi, err := os.Stat(dir)
-	if err != nil {
-		return err
-	}
-	perm := fi.Mode().Perm()
-	if perm&0o077 != 0 {
-		return os.Chmod(dir, perm&^0o077)
-	}
-	return nil
+	return tightenExistingDir(dir)
 }
 
 func cleanSQLitePath(dbPath string) string {
@@ -42,14 +57,25 @@ func cleanSQLitePath(dbPath string) string {
 	return clean
 }
 
-// PrepareSQLiteFile ensures parent dir permissions and creates/tightens the SQLite file.
+// PrepareSQLiteFile verifies the existing parent directory, tightens permissions,
+// and creates/tightens the SQLite file without auto-creating missing parent dirs.
 func PrepareSQLiteFile(dbPath string) error {
 	clean := cleanSQLitePath(dbPath)
 	if clean == "" {
 		return nil
 	}
-	if err := EnsureStateDir(filepath.Dir(clean)); err != nil {
-		return err
+	parentDir := filepath.Dir(clean)
+	if parentDir != "" && parentDir != "." {
+		pfi, err := os.Stat(parentDir)
+		if err != nil {
+			return err
+		}
+		if !pfi.IsDir() {
+			return fmt.Errorf("parent path is not a directory: %s", parentDir)
+		}
+		if err := tightenExistingDir(parentDir); err != nil {
+			return err
+		}
 	}
 	f, err := os.OpenFile(clean, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {

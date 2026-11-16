@@ -247,6 +247,12 @@ func NewStore(dbPath string, clock func() time.Time) (*Store, error) {
 	if strings.TrimSpace(dbPath) == "" {
 		return nil, fmt.Errorf("%w: empty db path", ErrInvalidCharterRequest)
 	}
+	if !signing.IsInMemorySQLitePath(dbPath) {
+		cleanPath := signing.CleanSQLiteFilePath(dbPath)
+		if err := pathutil.EnsureStateDir(filepath.Dir(cleanPath)); err != nil {
+			return nil, fmt.Errorf("create charter dir: %w", err)
+		}
+	}
 	if err := pathutil.PrepareSQLiteFile(dbPath); err != nil {
 		return nil, fmt.Errorf("prepare charter db: %w", err)
 	}

@@ -52,3 +52,22 @@ func TestPrepareSQLiteSkipsMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPrepareSQLiteFailsWhenParentMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-parent", "db.sqlite")
+	if err := PrepareSQLiteFile(missing); err == nil {
+		t.Fatalf("expected error for missing parent dir, got nil")
+	}
+}
+
+func TestEnsureStateDirSkipsStickySharedTempDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sticky temp dir test")
+	}
+	if _, err := os.Stat("/tmp"); err != nil {
+		t.Skip("/tmp unavailable")
+	}
+	if err := EnsureStateDir("/tmp"); err != nil {
+		t.Fatalf("EnsureStateDir(/tmp) must succeed without failing on sticky dir: %v", err)
+	}
+}

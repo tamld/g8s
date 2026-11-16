@@ -75,9 +75,15 @@ func tightenDirPerm(dir string) error {
 	if err != nil {
 		return err
 	}
+	if fi.Mode()&os.ModeSticky != 0 || filepath.Clean(dir) == filepath.Clean(os.TempDir()) {
+		return nil
+	}
 	perm := fi.Mode().Perm()
 	if perm&0o077 != 0 {
 		if err := os.Chmod(dir, perm&^0o077); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				return nil
+			}
 			return err
 		}
 	}
