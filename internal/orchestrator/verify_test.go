@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -100,4 +101,126 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+type failingVerifier struct{}
+
+func (failingVerifier) VerifyReceipt(ctx context.Context, receipt *Receipt) error {
+	return errors.New("verification failed intentionally")
+}
+
+func TestApplyReceiptVerifierFailsClosed(t *testing.T) {
+	verifier := failingVerifier{}
+	receipt := &Receipt{
+		OK:         true,
+		ReturnCode: 0,
+		LastError:  "",
+		RawStdout:  []byte("some output"),
+	}
+	ctx := context.Background()
+
+	err := applyReceiptVerifier(ctx, verifier, receipt)
+
+	if err == nil {
+		t.Fatal("expected error from applyReceiptVerifier")
+	}
+	if receipt.OK {
+		t.Fatal("expected receipt.OK = false after verification failure")
+	}
+	if receipt.ReturnCode != 1 {
+		t.Fatalf("expected receipt.ReturnCode = 1, got %d", receipt.ReturnCode)
+	}
+	if receipt.LastError == "" {
+		t.Fatal("expected receipt.LastError to be populated")
+	}
+}
+
+type fakeWorkerForFanOut struct {
+	name      string
+	available bool
+	spawnErr  error
+}
+
+func (w fakeWorkerForFanOut) Name() string { return w.name }
+func (w fakeWorkerForFanOut) Available(ctx context.Context) error {
+	if !w.available {
+		return errors.New("unavailable")
+	}
+	return nil
+}
+
+func (w fakeWorkerForFanOut) Spawn(ctx context.Context, t Task) (Handle, error) {
+	if w.spawnErr != nil {
+		return nil, w.spawnErr
+	}
+	return &fakeHandleForFanOut{receipt: Receipt{
+		OK:         true,
+		TaskID:     t.ID,
+		WorkerName: w.name,
+		CommitSHA:  "deadbeef",
+	}}, nil
+}
+
+type fakeHandleForFanOut struct {
+	receipt Receipt
+}
+
+func (h *fakeHandleForFanOut) PID() int { return 123 }
+func (h *fakeHandleForFanOut) Wait(ctx context.Context) (Receipt, error) {
+	return h.receipt, nil
+}
+func (h *fakeHandleForFanOut) Cancel(ctx context.Context) error { return nil }
+func (h *fakeHandleForFanOut) StdoutStream() interface {
+	Read(p []byte) (int, error)
+	Close() error
+} {
+	return nil
+}
+
+func TestFanOutRoutesWorkerName(t *testing.T) {
+	dir := t.TempDir()
+	mustRunGit(t, dir, "init", "-q", "-b", "master")
+	mustRunGit(t, dir, "config", "user.email", "test@example.com")
+	mustRunGit(t, dir, "config", "user.name", "Test")
+	mustRunGit(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
+	mustRunGit(t, dir, "checkout", "-q", "-b", "main")
+
+	r := NewRegistry()
+	_ = r.Register("worker-a", func() Worker { return fakeWorkerForFanOut{name: "worker-a", available: true} })
+	_ = r.Register("worker-b", func() Worker { return fakeWorkerForFanOut{name: "worker-b", available: true} })
+
+	pool, err := NewPool(PoolOptions{Repo: dir, Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+
+	plan := []TaskSpec{
+		{TaskID: "task-1", WorkerName: "worker-a", Task: Task{ID: "task-1"}},
+		{TaskID: "task-2", WorkerName: "worker-b", Task: Task{ID: "task-2"}},
+		{TaskID: "task-3", Task: Task{ID: "task-3"}}, // no WorkerName, should use Pick (first available = worker-a)
+	}
+
+	ctx := context.Background()
+	results, err := FanOut(ctx, plan, FanOutOptions{
+		Registry: r,
+		Pool:     pool,
+	})
+	if err != nil {
+		t.Fatalf("FanOut returned error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if results[0].WorkerName != "worker-a" {
+		t.Errorf("task-1 expected worker-a, got %q", results[0].WorkerName)
+	}
+	if results[1].WorkerName != "worker-b" {
+		t.Errorf("task-2 expected worker-b, got %q", results[1].WorkerName)
+	}
+	if results[2].WorkerName != "worker-a" {
+		t.Errorf("task-3 (no WorkerName) expected worker-a (first available), got %q", results[2].WorkerName)
+	}
+	if results[0].WorktreePath == "" {
+		t.Errorf("task-1 expected WorktreePath populated on receipt")
+	}
 }

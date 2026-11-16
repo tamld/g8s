@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,19 +87,40 @@ func TestRealReviewerPassNoGoFiles(t *testing.T) {
 func TestRealReviewerPassGoFilesNoTests(t *testing.T) {
 	r := NewRealReviewer()
 	env := SelectEnvelope(nil)
+
+	tmpDir := t.TempDir()
+	// Create a minimal go.mod
+	goMod := `module test
+
+go 1.23
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	// Create a Go file with no tests
+	goFile := `package test
+
+func Hello() string {
+	return "hello"
+}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(goFile), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
 	receipt := orchestrator.Receipt{
 		OK:              true,
 		CommitSHA:       "abc123",
-		FilesModified:   []string{"internal/newpkg/newfile.go"},
+		FilesModified:   []string{"main.go"},
 		ReturnCode:      0,
 		StartedAt:       time.Now(),
 		FinishedAt:      time.Now(),
 		ScopeViolations: nil,
+		WorktreePath:    tmpDir,
 	}
 	outcome := ReviewReceipt(receipt, env, r)
-	// Package doesn't exist, so go test will fail - but we treat non-existent as pass
 	if outcome.Verdict != VerdictPass {
-		t.Logf("outcome: %s reason=%q", outcome.Verdict, outcome.Reason)
+		t.Fatalf("expected VerdictPass, got %s reason=%q", outcome.Verdict, outcome.Reason)
 	}
 }
 
@@ -140,5 +162,104 @@ func TestRealReviewerCollectPackages(t *testing.T) {
 		if !expected[p] {
 			t.Errorf("unexpected package: %s", p)
 		}
+	}
+}
+
+func TestRealReviewerReviseOnFailingGoTest(t *testing.T) {
+	r := NewRealReviewer()
+
+	tmpDir := t.TempDir()
+	// Create a minimal go.mod
+	goMod := `module test
+
+go 1.23
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	// Create pkg/foo/foo.go
+	if err := os.MkdirAll(filepath.Join(tmpDir, "pkg", "foo"), 0o755); err != nil {
+		t.Fatalf("mkdir pkg/foo: %v", err)
+	}
+	goFile := `package foo
+
+func Add(a, b int) int {
+	return a + b
+}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "pkg", "foo", "foo.go"), []byte(goFile), 0o644); err != nil {
+		t.Fatalf("write foo.go: %v", err)
+	}
+	// Create pkg/foo/foo_test.go with a failing test
+	testFile := `package foo
+
+import "testing"
+
+func TestFail(t *testing.T) {
+	t.Fatal("intentional failure")
+}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "pkg", "foo", "foo_test.go"), []byte(testFile), 0o644); err != nil {
+		t.Fatalf("write foo_test.go: %v", err)
+	}
+
+	// Test with non-empty SelectedFields
+	envWithFields := SelectEnvelope(map[string]bool{"unit_test": true})
+	receipt := orchestrator.Receipt{
+		OK:              true,
+		CommitSHA:       "abc123",
+		FilesModified:   []string{"pkg/foo/foo.go"},
+		ReturnCode:      0,
+		StartedAt:       time.Now(),
+		FinishedAt:      time.Now(),
+		ScopeViolations: nil,
+		WorktreePath:    tmpDir,
+	}
+	outcome := ReviewReceipt(receipt, envWithFields, r)
+	if outcome.Verdict != VerdictRevise {
+		t.Fatalf("expected VerdictRevise with SelectedFields, got %s reason=%q", outcome.Verdict, outcome.Reason)
+	}
+
+	// Test with empty SelectedFields
+	envEmpty := SelectEnvelope(nil)
+	receipt2 := orchestrator.Receipt{
+		OK:              true,
+		CommitSHA:       "abc123",
+		FilesModified:   []string{"pkg/foo/foo.go"},
+		ReturnCode:      0,
+		StartedAt:       time.Now(),
+		FinishedAt:      time.Now(),
+		ScopeViolations: nil,
+		WorktreePath:    tmpDir,
+	}
+	outcome2 := ReviewReceipt(receipt2, envEmpty, r)
+	if outcome2.Verdict != VerdictRevise {
+		t.Fatalf("expected VerdictRevise with empty SelectedFields, got %s reason=%q", outcome2.Verdict, outcome2.Reason)
+	}
+}
+
+type customFailingReviewer struct{}
+
+func (f customFailingReviewer) Validate(env TaskEnvelope, receipt orchestrator.Receipt) (map[string]bool, error) {
+	return map[string]bool{"unit_test": false}, nil
+}
+
+func TestReviewReceiptReviseWhenCustomReviewerReturnsFalse(t *testing.T) {
+	env := SelectEnvelope(map[string]bool{"unit_test": true})
+	receipt := orchestrator.Receipt{
+		OK:              true,
+		CommitSHA:       "abc123",
+		FilesModified:   []string{"main.go"},
+		ReturnCode:      0,
+		StartedAt:       time.Now(),
+		FinishedAt:      time.Now(),
+		ScopeViolations: nil,
+	}
+	outcome := ReviewReceipt(receipt, env, customFailingReviewer{})
+	if outcome.Verdict != VerdictRevise {
+		t.Fatalf("expected VerdictRevise, got %s reason=%q", outcome.Verdict, outcome.Reason)
+	}
+	if outcome.Validated["unit_test"] != false {
+		t.Fatalf("expected unit_test=false in validated, got %v", outcome.Validated)
 	}
 }

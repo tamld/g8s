@@ -258,9 +258,11 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 
 	receipt := h.synthesize(err)
 	verifier := &StdoutEnvelopeVerifier{}
-	_ = verifier.VerifyReceipt(ctx, &receipt)
+	vErr := applyReceiptVerifier(ctx, verifier, &receipt)
 	if !receipt.OK && err == nil {
-		if receipt.LastError != "" {
+		if vErr != nil {
+			err = vErr
+		} else if receipt.LastError != "" {
 			err = errors.New(receipt.LastError)
 		} else if envErr := dispatch.ParseWorkerEnvelope(h.stdout.Bytes()); envErr != nil {
 			err = envErr
@@ -301,6 +303,7 @@ func (h *agyHandle) synthesize(runErr error) Receipt {
 		WorkerName:      "agy",
 		TaskID:          h.task.ID,
 		WorktreeID:      h.task.Worktree.ID,
+		WorktreePath:    h.task.Worktree.Path,
 		Branch:          h.task.Worktree.Branch,
 		Stdout:          h.stdout.String(),
 		RawStdout:       h.stdout.Bytes(),

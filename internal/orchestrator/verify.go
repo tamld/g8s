@@ -70,3 +70,19 @@ func (v *StdoutEnvelopeVerifier) VerifyReceipt(ctx context.Context, receipt *Rec
 	}
 	return nil
 }
+
+// applyReceiptVerifier calls the verifier and forces receipt fields on failure.
+// It is unexported so callers in this package and mounts.go can share the logic.
+func applyReceiptVerifier(ctx context.Context, v ReceiptVerifier, receipt *Receipt) error {
+	err := v.VerifyReceipt(ctx, receipt)
+	if err != nil && receipt != nil {
+		receipt.OK = false
+		if receipt.ReturnCode == 0 {
+			receipt.ReturnCode = 1
+		}
+		if receipt.LastError == "" {
+			receipt.LastError = fmt.Sprintf("receipt verification failed: %v", err)
+		}
+	}
+	return err
+}
