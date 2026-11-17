@@ -448,3 +448,19 @@
     demo: "go test ./cmd/g8s -run TestNoDeadInternalPackages"
     source: cmd/g8s/dead_packages_test.go
 
+- id: claim-offline-assurance-benchmark-suite
+  claim: "Offline assurance benchmark suite (tools/assurance_benchmark.sh and g8s eval run --category assurance) verifies 100% escape containment across 5 vectors, 0% seeded-mutant false-PASS rate, deterministic crash-lease reclaim RTO, sub-millisecond CAS/receipt latency, and 100% cryptographic audit completeness without external LLM keys"
+  evidence:
+    test: TestAssuranceProbes_AllPassAndEmitMetrics
+    eval: "as-001"
+    demo: "bash tools/assurance_benchmark.sh --json"
+    source: docs/security/containment-matrix.md
+
+- id: claim-ed25519-signed-receipts-and-charters
+  claim: "WriteReceipts (rc1:) and StratumCharters (ed25519:v1:) are Ed25519-authenticated against same-UID SQLite row tampering and stored with 0600/0700 state permissions"
+  evidence:
+    test: TestAssuranceProbes_AllPassAndEmitMetrics
+    eval: "as-005"
+    demo: "bin/g8s eval run --category assurance --json"
+    source: spec/constitution.md
+

@@ -18,6 +18,7 @@ const (
 	CategoryPermissionBypass    ProbeCategory = "permission_bypass"
 	CategoryWikiPolicyViolation ProbeCategory = "wiki_policy_violation"
 	CategoryTaskRouting         ProbeCategory = "task_routing"
+	CategoryAssurance           ProbeCategory = "assurance"
 )
 
 // ProbeResult is the outcome of a single probe execution.

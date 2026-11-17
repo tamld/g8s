@@ -4,7 +4,7 @@
 
 # g8s (The Gatekeepers)
 
-> **Single-binary zero-trust process execution harness (<25MB static pure-Go binary) for AI agent CLI workers.**  
+> **Single-binary layered zero-trust execution harness (<25MB static pure-Go binary) for AI agent CLI workers — combining OS sandboxing (Seatbelt / `bwrap`+Landlock / `JobObject`), Ed25519 capability receipts, and Git worktree firewalls.**  
 > *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."*
 
 <p align="center">
@@ -33,8 +33,8 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 | Dimension | Without g8s (Ambient Shell) | With g8s (Zero-Trust Harness) |
 | :--- | :--- | :--- |
 | **Execution Authority** | Ambient user machine access; worker can touch anything. | Strict role-based permission profiles (`read_only`, `workspace_write`). |
-| **Filesystem Safety** | Unchecked file mutations directly corrupt working tree. | Path-scoped, single-use `WriteReceipt`s enforced in-process (`AllowedPaths`). |
-| **Process Containment** | Child processes survive crashes as orphan zombies. | Isolated OS process groups (`Setpgid`) terminating cleanly on cancel/timeout. |
+| **Filesystem Safety** | Unchecked file mutations directly corrupt working tree. | Ed25519-signed single-use `WriteReceipt`s (`rc1:`), OS write-scope jail (`Seatbelt` / `bwrap` / Landlock on Unix), and post-run Git worktree diff firewall (`VerifyWorktreeDiffScope`). |
+| **Process Containment** | Child processes survive crashes as orphan zombies; host API keys leak into subprocess env. | Ambient secret scrubbing (`ScrubEnv`) + OS process-group/job isolation (`Setpgid`, `Pdeathsig` under Landlock, Win32 `JobObject`). See [3-OS Containment Matrix](docs/security/containment-matrix.md). |
 | **Task Durability** | Stored in ephemeral agent memory; lost on disconnect. | SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases. |
 | **LLM Gateway Access** | Ad-hoc Python scripts or proprietary closed agent clouds. | Universal config-driven consumer (`g8s llm-call`, `9router`, OpenAI, Anthropic). |
 | **Supervisor Context** | Flooded with megabytes of noisy test/CI raw logs. | Lossless Information Firewall (`RoundReceiptSchema` strips noise, preserves failures). |
@@ -336,6 +336,7 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..11) and non-functional requirements (NFR-1..4). |
 | [Definition of Done & Ready](docs/DOD_DOR.md) | Engineering criteria, multi-round verification, and gate rules. |
 | [OWASP Agentic, SLSA & SBOM Security](docs/security/owasp-agentic-slsa-sbom.md) | OWASP Top 10 for LLM/Agentic Apps (2025), SLSA v1.0, and SPDX SBOM matrix. |
+| [Containment & Threat-Model Matrix](docs/security/containment-matrix.md) | 3-OS kernel vs. Ed25519/CAS vs. Git diff-firewall guarantees, degraded modes, and offline audit reproduction. |
 | [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0041 architectural choices and rationales (with documented tombstone gaps). |
 
 ### AppSec & Quality Gates
@@ -348,6 +349,22 @@ Every code change is verified against four AppSec pillars and quantitative claim
 | **2. Black-Box DAST** | End-to-end API fuzzing & boundary probing (`dast_test.go`) | HTTP endpoints and MCP stdio resist malicious payloads and path escapes. |
 | **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) and red-team probe suite (`sa-006`..`sa-008`) | Eval-probe runtime hygiene snapshots verifying CAS contention, symlink confinement, and zero goroutine/temp leaks. |
 | **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Deterministic parsing resilience across arbitrary inputs. |
+
+### Containment Boundaries & Offline Assurance Benchmark (`#922`)
+
+Reproduce the 5-probe security, anti-false-PASS, crash-recovery, CAS-latency, and cryptographic-audit benchmark locally without any LLM API keys:
+
+```bash
+bash tools/assurance_benchmark.sh
+```
+
+| Platform | Kernel Filesystem & Process Enforcement | Control-Plane & Post-Run Enforcement | Degraded / Caveat Reporting |
+| :--- | :--- | :--- | :--- |
+| **macOS (`darwin`)** | XNU Seatbelt (`sandbox-exec`, `kernel_enforced`), `ScrubEnv`, `-pgid` + `G8S_SANDBOX_ID` sweep | Ed25519 receipts/charters (`0600`/`0700`), WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | No XNU `Pdeathsig` on external supervisor `SIGKILL` (`g8s cleanup`) |
+| **Linux (`linux`)** | `bwrap` / Landlock LSM (`kernel_enforced`), `ScrubEnv`, `-pgid` + subreaper + `Pdeathsig` (Landlock) | Ed25519 receipts/charters (`0600`/`0700`), WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | `policy_only` surfaced by `g8s doctor` if neither `bwrap` nor Landlock is usable; `/usr/bin/bwrap` AppArmor resets `pdeath_signal` |
+| **Windows (`windows`)** | Win32 `JobObject` (`KILL_ON_JOB_CLOSE`), `ScrubEnv`, `TerminateProcess` | Ed25519 receipts/charters, WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | No pre-run kernel worktree path ACL (`mode=job_object_env_scrubbed`); relies on Tiers 2–3 for file scope |
+
+Full threat-model table and reproducible verification guide: [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md).
 
 ---
 
