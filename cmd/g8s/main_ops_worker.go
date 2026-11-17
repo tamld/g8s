@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,10 +19,9 @@ import (
 	"github.com/tamld/g8s/internal/completion"
 	"github.com/tamld/g8s/internal/config"
 	"github.com/tamld/g8s/internal/controlplane"
-
 	"github.com/tamld/g8s/internal/orchestrator"
 	"github.com/tamld/g8s/internal/pathutil"
-
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/service"
 	"github.com/tamld/g8s/internal/settings"
 	"github.com/tamld/g8s/internal/vault"
@@ -693,7 +693,7 @@ func runWorker(args []string) {
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		if pool, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd, Prefix: "wt"}); poolErr == nil {
-			opts = append(opts, worker.WithWorktreeIsolator(workerPoolIsolator{pool: pool}))
+			opts = append(opts, worker.WithWorktreeIsolator(workerPoolIsolator{pool: pool, repoDir: cwd}))
 		}
 	}
 
@@ -915,10 +915,12 @@ func runStateReplay(args []string) {
 // gets a private worktree; release(keep=true) preserves the deliverable
 // (worktree dir + branch) for inspection/merge.
 type workerPoolIsolator struct {
-	pool *orchestrator.Pool
+	pool    *orchestrator.Pool
+	repoDir string
 }
 
 func (p workerPoolIsolator) AcquireWorktree(ctx context.Context, taskID string) (string, func(keep bool), error) {
+	reclaimStaleTaskWorktree(p.repoDir, taskID)
 	wt, err := p.pool.Acquire(ctx, taskID)
 	if err != nil {
 		return "", nil, err
@@ -932,6 +934,7 @@ func (p workerPoolIsolator) AcquireWorktree(ctx context.Context, taskID string) 
 
 func (p workerPoolIsolator) AcquireRepoWorktree(ctx context.Context, repoDir, taskID string) (string, func(keep bool), error) {
 	if strings.TrimSpace(repoDir) != "" {
+		reclaimStaleTaskWorktree(repoDir, taskID)
 		if targetPool, err := orchestrator.NewPool(orchestrator.PoolOptions{Repo: repoDir, Prefix: "wt"}); err == nil {
 			wt, acqErr := targetPool.Acquire(ctx, taskID)
 			if acqErr == nil {
@@ -944,4 +947,62 @@ func (p workerPoolIsolator) AcquireRepoWorktree(ctx context.Context, repoDir, ta
 		}
 	}
 	return p.AcquireWorktree(ctx, taskID)
+}
+
+func reclaimStaleTaskWorktree(repoDir, taskID string) {
+	repoDir = strings.TrimSpace(repoDir)
+	taskID = strings.TrimSpace(taskID)
+	if repoDir == "" || taskID == "" {
+		return
+	}
+	branch := "wt/" + taskID
+	fullRef := "refs/heads/" + branch
+	if exec.Command("git", "-C", repoDir, "show-ref", "--verify", "--quiet", fullRef).Run() != nil {
+		return
+	}
+
+	canonRepo := sandbox.CanonicalPath(repoDir)
+	wtBase := sandbox.CanonicalPath(filepath.Join(pathutil.DefaultStateDir(), "worktrees"))
+
+	if out, err := exec.Command("git", "-C", repoDir, "worktree", "list", "--porcelain").Output(); err == nil {
+		var curPath, curBranch string
+		flush := func() {
+			if curBranch == fullRef && curPath != "" {
+				canonWT := sandbox.CanonicalPath(curPath)
+				if canonWT != "" && canonWT != canonRepo && isStrictSubpath(wtBase, canonWT) {
+					if rerr := exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", "--", canonWT).Run(); rerr != nil {
+						_ = os.RemoveAll(canonWT)
+					}
+				}
+			}
+			curPath, curBranch = "", ""
+		}
+		for _, rawLine := range strings.Split(string(out), "\n") {
+			line := strings.TrimRight(rawLine, "\r")
+			if strings.TrimSpace(line) == "" {
+				flush()
+				continue
+			}
+			if strings.HasPrefix(line, "worktree ") {
+				curPath = strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+			} else if strings.HasPrefix(line, "branch ") {
+				curBranch = strings.TrimSpace(strings.TrimPrefix(line, "branch "))
+			}
+		}
+		flush()
+	}
+
+	_ = exec.Command("git", "-C", repoDir, "worktree", "prune").Run()
+	_ = exec.Command("git", "-C", repoDir, "branch", "-D", "--", branch).Run()
+}
+
+func isStrictSubpath(parentDir, targetPath string) bool {
+	if parentDir == "" || targetPath == "" {
+		return false
+	}
+	rel, err := filepath.Rel(parentDir, targetPath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }

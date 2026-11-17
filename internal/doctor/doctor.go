@@ -22,6 +22,7 @@ import (
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/registry"
 	g8sruntime "github.com/tamld/g8s/internal/runtime"
+	"github.com/tamld/g8s/internal/sandbox"
 	_ "modernc.org/sqlite"
 )
 
@@ -336,6 +337,7 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 	report.Checks = append(report.Checks, checkProviders())
 	report.Checks = append(report.Checks, checkProvidersFile())
 	report.Checks = append(report.Checks, checkHarnessProfiles())
+	report.Checks = append(report.Checks, checkOSSandbox())
 	report.Checks = append(report.Checks, checkStaleBinary())
 	report.Checks = append(report.Checks, checkBinaryVsHead())
 
@@ -363,6 +365,9 @@ func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry)
 	var workerCLIDetail string
 	apiGatewayOK := false
 	var apiGatewayDetail string
+	osSandboxOK := false
+	osSandboxState := "absent"
+	osSandboxDetail := "not probed"
 
 	for _, chk := range checks {
 		switch {
@@ -384,6 +389,24 @@ func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry)
 			if os.Getenv("NINEROUTER_URL") != "" || os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != "" {
 				apiGatewayOK = true
 				apiGatewayDetail = "environment API endpoint/credentials present (static env only; run 'g8s providers discover' to probe live reachability/quota)"
+			}
+		case chk.Name == "OS Sandbox":
+			detail := strings.TrimSpace(chk.Details)
+			if detail == "" {
+				detail = chk.Message
+			}
+			osSandboxDetail = detail
+			combined := chk.Message + " " + chk.Details
+			switch {
+			case chk.Status == "OK" && (strings.Contains(combined, "mode="+string(sandbox.ModeKernelEnforced)) || strings.Contains(combined, "mode="+string(sandbox.ModeJobObjectEnvScrubbed))):
+				osSandboxOK = true
+				osSandboxState = "probed"
+			case strings.Contains(combined, "mode="+string(sandbox.ModePolicyOnly)):
+				osSandboxOK = false
+				osSandboxState = "policy_only"
+			default:
+				osSandboxOK = false
+				osSandboxState = "absent"
 			}
 		}
 	}
@@ -422,6 +445,7 @@ func EvaluateCapabilities(checks []DiagnosticResult) (string, []CapabilityEntry)
 		{Name: "worker_cli", Available: workerCLIOK, VerificationState: stateFor(workerCLIOK, true), Detail: workerCLIDetail},
 		{Name: "api_gateway", Available: apiGatewayOK, VerificationState: stateFor(apiGatewayOK, false), Detail: apiGatewayDetail},
 		{Name: "ripgrep_turbo", Available: ripgrepOK, VerificationState: stateFor(ripgrepOK, true), Detail: rgDetail},
+		{Name: "os_sandbox", Available: osSandboxOK, VerificationState: osSandboxState, Detail: osSandboxDetail},
 	}
 
 	status := "MINIMAL"
@@ -856,6 +880,62 @@ func checkDiskSpace(stateDir ...string) DiagnosticResult {
 		Status:  "OK",
 		Message: fmt.Sprintf("Sufficient disk space available on state volume (%s free)", formatBytes(freeBytes)),
 		Details: fmt.Sprintf("path: %s, free: %d bytes", dir, freeBytes),
+	}
+}
+
+func checkOSSandbox() DiagnosticResult {
+	return probeOSSandbox(sandbox.Prepare)
+}
+
+func probeOSSandbox(prepareFn func(sandbox.Config) (*sandbox.PreparedLaunch, error)) DiagnosticResult {
+	probeExe, err := exec.LookPath("true")
+	if err != nil || strings.TrimSpace(probeExe) == "" {
+		if exe, exeErr := os.Executable(); exeErr == nil && strings.TrimSpace(exe) != "" {
+			probeExe = exe
+		} else {
+			probeExe = "g8s"
+		}
+	}
+
+	prep, err := prepareFn(sandbox.Config{
+		Argv:       []string{probeExe},
+		Permission: "read_only",
+	})
+	if prep != nil && prep.Cleanup != nil {
+		prep.Cleanup()
+	}
+	if err != nil {
+		return DiagnosticResult{
+			Name:    "OS Sandbox",
+			Status:  "WARN",
+			Message: fmt.Sprintf("OS sandbox probe failed: %v", err),
+			Details: err.Error(),
+		}
+	}
+	if prep == nil {
+		return DiagnosticResult{
+			Name:    "OS Sandbox",
+			Status:  "WARN",
+			Message: "OS sandbox probe returned nil launch",
+			Details: "mode=unknown",
+		}
+	}
+
+	detail := fmt.Sprintf("mode=%s backend=%s", prep.Mode, prep.Backend)
+	if prep.Mode == sandbox.ModeKernelEnforced || prep.Mode == sandbox.ModeJobObjectEnvScrubbed {
+		return DiagnosticResult{
+			Name:    "OS Sandbox",
+			Status:  "OK",
+			Message: fmt.Sprintf("Containment active (mode=%s, backend=%s)", prep.Mode, prep.Backend),
+			Details: detail,
+		}
+	}
+
+	return DiagnosticResult{
+		Name:    "OS Sandbox",
+		Status:  "OK",
+		Message: fmt.Sprintf("Policy-only fallback active (mode=%s, backend=%s)", prep.Mode, prep.Backend),
+		Details: detail,
 	}
 }
 

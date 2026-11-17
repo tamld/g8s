@@ -51,29 +51,52 @@ jobs:
           go-version: '1.26.11'
           cache: true
 
-      - name: prune-law gate
+      - name: prune-law gate & reflection cycle (D-09)
         shell: bash
         run: |
-          state="${G8S_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/g8s}"
-          if [[ ! -e "$state/reflection-receipts" ]]; then
-            echo "no reflection receipts in state; prune-law gate skipped"
-          else
-            G8S_REFLECTION_TOMBSTONE="$state/reflection-TOMBSTONED" \
-              bash tools/ci_process_prune_ratio.sh "$state/reflection-receipts"
-          fi
+          set -euo pipefail
+          CGO_ENABLED=0 go build -o ./bin/g8s ./cmd/g8s
+          state="$(mktemp -d)"
+          trap 'rm -rf "$state"' EXIT
+          mkdir -p "$state/reflection-receipts"
+          now_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-      - name: reflection cycle (D-09)
-        shell: bash
-        run: |
-          state="${G8S_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/g8s}"
-          if [[ -e "$state/reflection-TOMBSTONED" ]]; then
-            echo "reflection cycle tombstoned; cycle skipped (operator re-creation required)"
-          elif [[ -f "$state/reflection-latest.json" ]]; then
-            go build -o ./bin/g8s ./cmd/g8s
-            G8S_STATE_DIR="$state" ./bin/g8s autopilot tick -reflection-receipt "$state/reflection-latest.json"
-          else
-            echo "no reflection receipt in state; cycle skipped"
+          jq -n --arg ts "$now_utc" '{
+            receipt_id: "nightly-fixture-001",
+            cycle: { timestamp: $ts, trigger: "nightly" },
+            judge: { name: "g8s-nightly-fixture", version: "1.0.0" },
+            verdicts: [
+              {
+                artifact_path: "docs/OPERATIONS.md",
+                dimension: "drift",
+                verdict: "healthy",
+                evidence_refs: ["run:nightly-fixture-001"]
+              },
+              {
+                artifact_path: "docs/legacy-process.md",
+                dimension: "staleness",
+                verdict: "stale",
+                evidence_refs: ["run:nightly-fixture-001"]
+              }
+            ],
+            add_list: ["docs/OPERATIONS.md"],
+            prune_list: ["docs/legacy-process.md"],
+            prune_ratio: 1,
+            self_tombstone_after: 3
+          }' >"$state/reflection-latest.json"
+          cp "$state/reflection-latest.json" "$state/reflection-receipts/cycle-001.json"
+
+          G8S_REFLECTION_TOMBSTONE="$state/reflection-TOMBSTONED" \
+            bash tools/ci_process_prune_ratio.sh "$state/reflection-receipts"
+          test ! -e "$state/reflection-TOMBSTONED"
+
+          first_id=$(G8S_STATE_DIR="$state" AGY_MCP_ALLOW_WORKSPACE_WRITE=1 ./bin/g8s autopilot tick -reflection-receipt "$state/reflection-latest.json" --json | jq -er '.data.task_id')
+          second_id=$(G8S_STATE_DIR="$state" AGY_MCP_ALLOW_WORKSPACE_WRITE=1 ./bin/g8s autopilot tick -reflection-receipt "$state/reflection-latest.json" --json | jq -er '.data.task_id')
+          if [ "$first_id" != "$second_id" ]; then
+            echo "::error::D-09 idempotency failed: $first_id != $second_id"
+            exit 1
           fi
+          G8S_STATE_DIR="$state" ./bin/g8s get "$first_id" --json | jq -e '.data.state == "QUEUED"'
 
       - name: Check formatting (gofmt)
         shell: bash

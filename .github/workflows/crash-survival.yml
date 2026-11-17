@@ -14,9 +14,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  crash:
-    name: Subprocess Crash-Survival & Supervisor Adoption
+  lane-gate:
+    name: Docs lane scope
     runs-on: ubuntu-latest
+    outputs:
+      ci_lane: ${{ steps.detect.outputs.ci_lane }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -24,57 +26,61 @@ jobs:
           fetch-depth: 0
 
       - name: Detect CI Lane
+        id: detect
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.before }}
         run: |
-          lane=$(bash tools/ci_lane_detect.sh origin/main || true)
+          if ! lane=$(bash tools/ci_lane_detect.sh origin/main "$BASE_SHA" 2>/dev/null); then
+            lane="build"
+          fi
           if [ "$lane" = "lane=docs" ] || [ "$lane" = "docs" ]; then
             CI_LANE="docs"
           else
             CI_LANE="build"
           fi
-          echo "CI_LANE=$CI_LANE" >> "$GITHUB_ENV"
-          export CI_LANE
+          echo "ci_lane=$CI_LANE" >> "$GITHUB_OUTPUT"
           echo "Detected lane: $CI_LANE"
-
-      - name: Early exit for docs lane
-        shell: bash
-        run: |
-          if [ "${CI_LANE}" = "docs" ]; then
+          if [ "$CI_LANE" = "docs" ]; then
             echo "::notice::docs lane: Crash-Survival E2E skipped (not applicable)"
-            exit 0
           fi
 
+  crash:
+    name: 3-OS Fault-Injection & Sandbox (${{ matrix.os }})
+    needs: [lane-gate]
+    if: needs.lane-gate.outputs.ci_lane != 'docs'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
       - name: Setup Go
-        if: env.CI_LANE != 'docs'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.11'
 
-      - name: Build g8s binary
-        if: env.CI_LANE != 'docs'
+      - name: Verify OS sandbox capability via doctor --json
+        shell: bash
         run: |
-          go build -o ./g8s ./cmd/g8s
-          chmod +x ./g8s
-
-      - name: Submit initial task
-        if: env.CI_LANE != 'docs'
-        run: |
-          ./g8s submit --idempotency-key crash-${{ github.run_id }} --role scout --prompt "noop"
-
-      - name: Spawn worker and simulate SIGKILL mid-flight
-        if: env.CI_LANE != 'docs'
-        run: |
-          ./g8s worker --once &
-          WORKER_PID=$!
-          sleep 1
-          if kill -0 $WORKER_PID 2>/dev/null; then
-            kill -9 $WORKER_PID || true
+          set -euo pipefail
+          exe="./bin/g8s"
+          if [ "${RUNNER_OS:-}" = "Windows" ]; then
+            exe="./bin/g8s.exe"
           fi
-          sleep 2
+          mkdir -p ./bin
+          CGO_ENABLED=0 go build -o "$exe" ./cmd/g8s
+          state_dir="$(mktemp -d)"
+          trap 'rm -rf "$state_dir"' EXIT
+          G8S_STATE_DIR="$state_dir" "$exe" doctor --json | tr -d '\r' | jq -e '.data.capabilities[] | select(.name == "os_sandbox") | (.available == true and .verification_state == "probed")'
 
-      - name: Restart g8s, verify pending tasks still queue
-        if: env.CI_LANE != 'docs'
+      - name: Run 3-OS subprocess fault-injection E2E suite
+        shell: bash
         run: |
-          ./g8s submit --idempotency-key crash2-${{ github.run_id }} --role scout --prompt "noop2"
-          ./g8s tasks --state PENDING | grep -q "crash2"
-          ./g8s worker --once || true
+          CGO_ENABLED=0 go test -v -count=1 -timeout 5m -run '^TestFaultInjectionE2E' ./cmd/g8s
