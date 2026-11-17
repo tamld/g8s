@@ -322,25 +322,26 @@ func TestFaultInjectionE2E_CrashStaleLeaseReclaimVerifyAndDeliver(t *testing.T) 
 		t.Fatalf("state during active attempt = %q, want RUNNING", running.State)
 	}
 
-	// Hard-kill worker1 mid-lease.
+	// Hard-kill worker1 mid-lease. On Windows, closing worker1's process handle
+	// terminates the entire JobObject tree automatically. On POSIX, external
+	// SIGKILL on worker1 cannot run signal handlers or cross every bwrap/Setsid
+	// domain, so reap Attempt 1 sleepers cleanly before Worker 2 reclaims.
 	if err := worker1.Process.Kill(); err != nil {
 		t.Fatalf("kill worker1: %v", err)
 	}
 	_ = worker1.Wait()
 
-	if runtime.GOOS == "linux" || runtime.GOOS == "windows" {
-		if !waitFaultProcessDead(activeProcs.PID, 5*time.Second) {
-			t.Fatalf("faultworker pid %d survived worker1 SIGKILL on %s", activeProcs.PID, runtime.GOOS)
-		}
-	}
 	if runtime.GOOS == "windows" {
+		if !waitFaultProcessDead(activeProcs.PID, 5*time.Second) {
+			t.Fatalf("faultworker pid %d survived worker1 JobObject close on Windows", activeProcs.PID)
+		}
 		if !waitFaultProcessDead(activeProcs.GrandchildPID, 5*time.Second) {
 			t.Fatalf("detached grandchild pid %d survived worker1 JobObject close on Windows", activeProcs.GrandchildPID)
 		}
+	} else {
+		forceKillFaultTestPID(activeProcs.GrandchildPID)
+		forceKillFaultTestPID(activeProcs.PID)
 	}
-	// On macOS (XNU lacks Pdeathsig), kill Attempt 1's sleeper cleanly after observing Worker 1 died.
-	forceKillFaultTestPID(activeProcs.GrandchildPID)
-	forceKillFaultTestPID(activeProcs.PID)
 
 	if _, err := os.Stat(filepath.Join(env.repoDir, "pkg", "corrupt.go")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("dirty file must not leak into repoDir after worker1 crash, stat=%v", err)
@@ -455,7 +456,8 @@ func TestFaultInjectionE2E_HardTimeoutKillsDetachedProcessTree(t *testing.T) {
 		t.Fatal("expected non-empty LastError after timeout kill")
 	}
 	lowerErr := strings.ToLower(*task.LastError)
-	if !strings.Contains(lowerErr, "deadline exceeded") && !strings.Contains(lowerErr, "exited with code -1") {
+	validWindowsExit := runtime.GOOS == "windows" && strings.Contains(lowerErr, "exited with code 1")
+	if !strings.Contains(lowerErr, "deadline exceeded") && !strings.Contains(lowerErr, "exited with code -1") && !validWindowsExit {
 		t.Fatalf("expected deadline exceeded or forced signal exit in LastError, got %q", *task.LastError)
 	}
 }
