@@ -304,13 +304,18 @@ jobs:
           AUDIT_JSON=$("$AUDIT_BIN" feature audit --test-report "$COV_FILE" --json)
           AUDIT_RC=$?
           set -e
-          rm -f "$AUDIT_BIN"
           echo "$AUDIT_JSON" | jq '{valid: .data.valid, total: .data.total_features, runtime_proven: .data.runtime_proven_count, static_only: .data.static_only_count, broken: .data.broken_runtime_count, drifted: .data.drifted_contract_count}'
           if [ "$AUDIT_RC" -ne 0 ] || ! echo "$AUDIT_JSON" | jq -e '.data.valid == true and .data.total_features > 0 and .data.runtime_proven_count == .data.total_features and .data.static_only_count == 0 and .data.broken_runtime_count == 0 and .data.drifted_contract_count == 0' > /dev/null; then
+            rm -f "$AUDIT_BIN"
             echo "::error::Feature audit failed 100% RUNTIME_PROVEN gate:"
             echo "$AUDIT_JSON"
             exit 1
           fi
+
+          echo "=== Running Offline Assurance Benchmark Suite (#922) ==="
+          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null
+          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --markdown
+          rm -f "$AUDIT_BIN"
 
       - name: Coverage Ratchet
         if: env.CI_LANE != 'docs'
@@ -502,6 +507,13 @@ jobs:
       - name: go test (Windows, CGO=0)
         if: env.CI_LANE != 'docs'
         run: go test -count=1 ./...
+
+      - name: Offline Assurance Benchmark (Windows, #922)
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: |
+          bash tools/assurance_benchmark.sh --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null
+          bash tools/assurance_benchmark.sh --markdown
 
   cross-platform:
     name: Cross-Platform Build

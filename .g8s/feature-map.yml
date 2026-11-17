@@ -427,6 +427,7 @@ features:
       - "internal/runtime/**"
       - "internal/sleep/**"
       - "tools/worker_boundary*.sh"
+      - "tools/assurance_benchmark*.sh"
       - "tools/sisyphus_dispatch.sh"
       - "tools/spawn_worktree.sh"
       - "tools/drop_worktree.sh"

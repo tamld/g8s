@@ -304,6 +304,7 @@ func DefaultSuite() *ProbeSuite {
 		},
 	}
 	suite.Probes = append(suite.Probes, NewSycophancyProbes()...)
+	suite.Probes = append(suite.Probes, AssuranceProbes()...)
 	return suite
 }
 

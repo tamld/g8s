@@ -4,7 +4,7 @@
 
 # g8s (The Gatekeepers) — Bản tiếng Việt
 
-> **Harness thực thi tiến trình zero-trust bằng binary tĩnh thuần Go (<25MB, không CGO) cho các AI agent CLI worker.**  
+> **Harness thực thi đa tầng zero-trust bằng binary tĩnh thuần Go (<25MB, không CGO) cho các AI agent CLI worker — kết hợp sandbox nhân OS (`Seatbelt` / `bwrap`+Landlock / `JobObject`), biên nhận mật mã Ed25519, và tường lửa Git worktree.**  
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
 <p align="center">
@@ -35,8 +35,8 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 | Chiều hướng | Khi không có g8s (Ambient Shell) | Khi có g8s (Zero-Trust Harness) |
 | :--- | :--- | :--- |
 | **Quyền hạn thực thi** | Trao toàn quyền máy chủ; worker có thể can thiệp bất kỳ đâu. | Cấu hình quyền theo role chặt chẽ (`read_only`, `workspace_write`). |
-| **An toàn hệ thống file** | Thay đổi file trực tiếp làm hỏng working tree chính. | Biên nhận `WriteReceipt` một lần dùng, giới hạn vùng ghi (`AllowedPaths`). |
-| **Cách ly tiến trình** | Tiến trình con sót lại dưới dạng tiến trình ma (zombie) khi crash. | Nhóm tiến trình OS (`Setpgid`) kill sạch toàn bộ cây tiến trình khi dừng. |
+| **An toàn hệ thống file** | Thay đổi file trực tiếp làm hỏng working tree chính. | Biên nhận `WriteReceipt` ký Ed25519 (`rc1:`) dùng một lần, sandbox ghi ở nhân OS trên Unix (`Seatbelt` / `bwrap` / Landlock) và tường lửa diff worktree hậu kiểm (`VerifyWorktreeDiffScope`). |
+| **Cách ly tiến trình** | Tiến trình con sót lại dưới dạng zombie khi crash; rò rỉ khóa API môi trường. | Lọc bí mật môi trường (`ScrubEnv`) + cô lập process group / JobObject OS (`Setpgid`, `Pdeathsig` với Landlock, Win32 `JobObject`). Xem [Ma trận Containment 3-OS](docs/security/containment-matrix.md). |
 | **Tính bền vững của task** | Lưu trong bộ nhớ agent tạm bợ; mất khi ngắt kết nối. | Hàng đợi SQLite WAL với khóa Compare-And-Swap (CAS) nguyên tử. |
 | **Truy cập Gateway LLM** | Dùng script Python chắp vá hoặc nền tảng cloud đóng kín. | Tiêu thụ gateway hướng cấu hình thuần Go (`g8s llm-call`, `9router`, OpenAI, Anthropic). |
 | **Ngữ cảnh Supervisor** | Bị tràn ngập bởi hàng megabyte log thô kiểm thử / CI. | Tường lửa thông tin không suy hao (`RoundReceiptSchema` lọc nhiễu, giữ nguyên lỗi). |
@@ -333,6 +333,7 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | [Yêu cầu Phần mềm (SRS)](docs/SRS.md) | Yêu cầu chức năng (FR-1..11) và phi chức năng (NFR-1..4). |
 | [Định nghĩa Xong & Sẵn sàng (DOD_DOR)](docs/DOD_DOR.md) | Tiêu chuẩn chất lượng, quy trình xác thực đa vòng và cổng kiểm soát. |
 | [Chuẩn Bảo mật OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Ánh xạ OWASP Top 10 cho LLM/Agent (2025), SLSA v1.0 và SPDX SBOM. |
+| [Ma trận Containment & Threat Model 3-OS](docs/security/containment-matrix.md) | Ranh giới thực thi nhân OS vs. Ed25519/CAS vs. Tường lửa diff worktree, chế độ suy giảm và hướng dẫn tái lập benchmark offline. |
 | [Khôi phục Phiên bản (Rollback)](docs/release/ROLLBACK.md) | Khôi phục binary bản phát hành trước khi nâng cấp thất bại. |
 | [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0041 (kèm ghi chú tombstone). |
 
@@ -346,6 +347,16 @@ Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec 
 | **2. Black-Box DAST** | Fuzzing API và thăm dò biên giới hạn (`dast_test.go`) | Kiểm tra endpoint HTTP và MCP stdio chống payload độc và thoát thư mục. |
 | **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) và bộ probe red-team (`sa-006`..`sa-008`) | Snapshot kiểm định vệ sinh runtime xác minh tranh chấp CAS, giam giữ symlink và không rò rỉ goroutine/file tạm. |
 | **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Độ bền vững của bộ phân tích trước mọi đầu vào bất thường. |
+
+### Ranh giới Containment & Bộ Benchmark Độc lập Offline (`#922`)
+
+Tái lập độc lập toàn bộ 5 bài đo containment thoát sandbox, chống `False PASS` bằng canary đột biến, phục hồi lease crash, độ trễ CAS và kiểm toán mật mã Ed25519 mà không cần bất kỳ API key LLM nào:
+
+```bash
+bash tools/assurance_benchmark.sh
+```
+
+Chi tiết ma trận 3 hệ điều hành (`macOS`, `Linux`, `Windows`) và các giới hạn không cam kết: [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md).
 
 ---
 
