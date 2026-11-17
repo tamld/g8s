@@ -297,6 +297,21 @@ jobs:
             exit 1
           }
 
+          echo "=== Verifying 100% RUNTIME_PROVEN Feature Audit against live go test report (#921) ==="
+          AUDIT_BIN=$(mktemp)
+          CGO_ENABLED=0 go build -o "$AUDIT_BIN" ./cmd/g8s
+          set +e
+          AUDIT_JSON=$("$AUDIT_BIN" feature audit --test-report "$COV_FILE" --json)
+          AUDIT_RC=$?
+          set -e
+          rm -f "$AUDIT_BIN"
+          echo "$AUDIT_JSON" | jq '{valid: .data.valid, total: .data.total_features, runtime_proven: .data.runtime_proven_count, static_only: .data.static_only_count, broken: .data.broken_runtime_count, drifted: .data.drifted_contract_count}'
+          if [ "$AUDIT_RC" -ne 0 ] || ! echo "$AUDIT_JSON" | jq -e '.data.valid == true and .data.total_features > 0 and .data.runtime_proven_count == .data.total_features and .data.static_only_count == 0 and .data.broken_runtime_count == 0 and .data.drifted_contract_count == 0' > /dev/null; then
+            echo "::error::Feature audit failed 100% RUNTIME_PROVEN gate:"
+            echo "$AUDIT_JSON"
+            exit 1
+          fi
+
       - name: Coverage Ratchet
         if: env.CI_LANE != 'docs'
         shell: bash

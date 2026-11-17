@@ -947,8 +947,9 @@ g8s feature verify --file .g8s/feature-map.yml --repo . --json
 g8s feature list --json
 g8s feature inspect FEAT-FSOPS-01 --json
 
-# Run 2-layer AST contract & live behavioral test audit across feature nodes (#686)
+# Run multi-layer AST contract, live behavioral, or test-report audit across feature nodes (#686, #921)
 g8s feature audit --json
+g8s feature audit --test-report /tmp/go-test-report.jsonl --json
 g8s feature audit --feature FEAT-FEATUREMAP-01 --live --json
 ```
 

@@ -47,7 +47,7 @@ func runFeature(args []string) {
 func printFeatureUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  g8s feature verify [--file .g8s/feature-map.yml] [--repo .] [--strict] [--json]")
-	fmt.Println("  g8s feature audit [--file .g8s/feature-map.yml] [--repo .] [--feature <id>] [--live] [--json]")
+	fmt.Println("  g8s feature audit [--file .g8s/feature-map.yml] [--repo .] [--feature <id>] [--test-report <path>] [--live] [--json]")
 	fmt.Println("  g8s feature inspect <feature-id> [--file .g8s/feature-map.yml] [--json]")
 	fmt.Println("  g8s feature list [--file .g8s/feature-map.yml] [--json]")
 	fmt.Println("  g8s feature collisions --paths <glob,...> [--file .g8s/feature-map.yml] [--json]")
@@ -56,7 +56,7 @@ func printFeatureUsage() {
 
 // featureValueFlags lists flags (without dashes) that consume the following argument.
 var featureValueFlags = map[string]bool{
-	"file": true, "repo": true, "id": true, "feature": true,
+	"file": true, "repo": true, "id": true, "feature": true, "test-report": true,
 	"paths": true, "task-a": true, "task-b": true, "label-a": true, "label-b": true,
 }
 
@@ -149,10 +149,11 @@ func runFeatureAudit(args []string) {
 	featureFlag := fs.String("feature", "", "Optional single feature ID to audit")
 	fs.StringVar(featureFlag, "id", "", "Alias for --feature")
 	liveFlag := fs.Bool("live", false, "Execute visible_tests via go test to verify live runtime behavior")
+	testReportFlag := fs.String("test-report", os.Getenv("G8S_TEST_REPORT"), "Path to go test -json or go test -v output file to prove RUNTIME_PROVEN status")
 
 	args = normalizeFlags(args)
 	if err := fs.Parse(args); err != nil {
-		exitUsage("feature", "audit", *traceID, err.Error(), "usage: g8s feature audit [--file <path>] [--repo <dir>] [--feature <id>] [--live] [--json]", *jsonl)
+		exitUsage("feature", "audit", *traceID, err.Error(), "usage: g8s feature audit [--file <path>] [--repo <dir>] [--feature <id>] [--test-report <path>] [--live] [--json]", *jsonl)
 	}
 	if *featureFlag == "" && fs.NArg() > 0 {
 		*featureFlag = fs.Arg(0)
@@ -164,8 +165,9 @@ func runFeatureAudit(args []string) {
 	}
 
 	report, err := featuremap.Audit(fm, *repoFlag, featuremap.AuditOptions{
-		FeatureID: strings.TrimSpace(*featureFlag),
-		Live:      *liveFlag,
+		FeatureID:      strings.TrimSpace(*featureFlag),
+		Live:           *liveFlag,
+		TestReportPath: strings.TrimSpace(*testReportFlag),
 	})
 	if err != nil {
 		exitRuntime("feature", "audit", *traceID, cli.CodeNotFound, err, "Run 'g8s feature list' to view valid feature IDs", *jsonl)
@@ -188,8 +190,8 @@ func runFeatureAudit(args []string) {
 			fmt.Printf("  - %s\n", f)
 		}
 	}
-	fmt.Printf("\nAudit Summary: total=%d verified_live=%d static_only=%d drifted=%d broken=%d\n",
-		report.TotalFeatures, report.VerifiedLiveCount, report.StaticOnlyCount, report.DriftedContractCount, report.BrokenRuntimeCount)
+	fmt.Printf("\nAudit Summary: total=%d runtime_proven=%d verified_live=%d static_only=%d drifted=%d broken=%d\n",
+		report.TotalFeatures, report.RuntimeProvenCount, report.VerifiedLiveCount, report.StaticOnlyCount, report.DriftedContractCount, report.BrokenRuntimeCount)
 	if !report.Valid {
 		os.Exit(1)
 	}

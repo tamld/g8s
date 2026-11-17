@@ -1,7 +1,10 @@
 package featuremap
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -14,9 +17,10 @@ import (
 	"time"
 )
 
-// Audit classification statuses (#686).
+// Audit classification statuses (#686, #921).
 const (
 	AuditStatusVerifiedLive    = "VERIFIED_LIVE"
+	AuditStatusRuntimeProven   = "RUNTIME_PROVEN"
 	AuditStatusStaticOnly      = "STATIC_ONLY"
 	AuditStatusDriftedContract = "DRIFTED_CONTRACT"
 	AuditStatusBrokenRuntime   = "BROKEN_RUNTIME"
@@ -24,11 +28,12 @@ const (
 
 // AuditOptions configures Audit execution.
 type AuditOptions struct {
-	FeatureID string
-	Live      bool
+	FeatureID      string
+	Live           bool
+	TestReportPath string
 }
 
-// FeatureAuditResult holds the static AST and optional live test audit outcome for one FeatureNode.
+// FeatureAuditResult holds the static AST and optional live/report test audit outcome for one FeatureNode.
 type FeatureAuditResult struct {
 	ID                 string   `json:"id"`
 	Title              string   `json:"title"`
@@ -37,28 +42,45 @@ type FeatureAuditResult struct {
 	TestSymbolsChecked int      `json:"test_symbols_checked"`
 	InterfacesChecked  int      `json:"interfaces_checked"`
 	LiveTestsRun       int      `json:"live_tests_run,omitempty"`
+	ProvenTests        int      `json:"proven_tests,omitempty"`
 	Findings           []string `json:"findings,omitempty"`
 }
 
-// AuditReport summarises the conformance audit across the FeatureMap (#686).
+// AuditReport summarises the conformance audit across the FeatureMap (#686, #921).
 type AuditReport struct {
 	Valid                bool                 `json:"valid"`
 	Live                 bool                 `json:"live"`
+	TestReport           string               `json:"test_report,omitempty"`
 	TotalFeatures        int                  `json:"total_features"`
 	VerifiedLiveCount    int                  `json:"verified_live_count"`
+	RuntimeProvenCount   int                  `json:"runtime_proven_count"`
 	StaticOnlyCount      int                  `json:"static_only_count"`
 	DriftedContractCount int                  `json:"drifted_contract_count"`
 	BrokenRuntimeCount   int                  `json:"broken_runtime_count"`
 	Results              []FeatureAuditResult `json:"results"`
 }
 
-// Audit performs a 2-layer conformance audit on fm against repoRoot (#686):
+// TestExecutionIndex indexes passed and failed packages/tests parsed from
+// a `go test -json` or `go test -v` report (#921).
+type TestExecutionIndex struct {
+	ModulePath        string
+	PassedPackages    map[string]bool
+	FailedPackages    map[string]bool
+	PassedPkgTests    map[string]bool
+	FailedPkgTests    map[string]bool
+	PassedTestsByName map[string]bool
+	FailedTestsByName map[string]bool
+}
+
+// Audit performs a multi-layer conformance audit on fm against repoRoot (#686, #921):
 //  1. Static AST & Contract Layer: verifies code_paths exist, parses Go *_test.go
 //     ASTs to confirm Test... symbols referenced in visible_tests exist, and checks
 //     CLI/MCP interface registrations in cmd/g8s and internal/mcp.
-//  2. Live Behavioral Layer (when opts.Live is true): executes the feature's
-//     visible_tests via `go test` and classifies each feature as VERIFIED_LIVE,
-//     STATIC_ONLY, DRIFTED_CONTRACT, or BROKEN_RUNTIME.
+//  2. Execution Evidence Layer (when opts.TestReportPath is set): parses the
+//     `go test -json` or `go test -v` report and promotes features whose mapped
+//     visible_tests ran and passed to RUNTIME_PROVEN (or BROKEN_RUNTIME on gaps/failures).
+//  3. Live Behavioral Layer (when opts.Live is true without TestReportPath):
+//     executes the feature's visible_tests via `go test` and classifies as VERIFIED_LIVE.
 func Audit(fm *FeatureMap, repoRoot string, opts AuditOptions) (*AuditReport, error) {
 	if fm == nil {
 		return nil, fmt.Errorf("feature map is nil")
@@ -67,23 +89,40 @@ func Audit(fm *FeatureMap, repoRoot string, opts AuditOptions) (*AuditReport, er
 		repoRoot = "."
 	}
 
+	var testIdx *TestExecutionIndex
+	reportPath := strings.TrimSpace(opts.TestReportPath)
+	if reportPath != "" {
+		raw, err := os.ReadFile(reportPath)
+		if err != nil {
+			return nil, fmt.Errorf("read test report %q: %w", reportPath, err)
+		}
+		parsed, err := ParseTestReport(repoRoot, raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse test report %q: %w", reportPath, err)
+		}
+		testIdx = parsed
+	}
+
 	testSymbolsByFile, allTestSymbols, surfaceCorpus := indexRepoASTAndSurface(repoRoot)
 
 	report := &AuditReport{
-		Valid: true,
-		Live:  opts.Live,
+		Valid:      true,
+		Live:       opts.Live,
+		TestReport: reportPath,
 	}
 
 	for _, f := range fm.Features {
 		if opts.FeatureID != "" && f.ID != opts.FeatureID {
 			continue
 		}
-		res := auditSingleFeature(f, repoRoot, opts.Live, testSymbolsByFile, allTestSymbols, surfaceCorpus)
+		res := auditSingleFeature(f, repoRoot, opts.Live, testIdx, testSymbolsByFile, allTestSymbols, surfaceCorpus)
 		report.Results = append(report.Results, res)
 		report.TotalFeatures++
 		switch res.Status {
 		case AuditStatusVerifiedLive:
 			report.VerifiedLiveCount++
+		case AuditStatusRuntimeProven:
+			report.RuntimeProvenCount++
 		case AuditStatusStaticOnly:
 			report.StaticOnlyCount++
 		case AuditStatusDriftedContract:
@@ -106,6 +145,7 @@ func auditSingleFeature(
 	f FeatureNode,
 	repoRoot string,
 	live bool,
+	testIdx *TestExecutionIndex,
 	testSymbolsByFile map[string][]string,
 	allTestSymbols map[string]bool,
 	surfaceCorpus string,
@@ -125,6 +165,7 @@ func auditSingleFeature(
 
 	// 2. Verify visible_tests via Go AST
 	var liveTargets []string
+	var resolvedFiles []string
 	if len(f.VisibleTests) == 0 {
 		res.Findings = append(res.Findings, "visible_tests is empty")
 	}
@@ -152,6 +193,7 @@ func auditSingleFeature(
 			if len(testSymbolsByFile[mf]) > 0 {
 				hasTestFunc = true
 			}
+			resolvedFiles = appendUnique(resolvedFiles, mf)
 			pkgDir := "./" + filepath.ToSlash(filepath.Dir(mf))
 			liveTargets = appendUnique(liveTargets, "go test "+pkgDir)
 		}
@@ -179,6 +221,16 @@ func auditSingleFeature(
 
 	if len(res.Findings) > 0 {
 		res.Status = AuditStatusDriftedContract
+		return res
+	}
+
+	if testIdx != nil {
+		res.ProvenTests = verifyVisibleTestsAgainstReport(f.VisibleTests, resolvedFiles, testIdx, testSymbolsByFile, &res.Findings)
+		if len(res.Findings) > 0 {
+			res.Status = AuditStatusBrokenRuntime
+			return res
+		}
+		res.Status = AuditStatusRuntimeProven
 		return res
 	}
 
@@ -377,4 +429,302 @@ func runLiveTestCommand(repoRoot, cmdLine string) error {
 		return fmt.Errorf("%w (%s)", err, msg)
 	}
 	return nil
+}
+
+// ParseTestReport parses `go test -json` JSONL events or `go test -v` text output
+// into a package+test execution index (#921). Empty/unrecognized reports return an error.
+func ParseTestReport(repoRoot string, raw []byte) (*TestExecutionIndex, error) {
+	modPath := readGoModulePath(repoRoot)
+	idx := &TestExecutionIndex{
+		ModulePath:        modPath,
+		PassedPackages:    make(map[string]bool),
+		FailedPackages:    make(map[string]bool),
+		PassedPkgTests:    make(map[string]bool),
+		FailedPkgTests:    make(map[string]bool),
+		PassedTestsByName: make(map[string]bool),
+		FailedTestsByName: make(map[string]bool),
+	}
+
+	type goTestJSONEvent struct {
+		Action  string `json:"Action"`
+		Package string `json:"Package"`
+		Test    string `json:"Test"`
+	}
+
+	var (
+		hasEvents     bool
+		pendingPassed []string
+		pendingFailed []string
+	)
+
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "{") {
+			var ev goTestJSONEvent
+			if err := json.Unmarshal([]byte(trimmed), &ev); err == nil && ev.Action != "" {
+				pkg := normalizeReportPackage(ev.Package, modPath)
+				switch ev.Action {
+				case "pass":
+					if ev.Test != "" {
+						hasEvents = true
+						idx.PassedTestsByName[ev.Test] = true
+						if pkg != "" {
+							idx.PassedPkgTests[pkgTestKey(pkg, ev.Test)] = true
+						}
+					} else if pkg != "" {
+						hasEvents = true
+						idx.PassedPackages[pkg] = true
+					}
+				case "fail":
+					if ev.Test != "" {
+						hasEvents = true
+						top := topLevelTestName(ev.Test)
+						idx.FailedTestsByName[ev.Test] = true
+						idx.FailedTestsByName[top] = true
+						if pkg != "" {
+							idx.FailedPkgTests[pkgTestKey(pkg, ev.Test)] = true
+							idx.FailedPkgTests[pkgTestKey(pkg, top)] = true
+						}
+					} else if pkg != "" {
+						hasEvents = true
+						idx.FailedPackages[pkg] = true
+					}
+				}
+				continue
+			}
+		}
+
+		// Verbose text format: `--- PASS: TestFoo (0.01s)` / `--- FAIL: TestFoo (0.01s)`
+		if strings.HasPrefix(trimmed, "--- PASS:") {
+			if name := extractVerboseTestName(strings.TrimPrefix(trimmed, "--- PASS:")); name != "" {
+				hasEvents = true
+				idx.PassedTestsByName[name] = true
+				pendingPassed = append(pendingPassed, name)
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "--- FAIL:") {
+			if name := extractVerboseTestName(strings.TrimPrefix(trimmed, "--- FAIL:")); name != "" {
+				hasEvents = true
+				top := topLevelTestName(name)
+				idx.FailedTestsByName[name] = true
+				idx.FailedTestsByName[top] = true
+				pendingFailed = append(pendingFailed, name)
+				if top != name {
+					pendingFailed = append(pendingFailed, top)
+				}
+			}
+			continue
+		}
+
+		// Top-level package summary lines (never indented):
+		// `ok  	github.com/tamld/g8s/internal/lane	0.444s`
+		// `FAIL	github.com/tamld/g8s/internal/lane	0.444s`
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			fields := strings.Fields(trimmed)
+			if len(fields) >= 2 && fields[0] == "ok" {
+				pkg := normalizeReportPackage(fields[1], modPath)
+				if pkg != "" {
+					hasEvents = true
+					idx.PassedPackages[pkg] = true
+					for _, tname := range pendingPassed {
+						idx.PassedPkgTests[pkgTestKey(pkg, tname)] = true
+					}
+					for _, tname := range pendingFailed {
+						idx.FailedPkgTests[pkgTestKey(pkg, tname)] = true
+					}
+				}
+				pendingPassed = pendingPassed[:0]
+				pendingFailed = pendingFailed[:0]
+				continue
+			}
+			if len(fields) >= 2 && fields[0] == "FAIL" && strings.HasPrefix(line, "FAIL\t") {
+				pkg := normalizeReportPackage(fields[1], modPath)
+				if pkg != "" {
+					hasEvents = true
+					idx.FailedPackages[pkg] = true
+					for _, tname := range pendingPassed {
+						idx.PassedPkgTests[pkgTestKey(pkg, tname)] = true
+					}
+					for _, tname := range pendingFailed {
+						idx.FailedPkgTests[pkgTestKey(pkg, tname)] = true
+					}
+				}
+				pendingPassed = pendingPassed[:0]
+				pendingFailed = pendingFailed[:0]
+				continue
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan test report: %w", err)
+	}
+	if !hasEvents {
+		return nil, fmt.Errorf("test report contains no recognized go test pass/fail events")
+	}
+	return idx, nil
+}
+
+func verifyVisibleTestsAgainstReport(
+	visibleTests []string,
+	resolvedFiles []string,
+	testIdx *TestExecutionIndex,
+	testSymbolsByFile map[string][]string,
+	findings *[]string,
+) int {
+	provenCount := 0
+	for _, mf := range resolvedFiles {
+		pkgDir := filepath.ToSlash(filepath.Dir(mf))
+		pkgRel := "."
+		if pkgDir != "." && pkgDir != "" {
+			pkgRel = "./" + pkgDir
+		}
+		if testIdx.FailedPackages[pkgRel] {
+			*findings = append(*findings, fmt.Sprintf("visible_test %q: package %s failed in test report", mf, pkgRel))
+			continue
+		}
+		if !testIdx.PassedPackages[pkgRel] {
+			*findings = append(*findings, fmt.Sprintf("visible_test %q: package %s did not execute and pass in test report", mf, pkgRel))
+			continue
+		}
+
+		syms := testSymbolsByFile[mf]
+		filePassed := 0
+		fileFailed := 0
+		for _, sym := range syms {
+			if testIdx.FailedPkgTests[pkgTestKey(pkgRel, sym)] || (len(testIdx.FailedPkgTests) == 0 && testIdx.FailedTestsByName[sym]) {
+				fileFailed++
+				*findings = append(*findings, fmt.Sprintf("visible_test %q: test %s failed in test report", mf, sym))
+				continue
+			}
+			if !strings.HasPrefix(sym, "Test") || sym == "TestMain" {
+				continue
+			}
+			if testIdx.PassedPkgTests[pkgTestKey(pkgRel, sym)] || (len(testIdx.PassedPkgTests) == 0 && testIdx.PassedTestsByName[sym]) {
+				filePassed++
+			}
+		}
+		if fileFailed == 0 && filePassed == 0 {
+			*findings = append(*findings, fmt.Sprintf("visible_test %q: zero AST Test* functions ran and passed in test report", mf))
+		}
+		provenCount += filePassed
+	}
+
+	for _, vt := range visibleTests {
+		trimmed := strings.TrimSpace(vt)
+		if !isCommandTest(trimmed) {
+			continue
+		}
+		pkgRel := extractGoTestPackage(trimmed)
+		if pkgRel != "" {
+			if testIdx.FailedPackages[pkgRel] {
+				*findings = append(*findings, fmt.Sprintf("visible_test %q: package %s failed in test report", trimmed, pkgRel))
+				continue
+			}
+			if !testIdx.PassedPackages[pkgRel] {
+				*findings = append(*findings, fmt.Sprintf("visible_test %q: package %s did not pass in test report", trimmed, pkgRel))
+				continue
+			}
+		}
+		if runPat := extractGoTestRunPattern(trimmed); runPat != "" {
+			if matchesPatternInMap(runPat, pkgRel, testIdx.FailedPkgTests, testIdx.FailedTestsByName) {
+				*findings = append(*findings, fmt.Sprintf("visible_test %q: matching -run %q failed in test report", trimmed, runPat))
+				continue
+			}
+			if !matchesPatternInMap(runPat, pkgRel, testIdx.PassedPkgTests, testIdx.PassedTestsByName) {
+				*findings = append(*findings, fmt.Sprintf("visible_test %q: matching -run %q had zero passed tests in test report", trimmed, runPat))
+				continue
+			}
+			provenCount++
+		} else if pkgRel != "" {
+			provenCount++
+		}
+	}
+
+	return provenCount
+}
+
+func readGoModulePath(repoRoot string) string {
+	data, err := os.ReadFile(filepath.Join(repoRoot, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.TrimSpace(fields[1])
+		}
+	}
+	return ""
+}
+
+func normalizeReportPackage(rawPkg, modPath string) string {
+	p := strings.TrimSpace(rawPkg)
+	if p == "" {
+		return ""
+	}
+	if modPath != "" {
+		if p == modPath {
+			return "."
+		}
+		if strings.HasPrefix(p, modPath+"/") {
+			return "./" + strings.TrimPrefix(p, modPath+"/")
+		}
+	}
+	p = filepath.ToSlash(filepath.Clean(p))
+	if p == "." || strings.HasPrefix(p, "./") {
+		return p
+	}
+	return "./" + p
+}
+
+func pkgTestKey(pkg, test string) string {
+	return pkg + "::" + test
+}
+
+func topLevelTestName(test string) string {
+	if idx := strings.IndexByte(test, '/'); idx > 0 {
+		return test[:idx]
+	}
+	return test
+}
+
+func extractVerboseTestName(afterPrefix string) string {
+	fields := strings.Fields(strings.TrimSpace(afterPrefix))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func extractGoTestPackage(cmdLine string) string {
+	for _, f := range strings.Fields(cmdLine) {
+		if strings.HasPrefix(f, "./") || f == "." {
+			return strings.TrimSuffix(f, "/...")
+		}
+	}
+	return ""
+}
+
+func matchesPatternInMap(runPattern, pkgRel string, byPkg map[string]bool, byName map[string]bool) bool {
+	if pkgRel != "" && len(byPkg) > 0 {
+		prefix := pkgRel + "::"
+		for key := range byPkg {
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+			sym := strings.TrimPrefix(key, prefix)
+			if matchesAnyASTTestSymbol(runPattern, map[string]bool{sym: true}) {
+				return true
+			}
+		}
+		return false
+	}
+	return matchesAnyASTTestSymbol(runPattern, byName)
 }

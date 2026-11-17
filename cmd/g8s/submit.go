@@ -302,28 +302,6 @@ func runSubmit(args []string) {
 		}
 	}
 
-	// DELTA-42: optional pre-dispatch premise gate. A brief whose repo
-	// premises are refuted by deterministic probes is not dispatched unless
-	// the operator records an explicit override reason.
-	if strings.TrimSpace(*overrideReason) != "" && !*premiseCheck {
-		exitUsage("submit", "override-reason", *traceID, "--override-reason requires --premise-check", "Add --premise-check or drop --override-reason", *jsonl)
-	}
-	var premiseResult *premiseGateResult
-	if *premiseCheck {
-		repoRoot := *premiseRepo
-		if repoRoot == "" {
-			repoRoot = cwd
-		}
-		res, gateErr := evaluatePremiseGate(context.Background(), prompt, repoRoot, *overrideReason)
-		if gateErr != nil {
-			exitRuntime("submit", "premise-check", *traceID, cli.CodeInvalid, fmt.Errorf("premise check failed: %w", gateErr), "Check --premise-repo", *jsonl)
-		}
-		if res.Blocked {
-			exitRuntime("submit", "premise-check", *traceID, premise.ErrorCodePremiseContradicted, errors.New(contradictionMessage(res.Report)), "Correct the brief, or pass --override-reason \"<why>\" to dispatch anyway (recorded in the event log)", *jsonl)
-		}
-		premiseResult = res
-	}
-
 	dirs := []string(addDirs)
 	if len(dirs) == 0 {
 		dirs = []string{cwd}
@@ -440,6 +418,57 @@ func runSubmit(args []string) {
 				classPaths = append(classPaths, filepath.ToSlash(filepath.Clean(ap)))
 			}
 		}
+	}
+
+	// #921: Route through Lane router once classPaths (from --add-dir / --receipt-id)
+	// are known; any Lane S (trust boundary) dispatch automatically enables
+	// premise verification and provider conformance enforcement unless explicitly
+	// disabled via env.
+	var laneOpts []lane.RouterOption
+	if tbPath := findUpwardRepoFile(cwd, lane.DefaultTrustBoundariesPath); tbPath != "" {
+		laneOpts = append(laneOpts, lane.WithTrustBoundariesPath(tbPath))
+	}
+	if lbPath := findUpwardRepoFile(cwd, lane.DefaultLaneBundlesPath); lbPath != "" {
+		laneOpts = append(laneOpts, lane.WithBundlesPath(lbPath))
+	}
+	laneRouter := lane.NewRouter(laneOpts...)
+	routedLane := laneRouter.Route(lane.Input{
+		Paths:   classPaths,
+		Summary: prompt,
+	})
+	if routedLane == lane.LaneSecurity {
+		if !premiseCheckPassed && !isExplicitlyDisabledEnv("G8S_PREMISE_CHECK") {
+			*premiseCheck = true
+		}
+		if !enforceConformancePassed && !isExplicitlyDisabledEnv("G8S_ENFORCE_CONFORMANCE") {
+			*enforceConformance = true
+		}
+	}
+
+	// DELTA-42 / #921: pre-dispatch premise gate (explicit or auto-escalated for Lane S).
+	if strings.TrimSpace(*overrideReason) != "" && !*premiseCheck && !*enforceConformance {
+		exitUsage("submit", "override-reason", *traceID, "--override-reason requires --premise-check or --enforce-conformance", "Add --premise-check / --enforce-conformance or drop --override-reason", *jsonl)
+	}
+	var premiseResult *premiseGateResult
+	if *premiseCheck {
+		repoRoot := *premiseRepo
+		if repoRoot == "" {
+			if tb := findUpwardRepoFile(cwd, lane.DefaultTrustBoundariesPath); tb != "" {
+				repoRoot = filepath.Dir(filepath.Dir(tb))
+			} else if gm := findUpwardRepoFile(cwd, "go.mod"); gm != "" {
+				repoRoot = filepath.Dir(gm)
+			} else {
+				repoRoot = cwd
+			}
+		}
+		res, gateErr := evaluatePremiseGate(context.Background(), prompt, repoRoot, *overrideReason)
+		if gateErr != nil {
+			exitRuntime("submit", "premise-check", *traceID, cli.CodeInvalid, fmt.Errorf("premise check failed: %w", gateErr), "Check --premise-repo", *jsonl)
+		}
+		if res.Blocked {
+			exitRuntime("submit", "premise-check", *traceID, premise.ErrorCodePremiseContradicted, errors.New(contradictionMessage(res.Report)), "Correct the brief, or pass --override-reason \"<why>\" to dispatch anyway (recorded in the event log)", *jsonl)
+		}
+		premiseResult = res
 	}
 
 	className, defaultEffort, ecErr := lane.ResolveClassForRoots(classPaths, scopeRoots)
@@ -704,12 +733,23 @@ func runSubmit(args []string) {
 		exitRuntime("submit", "", *traceID, cli.CodeHarness, fmt.Errorf("harness validation failed: %w", err), "Ensure role and permissions allow the requested action", *jsonl)
 	}
 
-	// DELTA-43: consult provider conformance ground truth (warn; refuse only when enforced).
+	// DELTA-43 / #921: consult provider conformance ground truth (warn; refuse
+	// when --enforce-conformance or auto-escalated Lane S unless --override-reason is given).
+	var (
+		conformanceOverride        map[string]any
+		conformanceOverrideWarning string
+	)
 	if warning, refuse := conformanceGate(effectiveProvider, *enforceConformance); warning != "" {
 		if refuse {
-			exitRuntime("submit", "conformance", *traceID, cli.CodeDenied, errors.New(warning), "Re-run 'g8s providers conformance --live' or choose another provider", *jsonl)
+			if strings.TrimSpace(*overrideReason) == "" {
+				exitRuntime("submit", "conformance", *traceID, "E_PROVIDER_CONFORMANCE_FAIL", errors.New(warning), "Choose a conformant provider, re-run 'g8s providers conformance --live', or pass --override-reason \"<why>\" to record an audited override", *jsonl)
+			}
+			conformanceOverride = conformanceOverridePayload(effectiveProvider, warning, *overrideReason)
+			conformanceOverrideWarning = warning
+			warnings = append(warnings, warning+" (overridden: "+strings.TrimSpace(*overrideReason)+")")
+		} else {
+			fmt.Fprintf(os.Stderr, "[warn] submit: %s\n", warning)
 		}
-		fmt.Fprintf(os.Stderr, "[warn] submit: %s\n", warning)
 	}
 
 	dbPath, err := databasePath()
@@ -731,6 +771,7 @@ func runSubmit(args []string) {
 		"add_dirs":     dirs,
 		"actor":        *actor,
 		"effort_class": className,
+		"routed_lane":  string(routedLane),
 	}
 	if effectiveToolPolicy != "" {
 		payloadMap["tool_policy"] = effectiveToolPolicy
@@ -794,6 +835,9 @@ func runSubmit(args []string) {
 	if premiseResult != nil {
 		payloadMap["premise_check"] = premisePayload(premiseResult, *overrideReason)
 	}
+	if conformanceOverride != nil {
+		payloadMap["conformance_override"] = conformanceOverride
+	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {
 		exitRuntime("submit", "", *traceID, cli.CodeRuntime, err, "Failed to serialize task payload", *jsonl)
@@ -855,6 +899,11 @@ func runSubmit(args []string) {
 	if premiseResult != nil && premiseResult.Overridden {
 		if logErr := recordPremiseOverride(context.Background(), store, task.TaskID, *actor, premiseResult, *overrideReason); logErr != nil {
 			exitRuntime("submit", "premise-check", *traceID, cli.CodeRuntime, logErr, "Premise override could not be recorded in the event log", *jsonl)
+		}
+	}
+	if conformanceOverride != nil {
+		if logErr := recordConformanceOverride(context.Background(), store, task.TaskID, *actor, effectiveProvider, conformanceOverrideWarning, *overrideReason); logErr != nil {
+			exitRuntime("submit", "conformance", *traceID, cli.CodeRuntime, logErr, "Conformance override could not be recorded in the event log", *jsonl)
 		}
 	}
 
@@ -1010,4 +1059,24 @@ func isInsideGitWorkTree(dir string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "true"
+}
+
+func isExplicitlyDisabledEnv(key string) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	return val == "0" || strings.EqualFold(val, "false")
+}
+
+func findUpwardRepoFile(startDir, relPath string) string {
+	dir := startDir
+	for {
+		cand := filepath.Join(dir, relPath)
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
