@@ -606,8 +606,8 @@ func TestBundleConfig_TrackedFileVerification(t *testing.T) {
 	}
 }
 
-// TestTrustBoundaries_TrackedFileVerification verifies that default router loads the patterns
-// from .g8s/trust-boundaries.yml.
+// TestTrustBoundaries_TrackedFileVerification verifies that default router loads all patterns
+// from .g8s/trust-boundaries.yml and escalates every newly added security surface to Lane S.
 func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 	r := lane.NewRouter()
 	patterns := r.TrustBoundaries()
@@ -619,8 +619,19 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 		"internal/harness/*",
 		"internal/memory/*",
 		"internal/dispatch/*",
+		"internal/sandbox/*",
+		"internal/signing/*",
+		"internal/charter/*",
+		"internal/fsops/*",
+		"internal/verifier/*",
+		"internal/premise/*",
+		"internal/provider/conformance/*",
+		"cmd/g8s/deliver.go",
 	}
 
+	if len(patterns) != len(expectedSubstrings) {
+		t.Fatalf("trust boundaries count = %d, want %d (%v)", len(patterns), len(expectedSubstrings), patterns)
+	}
 	for _, exp := range expectedSubstrings {
 		found := false
 		for _, pat := range patterns {
@@ -631,6 +642,25 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("Expected pattern %q in trust boundaries, got %v", exp, patterns)
+		}
+	}
+
+	securitySamples := []string{
+		"internal/sandbox/sandbox.go",
+		"internal/sandbox",
+		"internal/sandbox/**",
+		"internal/signing/ed25519.go",
+		"internal/charter/charter.go",
+		"internal/fsops/fsops.go",
+		"internal/verifier/verifier.go",
+		"internal/premise/premise.go",
+		"internal/provider/conformance/store.go",
+		"cmd/g8s/deliver.go",
+		"cmd/g8s/**",
+	}
+	for _, sample := range securitySamples {
+		if got := r.Route(lane.Input{Paths: []string{sample}, Summary: "update module"}); got != lane.LaneSecurity {
+			t.Errorf("Route(%q) = %q, want %q", sample, got, lane.LaneSecurity)
 		}
 	}
 }

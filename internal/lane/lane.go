@@ -124,6 +124,14 @@ var DefaultTrustBoundaries = []string{
 	"internal/harness/*",
 	"internal/memory/*",
 	"internal/dispatch/*",
+	"internal/sandbox/*",
+	"internal/signing/*",
+	"internal/charter/*",
+	"internal/fsops/*",
+	"internal/verifier/*",
+	"internal/premise/*",
+	"internal/provider/conformance/*",
+	"cmd/g8s/deliver.go",
 }
 
 // Input represents a planned change submitted to the router.
@@ -376,12 +384,27 @@ func (r *Router) matchesTrustBoundary(paths []string) bool {
 	for _, p := range paths {
 		clean := filepath.ToSlash(filepath.Clean(p))
 		for _, pattern := range boundaries {
-			if pathMatches(clean, pattern) {
+			if pathMatches(clean, pattern) || globPathOverlapsBoundary(clean, pattern) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// globPathOverlapsBoundary reports whether a caller-supplied glob (for example
+// a receipt's "cmd/g8s/**" or "**") could authorize mutations to a trust boundary.
+func globPathOverlapsBoundary(cleanPath, boundaryPattern string) bool {
+	if !strings.Contains(cleanPath, "*") {
+		return false
+	}
+	sample := boundaryPattern
+	if strings.HasSuffix(sample, "/*") {
+		sample = strings.TrimSuffix(sample, "*") + "probe.go"
+	} else if strings.Contains(sample, "*") {
+		sample = strings.ReplaceAll(sample, "*", "probe")
+	}
+	return pathMatches(sample, cleanPath)
 }
 
 // Package-level default router instance.
@@ -525,7 +548,7 @@ func pathMatches(cleanFile, pattern string) bool {
 		if !strings.HasSuffix(dirPrefix, "/") {
 			dirPrefix += "/"
 		}
-		if strings.HasPrefix(cleanFile, dirPrefix) {
+		if strings.HasPrefix(cleanFile, dirPrefix) || (cleanFile != "" && cleanFile == strings.TrimSuffix(dirPrefix, "/")) {
 			return true
 		}
 	} else if !strings.Contains(cleanPattern, "*") {

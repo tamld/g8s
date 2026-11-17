@@ -562,6 +562,75 @@ if err:
     FAILED=$((FAILED + 1))
 fi
 
+# 18. #921 Trust-Boundary Parity & Live Surface Coverage: .g8s/trust-boundaries.yml
+#     matches DefaultTrustBoundaries in internal/lane/lane.go 1:1, every pattern matches
+#     tracked files on disk, and all core security/trust packages are registered.
+echo "--> [18/18] Verifying .g8s/trust-boundaries.yml parity with DefaultTrustBoundaries and security surfaces (#921)..."
+if ! python3 -c "
+import glob, re, sys
+
+with open('.g8s/trust-boundaries.yml', 'r', encoding='utf-8') as f:
+    yml_lines = []
+    in_section = False
+    for line in f:
+        s = line.strip()
+        if s.startswith('#') or not s:
+            continue
+        if s == 'trust_boundaries:':
+            in_section = True
+            continue
+        if in_section and s.startswith('- '):
+            val = s[2:].strip().strip('\"').strip(\"'\")
+            yml_lines.append(val)
+
+with open('internal/lane/lane.go', 'r', encoding='utf-8') as f:
+    lane_go = f.read()
+
+m = re.search(r'var DefaultTrustBoundaries = \[\]string\{(.*?)\}', lane_go, re.S)
+if not m:
+    print('::error::DefaultTrustBoundaries not found in internal/lane/lane.go')
+    sys.exit(1)
+go_lines = re.findall(r'\"([^\"]+)\"', m.group(1))
+
+err = False
+if yml_lines != go_lines:
+    print(f'::error::.g8s/trust-boundaries.yml ({yml_lines}) != DefaultTrustBoundaries ({go_lines})')
+    err = True
+
+for pat in yml_lines:
+    matches = glob.glob(pat)
+    if not matches:
+        print(f'::error::trust boundary pattern {pat!r} matches zero files on disk')
+        err = True
+
+required = [
+    'internal/receipt/*',
+    'internal/sandbox/*',
+    'internal/signing/*',
+    'internal/charter/*',
+    'internal/fsops/*',
+    'internal/verifier/*',
+    'internal/premise/*',
+    'internal/provider/conformance/*',
+    'internal/harness/*',
+    'internal/dispatch/*',
+    'internal/memory/*',
+    'internal/server/*',
+    'cmd/g8s/deliver.go',
+]
+yml_set = set(yml_lines)
+for req in required:
+    if req not in yml_set:
+        print(f'::error::core security boundary {req!r} missing from .g8s/trust-boundaries.yml')
+        err = True
+
+if err:
+    sys.exit(1)
+print(f'Trust boundaries verified: {len(yml_lines)} patterns synchronized and grounded on disk.')
+"; then
+    FAILED=$((FAILED + 1))
+fi
+
 if [ "$FAILED" -gt 0 ]; then
     echo ""
     echo "[DOC-CONTRACT] FAILED: $FAILED contract violation(s) found."

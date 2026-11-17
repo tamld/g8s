@@ -289,3 +289,26 @@ func recordPremiseOverride(ctx context.Context, store *controlplane.Store, taskI
 	}
 	return nil
 }
+
+// ConformanceOverrideEvent records an audited Lane-S override of a failing
+// DELTA-43 conformance verdict (#921).
+const ConformanceOverrideEvent state.Event = "conformance_override"
+
+func conformanceOverridePayload(provider, warning, overrideReason string) map[string]any {
+	return map[string]any{
+		"provider":        provider,
+		"warning":         warning,
+		"override_reason": strings.TrimSpace(overrideReason),
+	}
+}
+
+func recordConformanceOverride(ctx context.Context, store *controlplane.Store, taskID, actor, provider, warning, overrideReason string) error {
+	reason, err := json.Marshal(conformanceOverridePayload(provider, warning, overrideReason))
+	if err != nil {
+		return fmt.Errorf("encode conformance override: %w", err)
+	}
+	if err := store.LogStateEvent(ctx, taskID, state.SubjectTask, state.TaskStateQueued, state.TaskStateQueued, ConformanceOverrideEvent, actor, string(reason)); err != nil {
+		return fmt.Errorf("log conformance override for %s: %w", taskID, err)
+	}
+	return nil
+}
