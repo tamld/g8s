@@ -60,7 +60,7 @@ const (
 
 // defaultServerVersion is the fallback server version when none is provided via WithVersion.
 // Kept at "0.23.0" on main until tools/release.sh bumps it during the release cut.
-const defaultServerVersion = "0.24.0"
+const defaultServerVersion = "0.25.0"
 
 // jsonRPCRequest is one inbound JSON-RPC 2.0 request or notification.
 type jsonRPCRequest struct {

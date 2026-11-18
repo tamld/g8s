@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-18
+
 ### Added
 
 - **3-OS Kernel Subprocess Sandboxing, Secret Scrubbing & Escape Suite (`DELTA-49`, `#918`, `#928`)**:
