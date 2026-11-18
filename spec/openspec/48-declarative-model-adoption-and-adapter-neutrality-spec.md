@@ -5,7 +5,7 @@
 * **Implementation Status**: `IMPLEMENTED`
 * **Target Packages**: `internal/config`, `internal/routing`, `internal/provider`, `internal/provider/conformance`, `internal/harness/probe`, `internal/verifier`, `cmd/g8s`
 * **Milestone**: `M6 (LLM Consumer & Fleet)`
-* **Release**: `v0.23.0`
+* **Release**: `v0.24.0`
 
 ---
 

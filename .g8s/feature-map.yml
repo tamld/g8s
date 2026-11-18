@@ -729,6 +729,9 @@ features:
       - "!skills/g8s-supervisor/**"
       - "tools/cleanup_blind_worktrees.sh"
     shared_paths: []
+    interfaces:
+      cli:
+        - "blind-verify"
     invariants:
       - "Out-of-worktree holdout execution (--holdout-dir) without leaking tests into F1 worktree"
       - "Sanitized BlindReviewPacket strips worker identity, rationale, and self-reports"
@@ -1307,6 +1310,8 @@ features:
     shared_paths:
       - "cmd/g8s/main.go"
     interfaces:
+      cli:
+        - "reach"
       envelope_kinds:
         - "reach"
       go_packages:

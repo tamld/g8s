@@ -15,7 +15,7 @@ sanitized contribution packets (g8s-supervisor Mode 3).
    a repo root and they enforce spec↔code sync, README structure truth, and
    link integrity.
 3. **The supervisor charter** — [`skills/g8s-supervisor`](../skills/g8s-supervisor/SKILL.md)
-   v4.5.1: the operating practice for dispatching work through g8s
+   v4.5.2: the operating practice for dispatching work through g8s
    (admission-gated, fan-out, evidence-verified, leak-free reporting, Jev 3-tier fallback, and two-wave layer-disjoint integration).
 4. **Cross-platform search standard** — [`SEARCH_GUIDE.md`](SEARCH_GUIDE.md):
    why `ripgrep` (`rg`) replaces raw `grep -rn` / `find + xargs` across
@@ -37,7 +37,9 @@ sanitized contribution packets (g8s-supervisor Mode 3).
    - [`g8s-epistemic-audit`](../skills/g8s-epistemic-audit/SKILL.md): Claim decomposition & evidence-tier classifier enforcing the 4 Epistemic Laws.
    - Master reference: [`skills/g8s-supervisor/references/verification-skills-suite.md`](../skills/g8s-supervisor/references/verification-skills-suite.md).
 10. **Zero-Trust Worker Execution & Output Hardening (`DELTA-26..31`, `v0.19.1`)**:
-    - Fail-closed worktree isolation (`DELTA-26`), serial + concurrent `--provider`/`--model` claim affinity (`DELTA-27`), structured `receipt_export` visibility & `g8s receipt-export` retry (`DELTA-28`), recursive JSON Schema Draft-7 output validation (`DELTA-29`), non-loopback `g8s serve` auth enforcement (`DELTA-30`), and mechanical `EvaluateDoDMatrix` check binding (`DELTA-31`).
+    - Fail-closed worktree isolation (`DELTA-26`), non-loopback `g8s serve` auth enforcement (`DELTA-27`), mechanical `EvaluateDoDMatrix` check binding (`DELTA-28`), recursive JSON Schema Draft-7 output validation (`DELTA-29`), serial + concurrent `--provider`/`--model` claim affinity (`DELTA-30`), and structured `receipt_export` visibility & `g8s receipt-export` retry (`DELTA-31`).
+11. **3-OS Subprocess Containment, Cryptographic Authority & Offline Assurance (`DELTA-48..49`, `v0.25.0`)**:
+    - Declarative adapter-neutral model catalog v3 (`DELTA-48`), kernel-enforced macOS Seatbelt / Linux `bwrap`+Landlock / Windows `JobObject` subprocess sandboxing & secret scrubbing (`DELTA-49`), Ed25519-authenticated `WriteReceipt`s & `StratumCharter`s (`0600`/`0700` state hygiene), and offline reproducible `g8s eval run --category assurance` (`as-001`..`as-005`).
 
 ## Onboard in four steps + adapter parity
 

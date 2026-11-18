@@ -263,11 +263,11 @@ With `v0.19.0` (`DELTA-25`), `g8s` acts as a universal, config-driven consumer f
 
 1. **Six Execution Invariants (`DELTA-26..31`)**:
    - `DELTA-26` (`#656`): `workspace_write` fails closed on worktree isolation errors (`StateFailed` before `cmd.Start()`).
-   - `DELTA-27` (`#657`): `g8s worker --provider <p> --model <m>` enforces strict claim affinity across both serial (`RunOnce`) and concurrent (`RunConcurrent`) worker loops.
-   - `DELTA-28` (`#658`): `g8s worker` reports `receipt_export: {status, path, attempts, last_error}` and `g8s receipt-export --task <id>` recovers failed exports idempotently.
+   - `DELTA-27` (`#655`): `g8s serve` refuses non-loopback binds (`0.0.0.0`, `::`, LAN IPs) without `G8S_API_TOKEN`.
+   - `DELTA-28` (`#648`): `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any DoD criterion `MET`.
    - `DELTA-29` (`#659`): `g8s submit --output-schema <file>` validates worker JSON outputs against recursive Draft-7 constraints (`required`, `type`, `enum`, `minLength`, `minItems`, nested `properties`/`items`, `additionalProperties`).
-   - `DELTA-30` (`#655`): `g8s serve` refuses non-loopback binds (`0.0.0.0`, `::`, LAN IPs) without `G8S_API_TOKEN`.
-   - `DELTA-31` (`#648`): `EvaluateDoDMatrix` requires real executed `VerificationCheck` records (`exit_code=0`, matching check ID) before marking any DoD criterion `MET`.
+   - `DELTA-30` (`#657`): `g8s worker --provider <p> --model <m>` enforces strict claim affinity across both serial (`RunOnce`) and concurrent (`RunConcurrent`) worker loops.
+   - `DELTA-31` (`#658`): `g8s worker` reports `receipt_export: {status, path, attempts, last_error}` and `g8s receipt-export --task <id>` recovers failed exports idempotently.
 2. **Cross-Repo Commit & Push Completeness**:
    - Whenever `g8s` dogfooding or Offer Bundle upgrades modify sibling adopter repositories across any domain profile (`knowledge`, `security`, `infra`, `utility`), **never leave verified changes uncommitted or unpushed on local branches/worktrees**.
    - Every cross-repo campaign wave MUST conclude with: (a) worktree/branch pruning (`wt/*`), (b) `g8s offer check` verification, (c) clean commit + push to remote (`origin/main` or merged PR per repo governance), and (d) release tagging (`tools/release.sh`) when `g8s` capabilities advance.
@@ -290,3 +290,9 @@ Campaign ledger: `plans/261104-debt-sweep/ledger.md` (PRs #743, #745, #746, #747
 3. **Worker Env Is Poison for Tests**: `g8s worker` hydrates `G8S_TIER`, `G8S_STRATUM`, `G8S_SCOPE_ROOT`, `G8S_RECEIPT_ID`, `G8S_PERMISSION`, `G8S_TASK_ID`, `G8S_ROLE` into every child. Tests that read the ambient env are green on F0 and red inside workers, and workers misreport them as "unrelated failures". Scrub the full list once (package `TestMain`, central probe env jail); never one variable at a time. Triage by flipping one variable per run.
 4. **Pinned Tooling in Briefs**: briefs export `PATH="$(go env GOPATH)/bin:$PATH"` and require `which gofumpt golangci-lint` to resolve. Workers that `go run` other linter versions report phantom issues, and workers without the PATH silently skip the gate.
 5. **Probe Reality Before Dispatch**: verify an open issue is still open (#720 was already delivered by #727; a 30-second live probe closed it with evidence). Briefs must not contain `rm -rf`-like text — the harness rejects the submit (`E_HARNESS`); use `mktemp -d` scratch dirs instead.
+
+## 25. Release & Squash-Merge Provenance Hygiene (2026-11-18 v0.25.0 Hardening Campaign)
+
+1. **Always Pass Explicit Trailer `--body` to `gh pr merge --squash` (`#926`)**: GitHub's default `--squash` commit message strips single-commit `Receipt:` / `Provenance:` trailers when the PR title differs from the commit subject, and buries multi-commit trailers above the final paragraph where `internal/dogfood.ClassifyCommit` strictly requires a blank-line-separated trailing paragraph. Always pass `gh pr merge <N> --squash --body "<summary>\n\nReceipt: <task-id>"` (or `Provenance: F0-direct — <reason>`).
+2. **Pass `-U20+` Diff Context to `S3-A` `g8s blind-verify` for List/YAML Expansions**: Default `-U3` unified diffs can truncate unchanged items above an appended block, causing 30B adjudicators to undercount elements (observed on `.g8s/trust-boundaries.yml` during `#921`). Generate review shard diffs with `git diff -U20` (or `-U40`) for declarative lists.
+3. **Avoid Blind `git fetch --tags` When Legacy Rewritten Tags Exist**: In checkouts carrying historical local tags (`v0.11.0`), `git fetch origin main --tags` exits non-zero on tag clobber refusal before downstream commands execute; fetch `origin main` explicitly or fetch only the newly created tag ref (`git fetch origin refs/tags/<tag>:refs/tags/<tag>`).
