@@ -1,9 +1,9 @@
 ---
 name: g8s-supervisor
-description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (agy et al.) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
+description: "Charter for operating g8s as the canonical supervisor: bounded worker dispatch (across CLI & HTTP adapters) with supervisor and worker roles, multi-worker multi-role fan-out per task, evidence-verified acceptance, and leak-free upstream reporting."
 domain: orchestration
-version: 4.5.1
-last_updated: "2026-11-12"
+version: 4.5.2
+last_updated: "2026-11-18"
 risk_level: medium
 evidence_level: runtime_required
 args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objective>\" [--role <r>] [--root <dir>] [--timeout 300s] [--plan <file.json>] [--json]"
@@ -15,10 +15,12 @@ args_syntax: "g8s-supervisor [pilot|dispatch|fanout|contribute|audit] \"<objecti
 dispatches CLI workers through configured providers (`agy`, `codex`, `cursor`,
 `claude`, `gemini`, `opencode`, `qwen`, `ollama`, or HTTP gateways such as
 `9router`), isolates them in process groups and worktrees, and seals every run
-in a durable receipt. Its MCP server is the Claude-facing transport; every CLI
-provider connects through its own adapter (the agy-dispatch bridge is the
-original; live providers resolve from `providers.json`). **Claude remains the supervisor**: selects the slice, authorizes
-mutation, verifies evidence, accepts output, and owns integration.
+in a durable receipt. Its MCP server is an IDE-facing stdio transport; every CLI
+or HTTP provider connects through its own adapter (live providers resolve from
+`providers.json` and `.g8s/agent-models.yml`). **The F0 Sovereign Coordinator
+(Claude, Antigravity, Codex, Cursor, etc.) remains the supervisor**: selects
+the slice, authorizes mutation, verifies evidence, accepts output, and owns
+integration.
 
 ## Invocation & args
 
@@ -38,7 +40,7 @@ compensate for a missing arg.
 
 ## Two roles, one charter
 
-| | SUPERVISOR (Claude) | WORKER (agy/claude/codex via g8s) |
+| | SUPERVISOR (F0 Host Coordinator) | WORKER (CLI/HTTP adapter via g8s) |
 |---|---|---|
 | Owns | slice selection, oracle, scope, stop conditions, integration | one bounded mechanical packet |
 | Proves | executable admission, DoR, dispatch authorization | cited evidence inside its allowed root |

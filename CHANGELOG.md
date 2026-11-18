@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **3-OS Kernel Subprocess Sandboxing, Secret Scrubbing & Escape Suite (`DELTA-49`, `#918`, `#928`)**:
+  - Added `internal/sandbox` enforcing OS-native process isolation (`kernel_enforced` macOS XNU `sandbox-exec` Seatbelt profiles, Linux `bwrap` / Landlock LSM with `runtime.LockOSThread` and `Pdeathsig`, Windows Win32 `JobObject` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` + `TerminateProcess`), `ScrubEnv` stripping ambient secrets (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `GH_TOKEN`, `AWS_*`, `G8S_API_TOKEN`, `SSH_AUTH_SOCK`, etc.) across `internal/worker` and `internal/provider`, and a cross-platform 3-OS escape test suite.
+- **Ed25519 Cryptographic Receipts/Charters & `0600`/`0700` State Hygiene (`#919`, `#927`)**:
+  - Added pure-Go Ed25519 F0 authority key management in `internal/signing` (`f0-signing.key`/`f0-signing.pub` at `0600`), domain-separated `rc1:<ceiling>:ed25519:v1:` `WriteReceipt`s with immutable monotone expiry ceilings, `ed25519:v1:` `StratumCharter`s and signed stratum tokens, and fail-closed `0700` directory / `0600` SQLite+WAL+SHM permission enforcement in `internal/pathutil`.
+- **Offline Reproducible Assurance Benchmark & 3-OS Containment Matrix (`#922`, `#931`)**:
+  - Added `CategoryAssurance` (`as-001`..`as-005`) in `internal/harness/probe`, portable `jq`-only `tools/assurance_benchmark.sh` wired into Linux & Windows Quality CI, and [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md) documenting verified 3-OS enforcement boundaries and caveats; expanded `docs/claims.yml` to `59/59` bound claims.
+
+### Changed
+
+- **Runtime-Proven Feature Audit, 14 Trust Boundaries & `Lane S` Auto-Escalation (`#921`, `#930`)**:
+  - Promoted `g8s feature audit --test-report` to `19/19 RUNTIME_PROVEN` in `.github/workflows/quality.yml`, expanded `.g8s/trust-boundaries.yml` & `DefaultTrustBoundaries` to 14 disk-verified security patterns guarded by `tools/ci_doc_contract_check.sh` Check `[18/18]`, auto-escalated `premise-check` & `enforce-conformance` on `Lane S` `workspace_write` submissions (with audited `--override-reason`), and bound `blind-verify` & `reach` CLI commands in `.g8s/feature-map.yml`.
+- **SSoT Documentation, Adapter-Neutral Supervisor Charter (`v4.5.2`) & Citation Fixes**:
+  - Updated `skills/g8s-supervisor` (`v4.5.2`), `skills/manifest.json`, `AGENTS.md`, `docs/AGENTS_FULL.md`, `README.md`, `README.vi.md`, `offer/README.md`, and `spec/openspec/48-*` for symmetric F0 coordinator neutrality, accurate `DELTA-26..31` / `DELTA-48..49` references, and squash-merge trailer discipline.
+
+### Fixed
+
+- **Fail-Closed Verification, `SUPERVISOR_ACCEPTED` Deliver Gate & Git Rename Firewall (`#916`, `#917`, `#924`, `#925`)**:
+  - Enforced full validated map checking and `test_gate` fallback in `ReviewReceipt` / `RealReviewer`, fail-closed `StdoutEnvelopeVerifier`, hard `docs`/`test` verifier classes, mandatory `SUPERVISOR_ACCEPTED` check prior to `g8s deliver` (with audited `--allow-unverified-override` + `--override-reason`), default `BaseSHA` divergence CAS lock + per-workspace `lockfile.TryLock`, and NUL-delimited `git status --porcelain -z` rename/copy firewall.
+- **De-Theatered 3-OS Crash-Survival E2E & Live `os_sandbox` Doctor Probe (`#920`, `#929`)**:
+  - Replaced theatrical `golden-loop.yml` stubs with real `tools/faultworker` E2E tests (`SIGKILL` crash + stale-lease reclaim, grandchild timeout tree kill, `rc=0` error-envelope rejection, and concurrent `deliver` CAS races) across Ubuntu, macOS, and Windows in `.github/workflows/crash-survival.yml` & `nightly.yml`, plus live `os_sandbox` probing in `g8s doctor --json`.
+
+### Verification
+
+- **Full Quality, Security & Assurance Pass**:
+  - Zero-CGO `go test ./...`, `CGO_ENABLED=1 go test -race ./internal/...`, `gitleaks` (`0 leaks`), `ci_surface_inventory.sh` (`STALE-CLAIM=0 BROKEN-WIRE=0 ORPHAN=0`), `ci_doc_contract_check.sh` (`18/18`), `g8s eval run --category self-audit` (`5/5`), and `g8s eval run --category assurance` (`5/5`).
+
 ## [0.24.0] - 2026-11-15
 
 ### Added
