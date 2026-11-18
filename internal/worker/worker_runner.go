@@ -166,17 +166,27 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		}
 		return nil, err
 	}
+	// Attach Windows JobObject (and resume CREATE_SUSPENDED threads) immediately
+	// after cmd.Start() before any filesystem I/O so no child code can execute
+	// outside the JobObject containment boundary.
+	job, jerr := spawnJobHandle(cmd)
+	if jerr != nil {
+		if cmd.Process != nil {
+			if kerr := cmd.Process.Kill(); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
+				fmt.Fprintf(os.Stderr, "[warn] worker: kill uncontained pid %d: %v\n", cmd.Process.Pid, kerr)
+			}
+		}
+		if werr := cmd.Wait(); werr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] worker: wait uncontained child: %v\n", werr)
+		}
+		if sandboxCleanup != nil {
+			sandboxCleanup()
+		}
+		return nil, fmt.Errorf("worker: job object containment failed: %w", jerr)
+	}
 	pidPath := filepath.Join(opts.RunDir, "child.pid")
 	if werr := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); werr != nil {
 		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", pidPath, werr)
-	}
-	// #415 PR-2 (Windows): contain the whole tree in a Job Object with
-	// KILL_ON_JOB_CLOSE — the kernel kills every process (including
-	// detached grandchildren) the moment the handle closes. POSIX returns
-	// a zero handle (process-group containment applies instead).
-	job, jerr := spawnJobHandle(cmd)
-	if jerr != nil {
-		fmt.Fprintf(os.Stderr, "[warn] worker: job object containment unavailable: %v\n", jerr)
 	}
 	return newProcessChild(cmd, job, containmentMode, sandboxBackend, sandboxCleanup), nil
 }

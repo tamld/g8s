@@ -90,15 +90,84 @@ func AssignJobObjectKillOnClose(pid int) (func(), error) {
 
 func configureContainedProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
+}
+
+// ResumeProcessThreads enumerates threads belonging to pid via Toolhelp32
+// snapshot and resumes them after pre-execution containment setup (such as
+// AssignProcessToJobObject for CREATE_SUSPENDED processes).
+func ResumeProcessThreads(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("sandbox: invalid windows pid %d for thread resume", pid)
+	}
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return fmt.Errorf("sandbox: thread snapshot for pid %d: %w", pid, err)
+	}
+	defer func() {
+		if cerr := windows.CloseHandle(snap); cerr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: close thread snapshot for pid %d: %v\n", pid, cerr)
+		}
+	}()
+
+	var te windows.ThreadEntry32
+	// #nosec G103 -- Win32 THREADENTRY32 requires dwSize initialized to unsafe.Sizeof.
+	te.Size = uint32(unsafe.Sizeof(te))
+	if err := windows.Thread32First(snap, &te); err != nil {
+		return fmt.Errorf("sandbox: enumerate threads for pid %d: %w", pid, err)
+	}
+
+	resumed := 0
+	for {
+		if te.OwnerProcessID == uint32(pid) {
+			th, oerr := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, te.ThreadID)
+			if oerr != nil {
+				return fmt.Errorf("sandbox: open thread %d for pid %d: %w", te.ThreadID, pid, oerr)
+			}
+			_, rerr := windows.ResumeThread(th)
+			if cerr := windows.CloseHandle(th); cerr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] sandbox: close thread handle %d: %v\n", te.ThreadID, cerr)
+			}
+			if rerr != nil {
+				return fmt.Errorf("sandbox: resume thread %d for pid %d: %w", te.ThreadID, pid, rerr)
+			}
+			resumed++
+		}
+		// #nosec G103 -- Win32 THREADENTRY32 requires dwSize reset before Thread32Next.
+		te.Size = uint32(unsafe.Sizeof(te))
+		if err := windows.Thread32Next(snap, &te); err != nil {
+			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+				break
+			}
+			return fmt.Errorf("sandbox: next thread for pid %d: %w", pid, err)
+		}
+	}
+	if resumed == 0 {
+		return fmt.Errorf("sandbox: no threads found to resume for pid %d", pid)
+	}
+	return nil
 }
 
 func attachContainedHandle(cmd *exec.Cmd) (func(), error) {
 	if cmd == nil || cmd.Process == nil {
 		return nil, errors.New("sandbox: child process not started")
 	}
-	return AssignJobObjectKillOnClose(cmd.Process.Pid)
+	release, err := AssignJobObjectKillOnClose(cmd.Process.Pid)
+	if err != nil {
+		if kerr := cmd.Process.Kill(); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: kill uncontained pid %d: %v\n", cmd.Process.Pid, kerr)
+		}
+		return nil, err
+	}
+	if rerr := ResumeProcessThreads(cmd.Process.Pid); rerr != nil {
+		release()
+		if kerr := cmd.Process.Kill(); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: kill unresumed pid %d: %v\n", cmd.Process.Pid, kerr)
+		}
+		return nil, rerr
+	}
+	return release, nil
 }
 
 func terminateContainedProc(cmd *exec.Cmd, releaseHandle func()) {

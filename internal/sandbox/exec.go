@@ -38,7 +38,10 @@ func RunContained(ctx context.Context, cfg Config, stdout, stderr io.Writer) (ex
 
 	releaseHandle, attachErr := attachContainedHandle(cmd)
 	if attachErr != nil {
-		fmt.Fprintf(os.Stderr, "[warn] sandbox: attach containment handle: %v\n", attachErr)
+		if werr := cmd.Wait(); werr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: wait uncontained child: %v\n", werr)
+		}
+		return -1, prep.Mode, prep.Backend, fmt.Errorf("sandbox: attach containment handle: %w", attachErr)
 	}
 	defer func() {
 		if releaseHandle != nil {

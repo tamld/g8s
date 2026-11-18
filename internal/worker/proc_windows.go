@@ -5,11 +5,13 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
 	"unsafe"
 
+	"github.com/tamld/g8s/internal/sandbox"
 	"golang.org/x/sys/windows"
 )
 
@@ -20,27 +22,42 @@ const (
 
 // configureSysProcAttr configures process creation attributes on Windows.
 // CREATE_NEW_PROCESS_GROUP = 0x00000200 groups the immediate children for
-// CTRL signals; hard containment comes from the Job Object (#415 PR-2) —
-// CREATE_NEW_PROCESS_GROUP alone does not kill grandchildren.
+// CTRL signals, while CREATE_SUSPENDED keeps instruction 0 frozen until
+// spawnJobHandle binds the process to its KILL_ON_JOB_CLOSE Job Object and
+// resumes threads, eliminating post-Start pre-job TOCTOU escapes (#920).
 func configureSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: 0x00000200,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
 }
 
-// spawnJobHandle creates a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-// and assigns the freshly started child to it (#415 PR-2). While the handle
-// is open the tree runs normally; the moment the handle closes, the kernel
-// terminates every process in the job — including grandchildren that
-// taskkill /T cannot reach (detached wrappers, platform subagents). Returns
-// 0 when containment could not be established (the attempt still runs; the
-// failure is surfaced by the caller).
+func killUncontainedChild(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	if kerr := cmd.Process.Kill(); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
+		fmt.Fprintf(os.Stderr, "[warn] worker: kill uncontained pid %d: %v\n", cmd.Process.Pid, kerr)
+	}
+}
+
+func closeJobAndKill(job windows.Handle, cmd *exec.Cmd) {
+	if cerr := windows.CloseHandle(job); cerr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] worker: close job handle: %v\n", cerr)
+	}
+	killUncontainedChild(cmd)
+}
+
+// spawnJobHandle creates a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+// binds the suspended child to it, and resumes the child's primary thread (#415
+// PR-2, #920). Failing closed here prevents a fast child from spawning
+// descendants or completing before kernel tree containment is armed.
 func spawnJobHandle(cmd *exec.Cmd) (uintptr, error) {
-	if cmd.Process == nil {
+	if cmd == nil || cmd.Process == nil {
 		return 0, errors.New("assign job: child process not started")
 	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
+		killUncontainedChild(cmd)
 		return 0, fmt.Errorf("create job object: %w", err)
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
@@ -48,12 +65,13 @@ func spawnJobHandle(cmd *exec.Cmd) (uintptr, error) {
 			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 		},
 	}
-	_, err = windows.SetInformationJobObject(windows.Handle(job),
+	// #nosec G103 -- Windows SetInformationJobObject requires pointer to JOBOBJECT_EXTENDED_LIMIT_INFORMATION.
+	_, err = windows.SetInformationJobObject(job,
 		windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&info)),
 		uint32(unsafe.Sizeof(info)))
 	if err != nil {
-		_ = windows.CloseHandle(windows.Handle(job))
+		closeJobAndKill(job, cmd)
 		return 0, fmt.Errorf("set job limits: %w", err)
 	}
 	// os.Process does not expose its raw handle — open one by PID with
@@ -62,13 +80,20 @@ func spawnJobHandle(cmd *exec.Cmd) (uintptr, error) {
 		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false,
 		uint32(cmd.Process.Pid))
 	if err != nil {
-		_ = windows.CloseHandle(windows.Handle(job))
+		closeJobAndKill(job, cmd)
 		return 0, fmt.Errorf("open child process %d: %w", cmd.Process.Pid, err)
 	}
-	defer windows.CloseHandle(child)
-	if err := windows.AssignProcessToJobObject(windows.Handle(job), child); err != nil {
-		_ = windows.CloseHandle(windows.Handle(job))
-		return 0, fmt.Errorf("assign child %d to job: %w", cmd.Process.Pid, err)
+	assignErr := windows.AssignProcessToJobObject(job, child)
+	if cerr := windows.CloseHandle(child); cerr != nil {
+		fmt.Fprintf(os.Stderr, "[warn] worker: close child process handle %d: %v\n", cmd.Process.Pid, cerr)
+	}
+	if assignErr != nil {
+		closeJobAndKill(job, cmd)
+		return 0, fmt.Errorf("assign child %d to job: %w", cmd.Process.Pid, assignErr)
+	}
+	if rerr := sandbox.ResumeProcessThreads(cmd.Process.Pid); rerr != nil {
+		closeJobAndKill(job, cmd)
+		return 0, fmt.Errorf("resume child %d after job attach: %w", cmd.Process.Pid, rerr)
 	}
 	return uintptr(job), nil
 }
