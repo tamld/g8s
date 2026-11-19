@@ -22,381 +22,200 @@
 
 ---
 
-## 1. Overview & Why g8s?
+## 1. Why g8s?
 
-When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on local machines, giving them ambient shell authority invites catastrophe: accidental deletions, out-of-scope edits, dropped files, runaway loops, and environment leakage.
+Giving autonomous AI agents (Claude, GPT, Codex, Gemini) ambient shell access invites silent working-tree corruption, out-of-scope edits, secret leakage, and runaway loops.
 
-`g8s` does not assume an AI model is always right; it proves that even when an agent errs, is prompt-injected, or self-modifies, safety boundaries, independent verification, and atomic recovery hold — agents may experiment and improve within deterministic bounds enforced outside LLM inference, but may never self-authorize or weaken safety rules ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)). Built as a single static pure-Go binary with zero CGO dependencies, `g8s` isolates worker attempts into private Git worktrees, enforces path-scoped Ed25519 write receipts, and seals auditable evidence (with active hardening tracked under Epic [#934](https://github.com/tamld/g8s/issues/934)).
-
-### Without g8s vs. With g8s
+`g8s` does not assume an AI model is always right; it enforces that even when an agent errs, is prompt-injected, or self-modifies, safety boundaries, independent verification, and atomic recovery hold outside LLM inference ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)). Distributed as a single static pure-Go binary with zero CGO dependencies, `g8s` isolates every worker attempt into a private Git worktree, enforces single-use path-scoped Ed25519 receipts, and seals auditable evidence.
 
 | Dimension | Without g8s (Ambient Shell) | With g8s (Zero-Trust Harness) |
 | :--- | :--- | :--- |
-| **Execution Authority** | Ambient user machine access; worker can touch anything. | Strict role-based permission profiles (`read_only`, `workspace_write`). |
-| **Filesystem Safety** | Unchecked file mutations directly corrupt working tree. | Ed25519-signed single-use `WriteReceipt`s (`rc1:`), OS write-scope jail (`Seatbelt` / `bwrap` / Landlock on Unix), and post-run Git worktree diff firewall (`VerifyWorktreeDiffScope`). |
-| **Process Containment** | Child processes survive crashes as orphan zombies; host API keys leak into subprocess env. | Ambient secret scrubbing with provider-scoped allowlists (`ScrubEnv`) + OS process-group/job isolation (`Setpgid`, `Pdeathsig` under Landlock, Win32 `JobObject`). See [3-OS Containment Matrix](docs/security/containment-matrix.md). |
-| **Task Durability** | Stored in ephemeral agent memory; lost on disconnect. | SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases. |
-| **LLM Gateway Access** | Ad-hoc Python scripts or proprietary closed agent clouds. | Universal config-driven consumer (`g8s llm-call`, standard OpenAI/Anthropic-compatible HTTP endpoints, plus optional Layer 2 self-hosted gateways in `~/.config/g8s/providers.json`). |
-| **Supervisor Context** | Flooded with megabytes of noisy test/CI raw logs. | Lossless Information Firewall (`RoundReceiptSchema` strips noise, preserves failures). |
+| **Execution Authority** | Ambient machine access; agent can mutate anything. | Role-scoped profiles (`read_only`, `automation_read`, `workspace_write`, `supplied_text`). |
+| **Filesystem Safety** | Unchecked edits corrupt the main checkout. | Single-use Ed25519 `WriteReceipt` (`rc1:`), OS write jail on Unix, and NUL `-z` Git worktree diff firewall (`VerifyWorktreeDiffScope`). |
+| **Process & Network Isolation** | Orphan zombies survive crashes; API keys leak via env. | `ScrubEnv` allowlists, OS process-tree reaping (`Setpgid`, `JobObject`), and explicit `network_enforcement` reporting. |
+| **Task Durability & Context** | Ephemeral agent memory; logs flood coordinator context. | SQLite WAL queue with CAS leases + lossless `RoundReceiptSchema` firewall. |
+| **Gateway & Self-Improvement** | Ad-hoc scripts or unguarded self-edits to security rules. | Vendor-neutral `g8s llm-call` + immutable `S0` Trust Root (`TRUST-G1..G6`) + `PASS`/`FAIL` memory promotion gate. |
 
-### Core Terminology
-
-| Term | Architectural Definition |
-| :--- | :--- |
-| **Brain (`F0`)** | High-tier orchestrator (`claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) holding strategic reasoning and commit authority. |
-| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) or HTTP gateway consumer (OpenAI, Anthropic, or optional Layer 2 self-hosted gateways) executing one scoped packet. |
-| **Subagent (`F2`)** | Ephemeral subagent spawned recursively by F1 within F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`). |
-| **Task** | An atomic, durable work item queued in the SQLite WAL store with an idempotency key and attempt budget. |
-| **Receipt** | A cryptographically validated single-use authorization token granting scoped filesystem write permissions (`AllowedPaths`). |
-| **Attempt** | A concrete execution attempt of a task, isolated in a private Git worktree and process group. |
-| **Evidence Lake** | An append-only durable store capturing execution receipts, telemetry events, and physical diffs on disk. |
+- **Brain (`F0`)** ([ADR-0032](docs/decisions/0032-containment-levels.md), [ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md)): Reasoning coordinator owning decomposition, review, and CAS commit delivery — see [`AGENTS.md`](AGENTS.md) for the machine-facing protocol.
+- **Worker (`F1`)**: Bounded external CLI (`agy`, `claude`, `codex`, `cursor`, `gemini`, `opencode`, `qwen`, `ollama`, …) or HTTP endpoint (`openai`, `anthropic`, or Layer 2 local gateway) executing one isolated attempt.
+- **Subagent (`F2`)**: Recursive helper spawned by F1 inside F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`).
 
 ---
 
-## 2. Architecture & Execution Lifecycle
+## 2. How It Works
 
-`g8s` structures multi-agent collaboration across a 2-Axis Orthogonal Architecture (**Axis X**: `F0 / F1 / F2` Containment Rings per [ADR-0032](docs/decisions/0032-containment-levels.md) $\times$ **Axis Y**: `S0..S3 + O-Plane` Control Strata per [ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md)):
+`g8s` separates physical containment (`F0 / F1 / F2`) from control authority (`S0..S3 + O-Plane`):
 
 <p align="center">
   <img src="assets/architecture.svg" alt="g8s Orthogonal Zero-Trust Architecture (F0/F1/F2 x S0..S3)" width="100%"/>
 </p>
 
-### 5-Step Execution Lifecycle & Visual Workflow
+1. **Submit & Gate**: Coordinator issues a path-scoped single-use `WriteReceipt` (`g8s receipt issue`), validates the lane (`g8s brief-issue`), and queues work in SQLite WAL (`g8s submit`).
+2. **Lease**: Worker claims a task via atomic Compare-And-Swap (`g8s worker --once`).
+3. **Contain & Hydrate**: Harness spawns the worker inside a private Git worktree, OS sandbox/process group, scrubbed env, and digest-pinned skills.
+4. **Verify**: Out-of-worktree holdout suites, mutant canary checks, and diff firewalls run (`g8s verify`), emitting a compact `RoundReceiptSchema`.
+5. **Seal & CAS Deliver**: Verified diffs promote only when the target OID matches (`g8s deliver --expected-head-oid <sha>`), with TCB changes gated by `S0` human Ed25519 approval.
 
-1. **Submit & Gate**: Operator / Brain (`F0`) validates the task brief (`g8s brief-issue --lane <0|D|R|F|S>`), optionally compresses codebase context (`g8s context-pack`), issues a single-use path-scoped `WriteReceipt` (`g8s receipt issue`), and queues the task (`g8s submit`).
-2. **Lease**: Worker (`F1`) acquires the queued task via an atomic Compare-And-Swap (CAS) lease in SQLite WAL (`g8s worker --once`).
-3. **Contain & Hydrate**: Harness spawns the worker inside an isolated Git worktree and killable OS process group (`Setpgid`), hydrating digest-pinned skills (`skill://g8s/<tier>/<name>`) and bounded context.
-4. **Verify (6-Stage QA & Blind Audit)**: Verification gate (`g8s verify` & `g8s qa-report`) executes tests inside the worktree, runs out-of-worktree holdout suites + seeded mutant canary checks, and emits a compact `RoundReceiptSchema` across the Information Firewall.
-5. **Seal & CAS Deliver**: Outcome is sealed in a durable receipt; Brain inspects the physical diff and promotes changes via optimistic concurrency check (`g8s deliver --expected-head-oid <sha>`).
+<details>
+<summary>5-Step Command Routing Diagram</summary>
 
 <p align="center">
   <img src="assets/workflow.svg" alt="g8s 5-Step Execution Lifecycle & Command Routing" width="100%"/>
 </p>
 
+</details>
+
 ---
 
-## 3. Core Capabilities
+## 3. 30-Second Quickstart
 
-| Domain | Architectural Capability | Primary Surface |
-| :--- | :--- | :--- |
-| **Zero-Trust Containment** | Single-use path-scoped `WriteReceipt`s, POSIX process groups, and isolated Git worktrees. | `g8s receipt issue`, `g8s worker` |
-| **Durable Task Queue** | SQLite WAL storage, atomic CAS leases, idempotency deduplication, and retry policies. | `g8s submit`, `g8s watch`, `g8s status` |
-| **Native Agent I/O & ContextPack** | Pure-Go file discovery (`search`), bounded reader (`read`), atomic editor (`edit`), JSON selector (`select`), and 4-tier AST + PageRank + Knapsack context compressor (`context-pack`). | `g8s search`, `g8s read`, `g8s edit`, `g8s select`, `g8s context-pack` |
-| **Universal LLM Consumer** | Config-driven direct synchronous CLI (`llm-call`) and worker queue execution for OpenAI/Anthropic/9Router with continuous model scorecard & dynamic quarantine. | `g8s llm-call`, `g8s providers discover`, `g8s providers scorecard` |
-| **6-Stage AI QA & Blind Verify** | BA-to-Spec contract validation, holdout partition isolation, seeded mutant canary, and epistemic audit (`MECHANICAL_VERIFIED` vs `UNVERIFIED_PROSE`). | `g8s verify`, `g8s qa-report` |
-| **Decoupled Knowledge Vault** | Sub-millisecond SQLite FTS5 + BM25 ranked indexing of architectural records and JIT spatial whispers. | `g8s vault store`, `g8s vault query` |
+```bash
+# 1. Read-only scout task
+g8s submit --profile scout-fast --idempotency-key "scout-01" \
+  --prompt "Scan internal/provider and map exported interfaces"
+g8s worker --once
+
+# 2. Capability-scoped write task (single-use path-scoped receipt)
+RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select data.receipt_id)
+g8s submit --idempotency-key "cfg-test-01" --role test-runner \
+  --permission workspace_write --allow-workspace-write --receipt-id "$RECEIPT_ID" \
+  --prompt "Add unit tests for config validation in internal/config"
+g8s worker --once --allow-workspace-write
+
+# 3. Direct config-driven LLM call (OpenAI/Anthropic-compatible HTTP)
+g8s llm-call --provider openai --model gpt-5.5 --effort high \
+  --prompt "Review internal/fsops for race conditions"
+```
+
+See [Quickstart Guide](docs/quickstart.md) for end-to-end onboarding and [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) for pure-Go `g8s search`, `g8s read`, `g8s edit`, and `g8s select`.
 
 ---
 
 ## 4. Installation
 
-`g8s` is distributed as a single static pure-Go binary (<20MB stripped release binary per arch) with zero CGO or shared runtime-library dependencies (requires `git` for worktree isolation; optional `bwrap` on Linux for userns sandboxing). Pick an install path below; release assets also ship `checksums.txt`, `checksums.txt.sigstore.json`, and SPDX SBOM files alongside each archive ([GitHub Releases](https://github.com/tamld/g8s/releases)).
-
-### One-line installer (recommended)
-
 **macOS / Linux:**
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
 ```
 
 **Windows (PowerShell):**
-
 ```powershell
 irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
 ```
 
-The installers detect your CPU architecture, download the matching release asset, and **fail closed** on integrity: they require SHA-256 verification against `checksums.txt` from the release (via `sha256sum` / `shasum` on Unix, or `Get-FileHash` on Windows) and refuse to install if no checksum tool is available or verification fails; pass `--verify-signature` (or `G8S_VERIFY_SIGNATURE=1`) to `scripts/install.sh` to enforce Cosign Sigstore bundle or GitHub artifact attestation verification. For Windows-specific notes, see [Windows installation guide](docs/WINDOWS_INSTALL.md).
+Both installers **fail closed** on SHA-256 verification against the release `checksums.txt`; pass `--verify-signature` (or `G8S_VERIFY_SIGNATURE=1`) to `scripts/install.sh` to enforce Cosign Sigstore or GitHub attestation verification ([Releases](https://github.com/tamld/g8s/releases)).
 
-### Package managers
+| Platform | Architectures | Release Asset Pattern |
+| :--- | :--- | :--- |
+| **macOS** (universal) | `darwin/amd64`, `darwin/arm64` | `g8s_<version>_darwin_all.tar.gz` |
+| **Linux** | `linux/amd64`, `linux/arm64` | `g8s_<version>_linux_{amd64,arm64}.tar.gz` (plus `.deb`, `.rpm`, `.apk`) |
+| **Windows** | `windows/amd64`, `windows/arm64` | `g8s_<version>_windows_{amd64,arm64}.zip` |
 
-**macOS / Linux (Homebrew):**
+<details>
+<summary>Package managers (Homebrew, Scoop, Linux .deb/.rpm/.apk), Go 1.26.11+, Build from source & Verification</summary>
 
+**Homebrew (macOS / Linux):**
 ```bash
 brew install tamld/g8s/g8s
 ```
 
-The [tamld/g8s tap](https://github.com/tamld/homebrew-g8s) ships the prebuilt binary (universal on macOS; amd64/arm64 on Linux) and auto-updates within an hour of each release, pulling checksums from the release's own `checksums.txt`.
-
-**Windows (Scoop):**
-
+**Scoop (Windows):**
 ```powershell
 scoop bucket add tamld https://github.com/tamld/scoop-bucket
 scoop install tamld/g8s
 ```
 
-The [tamld scoop bucket](https://github.com/tamld/scoop-bucket) ships amd64/arm64 Windows binaries with hashes from the release's `checksums.txt` and the same hourly auto-update cadence.
-
-**Linux packages (from the release page):** there is no hosted `apt`/`yum`/`apk` repository yet—download the package for your architecture from the [release page](https://github.com/tamld/g8s/releases) and install locally:
-
-| Architecture | `.deb` | `.rpm` | `.apk` |
-| :--- | :--- | :--- | :--- |
-| `linux/amd64` | `g8s_<version>_linux_amd64.deb` | `g8s_<version>_linux_amd64.rpm` | `g8s_<version>_linux_amd64.apk` |
-| `linux/arm64` | `g8s_<version>_linux_arm64.deb` | `g8s_<version>_linux_arm64.rpm` | `g8s_<version>_linux_arm64.apk` |
-
+**Linux packages (download from [GitHub Releases](https://github.com/tamld/g8s/releases)):**
 ```bash
-sudo dpkg -i g8s_*_linux_amd64.deb          # Debian/Ubuntu
-sudo rpm -i g8s_*_linux_amd64.rpm             # RHEL/Fedora
-sudo apk add --allow-untrusted ./g8s_*_linux_amd64.apk   # Alpine
+sudo dpkg -i g8s_*_linux_amd64.deb                      # Debian/Ubuntu
+sudo rpm -i g8s_*_linux_amd64.rpm                         # RHEL/Fedora
+sudo apk add --allow-untrusted ./g8s_*_linux_amd64.apk    # Alpine
 ```
 
-### Archives (all platforms)
-
-| Platform | Release asset pattern |
-| :--- | :--- |
-| macOS (universal) | `g8s_<version>_darwin_all.tar.gz` |
-| Linux | `g8s_<version>_linux_{amd64,arm64}.tar.gz` (plus packages above) |
-| Windows | `g8s_<version>_windows_{amd64,arm64}.zip` |
-
-Extract the archive and place `g8s` on your `PATH`, or use the one-line installer instead.
-
-### Via Go Toolchain (`go1.26.11`+)
-
+**Via Go Toolchain (`go1.26.11`+) or From Source:**
 ```bash
 go install github.com/tamld/g8s/cmd/g8s@latest
+
+# Or clone & build local binary with commit provenance:
+git clone https://github.com/tamld/g8s.git && cd g8s && make local && ./bin/g8s doctor --json
 ```
 
-### Build from Source
+**Verify downloads & lifecycle commands:**
+1. **SHA-256**: `sha256sum -c checksums.txt` (`Get-FileHash` on Windows; automatic in one-line installers).
+2. **Attestation / Sigstore**: `gh attestation verify <asset> -R tamld/g8s --owner tamld` or `cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt`.
+3. **Lifecycle**: `g8s init`, `g8s doctor`, `g8s update`, `g8s uninstall`, `g8s service install|start|status`, `g8s version`. See [Windows Installation](docs/WINDOWS_INSTALL.md) and [Release Rollback](docs/release/ROLLBACK.md).
 
-```bash
-git clone https://github.com/tamld/g8s.git
-cd g8s
-make local
-./bin/g8s doctor --json
-```
-
-### Verify your download
-
-1. **SHA-256 (required):** Compare the archive hash to the line for your filename in `checksums.txt` on the release. The one-line installers perform this step automatically.
-2. **GitHub attestations (optional):** `gh attestation verify <asset> -R tamld/g8s --owner tamld` proves the release artifact is cryptographically linked to this repository’s build provenance.
-3. **Sigstore bundle (optional):** `cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt` proves the checksum manifest itself was signed in the release’s Sigstore bundle.
-
-If an install fails or you need to revert binaries, see [Release rollback](docs/release/ROLLBACK.md).
-
-### After install
-
-- **`g8s init`** — interactive or headless first-time setup (paths, MCP hints).
-- **`g8s doctor`** — sanity-check binary, config, and environment.
-- **`g8s update`** — upgrade to a newer release with verified replacement of the binary.
-- **`g8s uninstall`** — remove the installed binary (optional state purge).
-
-Other lifecycle surfaces include `g8s service install|start|status` and `g8s version`.
+</details>
 
 ---
 
-## 5. Usage Paradigms (Quickstart)
+## 5. Containment & TRUST Assurance Status
 
-### Paradigm 1: Read-Only Reconnaissance
-Safely explore a codebase without granting write permissions:
-```bash
-# Submit a read-only reconnaissance task (explicit flags or a catalog profile).
-# --profile requires .g8s/agent-models.yml discoverable from the working directory (run inside the repo).
-g8s submit \
-  --profile scout-fast \
-  --idempotency-key "scout-providers-01" \
-  --prompt "Scan internal/provider and map all exported interfaces"
+`g8s` reports security posture honestly per host OS and per binary (`ENFORCED`, `MEDIATED_ONLY`, `NOT_ENFORCED`, `UNVERIFIED`) under the [ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md) non-compensatory rule — aggregate probe scores never mask an unverified or degraded gate (`TRUST-G1..G6`):
 
-# Capture task id from the JSON envelope
-g8s submit --profile scout-fast --idempotency-key scout-02 --prompt "..." --json --select data.task_id
+| Platform | OS Containment & `TRUST-G1` Posture | Control-Plane Backstops & Caveats |
+| :--- | :--- | :--- |
+| **macOS (`darwin`)** | `ENFORCED` via XNU Seatbelt (`kernel_enforced`), `(deny network-outbound)`, `ScrubEnv`, `-pgid` + `G8S_SANDBOX_ID` sweep | Ed25519 receipts, WAL CAS, NUL `-z` diff firewall; external `SIGKILL` swept by `g8s cleanup` |
+| **Linux (`linux`)** | `ENFORCED` via `bwrap --unshare-net`; `MEDIATED_ONLY` via Landlock LSM (no OS socket block); `NOT_ENFORCED` if `policy_only` | Ed25519 receipts, WAL CAS, diff firewall; fail closed with `--require-kernel-sandbox` |
+| **Windows (`windows`)** | `MEDIATED_ONLY` via Win32 `JobObject` (`KILL_ON_JOB_CLOSE`, `job_object_env_scrubbed`) + `ScrubEnv` | No kernel FS ACLs or OS socket block yet; relies on Ed25519 scope + diff firewall |
 
-# Run one worker attempt to process the task
-g8s worker --once
-```
-
-### Paradigm 2: Capability-Scoped Mutation
-Issue a single-use, path-scoped receipt before mutating files:
-`--allow-workspace-write` temporarily sets `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` for that CLI invocation. If omitted or false, existing environment value stays unchanged; existing `AGY_MCP_ALLOW_WORKSPACE_WRITE=1` remains supported.
+Reproduce live non-compensatory telemetry and all 5 offline assurance probes (`as-001`..`as-005`) with zero API keys:
 
 ```bash
-# 1. Issue single-use write receipt scoped to a specific directory
-RECEIPT_ID=$(g8s receipt issue --path "internal/config/*.go" --json | g8s select data.receipt_id)
-
-# 2. Dispatch worker bounded by the receipt
-g8s submit \
-  --idempotency-key "test-config-01" \
-  --role test-runner \
-  --permission workspace_write \
-  --allow-workspace-write \
-  --receipt-id "$RECEIPT_ID" \
-  --prompt "Add unit tests for config validation in internal/config"
-
-g8s worker --once --allow-workspace-write
+g8s doctor --json                    # per-OS binary provenance + trust_assurance_status
+bash tools/assurance_benchmark.sh    # offline escape, mutant-canary, RTO, CAS, and audit suite
 ```
 
-### Paradigm 3: Universal Config-Driven LLM Gateway Consumer
-Directly invoke or queue tasks across standard OpenAI/Anthropic-compatible HTTP endpoints (or optional Layer 2 self-hosted gateways such as `9router` declared in untracked `~/.config/g8s/providers.json`):
-```bash
-# Direct synchronous execution against an official OpenAI-compatible endpoint
-g8s llm-call \
-  --provider openai \
-  --model gpt-5.5 \
-  --effort high \
-  --prompt "Review internal/fsops for race conditions"
-
-# Live model discovery against configured providers
-g8s providers discover --provider openai --json
-```
-
-### Paradigm 4: Native Cross-Platform Agent I/O
-Pure-Go high-performance replacements for external CLI utilities:
-```bash
-# Search codebase (replaces rg / grep / find)
-g8s search "WriteReceipt" --globs "*.go"
-
-# Bounded read with SHA-256 fingerprint (replaces sed -n / cat / head)
-g8s read internal/provider/registry.go --lines 20:50
-
-# Atomic compare-and-swap edit (replaces sed -i / awk)
-g8s edit internal/config/config.go --old "timeout = 30s" --new "timeout = 60s"
-
-# Extract JSON dot-path value (replaces jq)
-cat result.json | g8s select --selector .data.status
-```
+Quantitative claims in [`docs/claims.yml`](docs/claims.yml) are bound via `tools/claims_check.sh`. For the full threat matrix, SAST/DAST/IAST/Fuzzing controls, and distinction between tagged `v0.25.0` and `main` hardening, see [Containment & Threat-Model Matrix](docs/security/containment-matrix.md) and [OWASP Agentic, SLSA & SBOM Security](docs/security/owasp-agentic-slsa-sbom.md).
 
 ---
 
-## 6. MCP, Agent Skills & Offer Bundle
+## 6. MCP Server, Skills & Documentation
 
-### Model Context Protocol (MCP) Server
+`g8s mcp` exposes a native stdio JSON-RPC Model Context Protocol server for Claude Desktop, Cursor, Windsurf, and Antigravity.
 
-`g8s` runs as a native stdio Model Context Protocol (MCP) server supporting IDE hosts (Claude Desktop, Cursor, Windsurf, Antigravity):
+<details>
+<summary>All 23 Registered MCP Tools (22 active + g8s_run stub — click to expand)</summary>
 
-```bash
-g8s mcp
-```
+| Category | Tools | Reference |
+| :--- | :--- | :--- |
+| **Tasks & Containment** | `g8s_submit`, `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_receipt_issue`, `g8s_run` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
+| **Agent I/O & Context** | `g8s_search`, `g8s_read`, `g8s_edit`, `g8s_select`, `g8s_blast_radius`, `g8s_context_pack` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
+| **LLM & Introspection** | `g8s_llm_call`, `g8s_self_awareness`, `g8s_list_roles`, `g8s_list_permissions` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
+| **Federation, Skills & Mesh** | `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`, `g8s_skills_list`, `g8s_skills_read`, `g8s_coordinator_mesh` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
 
-#### Complete MCP Tool Inventory (23 Registered Tools: 22 Active + `g8s_run` Stub)
-
-| Tool Name | Operation & Purpose |
-| :--- | :--- |
-| `g8s_run` | Reserved post-MVP synchronous worker execution stub (returns JSON-RPC `-32603`; use `g8s_submit`). |
-| `g8s_submit` | Enqueue a durable task with role, permissions, and timeout budget. |
-| `g8s_get` | Fetch sanitized task status by task ID. |
-| `g8s_receipt_issue` | Issue a single-use, path-scoped, time-limited Write Receipt. |
-| `g8s_self_awareness` | Report discovered providers, model availability, and concurrency slots. |
-| `g8s_blast_radius` | Pure-Go AST and multi-tier CodeIntel impact analysis for a file/symbol (`DELTA-07`, `DELTA-20`). |
-| `g8s_dispatch` | Execute a bounded, read-only dispatch through the CLI wrapper. |
-| `g8s_list_tasks` | List tasks filtered by state (`QUEUED`, `LEASED`, `SUCCEEDED`, `FAILED`). |
-| `g8s_cancel_task` | Request cooperative cancellation of a durable task with an audit reason. |
-| `g8s_list_roles` | Enumerate all 10 registered worker role profiles and default permissions. |
-| `g8s_list_permissions` | Enumerate permission profiles (`read_only`, `automation_read`, `workspace_write`, `supplied_text`). |
-| `g8s_search` | Pure-Go regex and literal file search with gitignore awareness (`DELTA-22/23`). |
-| `g8s_read` | Bounded file reading with line-range slicing and SHA-256 validation (`DELTA-23`). |
-| `g8s_edit` | Atomic CAS file editing with CRLF/LF preservation and receipt checks (`DELTA-23`). |
-| `g8s_select` | Pure-Go JSON dot-path selector (replaces jq; `DELTA-23`). |
-| `g8s_llm_call` | Direct synchronous LLM invocation across configured providers (`DELTA-25`). |
-| `g8s_charter_issue` | Issue an epoch-fenced Stratum Charter (`S0/S1 -> S2`) (`DELTA-33`). |
-| `g8s_charter_verify` | Verify a Stratum Charter epoch and fence token (`DELTA-33`). |
-| `g8s_portfolio_status` | O-Plane read-only projection of active/revoked/completed Stratum Charters (`DELTA-33`). |
-| `g8s_skills_list` | List digest-pinned skills (`skill://g8s/<tier>/<name>`) filtered by F0/F1/F2 tier (`DELTA-34`). |
-| `g8s_skills_read` | Read a verified `SKILL.md` with optional `expected_digest` SHA-256 TOCTOU check (`DELTA-34`). |
-| `g8s_context_pack` | Pure-Go 4-tier AST elision, PageRank + BM25F, and Knapsack context compressor (`DELTA-36`). |
-| `g8s_coordinator_mesh` | Execute explicit-directory peer coordinator SQLite WAL ledger operations (`DELTA-46`). |
-
-### Agent Skills & Supervisor Charter
-
-The canonical operating charter for `g8s` supervisors is vendored at [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md) (`v4.3.0`), registered in [`skills/manifest.json`](skills/manifest.json), and governed by [`skills/g8s-supervisor/references/doc-standard.md`](skills/g8s-supervisor/references/doc-standard.md).
-
-### Sibling Repo Adoption via Offer Bundle
-
-Other repositories adopt `g8s` via the pull-based Offer Bundle ([`offer/README.md`](offer/README.md)), providing 4 domain profiles ([`knowledge`](offer/profiles/knowledge.md), [`security`](offer/profiles/security.md), [`infra`](offer/profiles/infra.md), [`utility`](offer/profiles/utility.md)) and 3 CI sync gates.
+</details>
 
 > [!NOTE]
-> **AI Agent SSoT Discovery**: Autonomous agents entering this repository should inspect [`manifest.json`](manifest.json) for machine-readable schemas and [`AGENTS.md`](AGENTS.md) for the complete 5-step reading order.
-
----
-
-## 7. Scope & Non-Goals
-
-To maintain high reliability and performance, `g8s` explicitly bounds its product scope:
-
-| Target Domain | Architectural Decision & Non-Goal |
-| :--- | :--- |
-| **In-Process Plugins** | **Non-Goal**: Dynamic in-process C/Go plugins. `g8s` uses **Declarative Config + Standard Protocols** (`providers.json`, JSON-RPC MCP, CLI subprocesses) to prevent runtime compilation fragility and sandbox escapes. |
-| **Heavy Frameworks** | **Non-Goal**: Heavy Python runtimes (LangChain, AutoGen). `g8s` is a pure-Go, zero-CGO static binary (requiring only `git` for worktree isolation, plus optional `bwrap` on Linux). |
-| **GUI Dashboard Bloat** | **Non-Goal**: Bloated web dashboards. `g8s` is CLI-first; telemetry is stored in the Evidence Lake and queried via CLI/MCP envelopes. |
-| **Model Inference Hosting** | **Non-Goal**: In-process model weights execution. `g8s` orchestrates external processes and gateways; inference is owned by upstream providers. |
-
----
-
-## 8. Documentation & Quality Assurance
+> **AI Agents & Sibling Repos**: Autonomous coordinators should read [`AGENTS.md`](AGENTS.md), [`manifest.json`](manifest.json), and [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md). External repos can adopt `g8s` via the pull-based [`offer/` Bundle](offer/README.md).
 
 ### Documentation Index
 
-| Guide / Specification | Scope & Focus |
+| Document | Focus |
 | :--- | :--- |
-| [Product site](https://g8s.flowaxon.com) | Landing page, product reel, and The Gate Room interactive containment demo. |
-| [Quickstart Guide](docs/quickstart.md) | Step-by-step introduction from first install to delegated execution. |
-| [Windows Installation](docs/WINDOWS_INSTALL.md) | PowerShell installer, `PATH`, and Windows-specific install troubleshooting. |
-| [Release Rollback](docs/release/ROLLBACK.md) | Revert to a prior release binary when an upgrade fails or must be undone. |
-| [CLI Reference](docs/user-guide/cli-reference.md) | Exhaustive manual of all subcommands, flags, and exit codes. |
-| [MCP Tools Reference](docs/user-guide/mcp-tools.md) | JSON schemas, parameters, and return types for all 23 registered MCP tools. |
-| [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Fast pure-Go searching, slicing, editing, and dot-path extraction. |
-| [Product Requirements (PRD)](docs/PRD.md) | Problem statement, target personas, and core value propositions. |
-| [Software Requirements (SRS)](docs/SRS.md) | Functional (FR-1..11) and non-functional requirements (NFR-1..4). |
-| [Definition of Done & Ready](docs/DOD_DOR.md) | Engineering criteria, multi-round verification, and gate rules. |
-| [OWASP Agentic, SLSA & SBOM Security](docs/security/owasp-agentic-slsa-sbom.md) | OWASP Top 10 for LLM/Agentic Apps (2025), SLSA v1.0, and SPDX SBOM matrix. |
-| [Containment & Threat-Model Matrix](docs/security/containment-matrix.md) | 3-OS kernel vs. Ed25519/CAS vs. Git diff-firewall guarantees, degraded modes, and offline audit reproduction. |
-| [Trust & Self-Improvement North Star (ADR-0042)](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md) | 7 TRUST principles (incl. Non-Self-Certifying), Trust Root outside LLM inference, `TRUST-G1`–`TRUST-G6` gates, mediated vs. enforced isolation, and two-tier autonomy boundary. |
-| [Architecture Decision Records](docs/decisions/) | ADR-0001 through ADR-0042 architectural choices and rationales (with documented tombstone gaps). |
+| [Quickstart Guide](docs/quickstart.md) | First install to receipt-scoped delegation |
+| [CLI Reference](docs/user-guide/cli-reference.md) & [MCP Reference](docs/user-guide/mcp-tools.md) | Subcommands, flags, exit codes, and 23 JSON-RPC schemas |
+| [Native Agent I/O Guide](offer/SEARCH_GUIDE.md) | Pure-Go `search`, `read`, `edit`, and `select` |
+| [Containment & Threat-Model Matrix](docs/security/containment-matrix.md) | 3-OS kernel vs. Ed25519 vs. diff-firewall guarantees |
+| [OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Security controls, Cosign verification, SPDX SBOMs |
+| [ADR-0042: TRUST North Star](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md) & [All ADRs](docs/decisions/) | Trust Root outside LLM inference and `TRUST-G1..G6` |
+| [PRD](docs/PRD.md), [SRS](docs/SRS.md) & [DoD/DoR](docs/DOD_DOR.md) | Requirements and engineering acceptance standards |
+| [Windows Install](docs/WINDOWS_INSTALL.md) & [Rollback](docs/release/ROLLBACK.md) | Windows troubleshooting and binary rollback steps |
+| [Architecture Roadmap](docs/ARCHITECTURE_ROADMAP.md) & [Changelog](CHANGELOG.md) | Release history (`v0.18.0`–`v0.25.0`) and milestone plan |
 
-### AppSec & Quality Gates
+### Roadmap Snapshot & Non-Goals
 
-Every code change is verified against four AppSec pillars and quantitative claims bound to [`docs/claims.yml`](docs/claims.yml) via `tools/claims_check.sh`:
-
-| Pillar | Quality Assurance Mechanism | Verification Target |
-| :--- | :--- | :--- |
-| **1. SAST Triad** | `gosec` (in `golangci-lint`) + `Semgrep` (`.semgrep/g8s-rules.yml`) + `CodeQL` | Zero security antipatterns, zero unchecked errors (`errcheck`). |
-| **2. Black-Box DAST** | End-to-end API fuzzing & boundary probing (`dast_test.go`) | HTTP endpoints and MCP stdio resist malicious payloads and path escapes. |
-| **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) and red-team probe suite (`sa-006`..`sa-008`) | Eval-probe runtime hygiene snapshots verifying CAS contention, symlink confinement, and zero goroutine/temp leaks. |
-| **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Deterministic parsing resilience across arbitrary inputs. |
-
-### Containment Boundaries & Offline Assurance Benchmark (`#922`)
-
-Reproduce the 5-probe security, anti-false-PASS, crash-recovery, CAS-latency, and cryptographic-audit benchmark locally without any LLM API keys:
-
-```bash
-bash tools/assurance_benchmark.sh
-```
-
-| Platform | Kernel Filesystem & Process Enforcement | Control-Plane & Post-Run Enforcement | Degraded / Caveat Reporting |
-| :--- | :--- | :--- | :--- |
-| **macOS (`darwin`)** | XNU Seatbelt (`sandbox-exec`, `kernel_enforced`), `ScrubEnv`, `-pgid` + `G8S_SANDBOX_ID` sweep | Ed25519 receipts/charters (`0600`/`0700`), WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | No XNU `Pdeathsig` on external supervisor `SIGKILL` (`g8s cleanup`) |
-| **Linux (`linux`)** | `bwrap` / Landlock LSM (`kernel_enforced`), `ScrubEnv`, `-pgid` + subreaper + `Pdeathsig` (Landlock) | Ed25519 receipts/charters (`0600`/`0700`), WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | `policy_only` surfaced by `g8s doctor` if neither `bwrap` nor Landlock is usable; `/usr/bin/bwrap` AppArmor resets `pdeath_signal` |
-| **Windows (`windows`)** | Win32 `JobObject` (`KILL_ON_JOB_CLOSE`), `ScrubEnv`, `TerminateProcess` | Ed25519 receipts/charters, WAL CAS, `VerifyWorktreeDiffScope`, fail-closed `deliver` | No pre-run kernel worktree path ACL (`mode=job_object_env_scrubbed`); relies on Tiers 2–3 for file scope |
-
-Full threat-model table and reproducible verification guide: [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md).
-
-> [!NOTE]
-> **v0.25.0 Boundary & Active Hardening**: `v0.25.0` enforces layered single-host containment on macOS/Linux (`kernel_enforced`) and Windows (`job_object_env_scrubbed` process-tree + env scrub, not same-UID filesystem ACL). Follow-on hardening for unified NUL `-z` non-claim diff firewall (`#935`), strict fail-closed `--require-kernel-sandbox` (`#936`), and installer supply-chain hardening (`#937`) is tracked openly under Epic [#934](https://github.com/tamld/g8s/issues/934).
-
----
-
-## 9. Roadmap, Project Structure & License
-
-### Grounded Release Roadmap
-
-Milestones are evidence-gated on test verification and burn-in stability:
-
-| Version Milestone | Scope & Grounded Milestones | Status |
+| Milestone | Scope | Status |
 | :--- | :--- | :---: |
-| **`v0.18.0`** (2026-10-21) | **F0 Verified Delegation & Symmetric Zero-Trust Control Plane** ([ADR-0033](docs/decisions/0033-f0-verified-delegation.md)): hash-chained evidence ledger, signed mandates (`T0`–`T4`), commit/merge gates `G0`–`G7`, lossless verify firewall. | **Done** |
-| **`v0.19.0`** (2026-10-21) | **Universal Config-Driven LLM Call Consumer & Multi-Model Fleet** ([ADR-0034](docs/decisions/0034-config-driven-llm-consumer-9router.md), `DELTA-25`): `g8s_llm_call`, `g8s_select`, Offer Bundle `v0.19.0`, Skills `v4.3.0` (`doc-standard.md`), Single `MIT` License, Zero-Stale `manifest.json` & Structure Sync. | **Done** |
-| **`v0.20.0`** (2026-10-25) | **Orthogonal Stratum Federation, Continuous Model Scorecard, Digest-Pinned Skill Hydration, Pure-Go AST/Knapsack ContextPack, 6-Stage AI QA Pipeline & DeviceLeasePool** ([ADR-0035](docs/decisions/0035-orthogonal-stratum-federation.md), `DELTA-26..38`): `S0..S3` + `O-Plane` charter engine, expanded MCP surface (`g8s_skills_list`, `g8s_skills_read`, `g8s_context_pack`, `g8s_charter_*`), 10-role harness taxonomy, typed `FailureDiagnosis` & dynamic quarantine, CAS `deliver --expected-head-oid`, risk-tiered `Lane F/R/S` pre-execution gate, `g8s context-pack`, `g8s qa-report`, and `DeviceLeasePool`. | **Done** |
-| **`v0.21.0`** (2026-10-27) | **Universal CLI Agent Adapter Suite & Dual-Path Cursor Integration** (`DELTA-39..45`, [#672](https://github.com/tamld/g8s/issues/672)): first-class CLI worker adapters for `opencode`, `commandcode`, `qwen`, `codex`, and `cursor` (Cursor Cloud REST discovery via `CURSOR_API_KEY` + local `cursor-agent` headless), worktree `diff_firewall` failing closed on out-of-scope mutations (`E_OUT_OF_SCOPE_MUTATION`), Spec-Kit v2 with 8 living domain specs (40-repo crucible rollout), generative CLI surface contract v2 (`E_UNBOUND_CLI_CLAIM`), unified telemetry bus + 5-Axis Kaizen scorecard, transactional enterprise access-audit log, and capability-scoped skill/MCP hydration. | **Done** |
-| **`v0.22.0`** (2026-11-01) | **Multi-Coordinator Native Interop Ledger & RT-MESH v1** (spec `46-peer-coordinator-ledger-spec.md`, `DELTA-46`): shared SQLite WAL ledger for equal-peer F0 coordinators (`register`/`quota-publish`/`send`/`inbox`/`ack`/`claim`/`release`/`accept`/`snapshot`/`wait` via CLI + `g8s_coordinator_mesh` MCP tool), typed idempotent messages (UNIQUE `message_id` + digest echo), CAS claims with TTL + context-revision fence, bounded wait long-poll, 2-tier quota self-report (unknown stays unknown), whitespace-only layer-gate exemption (A6), nightly full-battery workflow; ratified across Codex/AGY/ZCode peers with live 3-platform exchange ([#700](https://github.com/tamld/g8s/pull/700), [#701](https://github.com/tamld/g8s/pull/701), [#702](https://github.com/tamld/g8s/pull/702), tracker [#699](https://github.com/tamld/g8s/issues/699)). **+ Platform data-acquisition layer ("reach")** — per-platform ordered fallback tool chains (`g8s reach read`), persistent health & owned-paths ledgers (`S2`), Context Broker `WorldSnippets` & `PROPOSED`-default vault promotion (`S3`), and machine-fetched research-gate artifacts (`S4`) ([#704](https://github.com/tamld/g8s/issues/704), [ADR-0037](docs/decisions/0037-reach-layer.md), `DELTA-47`). | **Done** |
-| **`v0.23.0`** (2026-11-08) | **Containment Hardened & Process-Reflective** — claim-scoped mutation fence end-to-end ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md)): issuance-clip/TTL≤lease/renewal, fsops pre-mutation gate, claim-aware fail-closed harvest firewall, red matrix R1-R7 + conformance probe P9; **RT-MESH v1.1** A1-A5 (cumulative ack, flow window, retry budget, keepalive, screen-state gate — spec 46); **D-09 REFLEX-CYCLE closed** (SENSE→JUDGE→ACT→PRUNE-LAW, self-tombstoning); **provenance honesty ledger** ([ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), weekly receipt-ratio); Mechanized SSoT & worker git-commit proxy ([ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)); release-gate hardening (pre-tag surface inventory, fail-loud pre_push, doctor binary-vs-HEAD). | **Done** (tag v0.23.0 — attested, cosigned; live drill + agy co-sign recorded in spec 46) |
-| **`v0.24.0`** (2026-11-15) | **Declarative Model Adoption, Adapter-Neutral Control Plane & Zero-Implicit-Default Closure** (`DELTA-48`, [#893](https://github.com/tamld/g8s/issues/893), [#894](https://github.com/tamld/g8s/issues/894), [#902](https://github.com/tamld/g8s/issues/902), [#904](https://github.com/tamld/g8s/pull/904), [#905](https://github.com/tamld/g8s/issues/905), [#906](https://github.com/tamld/g8s/issues/906), [#907](https://github.com/tamld/g8s/issues/907)): Gemini 4 Element Series onboarding & `.g8s/agent-models.yml` catalog v3 (`status`, `replacement`, `sunset_at`), symmetric adapter-neutral governance across `9router`/`opencode`/`codex`/`claude`/`cursor`/`agy`, `ResolveProviderDefaultModel` purging deprecated `gemini-3.8-*` defaults, catalog profile timeout inheritance on explicit triples, scope-aware `g8s verify` fallback, dynamic MCP server version stamping, mechanized verification skill `gate_command` SSoT, and RFC1918 probe error DLP redaction. | **Done** |
-| **`v0.25.0`** (2026-11-18, Current) | **Kernel-Enforced 3-OS Sandboxing, Ed25519 Receipt Authority & Offline Assurance Benchmark** (`DELTA-49`, Epic [#923](https://github.com/tamld/g8s/issues/923), [#916](https://github.com/tamld/g8s/issues/916)–[#922](https://github.com/tamld/g8s/issues/922)): macOS Seatbelt / Linux `bwrap`+Landlock / Windows `JobObject` subprocess sandboxing & `ScrubEnv` (`internal/sandbox`), Ed25519-signed `WriteReceipt`s & `StratumCharter`s + `0600`/`0700` state hygiene (`internal/signing`, `internal/pathutil`), fail-closed `ReviewReceipt`/`RealReviewer`/`deliver` CAS + `-z` rename firewall, real `tools/faultworker` 3-OS crash-survival E2E + live `os_sandbox` doctor probe, `19/19 RUNTIME_PROVEN` feature audit + `14`-pattern trust-boundary SSoT + `Lane S` auto-escalation, and reproducible `as-001`..`as-005` offline assurance benchmark + [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md). | **Done** |
-| **`v0.25.1`** (Planned) | **P0 Trust Root, Diff Firewall, Strict Sandbox, Supply-Chain & ToS Hygiene Hardening** (Epic [#934](https://github.com/tamld/g8s/issues/934), [#935](https://github.com/tamld/g8s/issues/935)–[#939](https://github.com/tamld/g8s/issues/939), [#945](https://github.com/tamld/g8s/issues/945)): unify `VerifyWorktreeDiffScope` on `-z` & remove `.g8s` exemption, fail-closed `--require-kernel-sandbox`, narrow `9router` env allowlist, fix `install.sh` (`darwin_all` + no `v0.1.0` fallback + optional Cosign verification), vendor-neutral Layer 1/Layer 2 gateway separation & ToS hygiene, runtime-proven `claims_check.sh --test-report`, and accurate release tag `manifest.json`. | **Planned** |
-| **`v0.26.0`** (Planned) | **P1 Independent Evaluator, Provider Parity & WAL Stress Proof** ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md), [#940](https://github.com/tamld/g8s/issues/940)–[#943](https://github.com/tamld/g8s/issues/943)): `ProcessTransport` vs `RequestTransport` split + async HTTP `Handle.Cancel()`, `agent-models.v2` capability gate, offline 8-CLI/HTTP adapter contract suite, automated POSIX `SIGKILL` orphan sweep E2E, single-host multi-coordinator WAL fencing stress E2E, unified `PolicyEnforcementReport`, immutable out-of-worktree holdout eval, and `TRUST-G6` bounded evolution / universal `PASS`+`FAIL` memory promotion gate. | **Planned** |
-| **`v0.30.0`** (Planned) | **Scoped MCP/Network Capability Proxy, Controlled Self-Improvement v1 & Multi-Repo Offer Burn-In** ([#672](https://github.com/tamld/g8s/issues/672), [ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)): in-worktree F1/F2 MCP/HTTP capability proxy (mediated access; enforced network isolation where OS/container blocks direct sockets), `Tier A` canary self-improvement loop under `TRUST-G1`–`TRUST-G6`, and 90-day multi-repo Offer retention burn-in. | **Planned** |
-| **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
-| **`v1.0.0`** (Evidence-Gated GA) | **Production GA Lock**: gated on completing `v0.30.0` + `v0.40.0`, passing all `ADR-0042` Trust Gates `TRUST-G1`–`TRUST-G6` (`0` critical escapes, `0` self-authorizations), and passing **$\ge 50$ receipt-backed real dispatches** across all 4 Offer Bundle domain profiles (`knowledge`, `security`, `infra`, `utility`) with **$\ge 90\%$ First-Pass Yield** (evidence-gated, not calendar-gated). | **Planned** |
+| **`v0.25.0`** (2026-11-18) | Kernel 3-OS sandboxing, Ed25519 receipts/charters, `faultworker` E2E, `as-001`..`as-005` benchmark | **Released** |
+| **`main`** (post-`v0.25.0`) | Hardened `-z` firewall, `--require-kernel-sandbox`, S0 human TCB keys, `TRUST-G1..G6` enforcement & status telemetry | **In Progress** |
+| **`v0.30.0`** | In-worktree Scoped MCP/Network Capability Proxy, `Tier A` canary self-improvement, 90-day Offer burn-in | **Planned** |
+| **`v1.0.0`** | Full `TRUST-G1..G6` pass, $\ge 50$ receipt-backed real dispatches, $\ge 90\%$ First-Pass Yield | **Planned** |
 
-> **Scope & Non-Goals (`v0.25`–`v0.40`)**: `g8s` targets single-host SQLite WAL durability and read-only `S1 -> S2` charter federation; multi-node distributed Raft/network-partition consensus and root-requiring kernel eBPF/iptables firewalls are explicit non-goals.
+**Explicit Non-Goals**: `g8s` is a single-host CLI/SQLite WAL orchestrator (`S1 -> S2` charter federation only); distributed Raft consensus, dynamic C/Go plugins, in-process LLM weight hosting, and heavy web UIs are out of scope.
 
-### Project Structure
+<details>
+<summary>Project Structure (auto-synced Go package map)</summary>
 
 <!-- structure:start -->
 ```
@@ -483,10 +302,12 @@ g8s/
 ```
 <!-- structure:end -->
 
+</details>
+
 ---
 
-## 10. License
+## 7. License
 
 Distributed under the **MIT License**. Copyright (c) 2026 TamLD. See [LICENSE](LICENSE) for details.
 
-**Independent OSS & Vendor ToS Compliance**: `g8s` is an independent open-source project and is not affiliated with, sponsored by, or endorsed by Google, Anthropic, OpenAI, Cursor, or any other model vendor. Operators supply their own official vendor CLIs and official API keys in accordance with each vendor's Terms of Service; `g8s` provides no credential sharing, free-tier account rotation, or proprietary protocol bypass.
+**Independent OSS & Vendor ToS Compliance**: `g8s` is an independent open-source project not affiliated with or endorsed by Google, Anthropic, OpenAI, Cursor, or any model vendor. Operators supply their own official CLIs and API keys in accordance with vendor Terms of Service.

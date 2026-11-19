@@ -263,7 +263,8 @@ cat result.json | g8s select --selector .data.status
 g8s mcp
 ```
 
-#### Danh mục 23 công cụ MCP đã đăng ký (22 hoạt động + `g8s_run` dự trữ)
+<details>
+<summary>Danh mục 23 công cụ MCP đã đăng ký (22 hoạt động + g8s_run dự trữ — nhấn để mở rộng)</summary>
 
 | Tên công cụ | Mục đích & Thao tác |
 | :--- | :--- |
@@ -290,6 +291,8 @@ g8s mcp
 | `g8s_skills_read` | Đọc `SKILL.md` có kiểm tra chống giả mạo TOCTOU qua `expected_digest` SHA-256 (`DELTA-34`). |
 | `g8s_context_pack` | Nén ngữ cảnh AST 4 tầng thuần Go, PageRank + BM25F và Knapsack (`DELTA-36`). |
 | `g8s_coordinator_mesh` | Thực thi các thao tác sổ cái SQLite WAL liên peer coordinator với thư mục tường minh (`DELTA-46`). |
+
+</details>
 
 ### Agent Skills & Hiến chương Giám sát
 
@@ -349,18 +352,19 @@ Mọi commit đều được kiểm tra nghiêm ngặt qua 4 trụ cột AppSec 
 | **3. In-Process IAST** | `probe.RuntimeSensor` (`internal/harness/probe`) và bộ probe red-team (`sa-006`..`sa-008`) | Snapshot kiểm định vệ sinh runtime xác minh tranh chấp CAS, giam giữ symlink và không rò rỉ goroutine/file tạm. |
 | **4. Grey-Box Fuzzing** | Go native fuzzing (`FuzzVerifyScope`, `FuzzReadAndEdit`, `FuzzSelectPath`) | Độ bền vững của bộ phân tích trước mọi đầu vào bất thường. |
 
-### Ranh giới Containment & Bộ Benchmark Độc lập Offline (`#922`)
+### Ranh giới Containment, TRUST Assurance Status & Benchmark Offline (`#922`, `#959`)
 
-Tái lập độc lập toàn bộ 5 bài đo containment thoát sandbox, chống `False PASS` bằng canary đột biến, phục hồi lease crash, độ trễ CAS và kiểm toán mật mã Ed25519 mà không cần bất kỳ API key LLM nào:
+Tái lập độc lập trạng thái tuân thủ phi bù trừ theo từng hệ điều hành và binary (`trust_assurance_status`: `ENFORCED`, `MEDIATED_ONLY`, `NOT_ENFORCED`, `UNVERIFIED` cho `TRUST-G1`–`TRUST-G6` theo [ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)) cùng toàn bộ 5 bài đo thoát sandbox, canary đột biến, phục hồi lease crash, độ trễ CAS và kiểm toán mật mã Ed25519 không cần API key LLM:
 
 ```bash
+g8s doctor --json
 bash tools/assurance_benchmark.sh
 ```
 
 Chi tiết ma trận 3 hệ điều hành (`macOS`, `Linux`, `Windows`) và các giới hạn không cam kết: [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md).
 
 > [!NOTE]
-> **Ranh giới `v0.25.0` & Gia cố Đang mở**: `v0.25.0` chứng minh cơ chế cách ly nhiều tầng trên một máy với macOS/Linux (`kernel_enforced`) và Windows (`job_object_env_scrubbed` cách ly process tree + lọc env, chưa có filesystem ACL cùng UID). Các hạng mục gia cố tiếp theo cho tường lửa diff `-z` thống nhất (`#935`), cờ fail-closed `--require-kernel-sandbox` (`#936`), và supply-chain installer (`#937`) được theo dõi công khai tại Epic [#934](https://github.com/tamld/g8s/issues/934).
+> **Ranh giới `v0.25.0` vs. Gia cố trên `main`**: Bản phát hành `v0.25.0` cung cấp cách ly nhân trên macOS/Linux (`kernel_enforced`) và Win32 `JobObject` (`job_object_env_scrubbed`, chưa có ACL hệ thống file) trên Windows. Trên nhánh `main` sau `v0.25.0`, các gia cố tường lửa diff `-z`, khóa `S0` ngoài suy luận LLM (`TRUST-G2`), cô lập mạng OS và báo cáo `TRUST Assurance Status` theo từng binary đã được hợp nhất; mốc tổng quan xem tại [README.md](README.md) và Epic [#934](https://github.com/tamld/g8s/issues/934).
 
 ---
 
