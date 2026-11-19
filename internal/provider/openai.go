@@ -624,7 +624,7 @@ func (p *OpenAIProvider) consumeAnthropicSSE(r io.Reader, h *asyncRequestHandle)
 			} `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &evt); err != nil {
-			continue
+			return Receipt{Status: "FAILED", Stderr: fmt.Sprintf("decode anthropic stream event: %v", err), ExitCode: 1, Streamed: true}
 		}
 		if evt.Error != nil && evt.Error.Message != "" {
 			return Receipt{Status: "FAILED", Stderr: fmt.Sprintf("anthropic stream error: %s", evt.Error.Message), ExitCode: 1, Streamed: true}
@@ -888,7 +888,7 @@ func (p *OpenAIProvider) consumeOpenAISSE(r io.Reader, h *asyncRequestHandle) Re
 			} `json:"error,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
+			return Receipt{Status: "FAILED", Stderr: fmt.Sprintf("decode chat stream chunk: %v", err), ExitCode: 1, Streamed: true}
 		}
 		if chunk.Error != nil && chunk.Error.Message != "" {
 			return Receipt{Status: "FAILED", Stderr: fmt.Sprintf("chat stream error: %s", chunk.Error.Message), ExitCode: 1, Streamed: true}

@@ -40,20 +40,28 @@
   - **DELTA-48**: `agy` is unified under `PolicyPaid` (`DefaultModel: gemini-4-hydrogen-low`, `roles_eligible: ["brain", "worker", "scout"]`) alongside `claude` and `codex`. `PolicyForbidden` (`E_LIVE_FORBIDDEN`) remains supported for operator-locked adapters.
   - Paid providers (`claude`, `codex`, `gemini`, `commandcode`) require explicit `--allow-paid <provider>`.
   - `9router` and `opencode` only run live probes without `--allow-paid` when using cheapest/free-tier models (`fast-agent`, `reasoning-free`, `docs-retriever`, `*free*`).
+- **DELTA-48 / #941**: Includes `cursor` (`cursor-agent`, `CURSOR_BIN`, `PolicyPaid`), `openai`, and `anthropic` HTTP gateways in the conformance inventory.
 - Every `ProviderReport` carries `roles_eligible` (`brain` | `worker` | `scout` | `compatibility-only`), `recommended_for`, and `note`. `ollama` is classified `compatibility-only` (`recommended_for: ["tts", "voice", "light-offline"]`).
 
-### R3 — Ground-Truth Persistence & Pre-Dispatch Gate (`store.go`, `cmd/g8s/submit.go`)
+### R3 — Ground-Truth Persistence, Offline Contract Split (`v2`) & Pre-Dispatch Gate (`store.go`, `cmd/g8s/submit.go`)
 - `g8s providers conformance [--provider <name>] [--live] [--allow-paid <csv>] [--write] [--json]`
-- `--write` atomically updates `.g8s/provider-conformance.yml` (`schema_version: "g8s.provider-conformance/v1"`) with sanitized evidence (never recording private LAN IPs or secrets) and renders `docs/user-guide/provider-matrix.md`.
-- `g8s submit` consults `.g8s/provider-conformance.yml` via `CheckDispatchFromDir`: if a provider has a `FAIL` on a required probe, `g8s submit` emits a warning by default and refuses dispatch (`E_PROVIDER_CONFORMANCE_FAIL`, exit code `3`) when `--enforce-conformance` is passed.
+- `--write` atomically updates `.g8s/provider-conformance.yml` (`schema_version: "g8s.provider-conformance/v2"`, while `LoadMatrix` still accepts `v1` on read) with sanitized evidence (never recording private LAN IPs or secrets) and renders `docs/user-guide/provider-matrix.md`.
+- Every probe separates `contract_status` / `contract_reason` (deterministic offline CI adapter contract verdict: `PASS` or `UNSUPPORTED`, preserved across `--live` merges via `Matrix.Merge`) from `live_status` / `status` (operator `--live` probe verdict: `PASS`, `FAIL`, `UNSUPPORTED`, or `UNVERIFIED`), preventing `UNVERIFIED` live probes from obscuring CI-verified adapter contracts.
+- `g8s submit` consults `.g8s/provider-conformance.yml` via `CheckDispatchFromDir`: if a provider has a `FAIL` on a required probe (`EffectiveLiveStatus() == FAIL` or `ContractStatus == FAIL`), `g8s submit` emits a warning by default and refuses dispatch (`E_PROVIDER_CONFORMANCE_FAIL`, exit code `3`) when `--enforce-conformance` is passed.
 
 ---
 
 ## 3. Verification Scenarios
 
 #### Scenario: Static and live conformance probing across CLI and HTTP providers
-<!-- tests: TestProbeHTTPStaticAndLive, TestStoreRunnerAndDispatchGate -->
+<!-- tests: TestProbeHTTPStaticAndLive, TestStoreRunnerAndDispatchGate, TestMatrixV1CompatibilityAndContractStatusMerge -->
 - **GIVEN** CLI agent profiles and OpenAI-compatible HTTP endpoints
 - **WHEN** `ProbeCLI`, `ProbeHTTP`, and `WriteMatrix` execute
 - **THEN** probe verdicts (`PASS`, `FAIL`, `UNSUPPORTED`, `UNVERIFIED`), `roles_eligible` (`brain`, `worker`, `scout`, `compatibility-only`), and sanitized SHA-256 evidence are persisted and enforced by `CheckDispatchFromDir`.
+
+#### Scenario: Offline cross-platform adapter contract & negative regression verification (#941)
+<!-- tests: TestOfflineAdapterContractSuite, TestOfflineAdapterNegativeRegressions, TestConformanceOfflineCLIContracts_AllProfiles, TestConformanceOfflineHTTPContracts_AllGateways, TestProviderConformanceMatrix_ContractParity -->
+- **GIVEN** compiled cross-platform fake CLI binaries (`agy`, `codex`, `claude`, `opencode`, `commandcode`, `qwen`, `cursor`) and deterministic HTTP mocks (`ollama`, `openai`, `anthropic`, `9router`)
+- **WHEN** positive contract suites and negative regression fixtures (malformed stdout/JSON/SSE, non-zero exit / exit-0 stderr refusals, HTTP 4xx/5xx, timeout/cancel hangs) run offline in CI
+- **THEN** all adapter contracts pass deterministically on Linux, macOS, and Windows, negative violations fail closed, and `.g8s/provider-conformance.yml` (`v2`) stays synchronized with `docs/user-guide/provider-matrix.md`.
 

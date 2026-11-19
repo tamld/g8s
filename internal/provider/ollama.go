@@ -220,7 +220,9 @@ func (o *OllamaProvider) StartRequest(ctx context.Context, spec Spec) (RequestHa
 		}
 
 		var genResp struct {
-			Response string `json:"response"`
+			Response        string `json:"response"`
+			PromptEvalCount int    `json:"prompt_eval_count"`
+			EvalCount       int    `json:"eval_count"`
 		}
 		if err := json.Unmarshal(respBody, &genResp); err != nil {
 			h.complete(Receipt{
@@ -232,14 +234,24 @@ func (o *OllamaProvider) StartRequest(ctx context.Context, spec Spec) (RequestHa
 			return
 		}
 
+		inTok := 0
+		outTok := len(genResp.Response)
+		totalTok := len(genResp.Response)
+		if genResp.PromptEvalCount > 0 || genResp.EvalCount > 0 {
+			inTok = genResp.PromptEvalCount
+			outTok = genResp.EvalCount
+			totalTok = genResp.PromptEvalCount + genResp.EvalCount
+		}
+
 		h.streamBuf.WriteString(genResp.Response)
 		h.complete(Receipt{
 			Status:        "COMPLETED",
 			Stdout:        genResp.Response,
 			ExitCode:      0,
 			ModelResolved: model,
-			OutputTokens:  len(genResp.Response),
-			TotalTokens:   len(genResp.Response),
+			InputTokens:   inTok,
+			OutputTokens:  outTok,
+			TotalTokens:   totalTok,
 		}, nil)
 	}()
 
