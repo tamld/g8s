@@ -83,7 +83,7 @@ while [ $# -gt 0 ]; do
             echo "Usage: $0 [--fast|-f] [--impacted] [--fix] [--help|-h]"
             echo ""
             echo "Options:"
-            echo "  --fast, -f    Skip race detector and cross-platform compilation (faster run)"
+            echo "  --fast, -f    Skip race detector, runtime feature/claims/benchmark audit, and Linux/Darwin cross-build (keeps Windows smoke build)"
             echo "  --impacted    Scope Go tests to impacted features/consumers via .g8s/feature-map.yml"
             echo "                (falls back to full ./... suite on hotspots, core/shared packages, or unmapped paths)"
             echo "  --fix         Auto-apply gofmt and gofumpt fixes before checking"
@@ -677,7 +677,8 @@ fi
 
 echo "  -> Pass 1: Pure-Go (Zero-CGO) with coverage..."
 COV_FILE=$(mktemp)
-trap 'rm -f "$COV_FILE"' EXIT
+AUDIT_BIN=""
+trap 'rm -f "$COV_FILE" "${AUDIT_BIN:-}"' EXIT
 EXPECTED_TEST_PKGS=()
 if [ "$SCOPED_RUN" -eq 1 ]; then
     set +e
@@ -748,6 +749,41 @@ if [ "$SCOPED_RUN" -eq 0 ]; then
         fail "Aggregate coverage ${avg}% is below 80% threshold."
     fi
     pass "Coverage threshold met (${avg}% >= 80%)"
+
+    if [ "$FAST_MODE" -eq 0 ]; then
+        echo "  -> Checking 100% RUNTIME_PROVEN Feature Audit, Claims Registry & Assurance Benchmark..."
+        AUDIT_BIN=$(mktemp)
+        if ! CGO_ENABLED=0 go build -o "$AUDIT_BIN" ./cmd/g8s; then
+            fail "Failed to build audit binary for feature/claims/benchmark checks."
+        fi
+        set +e
+        AUDIT_JSON=$("$AUDIT_BIN" feature audit --test-report "$COV_FILE" --json)
+        AUDIT_RC=$?
+        set -e
+        if [ "$AUDIT_RC" -ne 0 ] || ! echo "$AUDIT_JSON" | jq -e '.data.valid == true and .data.total_features > 0 and .data.runtime_proven_count == .data.total_features and .data.static_only_count == 0 and .data.broken_runtime_count == 0 and .data.drifted_contract_count == 0' > /dev/null; then
+            echo "$AUDIT_JSON" >&2
+            rm -f "$AUDIT_BIN"
+            AUDIT_BIN=""
+            fail "Feature audit failed 100% RUNTIME_PROVEN gate."
+        fi
+        pass "Feature audit 100% RUNTIME_PROVEN"
+
+        if ! bash tools/claims_check.sh --test-report "$COV_FILE"; then
+            rm -f "$AUDIT_BIN"
+            AUDIT_BIN=""
+            fail "Runtime-proven quantitative claims check failed."
+        fi
+        pass "Runtime-proven quantitative claims verified"
+
+        if ! bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null; then
+            rm -f "$AUDIT_BIN"
+            AUDIT_BIN=""
+            fail "Offline assurance benchmark failed."
+        fi
+        rm -f "$AUDIT_BIN"
+        AUDIT_BIN=""
+        pass "Offline assurance benchmark passed (5/5)"
+    fi
 else
     SCOPED_CHECK_OUT="$(verify_scoped_test_log "$COV_FILE" "${EXPECTED_TEST_PKGS[@]}" 2>&1)" || fail "Scoped --impacted run was vacuous: ${SCOPED_CHECK_OUT}"
     SCOPED_PASS="${SCOPED_CHECK_OUT#PASS_COUNT=}"
@@ -768,12 +804,18 @@ else
     echo "  -> Pass 2: Skipped (fast mode)"
 fi
 
-# 14. Dogfooding CI Roundtrip
-step "14/${BUILD_STEPS}" "Running Dogfooding Roundtrip Gate..."
+# 14. Dogfooding & Safe-Merge Harness Gate
+step "14/${BUILD_STEPS}" "Running Dogfooding & Safe-Merge Harness Gate..."
 if ! make dogfood; then
     fail "Dogfooding roundtrip failed."
 fi
 pass "Dogfooding roundtrip verified"
+if [ -f "tools/safe_merge_test.sh" ]; then
+    if ! bash tools/safe_merge_test.sh >/dev/null; then
+        fail "Safe-merge harness self-tests failed."
+    fi
+    pass "Safe-merge harness self-tests passed"
+fi
 
 # 15. Cross-Platform Compilation Gate
 step "15/${BUILD_STEPS}" "Running Cross-Platform Build Gate..."
@@ -783,7 +825,11 @@ if [ "$FAST_MODE" -eq 0 ]; then
     fi
     pass "Linux, macOS, and Windows compilation successful"
 else
-    echo "  -> Skipped (fast mode)"
+    echo "  -> Fast mode: running Windows cross-build smoke (GOOS=windows GOARCH=amd64)..."
+    if ! GOOS=windows GOARCH=amd64 go build ./...; then
+        fail "Windows cross-platform build failed."
+    fi
+    pass "Windows cross-platform smoke build successful (Linux/Darwin skipped in fast mode)"
 fi
 
 echo ""
