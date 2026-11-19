@@ -62,8 +62,8 @@ jobs:
       - name: Build g8s binary
         run: go build -o g8s.exe ./cmd/g8s
 
-      - name: Run Windows Test Suite
-        run: go test -count=1 -tags=windows ./...
+      - name: Run Windows Platform-Critical Test Suite
+        run: go test -count=1 -tags=windows ./internal/sandbox/... ./internal/service/... ./internal/fsops/... ./internal/worker/...
         env:
           CGO_ENABLED: '0'
 
@@ -95,3 +95,27 @@ jobs:
           path: |
             *.log
             .cleanup-audit.jsonl
+
+  windows-e2e-gate:
+    name: Windows E2E Gate
+    needs: [lane-gate, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate Windows E2E Status
+        shell: bash
+        env:
+          LANE_RESULT: ${{ needs.lane-gate.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "lane-gate: ${LANE_RESULT}"
+          echo "test: ${TEST_RESULT}"
+          if [ "${LANE_RESULT}" != "success" ]; then
+            echo "::error::Docs lane scope job failed (${LANE_RESULT})."
+            exit 1
+          fi
+          if [ "${TEST_RESULT}" != "success" ] && [ "${TEST_RESULT}" != "skipped" ]; then
+            echo "::error::Windows E2E Verification failed (${TEST_RESULT})."
+            exit 1
+          fi
+          echo "Windows E2E Gate PASSED."

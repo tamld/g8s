@@ -84,3 +84,27 @@ jobs:
         shell: bash
         run: |
           CGO_ENABLED=0 go test -v -count=1 -timeout 5m -run '^TestFaultInjectionE2E' ./cmd/g8s
+
+  crash-gate:
+    name: Crash-Survival Gate
+    needs: [lane-gate, crash]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate Crash-Survival Status
+        shell: bash
+        env:
+          LANE_RESULT: ${{ needs.lane-gate.result }}
+          CRASH_RESULT: ${{ needs.crash.result }}
+        run: |
+          echo "lane-gate: ${LANE_RESULT}"
+          echo "crash: ${CRASH_RESULT}"
+          if [ "${LANE_RESULT}" != "success" ]; then
+            echo "::error::Docs lane scope job failed (${LANE_RESULT})."
+            exit 1
+          fi
+          if [ "${CRASH_RESULT}" != "success" ] && [ "${CRASH_RESULT}" != "skipped" ]; then
+            echo "::error::Crash-Survival E2E failed (${CRASH_RESULT})."
+            exit 1
+          fi
+          echo "Crash-Survival Gate PASSED."

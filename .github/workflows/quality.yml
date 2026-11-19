@@ -99,12 +99,12 @@ jobs:
           export CI_LANE
           echo "Detected lane: $CI_LANE"
 
-      - name: Setup Go (1.25 for golangci-lint compatibility with go.mod)
+      - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.11'
 
-      - name: Install golangci-lint (bundles staticcheck, errcheck, gosec, govulncheck, gocognit)
+      - name: Run golangci-lint (staticcheck, errcheck, gosec, govet, ineffassign, unused)
         if: env.CI_LANE != 'docs'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
@@ -135,10 +135,6 @@ jobs:
         run: go vet ./...
         env:
           CGO_ENABLED: '0'
-
-      - name: golangci-lint (staticcheck, errcheck, gosec, govet, ineffassign, unused)
-        if: env.CI_LANE != 'docs'
-        run: golangci-lint run
 
       - name: Cognitive complexity audit on changed Go files (gocognit)
         if: env.CI_LANE != 'docs'
@@ -184,6 +180,11 @@ jobs:
       - name: Brief anti-pattern self-test
         shell: bash
         run: bash tools/brief_lint_test.sh
+
+      - name: Safe-merge harness self-test
+        if: env.CI_LANE != 'docs'
+        shell: bash
+        run: bash tools/safe_merge_test.sh
 
       - name: AI anti-pattern lint (DEBT-21 + DEBT-49)
         shell: bash
@@ -255,7 +256,7 @@ jobs:
           COV_FILE=$(mktemp)
           trap 'rm -f "$COV_FILE"' EXIT
           echo "=== Running go test with coverage (-v for per-package) ==="
-          go test -count=1 -v -cover ./... 2>&1 | tee "$COV_FILE"
+          go test -count=1 -v -cover -coverprofile=coverage.out ./... 2>&1 | tee "$COV_FILE"
           TEST_EXIT=${PIPESTATUS[0]}
           echo "=== go test exit code: $TEST_EXIT ==="
           if [ $TEST_EXIT -ne 0 ]; then
@@ -463,9 +464,8 @@ jobs:
           path: coverage.out
 
   quality-windows:
-    # #336: the quality suite previously ran ubuntu-only; this job gives
-    # Windows a first-class vet+test pass (coverage parsing and golangci-lint
-    # remain Linux-only by design).
+    # #336 / #955: full Windows go test ./... + -race runs in CI (ci.yml);
+    # keep Windows go vet + offline assurance benchmark here to avoid duplicate full-suite runs.
     name: Quality Gate (windows-latest)
     needs: [path-scope]
     runs-on: windows-latest
@@ -493,7 +493,7 @@ jobs:
         shell: bash
         run: |
           if [ "${CI_LANE}" = "docs" ]; then
-            echo "::notice::docs lane: Windows go vet/test skipped (not applicable)"
+            echo "::notice::docs lane: Windows go vet/benchmark skipped (not applicable)"
             exit 0
           fi
 
@@ -506,10 +506,6 @@ jobs:
       - name: go vet (Windows)
         if: env.CI_LANE != 'docs'
         run: go vet ./...
-
-      - name: go test (Windows, CGO=0)
-        if: env.CI_LANE != 'docs'
-        run: go test -count=1 ./...
 
       - name: Offline Assurance Benchmark (Windows, #922)
         if: env.CI_LANE != 'docs'

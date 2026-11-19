@@ -131,3 +131,21 @@ jobs:
             light -out "dist/g8s_${VERSION}_windows_amd64.msi" dist/g8s.wixobj
           fi
 
+  ci-gate:
+    name: CI Gate
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate 3-OS CI Status
+        shell: bash
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "test: ${TEST_RESULT}"
+          if [ "${TEST_RESULT}" != "success" ] && [ "${TEST_RESULT}" != "skipped" ]; then
+            echo "::error::CI 3-OS matrix failed (${TEST_RESULT})."
+            exit 1
+          fi
+          echo "CI Gate PASSED."
+

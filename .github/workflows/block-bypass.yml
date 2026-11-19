@@ -20,21 +20,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reject force-push
+      - name: Reject force-push / unrelated history or oversized PR diff
+        shell: bash
         run: |
-          if git log --since="7 days ago" --pretty=format:"%H" | \
-             xargs -I{} git show --end-of-options {} --name-only --pretty=format: | \
-             sort -u | head -1000 > /tmp/recent.txt; then
-            # Count files in recent commits
-            if [ $(wc -l < /tmp/recent.txt) -gt 500 ]; then
-              echo "::error::Too many files changed in recent commits (force-push?)"
-              exit 1
-            fi
+          if ! git merge-base origin/main HEAD >/dev/null 2>&1; then
+            echo "::error::PR branch has no common merge-base with origin/main (unrelated history / force-push?)"
+            exit 1
+          fi
+          CHANGED_COUNT=$(git diff --name-only origin/main...HEAD | wc -l | tr -d ' ')
+          echo "PR changed files vs origin/main: ${CHANGED_COUNT}"
+          if [ "$CHANGED_COUNT" -gt 500 ]; then
+            echo "::error::Too many files changed in PR diff (${CHANGED_COUNT} > 500)"
+            exit 1
           fi
 
       - name: Verify no self-merge in commit messages
+        shell: bash
         run: |
-          if git rev-parse --verify HEAD~5 >/dev/null 2>&1; then
+          if git merge-base origin/main HEAD >/dev/null 2>&1; then
+            RANGE="origin/main..HEAD"
+          elif git rev-parse --verify HEAD~5 >/dev/null 2>&1; then
             RANGE="HEAD~5..HEAD"
           else
             RANGE="HEAD"
@@ -44,7 +49,8 @@ jobs:
           # /Merge.*#[0-9]+/ false-positives on squash subjects like
           # "test(f0): ...T2Merge flake class (#892)" — the word "Merge"
           # inside "T2Merge" plus a trailing "(#N)".
-          if git log --pretty=format:"%s" $RANGE | grep -E "^Merge (pull request|branch|remote-tracking)?[^)]*#[0-9]+"; then
+          if [ -n "$(git log --pretty=format:"%s" "$RANGE")" ] && \
+             git log --pretty=format:"%s" "$RANGE" | grep -E "^Merge (pull request|branch|remote-tracking)?[^)]*#[0-9]+"; then
             echo "::error::Commit message contains self-merge"
             exit 1
           fi
