@@ -32,6 +32,12 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 				removeAllLogged(tmpDir)
 			}
 		},
+		proof: newSandboxKernelProof(
+			ModeJobObjectEnvScrubbed,
+			"windows_job_object",
+			false,
+			"Windows JobObject process-tree termination only; no kernel filesystem ACLs or outbound socket isolation",
+		),
 	}, nil
 }
 

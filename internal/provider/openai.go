@@ -348,7 +348,7 @@ func (p *OpenAIProvider) StartRequest(ctx context.Context, spec Spec) (RequestHa
 		RequireNetworkEnforced: spec.RequireNetworkEnforced,
 		TransportKind:          string(TransportKindRequest),
 	}
-	policyReport := sandbox.EvaluatePolicyContract(reqPolicy, sandbox.ModePolicyOnly, "http_request_transport", true, false)
+	policyReport := sandbox.EvaluatePolicyContract(reqPolicy, sandbox.NewMediatedTransportProof("http_request_transport"))
 	if policyReport.RejectedBeforeSpawn {
 		sentinel := sandbox.ErrKernelSandboxRequired
 		if policyReport.Evaluated.RejectionCode == sandbox.ErrNetworkEnforcementRequired.Error() {

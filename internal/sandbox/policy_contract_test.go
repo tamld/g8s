@@ -19,7 +19,7 @@ func TestEvaluatePolicyContract_DecisionMatrix(t *testing.T) {
 			AllowedPaths:          []string{"pkg/**"},
 			RequireKernelEnforced: true,
 			TransportKind:         "process",
-		}, ModePolicyOnly, "linux_policy_only", false, false)
+		}, NewUnrestrictedProcessProof(ModePolicyOnly, "linux_policy_only"))
 
 		if report.Evaluated.Allowed {
 			t.Fatalf("expected Allowed=false when kernel_enforced is unavailable")
@@ -40,7 +40,7 @@ func TestEvaluatePolicyContract_DecisionMatrix(t *testing.T) {
 		mediated := EvaluatePolicyContract(RequestedPolicy{
 			Permission:    "read_only",
 			TransportKind: "request",
-		}, ModePolicyOnly, "http_request_transport", true, false)
+		}, NewMediatedTransportProof("http_request_transport"))
 
 		if mediated.RejectedBeforeSpawn {
 			t.Fatalf("expected mediated report without RequireNetworkEnforced to allow: %+v", mediated)
@@ -49,12 +49,15 @@ func TestEvaluatePolicyContract_DecisionMatrix(t *testing.T) {
 			t.Fatalf("NetworkEnforcement = %q / %q, want %q",
 				mediated.NetworkEnforcement, mediated.Effective.NetworkEnforcement, NetworkMediatedOnly)
 		}
+		if mediated.Effective.ProofSource != "http_request_mediation" {
+			t.Fatalf("ProofSource = %q, want http_request_mediation", mediated.Effective.ProofSource)
+		}
 
 		strictNet := EvaluatePolicyContract(RequestedPolicy{
 			Permission:             "read_only",
 			TransportKind:          "request",
 			RequireNetworkEnforced: true,
-		}, ModePolicyOnly, "http_request_transport", true, false)
+		}, NewMediatedTransportProof("http_request_transport"))
 		if !strictNet.RejectedBeforeSpawn || strictNet.Evaluated.RejectionCode != ErrNetworkEnforcementRequired.Error() {
 			t.Fatalf("expected E_NETWORK_ENFORCEMENT_REQUIRED rejection, got %+v", strictNet)
 		}
@@ -67,13 +70,16 @@ func TestEvaluatePolicyContract_DecisionMatrix(t *testing.T) {
 			RequireKernelEnforced:  true,
 			RequireNetworkEnforced: true,
 			TransportKind:          "process",
-		}, ModeKernelEnforced, "bwrap", true, true)
+		}, newSandboxKernelProof(ModeKernelEnforced, "bwrap", true, "Linux bwrap --unshare-net network namespace isolation"))
 
 		if enforced.RejectedBeforeSpawn || !enforced.Evaluated.Allowed {
 			t.Fatalf("expected enforced report allowed, got %+v", enforced)
 		}
 		if enforced.NetworkEnforcement != NetworkEnforced || enforced.Effective.NetworkEnforcement != NetworkEnforced {
 			t.Fatalf("expected NetworkEnforcement=%q, got %q", NetworkEnforced, enforced.NetworkEnforcement)
+		}
+		if enforced.Effective.ProofSource != "os_kernel_probe" {
+			t.Fatalf("ProofSource = %q, want os_kernel_probe", enforced.Effective.ProofSource)
 		}
 		if !enforced.Effective.HoldoutDenied || !enforced.Effective.DiffFirewallActive {
 			t.Fatalf("expected HoldoutDenied=true and DiffFirewallActive=true, got %+v", enforced.Effective)
@@ -86,10 +92,52 @@ func TestEvaluatePolicyContract_DecisionMatrix(t *testing.T) {
 			HoldoutDenyDirs: []string{"/tmp/holdout-eval"},
 			NoSandbox:       true,
 			TransportKind:   "process",
-		}, ModePolicyOnly, "disabled", false, false)
+		}, newSandboxDisabledProof())
 
 		if rep.Effective.HoldoutDenied {
 			t.Fatalf("policy_only mode must never overclaim holdout_denied=true")
+		}
+		if rep.Effective.ProofSource != "sandbox_disabled" {
+			t.Fatalf("ProofSource = %q, want sandbox_disabled", rep.Effective.ProofSource)
+		}
+	})
+
+	t.Run("zero_value_and_external_proofs_cannot_forge_network_enforced", func(t *testing.T) {
+		zero := EvaluatePolicyContract(RequestedPolicy{
+			Permission:             "workspace_write",
+			RequireKernelEnforced:  true,
+			RequireNetworkEnforced: true,
+			TransportKind:          "process",
+		}, EnforcementProof{})
+		if !zero.RejectedBeforeSpawn || zero.Effective.ContainmentMode != ModePolicyOnly || zero.NetworkEnforcement != NetworkUnrestricted || zero.Effective.ProofSource != "unsealed_default" {
+			t.Fatalf("zero-value proof must fail closed to unsealed_default/policy_only/unrestricted, got %+v", zero)
+		}
+
+		extKernel := EvaluatePolicyContract(RequestedPolicy{
+			Permission:             "workspace_write",
+			RequireKernelEnforced:  true,
+			RequireNetworkEnforced: true,
+			TransportKind:          "process",
+		}, NewUnrestrictedProcessProof(ModeKernelEnforced, "seatbelt"))
+		if !extKernel.RejectedBeforeSpawn || extKernel.Evaluated.RejectionCode != ErrNetworkEnforcementRequired.Error() {
+			t.Fatalf("external process proof must NOT satisfy RequireNetworkEnforced, got %+v", extKernel)
+		}
+	})
+
+	t.Run("seatbelt_and_bwrap_profiles_emit_outbound_network_blocks_when_requested", func(t *testing.T) {
+		sbProf, err := BuildSeatbeltProfileWithOptions([]string{"/work/wt"}, nil, nil, true)
+		if err != nil {
+			t.Fatalf("BuildSeatbeltProfileWithOptions: %v", err)
+		}
+		if !strings.Contains(sbProf, "(deny network-outbound)") {
+			t.Fatalf("expected (deny network-outbound) in Seatbelt profile:\n%s", sbProf)
+		}
+
+		bwrapArgs := BuildBwrapArgsWithOptions("/usr/bin/bwrap", []string{"true"}, "", []string{"/work/wt"}, nil, nil, true, func(string) (bool, bool) {
+			return true, true
+		})
+		if !strings.Contains(strings.Join(bwrapArgs, " "), "--unshare-net") {
+			t.Fatalf("expected --unshare-net in bwrap args: %v", bwrapArgs)
 		}
 	})
 }

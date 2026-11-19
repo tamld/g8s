@@ -55,6 +55,7 @@ func SensitiveDenySpec(homeDir, stateDir, sshAuthSock string) (denyDirs []string
 
 	if cleanState := strings.TrimSpace(stateDir); cleanState != "" {
 		addFile(filepath.Join(cleanState, "f0-signing.key"))
+		addFile(filepath.Join(cleanState, "s0-human.key"))
 	}
 	if cleanSock := strings.TrimSpace(sshAuthSock); cleanSock != "" {
 		addFile(cleanSock)
@@ -127,6 +128,12 @@ func escapeSBPLString(p string) (string, error) {
 // writes outside writableDirs and device nodes, and denying reads of denyDirs
 // and denyFiles.
 func BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles []string) (string, error) {
+	return BuildSeatbeltProfileWithOptions(writableDirs, denyDirs, denyFiles, false)
+}
+
+// BuildSeatbeltProfileWithOptions generates an XNU Seatbelt (SBPL v1) profile
+// with optional kernel outbound network denial.
+func BuildSeatbeltProfileWithOptions(writableDirs, denyDirs, denyFiles []string, blockOutboundNetwork bool) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("(version 1)\n")
 	sb.WriteString("(allow default)\n")
@@ -184,6 +191,9 @@ func BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles []string) (string, e
 		}
 		sb.WriteString(")\n")
 	}
+	if blockOutboundNetwork {
+		sb.WriteString("(deny network-outbound)\n")
+	}
 	return sb.String(), nil
 }
 
@@ -195,6 +205,19 @@ func BuildBwrapArgs(
 	argv []string,
 	worktreeDir string,
 	writableDirs, denyDirs, denyFiles []string,
+	statFn func(string) (isDir bool, exists bool),
+) []string {
+	return BuildBwrapArgsWithOptions(bwrapBin, argv, worktreeDir, writableDirs, denyDirs, denyFiles, false, statFn)
+}
+
+// BuildBwrapArgsWithOptions builds a bubblewrap command vector with optional
+// `--unshare-net` network namespace isolation.
+func BuildBwrapArgsWithOptions(
+	bwrapBin string,
+	argv []string,
+	worktreeDir string,
+	writableDirs, denyDirs, denyFiles []string,
+	blockOutboundNetwork bool,
 	statFn func(string) (isDir bool, exists bool),
 ) []string {
 	if statFn == nil {
@@ -216,10 +239,15 @@ func BuildBwrapArgs(
 	args := []string{
 		bwrapBin,
 		"--die-with-parent",
+	}
+	if blockOutboundNetwork {
+		args = append(args, "--unshare-net")
+	}
+	args = append(args,
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
-	}
+	)
 
 	for _, w := range writableDirs {
 		if isDir, exists := statFn(w); exists && isDir {

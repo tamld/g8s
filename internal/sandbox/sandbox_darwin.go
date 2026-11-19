@@ -29,7 +29,7 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 	writableDirs := WritableDirsForConfig(cfg, tmpDir, gocacheDir)
 	denyDirs, denyFiles := SensitiveDenySpec(resolveHomeDir(cfg), cfg.StateDir, resolveSSHAuthSock(cfg))
 	denyDirs = MergeDenyDirs(denyDirs, cfg.DenyDirs)
-	profile, err := BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles)
+	profile, err := BuildSeatbeltProfileWithOptions(writableDirs, denyDirs, denyFiles, cfg.RequireNetworkEnforced)
 	if err != nil {
 		if ownTmp {
 			removeAllLogged(tmpDir)
@@ -41,6 +41,11 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 	wrappedArgv = append(wrappedArgv, sbBin, "-p", profile, "--")
 	wrappedArgv = append(wrappedArgv, cfg.Argv...)
 
+	netDetail := "macOS Seatbelt outbound network unrestricted"
+	if cfg.RequireNetworkEnforced {
+		netDetail = "macOS Seatbelt (deny network-outbound) enforced"
+	}
+
 	return &PreparedLaunch{
 		Argv:      wrappedArgv,
 		Env:       env,
@@ -49,6 +54,7 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 		TempDir:   tmpDir,
 		SandboxID: sandboxID,
 		Cleanup:   makeDarwinCleanup(sandboxID, tmpDir, ownTmp),
+		proof:     newSandboxKernelProof(ModeKernelEnforced, "seatbelt", cfg.RequireNetworkEnforced, netDetail),
 	}, nil
 }
 

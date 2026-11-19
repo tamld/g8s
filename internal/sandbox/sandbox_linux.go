@@ -24,9 +24,43 @@ var (
 	bwrapPath string
 	bwrapOK   bool
 
+	bwrapNetOnce sync.Once
+	bwrapNetOK   bool
+
 	landlockOnce sync.Once
 	landlockABI  int
 )
+
+func probeBwrapNetWith(lookPath func(string) (string, error)) bool {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	bin, err := lookPath("bwrap")
+	if err != nil {
+		return false
+	}
+	trueBin := "/bin/true"
+	if resolved, tErr := lookPath("true"); tErr == nil {
+		trueBin = resolved
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--unshare-net",
+		"--", trueBin,
+	)
+	return cmd.Run() == nil
+}
+
+func probeBwrapNet() bool {
+	bwrapNetOnce.Do(func() {
+		bwrapNetOK = probeBwrapNetWith(exec.LookPath)
+	})
+	return bwrapNetOK
+}
 
 func probeBwrapWith(lookPath func(string) (string, error)) (string, bool) {
 	if lookPath == nil {
@@ -80,7 +114,24 @@ func buildBwrapLaunch(
 	sandboxID string,
 	cleanup func(),
 ) *PreparedLaunch {
-	args := BuildBwrapArgs(bwrapBin, cfg.Argv, cfg.WorktreeDir, writableDirs, denyDirs, denyFiles, nil)
+	return buildBwrapLaunchWithOptions(bwrapBin, cfg, env, tmpDir, writableDirs, denyDirs, denyFiles, sandboxID, false, cleanup)
+}
+
+func buildBwrapLaunchWithOptions(
+	bwrapBin string,
+	cfg Config,
+	env []string,
+	tmpDir string,
+	writableDirs, denyDirs, denyFiles []string,
+	sandboxID string,
+	blockOutboundNetwork bool,
+	cleanup func(),
+) *PreparedLaunch {
+	args := BuildBwrapArgsWithOptions(bwrapBin, cfg.Argv, cfg.WorktreeDir, writableDirs, denyDirs, denyFiles, blockOutboundNetwork, nil)
+	netDetail := "Linux bwrap filesystem isolation; outbound sockets unrestricted"
+	if blockOutboundNetwork {
+		netDetail = "Linux bwrap --unshare-net network namespace isolation"
+	}
 	return &PreparedLaunch{
 		Argv:      args,
 		Env:       env,
@@ -89,6 +140,7 @@ func buildBwrapLaunch(
 		TempDir:   tmpDir,
 		SandboxID: sandboxID,
 		Cleanup:   cleanup,
+		proof:     newSandboxKernelProof(ModeKernelEnforced, "bwrap", blockOutboundNetwork, netDetail),
 	}
 }
 
@@ -141,6 +193,7 @@ func buildLandlockLaunch(
 		TempDir:   tmpDir,
 		SandboxID: sandboxID,
 		Cleanup:   cleanup,
+		proof:     newSandboxKernelProof(ModeKernelEnforced, "landlock", false, "Linux Landlock filesystem containment only; no OS socket isolation"),
 	}, nil
 }
 
@@ -153,6 +206,7 @@ func buildLinuxPolicyOnlyLaunch(cfg Config, env []string, tmpDir, sandboxID stri
 		TempDir:   tmpDir,
 		SandboxID: sandboxID,
 		Cleanup:   cleanup,
+		proof:     newSandboxKernelProof(ModePolicyOnly, "linux_policy_only", false, "Linux policy_only fallback; no kernel filesystem or socket isolation"),
 	}
 }
 
@@ -163,7 +217,11 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 	cleanup := makeLinuxCleanup(sandboxID, tmpDir, ownTmp)
 
 	if bwrapBin, ok := probeBwrap(); ok {
-		return buildBwrapLaunch(bwrapBin, cfg, env, tmpDir, writableDirs, denyDirs, denyFiles, sandboxID, cleanup), nil
+		netBlocked := false
+		if cfg.RequireNetworkEnforced {
+			netBlocked = probeBwrapNet()
+		}
+		return buildBwrapLaunchWithOptions(bwrapBin, cfg, env, tmpDir, writableDirs, denyDirs, denyFiles, sandboxID, netBlocked, cleanup), nil
 	}
 
 	if abi := probeLandlockABI(); abi >= 1 {

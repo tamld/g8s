@@ -57,9 +57,90 @@ type EffectiveEnforcement struct {
 	SandboxBackend     string             `json:"sandbox_backend"`
 	NetworkEnforcement NetworkEnforcement `json:"network_enforcement"`
 	NetworkDetail      string             `json:"network_detail,omitempty"`
+	ProofSource        string             `json:"proof_source,omitempty"`
 	HoldoutDenied      bool               `json:"holdout_denied"`
 	DiffFirewallActive bool               `json:"diff_firewall_active"`
 	EpistemicClass     EpistemicClass     `json:"epistemic_class"`
+}
+
+// EnforcementProof is an unforgeable capability value minted by enforcement probes.
+// All fields are unexported so external callers cannot forge OS-enforced socket isolation.
+type EnforcementProof struct {
+	sealed             bool
+	containmentMode    ContainmentMode
+	backend            string
+	networkEnforcement NetworkEnforcement
+	networkDetail      string
+	proofSource        string
+}
+
+// NewUnrestrictedProcessProof constructs an honest proof for external/direct subprocesses without OS socket blocking.
+func NewUnrestrictedProcessProof(mode ContainmentMode, backend string) EnforcementProof {
+	if strings.TrimSpace(backend) == "" {
+		backend = "direct_process"
+	}
+	return EnforcementProof{
+		sealed:             true,
+		containmentMode:    mode,
+		backend:            backend,
+		networkEnforcement: NetworkUnrestricted,
+		networkDetail:      "outbound OS sockets unrestricted",
+		proofSource:        "external_unrestricted_process",
+	}
+}
+
+// NewMediatedTransportProof constructs an honest proof for HTTP/API transports with userspace mediation only.
+func NewMediatedTransportProof(backend string) EnforcementProof {
+	if strings.TrimSpace(backend) == "" {
+		backend = "http_request_transport"
+	}
+	return EnforcementProof{
+		sealed:             true,
+		containmentMode:    ModePolicyOnly,
+		backend:            backend,
+		networkEnforcement: NetworkMediatedOnly,
+		networkDetail:      "application proxy/HTTP mediation only; no OS socket block",
+		proofSource:        "http_request_mediation",
+	}
+}
+
+func newSandboxDisabledProof() EnforcementProof {
+	return EnforcementProof{
+		sealed:             true,
+		containmentMode:    ModePolicyOnly,
+		backend:            "disabled",
+		networkEnforcement: NetworkUnrestricted,
+		networkDetail:      "sandbox disabled; outbound OS sockets unrestricted",
+		proofSource:        "sandbox_disabled",
+	}
+}
+
+func newSandboxKernelProof(mode ContainmentMode, backend string, osSocketBlocked bool, detail string) EnforcementProof {
+	trimmedDetail := strings.TrimSpace(detail)
+	if mode == ModeKernelEnforced && osSocketBlocked {
+		if trimmedDetail == "" {
+			trimmedDetail = "OS/container outbound socket isolation enforced"
+		}
+		return EnforcementProof{
+			sealed:             true,
+			containmentMode:    mode,
+			backend:            backend,
+			networkEnforcement: NetworkEnforced,
+			networkDetail:      trimmedDetail,
+			proofSource:        "os_kernel_probe",
+		}
+	}
+	if trimmedDetail == "" {
+		trimmedDetail = "outbound OS sockets unrestricted"
+	}
+	return EnforcementProof{
+		sealed:             true,
+		containmentMode:    mode,
+		backend:            backend,
+		networkEnforcement: NetworkUnrestricted,
+		networkDetail:      trimmedDetail,
+		proofSource:        "os_sandbox_prepare",
+	}
 }
 
 // PolicyEnforcementReport binds RequestedPolicy -> EvaluatedPolicy -> EffectiveEnforcement across execution receipts.
@@ -118,23 +199,26 @@ func MergeDenyDirs(base, extra []string) []string {
 	return out
 }
 
-// EvaluatePolicyContract binds requested policy intent to evaluated admission and observed OS/network enforcement.
-func EvaluatePolicyContract(
-	req RequestedPolicy,
-	mode ContainmentMode,
-	backend string,
-	networkMediatedProxy bool,
-	osSocketBlocked bool,
-) PolicyEnforcementReport {
-	netEnf := NetworkUnrestricted
-	netDetail := "outbound OS sockets unrestricted"
-	switch {
-	case osSocketBlocked:
-		netEnf = NetworkEnforced
-		netDetail = "OS/container outbound socket isolation enforced"
-	case networkMediatedProxy:
-		netEnf = NetworkMediatedOnly
-		netDetail = "application proxy/HTTP mediation only; no OS socket block"
+// EvaluatePolicyContract binds requested policy intent to evaluated admission and an unforgeable EnforcementProof.
+func EvaluatePolicyContract(req RequestedPolicy, proof EnforcementProof) PolicyEnforcementReport {
+	mode := proof.containmentMode
+	backend := proof.backend
+	netEnf := proof.networkEnforcement
+	netDetail := proof.networkDetail
+	proofSource := proof.proofSource
+	if !proof.sealed {
+		mode = ModePolicyOnly
+		backend = "unprobed"
+		netEnf = NetworkUnrestricted
+		netDetail = "unsealed policy proof; outbound OS sockets unrestricted"
+		proofSource = "unsealed_default"
+	} else {
+		if netEnf == "" {
+			netEnf = NetworkUnrestricted
+		}
+		if netDetail == "" {
+			netDetail = "outbound OS sockets unrestricted"
+		}
 	}
 
 	reqMode := "best_effort"
@@ -186,6 +270,7 @@ func EvaluatePolicyContract(
 			SandboxBackend:     backend,
 			NetworkEnforcement: netEnf,
 			NetworkDetail:      netDetail,
+			ProofSource:        proofSource,
 			HoldoutDenied:      holdoutDenied,
 			DiffFirewallActive: diffFirewallActive,
 			EpistemicClass:     EpistemicMeasuredMetric,
