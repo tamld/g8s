@@ -87,6 +87,7 @@ hotspots:
       - "tools/ci_coverage_ratchet*.sh"
       - "tools/ai_lint*.sh"
       - "tools/ci_pr_contract*.sh"
+      - "tools/safe_merge*.sh"
 
   - id: "HOT-CONSTITUTION"
     policy: "serialize"
@@ -1179,10 +1180,12 @@ features:
     code_paths:
       - "internal/dogfood/**"
       - "tools/dogfood_provenance/**"
+      - "tools/provenance_check/**"
     collision_domain: "dogfood-provenance"
     owned_paths:
       - "internal/dogfood/**"
       - "tools/dogfood_provenance/**"
+      - "tools/provenance_check/**"
     shared_paths: []
     interfaces:
       go_packages:
@@ -1193,6 +1196,7 @@ features:
     visible_tests:
       - "internal/dogfood/ledger_test.go"
       - "tools/dogfood_provenance/main_test.go"
+      - "tools/provenance_check/main_test.go"
     verifier_class: "test"
     blast_radius:
       depends_on: []
