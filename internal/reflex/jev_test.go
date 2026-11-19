@@ -900,3 +900,25 @@ func TestEvaluateMemoryEntryOnlineAndOffline(t *testing.T) {
 		t.Fatalf("expected truncated context_packet map, got %v", capped)
 	}
 }
+
+func TestTrustG5_ReflexEpistemicHeuristicTagging(t *testing.T) {
+	gate := NewReflexGate(WithKeys([]string{}), WithEnvFile(false))
+	verdict, err := gate.TriageMutation(context.Background(), TriageRequest{
+		TaskID:        "t-epistemic",
+		FilesModified: []string{"internal/sandbox/sandbox.go"},
+		DiffSummary:   "triage check",
+	})
+	if err != nil {
+		t.Fatalf("TriageMutation: %v", err)
+	}
+	if verdict.EpistemicClass != "estimated_heuristic" {
+		t.Fatalf("TriageVerdict.EpistemicClass = %q, want estimated_heuristic", verdict.EpistemicClass)
+	}
+	if verdict.Signal.EpistemicClass != "estimated_heuristic" {
+		t.Fatalf("ReflexSignal.EpistemicClass = %q, want estimated_heuristic", verdict.Signal.EpistemicClass)
+	}
+	outVerdict := EvaluateOutputQuality(verdict.Signal)
+	if outVerdict.EpistemicClass != "estimated_heuristic" {
+		t.Fatalf("OutputQualityVerdict.EpistemicClass = %q, want estimated_heuristic", outVerdict.EpistemicClass)
+	}
+}

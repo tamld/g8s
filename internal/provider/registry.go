@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 var (
@@ -34,47 +35,52 @@ type Provider interface {
 
 // Spec defines the configuration and requirements for a worker execution.
 type Spec struct {
-	Brief              string            `json:"brief"`
-	Model              string            `json:"model,omitempty"`
-	Effort             string            `json:"effort,omitempty"`
-	MaxTokens          int               `json:"max_tokens,omitempty"`
-	Temperature        *float64          `json:"temperature,omitempty"`
-	AddDirs            []string          `json:"add_dirs,omitempty"`
-	SystemPrompt       string            `json:"system_prompt,omitempty"`
-	Timeout            time.Duration     `json:"timeout,omitempty"`
-	TraceID            string            `json:"trace_id,omitempty"`
-	Role               string            `json:"role,omitempty"`
-	Permission         string            `json:"permission,omitempty"`
-	WorktreeDir        string            `json:"worktree_dir,omitempty"`
-	Env                map[string]string `json:"env,omitempty"`
-	Stream             bool              `json:"stream,omitempty"`
-	Tools              []map[string]any  `json:"tools,omitempty"`
-	ResponseFormat     map[string]any    `json:"response_format,omitempty"`
-	StrictCapabilities bool              `json:"strict_capabilities,omitempty"`
-	AllowEffortDegrade bool              `json:"allow_effort_degrade,omitempty"`
+	Brief                  string            `json:"brief"`
+	Model                  string            `json:"model,omitempty"`
+	Effort                 string            `json:"effort,omitempty"`
+	MaxTokens              int               `json:"max_tokens,omitempty"`
+	Temperature            *float64          `json:"temperature,omitempty"`
+	AddDirs                []string          `json:"add_dirs,omitempty"`
+	SystemPrompt           string            `json:"system_prompt,omitempty"`
+	Timeout                time.Duration     `json:"timeout,omitempty"`
+	TraceID                string            `json:"trace_id,omitempty"`
+	Role                   string            `json:"role,omitempty"`
+	Permission             string            `json:"permission,omitempty"`
+	WorktreeDir            string            `json:"worktree_dir,omitempty"`
+	Env                    map[string]string `json:"env,omitempty"`
+	Stream                 bool              `json:"stream,omitempty"`
+	Tools                  []map[string]any  `json:"tools,omitempty"`
+	ResponseFormat         map[string]any    `json:"response_format,omitempty"`
+	StrictCapabilities     bool              `json:"strict_capabilities,omitempty"`
+	AllowEffortDegrade     bool              `json:"allow_effort_degrade,omitempty"`
+	ReceiptID              string            `json:"receipt_id,omitempty"`
+	HoldoutDenyDirs        []string          `json:"holdout_deny_dirs,omitempty"`
+	RequireKernelEnforced  bool              `json:"require_kernel_enforced,omitempty"`
+	RequireNetworkEnforced bool              `json:"require_network_enforced,omitempty"`
 }
 
 // Receipt records the outcome of a worker subprocess or HTTP request execution.
 type Receipt struct {
-	TaskID           string        `json:"task_id,omitempty"`
-	Provider         string        `json:"provider"`
-	TransportKind    TransportKind `json:"transport_kind,omitempty"`
-	RequestID        string        `json:"request_id,omitempty"`
-	Status           string        `json:"status"` // "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"
-	Stdout           string        `json:"stdout,omitempty"`
-	Stderr           string        `json:"stderr,omitempty"`
-	ExitCode         int           `json:"exit_code"`
-	DurationMs       int64         `json:"duration_ms"`
-	Violations       []string      `json:"violations,omitempty"`
-	ModelResolved    string        `json:"model_resolved,omitempty"`
-	EffortRequested  string        `json:"effort_requested,omitempty"`
-	EffortApplied    string        `json:"effort_applied,omitempty"`
-	EffortDegraded   bool          `json:"effort_degraded,omitempty"`
-	EffortDegradeMsg string        `json:"effort_degrade_reason,omitempty"`
-	Streamed         bool          `json:"streamed,omitempty"`
-	InputTokens      int           `json:"input_tokens,omitempty"`
-	OutputTokens     int           `json:"output_tokens,omitempty"`
-	TotalTokens      int           `json:"total_tokens,omitempty"`
+	TaskID            string                           `json:"task_id,omitempty"`
+	Provider          string                           `json:"provider"`
+	TransportKind     TransportKind                    `json:"transport_kind,omitempty"`
+	RequestID         string                           `json:"request_id,omitempty"`
+	Status            string                           `json:"status"` // "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"
+	Stdout            string                           `json:"stdout,omitempty"`
+	Stderr            string                           `json:"stderr,omitempty"`
+	ExitCode          int                              `json:"exit_code"`
+	DurationMs        int64                            `json:"duration_ms"`
+	Violations        []string                         `json:"violations,omitempty"`
+	ModelResolved     string                           `json:"model_resolved,omitempty"`
+	EffortRequested   string                           `json:"effort_requested,omitempty"`
+	EffortApplied     string                           `json:"effort_applied,omitempty"`
+	EffortDegraded    bool                             `json:"effort_degraded,omitempty"`
+	EffortDegradeMsg  string                           `json:"effort_degrade_reason,omitempty"`
+	Streamed          bool                             `json:"streamed,omitempty"`
+	InputTokens       int                              `json:"input_tokens,omitempty"`
+	OutputTokens      int                              `json:"output_tokens,omitempty"`
+	TotalTokens       int                              `json:"total_tokens,omitempty"`
+	PolicyEnforcement *sandbox.PolicyEnforcementReport `json:"policy_enforcement,omitempty"`
 }
 
 // Handle represents a running worker subprocess.

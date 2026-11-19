@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // Status indicates the enforcement mode of a verifier class.
@@ -173,32 +175,34 @@ type InjectedLessonHint struct {
 
 // Verdict encapsulates the complete machine acceptance decision.
 type Verdict struct {
-	Class              string               `json:"class"`
-	Registered         bool                 `json:"registered"`
-	Status             Status               `json:"status"`
-	Outcome            Outcome              `json:"outcome"`
-	Checks             []CheckResult        `json:"checks"`
-	Advisories         []DiffAdvisory       `json:"advisories,omitempty"`
-	DormantReawakened  []string             `json:"dormant_reawakened,omitempty"`
-	OverrideReason     string               `json:"override_reason,omitempty"`
-	Scope              bool                 `json:"scope"`
-	RecordedAt         time.Time            `json:"recorded_at"`
-	WorktreeDir        string               `json:"worktree_dir,omitempty"`
-	TreeSHA            string               `json:"tree_sha,omitempty"`
-	RawLogPath         string               `json:"raw_log_path,omitempty"`
-	RawLogSHA256       string               `json:"raw_log_sha256,omitempty"`
-	TestsRan           int                  `json:"tests_ran"`
-	TestsFailed        int                  `json:"tests_failed"`
-	FailureDiagnostics []FailureDiagnostic  `json:"failure_diagnostics,omitempty"`
-	DoDMatrix          []DoDItemStatus      `json:"dod_matrix,omitempty"`
-	F2Summary          *F2TelemetrySummary  `json:"f2_summary,omitempty"`
-	InjectedLessons    []InjectedLessonHint `json:"injected_lessons,omitempty"`
-	FeatureID          string               `json:"feature_id,omitempty"`
-	HoldoutChecksOK    *bool                `json:"holdout_checks_ok,omitempty"`
-	BlindReviewPacket  *BlindReviewPacket   `json:"blind_review_packet,omitempty"`
-	CanaryResult       *CanaryResult        `json:"canary_result,omitempty"`
-	VetoReason         string               `json:"veto_reason,omitempty"`
-	JITBaton           string               `json:"jit_baton,omitempty"`
+	Class              string                 `json:"class"`
+	Registered         bool                   `json:"registered"`
+	Status             Status                 `json:"status"`
+	Outcome            Outcome                `json:"outcome"`
+	Checks             []CheckResult          `json:"checks"`
+	Advisories         []DiffAdvisory         `json:"advisories,omitempty"`
+	DormantReawakened  []string               `json:"dormant_reawakened,omitempty"`
+	OverrideReason     string                 `json:"override_reason,omitempty"`
+	Scope              bool                   `json:"scope"`
+	RecordedAt         time.Time              `json:"recorded_at"`
+	WorktreeDir        string                 `json:"worktree_dir,omitempty"`
+	TreeSHA            string                 `json:"tree_sha,omitempty"`
+	RawLogPath         string                 `json:"raw_log_path,omitempty"`
+	RawLogSHA256       string                 `json:"raw_log_sha256,omitempty"`
+	TestsRan           int                    `json:"tests_ran"`
+	TestsFailed        int                    `json:"tests_failed"`
+	FailureDiagnostics []FailureDiagnostic    `json:"failure_diagnostics,omitempty"`
+	DoDMatrix          []DoDItemStatus        `json:"dod_matrix,omitempty"`
+	F2Summary          *F2TelemetrySummary    `json:"f2_summary,omitempty"`
+	InjectedLessons    []InjectedLessonHint   `json:"injected_lessons,omitempty"`
+	FeatureID          string                 `json:"feature_id,omitempty"`
+	HoldoutChecksOK    *bool                  `json:"holdout_checks_ok,omitempty"`
+	HoldoutDigest      string                 `json:"holdout_digest,omitempty"`
+	BlindReviewPacket  *BlindReviewPacket     `json:"blind_review_packet,omitempty"`
+	CanaryResult       *CanaryResult          `json:"canary_result,omitempty"`
+	VetoReason         string                 `json:"veto_reason,omitempty"`
+	EpistemicClass     sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
+	JITBaton           string                 `json:"jit_baton,omitempty"`
 }
 
 // DefaultRegistryPath is the default location for the verifier classes configuration.

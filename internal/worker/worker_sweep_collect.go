@@ -367,6 +367,29 @@ func (s *Supervisor) collect(
 			sandboxBackend = b
 		}
 	}
+	var policyReport *sandbox.PolicyEnforcementReport
+	if prChild, ok := child.(interface {
+		PolicyReport() *sandbox.PolicyEnforcementReport
+	}); ok {
+		policyReport = prChild.PolicyReport()
+	}
+	if policyReport == nil {
+		var holdoutDeny []string
+		if strings.TrimSpace(req.HoldoutDir) != "" {
+			holdoutDeny = []string{strings.TrimSpace(req.HoldoutDir)}
+		}
+		rep := sandbox.EvaluatePolicyContract(sandbox.RequestedPolicy{
+			Permission:            req.Permission,
+			Role:                  req.Role,
+			ReceiptID:             req.ReceiptID,
+			AllowedPaths:          append([]string(nil), req.AllowedPaths...),
+			HoldoutDenyDirs:       holdoutDeny,
+			RequireKernelEnforced: s.requireKernelSandbox,
+			NoSandbox:             req.NoSandbox,
+			TransportKind:         "process",
+		}, sandbox.ContainmentMode(containmentMode), sandboxBackend, false, false)
+		policyReport = &rep
+	}
 
 	stdoutRaw, _ := os.ReadFile(stdoutPath)
 	stderrRaw, _ := os.ReadFile(stderrPath)
@@ -399,6 +422,9 @@ func (s *Supervisor) collect(
 		if sandboxBackend != "" {
 			env["sandbox_backend"] = sandboxBackend
 		}
+		if policyReport != nil {
+			env["policy_enforcement"] = policyReport
+		}
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
 		}
@@ -426,6 +452,9 @@ func (s *Supervisor) collect(
 		env["containment_mode"] = containmentMode
 		if sandboxBackend != "" {
 			env["sandbox_backend"] = sandboxBackend
+		}
+		if policyReport != nil {
+			env["policy_enforcement"] = policyReport
 		}
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
@@ -803,6 +832,9 @@ func (s *Supervisor) collect(
 			m["containment_mode"] = containmentMode
 			if sandboxBackend != "" {
 				m["sandbox_backend"] = sandboxBackend
+			}
+			if policyReport != nil {
+				m["policy_enforcement"] = policyReport
 			}
 			if wr.ProviderDurationSeconds > 0 {
 				m["provider_duration_seconds"] = wr.ProviderDurationSeconds

@@ -29,30 +29,36 @@ var ErrKernelSandboxRequired = errors.New("E_SANDBOX_KERNEL_ENFORCED_REQUIRED")
 
 // Config parameterizes per-attempt subprocess containment and environment scrubbing.
 type Config struct {
-	Argv                  []string
-	WorktreeDir           string
-	RunDir                string
-	StateDir              string
-	Permission            string
-	ProviderName          string
-	AddDirs               []string
-	ExtraWriteDirs        []string
-	BaseEnv               []string
-	TaskEnv               []string
-	NoSandbox             bool
-	RequireKernelEnforced bool
+	Argv                   []string
+	WorktreeDir            string
+	RunDir                 string
+	StateDir               string
+	Permission             string
+	Role                   string
+	ReceiptID              string
+	AllowedPaths           []string
+	ProviderName           string
+	AddDirs                []string
+	ExtraWriteDirs         []string
+	DenyDirs               []string
+	BaseEnv                []string
+	TaskEnv                []string
+	NoSandbox              bool
+	RequireKernelEnforced  bool
+	RequireNetworkEnforced bool
 }
 
 // PreparedLaunch holds the wrapped command vector, scrubbed environment, containment
-// telemetry, and a cleanup hook that reaps surviving sandboxed grandchildren.
+// telemetry, policy enforcement report, and a cleanup hook that reaps surviving sandboxed grandchildren.
 type PreparedLaunch struct {
-	Argv      []string
-	Env       []string
-	Mode      ContainmentMode
-	Backend   string
-	TempDir   string
-	SandboxID string
-	Cleanup   func()
+	Argv         []string
+	Env          []string
+	Mode         ContainmentMode
+	Backend      string
+	TempDir      string
+	SandboxID    string
+	PolicyReport *PolicyEnforcementReport
+	Cleanup      func()
 }
 
 // CanonicalPath cleans p and resolves symlinks on the longest existing prefix,
@@ -148,20 +154,28 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 	}
 	env := ScrubEnv(baseEnv, cfg.TaskEnv, cfg.ProviderName, tmpDir, gocacheDir, sandboxID)
 
+	reqPolicy := requestedPolicyFromConfig(cfg)
+
 	if cfg.NoSandbox {
-		if cfg.RequireKernelEnforced {
+		report := EvaluatePolicyContract(reqPolicy, ModePolicyOnly, "disabled", false, false)
+		if report.RejectedBeforeSpawn {
 			if ownTmp {
 				removeAllLogged(tmpDir)
 			}
-			return nil, fmt.Errorf("%w: no_sandbox cannot be combined with require_kernel_enforced", ErrKernelSandboxRequired)
+			sentinel := ErrKernelSandboxRequired
+			if !reqPolicy.RequireKernelEnforced && reqPolicy.RequireNetworkEnforced {
+				sentinel = ErrNetworkEnforcementRequired
+			}
+			return nil, &PolicyRejectionError{Err: sentinel, Report: report}
 		}
 		launch := &PreparedLaunch{
-			Argv:      append([]string{}, cfg.Argv...),
-			Env:       env,
-			Mode:      ModePolicyOnly,
-			Backend:   "disabled",
-			TempDir:   tmpDir,
-			SandboxID: sandboxID,
+			Argv:         append([]string{}, cfg.Argv...),
+			Env:          env,
+			Mode:         ModePolicyOnly,
+			Backend:      "disabled",
+			TempDir:      tmpDir,
+			SandboxID:    sandboxID,
+			PolicyReport: &report,
 			Cleanup: func() {
 				if ownTmp {
 					removeAllLogged(tmpDir)
@@ -176,12 +190,26 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 	if osErr != nil {
 		return nil, osErr
 	}
-	enforced, err := enforceContainmentRequirement(launch, cfg.RequireKernelEnforced)
+	enforced, err := enforcePolicyRequirement(launch, reqPolicy)
 	if err != nil {
 		return nil, err
 	}
 	attachSandboxMarker(cfg.StateDir, cfg, enforced)
 	return enforced, nil
+}
+
+func requestedPolicyFromConfig(cfg Config) RequestedPolicy {
+	return RequestedPolicy{
+		Permission:             cfg.Permission,
+		Role:                   cfg.Role,
+		ReceiptID:              cfg.ReceiptID,
+		AllowedPaths:           append([]string(nil), cfg.AllowedPaths...),
+		HoldoutDenyDirs:        MergeDenyDirs(nil, cfg.DenyDirs),
+		RequireKernelEnforced:  cfg.RequireKernelEnforced,
+		NoSandbox:              cfg.NoSandbox,
+		RequireNetworkEnforced: cfg.RequireNetworkEnforced,
+		TransportKind:          "process",
+	}
 }
 
 func attachSandboxMarker(stateDir string, cfg Config, launch *PreparedLaunch) {
@@ -208,17 +236,29 @@ func attachSandboxMarker(stateDir string, cfg Config, launch *PreparedLaunch) {
 }
 
 func enforceContainmentRequirement(launch *PreparedLaunch, requireKernel bool) (*PreparedLaunch, error) {
-	if !requireKernel || launch == nil {
-		return launch, nil
+	return enforcePolicyRequirement(launch, RequestedPolicy{
+		RequireKernelEnforced: requireKernel,
+		TransportKind:         "process",
+	})
+}
+
+func enforcePolicyRequirement(launch *PreparedLaunch, reqPolicy RequestedPolicy) (*PreparedLaunch, error) {
+	if launch == nil {
+		return nil, nil
 	}
-	if launch.Mode == ModeKernelEnforced {
-		return launch, nil
+	report := EvaluatePolicyContract(reqPolicy, launch.Mode, launch.Backend, false, false)
+	if report.RejectedBeforeSpawn {
+		if launch.Cleanup != nil {
+			launch.Cleanup()
+		}
+		sentinel := ErrKernelSandboxRequired
+		if report.Evaluated.RejectionCode == ErrNetworkEnforcementRequired.Error() {
+			sentinel = ErrNetworkEnforcementRequired
+		}
+		return nil, &PolicyRejectionError{Err: sentinel, Report: report}
 	}
-	if launch.Cleanup != nil {
-		launch.Cleanup()
-	}
-	return nil, fmt.Errorf("%w: containment degraded to mode=%s backend=%s (kernel_enforced required)",
-		ErrKernelSandboxRequired, launch.Mode, launch.Backend)
+	launch.PolicyReport = &report
+	return launch, nil
 }
 
 func validatePathString(label, val string) error {
@@ -249,6 +289,11 @@ func validateConfigPaths(cfg Config) error {
 	}
 	for _, d := range cfg.ExtraWriteDirs {
 		if err := validatePathString("extra_write_dir", d); err != nil {
+			return err
+		}
+	}
+	for _, d := range cfg.DenyDirs {
+		if err := validatePathString("deny_dir", d); err != nil {
 			return err
 		}
 	}

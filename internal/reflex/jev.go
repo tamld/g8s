@@ -21,6 +21,7 @@ import (
 	"time"
 
 	g8scontext "github.com/tamld/g8s/internal/context"
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // TriageAction defines the concrete operational decision emitted by the g8s Supervisor policy engine.
@@ -65,39 +66,42 @@ type OutputQualityRequest struct {
 
 // OutputQualityVerdict is the L3 policy decision.
 type OutputQualityVerdict struct {
-	Action     string  `json:"action"`  // "accept" | "reject" | "skip"
-	Quality    float64 `json:"quality"` // 0=garbage/hallucination, 5=high-quality evidence
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
+	Action         string  `json:"action"`  // "accept" | "reject" | "skip"
+	Quality        float64 `json:"quality"` // 0=garbage/hallucination, 5=high-quality evidence
+	Confidence     float64 `json:"confidence"`
+	Reason         string  `json:"reason"`
+	EpistemicClass string  `json:"epistemic_class,omitempty"`
 }
 
 // ReflexSignal represents pure perception telemetry emitted by a System 1 reflex sensor.
 // It carries empirical measurements without dictating supervisor actions.
 type ReflexSignal struct {
-	RiskScore     float64 `json:"risk_score"`  // 0.0 (benign) -> 5.0 (critical)
-	BreachProb    float64 `json:"breach_prob"` // 0.0 -> 1.0 (estimated probability of sandbox breach)
-	Confidence    float64 `json:"confidence"`  // confidence score [0..1]
-	LatencyMs     int64   `json:"latency_ms"`
-	Source        string  `json:"source"` // "jev" | "deterministic"
-	Reason        string  `json:"reason,omitempty"`
-	KeyUsed       string  `json:"key_used,omitempty"`
-	IsFallback    bool    `json:"is_fallback"`
-	ModelResolved string  `json:"model_resolved,omitempty"`
-	InputTokens   int     `json:"input_tokens,omitempty"`
-	OutputTokens  int     `json:"output_tokens,omitempty"`
+	RiskScore      float64 `json:"risk_score"`  // 0.0 (benign) -> 5.0 (critical)
+	BreachProb     float64 `json:"breach_prob"` // 0.0 -> 1.0 (estimated probability of sandbox breach)
+	Confidence     float64 `json:"confidence"`  // confidence score [0..1]
+	LatencyMs      int64   `json:"latency_ms"`
+	Source         string  `json:"source"` // "jev" | "deterministic"
+	Reason         string  `json:"reason,omitempty"`
+	KeyUsed        string  `json:"key_used,omitempty"`
+	IsFallback     bool    `json:"is_fallback"`
+	ModelResolved  string  `json:"model_resolved,omitempty"`
+	InputTokens    int     `json:"input_tokens,omitempty"`
+	OutputTokens   int     `json:"output_tokens,omitempty"`
+	EpistemicClass string  `json:"epistemic_class,omitempty"`
 }
 
 // TriageVerdict represents the authoritative decision made by the g8s Supervisor policy engine.
 type TriageVerdict struct {
-	Action     TriageAction `json:"action"`
-	Signal     ReflexSignal `json:"signal"`
-	RiskScore  float64      `json:"risk_score"`
-	BreachProb float64      `json:"breach_prob"`
-	Confidence float64      `json:"confidence"`
-	LatencyMs  int64        `json:"latency_ms"`
-	Reason     string       `json:"reason"`
-	KeyUsed    string       `json:"key_used,omitempty"`
-	IsFallback bool         `json:"is_fallback"`
+	Action         TriageAction `json:"action"`
+	Signal         ReflexSignal `json:"signal"`
+	RiskScore      float64      `json:"risk_score"`
+	BreachProb     float64      `json:"breach_prob"`
+	Confidence     float64      `json:"confidence"`
+	LatencyMs      int64        `json:"latency_ms"`
+	Reason         string       `json:"reason"`
+	KeyUsed        string       `json:"key_used,omitempty"`
+	IsFallback     bool         `json:"is_fallback"`
+	EpistemicClass string       `json:"epistemic_class,omitempty"`
 }
 
 // Answer represents a typed Jev question response.
@@ -452,14 +456,15 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 	}
 
 	sig := ReflexSignal{
-		RiskScore:  riskScore,
-		BreachProb: breachProb,
-		Confidence: conf,
-		LatencyMs:  elapsed,
-		Source:     "jev",
-		KeyUsed:    MaskKey(activeKey),
-		Reason:     reason,
-		IsFallback: false,
+		RiskScore:      riskScore,
+		BreachProb:     breachProb,
+		Confidence:     conf,
+		LatencyMs:      elapsed,
+		Source:         "jev",
+		KeyUsed:        MaskKey(activeKey),
+		Reason:         reason,
+		IsFallback:     false,
+		EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic),
 	}
 	if jevResp.Model != "" {
 		sig.ModelResolved = jevResp.Model
@@ -471,16 +476,20 @@ func (g *ReflexGate) EmitSignal(ctx context.Context, req TriageRequest) (ReflexS
 
 func newVerdict(signal ReflexSignal, action TriageAction, reason string) TriageVerdict {
 	signal.KeyUsed = MaskKey(signal.KeyUsed)
+	if signal.EpistemicClass == "" {
+		signal.EpistemicClass = string(sandbox.EpistemicEstimatedHeuristic)
+	}
 	return TriageVerdict{
-		Action:     action,
-		Signal:     signal,
-		RiskScore:  signal.RiskScore,
-		BreachProb: signal.BreachProb,
-		Confidence: signal.Confidence,
-		LatencyMs:  signal.LatencyMs,
-		Reason:     reason,
-		KeyUsed:    MaskKey(signal.KeyUsed),
-		IsFallback: signal.IsFallback,
+		Action:         action,
+		Signal:         signal,
+		RiskScore:      signal.RiskScore,
+		BreachProb:     signal.BreachProb,
+		Confidence:     signal.Confidence,
+		LatencyMs:      signal.LatencyMs,
+		Reason:         reason,
+		KeyUsed:        MaskKey(signal.KeyUsed),
+		IsFallback:     signal.IsFallback,
+		EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic),
 	}
 }
 
@@ -549,13 +558,14 @@ func (g *ReflexGate) EmitOutputQualitySignal(ctx context.Context, req OutputQual
 	}
 
 	sig := ReflexSignal{
-		RiskScore:  riskScore,
-		BreachProb: authAns.Noul,
-		Confidence: conf,
-		LatencyMs:  time.Since(start).Milliseconds(),
-		Source:     "jev",
-		KeyUsed:    MaskKey(activeKey),
-		IsFallback: false,
+		RiskScore:      riskScore,
+		BreachProb:     authAns.Noul,
+		Confidence:     conf,
+		LatencyMs:      time.Since(start).Milliseconds(),
+		Source:         "jev",
+		KeyUsed:        MaskKey(activeKey),
+		IsFallback:     false,
+		EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic),
 	}
 	if jevResp.Model != "" {
 		sig.ModelResolved = jevResp.Model
@@ -573,12 +583,12 @@ func EvaluateOutputQuality(signal ReflexSignal) OutputQualityVerdict {
 	quality := 5.0 - signal.RiskScore // invert back
 	th := defaultPromptsConfig().Thresholds
 	if signal.IsFallback {
-		return OutputQualityVerdict{Action: "skip", Quality: quality, Confidence: signal.Confidence, Reason: "deterministic fallback — no live assessment"}
+		return OutputQualityVerdict{Action: "skip", Quality: quality, Confidence: signal.Confidence, Reason: "deterministic fallback — no live assessment", EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic)}
 	}
 	if quality <= th.L3RejectMaxQuality && signal.Confidence >= th.L3RejectMinConfidence {
-		return OutputQualityVerdict{Action: "reject", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f below threshold (hallucination suspected)", quality)}
+		return OutputQualityVerdict{Action: "reject", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f below threshold (hallucination suspected)", quality), EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic)}
 	}
-	return OutputQualityVerdict{Action: "accept", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f acceptable", quality)}
+	return OutputQualityVerdict{Action: "accept", Quality: quality, Confidence: signal.Confidence, Reason: fmt.Sprintf("output quality %.2f acceptable", quality), EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic)}
 }
 
 // EvaluatePolicy implements the g8s Supervisor Policy Engine.
@@ -621,12 +631,13 @@ func (g *ReflexGate) TriageMutation(ctx context.Context, req TriageRequest) (Tri
 
 func fallbackSignal(risk, breach, conf float64, reason string) ReflexSignal {
 	return ReflexSignal{
-		RiskScore:  risk,
-		BreachProb: breach,
-		Confidence: conf,
-		Source:     "deterministic",
-		Reason:     reason,
-		IsFallback: true,
+		RiskScore:      risk,
+		BreachProb:     breach,
+		Confidence:     conf,
+		Source:         "deterministic",
+		Reason:         reason,
+		IsFallback:     true,
+		EpistemicClass: string(sandbox.EpistemicEstimatedHeuristic),
 	}
 }
 
