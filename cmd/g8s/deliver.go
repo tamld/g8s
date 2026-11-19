@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,10 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/lockfile"
 	"github.com/tamld/g8s/internal/receipt"
+	"github.com/tamld/g8s/internal/signing"
 )
 
 type deliverablePointer struct {
@@ -64,6 +67,8 @@ func runDeliver(args []string) {
 	expectedHeadOID := fs.String("expected-head-oid", "", "optional expected git HEAD SHA in target workspace (CAS STALE_HEAD guard; DELTA-34)")
 	allowUnverifiedOverride := fs.Bool("allow-unverified-override", false, "allow F0 override to deliver unverified or rejected tasks (requires --override-reason)")
 	overrideReason := fs.String("override-reason", "", "mandatory audit rationale when --allow-unverified-override is used")
+	s0ApprovalFlag := fs.String("s0-approval", "", "path to signed S0 Human Principal approval JSON (required when delivering TCB paths)")
+	s0PubKeyFlag := fs.String("s0-pubkey", "", "path to pinned S0 Human Ed25519 public key file (default: <stateDir>/s0-human.pub or G8S_S0_PUBKEY_PATH)")
 
 	// Allow flags to appear before or after positional task-id
 	var positional []string
@@ -72,7 +77,7 @@ func runDeliver(args []string) {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flagArgs = append(flagArgs, arg)
-			if (arg == "--task-id" || arg == "-task-id" || arg == "--task" || arg == "-task" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--receipt" || arg == "-receipt" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--override-reason" || arg == "-override-reason" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if (arg == "--task-id" || arg == "-task-id" || arg == "--task" || arg == "-task" || arg == "--worktree" || arg == "-worktree" || arg == "--receipt-id" || arg == "-receipt-id" || arg == "--receipt" || arg == "-receipt" || arg == "--expected-head-oid" || arg == "-expected-head-oid" || arg == "--override-reason" || arg == "-override-reason" || arg == "--s0-approval" || arg == "-s0-approval" || arg == "--s0-pubkey" || arg == "-s0-pubkey" || arg == "--actor" || arg == "-actor" || arg == "--trace-id" || arg == "-trace-id") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -437,6 +442,25 @@ func runDeliver(args []string) {
 		exitRuntime("deliver", "", *traceID, cli.CodeDenied,
 			fmt.Errorf("out-of-scope path(s) not covered by receipt %s: %s", receiptID, strings.Join(offending, ", ")),
 			"All modified files must be covered by receipt allowed_paths", *jsonl)
+	}
+
+	// 4b. TRUST-G2 gate: cryptographically signed S0 Human custody for any TCB path
+	if tcbErr := enforceDeliverTrustRootGate(
+		filepath.Dir(dbPath),
+		*actor,
+		deliverableDir,
+		candidates,
+		deletedCandidates,
+		copyOps,
+		renameOps,
+		verifiedOK,
+		task.Result,
+		*s0ApprovalFlag,
+		*s0PubKeyFlag,
+		*dryRun,
+	); tcbErr != nil {
+		exitRuntime("deliver", "", *traceID, cli.CodeDenied, tcbErr,
+			"Tier B TCB deliveries require passing deterministic checks and a valid signed S0 approval attestation", *jsonl)
 	}
 
 	// 5. Apply — DELTA-34: CAS Head Check (--expected-head-oid / STALE_HEAD protection)
@@ -896,6 +920,129 @@ func deliverPathMatchesPattern(cleanFile, pattern string) bool {
 	}
 	m, _ := filepath.Match(cleanPattern, cleanFile)
 	return m
+}
+
+func resolveDeliverActorStratum() string {
+	tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER")))
+	switch tier {
+	case "F1", "F2":
+		return tier
+	}
+	stratum := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_STRATUM")))
+	switch stratum {
+	case "F1", "F2", "S3", "S3-M", "S3-A", "WORKER", "SUBAGENT", "F0", "S2", "S1", "S0":
+		return stratum
+	default:
+		return "F0"
+	}
+}
+
+func enforceDeliverTrustRootGate(
+	stateDir string,
+	actorFlag string,
+	deliverableDir string,
+	candidates []string,
+	deletedCandidates []string,
+	copyOps []deliverCopyOp,
+	renameOps []deliverRenameOp,
+	verifiedOK bool,
+	taskResult []byte,
+	s0ApprovalPath string,
+	s0PubKeyPath string,
+	dryRun bool,
+) error {
+	applyPaths := append([]string(nil), candidates...)
+	for _, op := range copyOps {
+		applyPaths = append(applyPaths, op.newPath)
+	}
+	for _, op := range renameOps {
+		applyPaths = append(applyPaths, op.newPath)
+	}
+	deletePaths := append([]string(nil), deletedCandidates...)
+	for _, op := range renameOps {
+		deletePaths = append(deletePaths, op.oldPath)
+	}
+
+	combined := make([]string, 0, len(applyPaths)+len(deletePaths))
+	combined = append(combined, applyPaths...)
+	combined = append(combined, deletePaths...)
+	allPaths := harness.CanonicalizeTCBPaths(combined)
+
+	touchesTCB := false
+	for _, p := range allPaths {
+		if harness.IsTCBPath(p) {
+			touchesTCB = true
+			break
+		}
+	}
+	if !touchesTCB {
+		return nil
+	}
+
+	actorID := strings.TrimSpace(actorFlag)
+	if actorID == "" {
+		actorID = "f0-supervisor"
+	}
+
+	observedArtifactDigest, err := harness.ComputeDeliverableArtifactDigest(deliverableDir, applyPaths, deletePaths)
+	if err != nil {
+		return fmt.Errorf("%s: compute deliverable artifact digest: %w", harness.CodeTrustRootDigestMismatch, err)
+	}
+	var observedChecksDigest string
+	if verifiedOK {
+		observedChecksDigest = harness.ComputeChecksDigest(taskResult)
+	}
+
+	resolvedPubPath := strings.TrimSpace(s0PubKeyPath)
+	if resolvedPubPath == "" {
+		resolvedPubPath = strings.TrimSpace(os.Getenv("G8S_S0_PUBKEY_PATH"))
+	}
+	if resolvedPubPath == "" {
+		resolvedPubPath = filepath.Join(stateDir, signing.S0PublicKeyFile)
+	}
+	var s0Pub ed25519.PublicKey
+	if loadedPub, pubErr := signing.LoadPublicKeyFile(resolvedPubPath); pubErr == nil {
+		s0Pub = loadedPub
+	}
+
+	var f0Pub ed25519.PublicKey
+	if loadedF0, f0Err := signing.LoadPublicKeyFile(filepath.Join(stateDir, signing.F0PublicKeyFile)); f0Err == nil {
+		f0Pub = loadedF0
+	}
+
+	var s0Approval *harness.S0ApprovalAttestation
+	trimmedAttPath := strings.TrimSpace(s0ApprovalPath)
+	if trimmedAttPath != "" {
+		rawAtt, readErr := os.ReadFile(trimmedAttPath)
+		if readErr != nil {
+			return fmt.Errorf("%s: read S0 approval file %q: %w", harness.CodeTrustRootS0ApprovalRequired, trimmedAttPath, readErr)
+		}
+		var parsed harness.S0ApprovalAttestation
+		if jErr := json.Unmarshal(rawAtt, &parsed); jErr != nil {
+			return fmt.Errorf("%s: parse S0 approval JSON %q: %w", harness.CodeTrustRootS0SignatureInvalid, trimmedAttPath, jErr)
+		}
+		s0Approval = &parsed
+	}
+
+	nonceStore := harness.NewFileS0NonceStore(filepath.Join(stateDir, "s0-used-nonces.json"))
+	dec := harness.EvaluateTrustRootMutation(harness.TrustRootRequest{
+		ActorStratum:              resolveDeliverActorStratum(),
+		ActorID:                   actorID,
+		TargetPaths:               allPaths,
+		RequestedTier:             harness.TierBS0HumanTCB,
+		DeterministicChecksPassed: verifiedOK,
+		ObservedChecksDigest:      observedChecksDigest,
+		ObservedArtifactDigest:    observedArtifactDigest,
+		S0PublicKey:               s0Pub,
+		F0PublicKey:               f0Pub,
+		NonceStore:                nonceStore,
+		DryRun:                    dryRun,
+		S0Approval:                s0Approval,
+	})
+	if !dec.Allowed {
+		return fmt.Errorf("%s: %s", dec.Code, dec.Reason)
+	}
+	return nil
 }
 
 func deliverGlobstarMatch(fileSegs, patSegs []string) bool {
