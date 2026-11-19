@@ -210,7 +210,7 @@ func RunAssuranceEscapeContainment(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Vector 5: Git rename escape outside receipt/claim scope (#917)
+	// Vector 5: Git rename escape outside receipt/claim scope (#917, #935)
 	if err := runAssuranceGit(ctx, worktreeDir, "mv", "secret/key.txt", "allowed/stolen.txt"); err == nil {
 		claim := &receipt.ClaimBinding{
 			TaskID:          "task-as1",
@@ -221,7 +221,9 @@ func RunAssuranceEscapeContainment(ctx context.Context) (string, error) {
 			Paths:           []string{"allowed/ok.txt", "allowed/stolen.txt"},
 			ExpiresAt:       time.Now().Add(time.Hour),
 		}
-		if _, fwErr := worker.VerifyWorktreeDiffScope(worktreeDir, "workspace_write", []string{"allowed/**"}, claim); fwErr != nil {
+		_, noClaimErr := worker.VerifyWorktreeDiffScope(worktreeDir, "workspace_write", []string{"allowed/**"})
+		_, claimErr := worker.VerifyWorktreeDiffScope(worktreeDir, "workspace_write", []string{"allowed/**"}, claim)
+		if noClaimErr != nil && claimErr != nil {
 			blocked++
 		}
 	}

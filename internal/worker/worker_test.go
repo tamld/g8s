@@ -698,7 +698,7 @@ func TestCollectCompletionAppendsModelOutcomeWithSessionStateDir(t *testing.T) {
 	startTime := sup.clock()
 	final, cerr := sup.collect(ctx, child, "", claimed.TaskID, "w-collect", token,
 		attemptDir, filepath.Join(attemptDir, "prompt.txt"), resultPath, stdoutPath, stderrPath,
-		"", "read_only", "", startTime, "", req)
+		"", "read_only", "", startTime, "", req, nil)
 	if cerr != nil {
 		t.Fatalf("collect: %v", cerr)
 	}

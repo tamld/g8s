@@ -342,6 +342,7 @@ func (s *Supervisor) collect(
 	startTime time.Time,
 	deliverableDir string,
 	req taskRequest,
+	baselineIgnored map[string]IgnoredFileStamp,
 ) (*controlplane.Task, error) {
 	select {
 	case <-child.Done():
@@ -662,7 +663,11 @@ func (s *Supervisor) collect(
 				claim, dfErr = LoadClaimFence(ctx, filepath.Join(filepath.Dir(pathutil.DefaultDatabasePath()), "receipts.db"), receiptID)
 			}
 			if dfErr == nil {
-				violations, dfErr = VerifyWorktreeDiffScope(deliverableDir, permission, allowedPaths, claim)
+				violations, dfErr = VerifyWorktreeDiffScopeWithOptions(deliverableDir, permission, allowedPaths, DiffFirewallOptions{
+					Claim:           claim,
+					BaselineIgnored: baselineIgnored,
+					CheckIgnored:    true,
+				})
 			}
 			if dfErr != nil {
 				wr = workerResult{

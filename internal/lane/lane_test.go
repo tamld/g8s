@@ -615,6 +615,7 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 	expectedSubstrings := []string{
 		"internal/receipt/*",
 		"internal/worker/proc_*",
+		"internal/worker/diff_firewall*",
 		"internal/server/*",
 		"internal/harness/*",
 		"internal/memory/*",
@@ -646,6 +647,7 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 	}
 
 	securitySamples := []string{
+		"internal/worker/diff_firewall.go",
 		"internal/sandbox/sandbox.go",
 		"internal/sandbox",
 		"internal/sandbox/**",
