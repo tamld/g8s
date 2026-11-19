@@ -278,7 +278,7 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	if err != nil {
 		return nil, fmt.Errorf("load F0 verifier for %q: %w", dbPath, err)
 	}
-	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
+	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open receipt database %q: %w", dbPath, err)
@@ -304,6 +304,38 @@ func (m *Manager) Close() error {
 	return m.db.Close()
 }
 
+func isReceiptSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked") ||
+		strings.Contains(msg, "sqlite_busy")
+}
+
+func withReceiptBusyRetry(op func() error) error {
+	const maxAttempts = 20
+	backoff := 5 * time.Millisecond
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = op()
+		if err == nil || !isReceiptSQLiteBusy(err) {
+			return err
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(backoff)
+			if backoff < 100*time.Millisecond {
+				backoff *= 2
+				if backoff > 100*time.Millisecond {
+					backoff = 100 * time.Millisecond
+				}
+			}
+		}
+	}
+	return err
+}
+
 // initialize runs the schema gate inside one EXCLUSIVE transaction on a single
 // pinned connection: accept user_version 0 (fresh), 1 (legacy), or current;
 // migrate schema by adding missing columns; reject unsupported versions.
@@ -314,19 +346,50 @@ func (m *Manager) initialize() error {
 	}
 	defer conn.Close()
 
+	// Configure WAL mode explicitly on file-backed DBs outside the DSN so busy
+	// retry covers multi-process cold opens without breaking ":memory:" tests.
+	if m.stateDir != "" {
+		var journalMode string
+		if err := conn.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil || !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+			err = withReceiptBusyRetry(func() error {
+				var mode string
+				if qerr := conn.QueryRowContext(context.Background(), "PRAGMA journal_mode=WAL").Scan(&mode); qerr != nil {
+					return qerr
+				}
+				if !strings.EqualFold(strings.TrimSpace(mode), "wal") {
+					return fmt.Errorf("set journal_mode=WAL: got %q", mode)
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("enable WAL journal mode: %w", err)
+			}
+		}
+	}
+
 	// Fast-path: if database already matches current schema version, skip exclusive lock.
 	var version int
-	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err == nil && version == SchemaVersion {
+	if err := withReceiptBusyRetry(func() error {
+		return conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version)
+	}); err == nil && version == SchemaVersion {
 		return nil
+	}
+
+	if err := withReceiptBusyRetry(func() error {
+		_, execErr := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE")
+		return execErr
+	}); err != nil {
+		return fmt.Errorf("begin exclusive schema transaction: %w", err)
 	}
 
 	var priorVersion int
 	if err := conn.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&priorVersion); err != nil {
+		rollbackInit(conn)
 		return fmt.Errorf("read schema version before migration: %w", err)
 	}
-
-	if _, err := conn.ExecContext(context.Background(), "BEGIN EXCLUSIVE"); err != nil {
-		return fmt.Errorf("begin exclusive schema transaction: %w", err)
+	if priorVersion == SchemaVersion {
+		rollbackInit(conn)
+		return nil
 	}
 
 	if err := checkSchemaVersion(conn); err != nil {
@@ -759,8 +822,9 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 	sigTag := FormatMonotoneReceiptSig(priv, r.ReceiptID, r.Issuer, string(pathsJSON), expiresUnix, createdUnix, claimStr)
 	r.Signature = sigTag
 
-	if _, err := m.db.Exec(
-		`INSERT INTO write_receipts
+	if err := withReceiptBusyRetry(func() error {
+		_, execErr := m.db.Exec(
+			`INSERT INTO write_receipts
 			(receipt_id, issuer, allowed_paths_json, expires_at, consumed, consumer_task_id, created_at,
 			 approach_idx, attempt_idx, rca_confidence, adr_path,
 			 envelope_schema_uri, envelope_field_order_json, envelope_required_fields_json,
@@ -770,12 +834,14 @@ func (m *Manager) IssueReceipt(issuer string, allowedPaths []string, ttl time.Du
 		 ?, ?, ?,
 		 ?, ?, ?,
 		 ?, ?, ?, ?, ?, ?, ?)`,
-		r.ReceiptID, r.Issuer, string(pathsJSON), expiresUnix, createdUnix,
-		approachIdx, attemptIdx, rcaConfidence, adrPath,
-		envelopeSchemaURI, envelopeFieldOrder, envelopeRequiredFlds,
-		rulesetVersion, pipelineDigest, adrRefVal,
-		issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON, sigTag,
-	); err != nil {
+			r.ReceiptID, r.Issuer, string(pathsJSON), expiresUnix, createdUnix,
+			approachIdx, attemptIdx, rcaConfidence, adrPath,
+			envelopeSchemaURI, envelopeFieldOrder, envelopeRequiredFlds,
+			rulesetVersion, pipelineDigest, adrRefVal,
+			issuedBy, toolVersion, traceID, actorChainJSON, sourceCommit, claimBindingJSON, sigTag,
+		)
+		return execErr
+	}); err != nil {
 		return nil, fmt.Errorf("insert receipt %q: %w", r.ReceiptID, err)
 	}
 	return r, nil
@@ -809,8 +875,12 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tx, err := m.db.Begin()
-	if err != nil {
+	var tx *sql.Tx
+	if err := withReceiptBusyRetry(func() error {
+		var beginErr error
+		tx, beginErr = m.db.Begin()
+		return beginErr
+	}); err != nil {
 		return nil, fmt.Errorf("begin consume transaction: %w", err)
 	}
 	defer tx.Rollback()

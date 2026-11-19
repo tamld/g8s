@@ -201,13 +201,14 @@ func hasExactNulEnvToken(data, token []byte) bool {
 	}
 }
 
-func sweepLinuxSandboxProcesses(sandboxID string) {
+func findSandboxProcessesOS(sandboxID string) []int {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return
+		return nil
 	}
 	selfPID := os.Getpid()
 	target := []byte("G8S_SANDBOX_ID=" + sandboxID)
+	var pids []int
 	for _, ent := range entries {
 		if !ent.IsDir() {
 			continue
@@ -221,9 +222,16 @@ func sweepLinuxSandboxProcesses(sandboxID string) {
 			continue
 		}
 		if hasExactNulEnvToken(data, target) {
-			if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
-				fmt.Fprintf(os.Stderr, "[warn] sandbox: kill survivor pid %d: %v\n", pid, kerr)
-			}
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func sweepLinuxSandboxProcesses(sandboxID string) {
+	for _, pid := range findSandboxProcessesOS(sandboxID) {
+		if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: kill survivor pid %d: %v\n", pid, kerr)
 		}
 	}
 }

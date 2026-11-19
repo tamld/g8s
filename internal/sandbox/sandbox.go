@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // ContainmentMode describes the strength of process isolation achieved at launch.
@@ -154,7 +155,7 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 			}
 			return nil, fmt.Errorf("%w: no_sandbox cannot be combined with require_kernel_enforced", ErrKernelSandboxRequired)
 		}
-		return &PreparedLaunch{
+		launch := &PreparedLaunch{
 			Argv:      append([]string{}, cfg.Argv...),
 			Env:       env,
 			Mode:      ModePolicyOnly,
@@ -166,14 +167,44 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 					removeAllLogged(tmpDir)
 				}
 			},
-		}, nil
+		}
+		attachSandboxMarker(cfg.StateDir, cfg, launch)
+		return launch, nil
 	}
 
 	launch, osErr := prepareOS(cfg, env, tmpDir, gocacheDir, sandboxID, ownTmp)
 	if osErr != nil {
 		return nil, osErr
 	}
-	return enforceContainmentRequirement(launch, cfg.RequireKernelEnforced)
+	enforced, err := enforceContainmentRequirement(launch, cfg.RequireKernelEnforced)
+	if err != nil {
+		return nil, err
+	}
+	attachSandboxMarker(cfg.StateDir, cfg, enforced)
+	return enforced, nil
+}
+
+func attachSandboxMarker(stateDir string, cfg Config, launch *PreparedLaunch) {
+	if launch == nil || strings.TrimSpace(stateDir) == "" || strings.TrimSpace(launch.SandboxID) == "" {
+		return
+	}
+	if err := WriteSandboxMarker(stateDir, SandboxMarker{
+		SandboxID:   launch.SandboxID,
+		WorkerPID:   os.Getpid(),
+		WorktreeDir: cfg.WorktreeDir,
+		RunDir:      cfg.RunDir,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[warn] sandbox: persist marker %s: %v\n", launch.SandboxID, err)
+	}
+	origCleanup := launch.Cleanup
+	sbxID := launch.SandboxID
+	launch.Cleanup = func() {
+		if origCleanup != nil {
+			origCleanup()
+		}
+		RemoveSandboxMarker(stateDir, sbxID)
+	}
 }
 
 func enforceContainmentRequirement(launch *PreparedLaunch, requireKernel bool) (*PreparedLaunch, error) {

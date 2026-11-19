@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,8 +162,7 @@ func (e *faultE2EEnv) cmdEnv() []string {
 	return out
 }
 
-func (e *faultE2EEnv) run(args ...string) (testEnvelope, int, string) {
-	e.t.Helper()
+func (e *faultE2EEnv) runNoFatal(args ...string) (testEnvelope, int, string, error) {
 	cmd := exec.Command(e.g8sBin, args...)
 	cmd.Dir = e.repoDir
 	cmd.Env = e.cmdEnv()
@@ -172,12 +173,21 @@ func (e *faultE2EEnv) run(args ...string) (testEnvelope, int, string) {
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
-			e.t.Fatalf("exec %v: %v\n%s", args, err, string(out))
+			return testEnvelope{}, -1, string(out), fmt.Errorf("exec %v: %w\n%s", args, err, string(out))
 		}
 	}
 	var env testEnvelope
 	_ = json.Unmarshal([]byte(strings.TrimSpace(string(out))), &env)
-	return env, exitCode, string(out)
+	return env, exitCode, string(out), nil
+}
+
+func (e *faultE2EEnv) run(args ...string) (testEnvelope, int, string) {
+	e.t.Helper()
+	env, rc, raw, err := e.runNoFatal(args...)
+	if err != nil {
+		e.t.Fatalf("%v", err)
+	}
+	return env, rc, raw
 }
 
 func (e *faultE2EEnv) issueReceipt(pathGlob string) string {
@@ -317,15 +327,23 @@ func TestFaultInjectionE2E_CrashStaleLeaseReclaimVerifyAndDeliver(t *testing.T) 
 		forceKillFaultTestPID(activeProcs.PID)
 	})
 
-	running := env.getTask(taskID)
-	if running.State != controlplane.StateRunning {
-		t.Fatalf("state during active attempt = %q, want RUNNING", running.State)
+	var running controlplane.Task
+	runDeadline := time.Now().Add(5 * time.Second)
+	for {
+		running = env.getTask(taskID)
+		if running.State == controlplane.StateRunning {
+			break
+		}
+		if time.Now().After(runDeadline) {
+			t.Fatalf("state during active attempt = %q after 5s wait, want RUNNING", running.State)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	// Hard-kill worker1 mid-lease. On Windows, closing worker1's process handle
 	// terminates the entire JobObject tree automatically. On POSIX, external
-	// SIGKILL on worker1 cannot run signal handlers or cross every bwrap/Setsid
-	// domain, so reap Attempt 1 sleepers cleanly before Worker 2 reclaims.
+	// SIGKILL leaves detached sleepers alive until g8s cleanup --target ghost-process
+	// automatically reaps G8S_SANDBOX_ID-tagged orphans belonging to the dead worker.
 	if err := worker1.Process.Kill(); err != nil {
 		t.Fatalf("kill worker1: %v", err)
 	}
@@ -339,8 +357,36 @@ func TestFaultInjectionE2E_CrashStaleLeaseReclaimVerifyAndDeliver(t *testing.T) 
 			t.Fatalf("detached grandchild pid %d survived worker1 JobObject close on Windows", activeProcs.GrandchildPID)
 		}
 	} else {
-		forceKillFaultTestPID(activeProcs.GrandchildPID)
-		forceKillFaultTestPID(activeProcs.PID)
+		cEnv, cRC, cOut := env.run("cleanup", "--target", "ghost-process", "--force", "--grace-period", "1s", "--json")
+		if cRC != 0 {
+			t.Fatalf("g8s cleanup --target ghost-process rc=%d out=%s", cRC, cOut)
+		}
+		if !waitFaultProcessDead(activeProcs.PID, 5*time.Second) {
+			t.Fatalf("faultworker pid %d survived g8s cleanup --target ghost-process on %s (out=%s)", activeProcs.PID, runtime.GOOS, cOut)
+		}
+		if !waitFaultProcessDead(activeProcs.GrandchildPID, 5*time.Second) {
+			t.Fatalf("detached grandchild pid %d survived g8s cleanup --target ghost-process on %s (out=%s)", activeProcs.GrandchildPID, runtime.GOOS, cOut)
+		}
+		var report struct {
+			Items []struct {
+				Target string `json:"target"`
+				ID     string `json:"id"`
+				Action string `json:"action"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(cEnv.Data, &report); err != nil {
+			t.Fatalf("decode cleanup report: %v raw=%s", err, cOut)
+		}
+		gcStr := strconv.Itoa(activeProcs.GrandchildPID)
+		killedGrandchild := false
+		for _, it := range report.Items {
+			if it.Target == "ghost-process" && it.Action == "killed" && it.ID == gcStr {
+				killedGrandchild = true
+			}
+		}
+		if !killedGrandchild {
+			t.Fatalf("expected g8s cleanup --target ghost-process to explicitly reap detached grandchild pid %d, got items=%+v raw=%s", activeProcs.GrandchildPID, report.Items, cOut)
+		}
 	}
 
 	if _, err := os.Stat(filepath.Join(env.repoDir, "pkg", "corrupt.go")); !errors.Is(err, os.ErrNotExist) {
@@ -617,5 +663,196 @@ func TestFaultInjectionE2E_ConcurrentDeliverAndStaleHeadCAS(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.repoDir, "pkg", "cas2.go")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("pkg/cas2.go must remain absent after default BaseSHA STALE_HEAD refusal, stat=%v", err)
+	}
+}
+
+func TestFaultInjectionE2E_MultiCoordinatorConcurrentWorkersAndDeliverFencing(t *testing.T) {
+	env := setupFaultE2EEnv(t)
+	if _, rc, raw := env.run("receipt", "list", "--json"); rc != 0 {
+		t.Fatalf("bootstrap receipt ledger rc=%d: %s", rc, raw)
+	}
+	const numTasks = 6
+	const numWorkers = 10
+
+	coordinators := []string{"f0-coord-a", "f0-coord-b"}
+	taskIDs := make([]string, numTasks)
+	receiptIDs := make([]string, numTasks)
+	prompts := make([]string, numTasks)
+	submitGate := make(chan struct{})
+	var submitWG sync.WaitGroup
+	for i := 0; i < numTasks; i++ {
+		i := i
+		submitWG.Add(1)
+		go func() {
+			defer submitWG.Done()
+			<-submitGate
+			coord := coordinators[i%len(coordinators)]
+			rcEnv, rcRC, rcRaw, err := env.runNoFatal("receipt", "issue", "--actor", coord, "--path", "pkg/**", "--ttl", "600", "--json")
+			if err != nil {
+				t.Errorf("coord %s receipt issue exec: %v", coord, err)
+				return
+			}
+			if rcRC != 0 {
+				t.Errorf("coord %s receipt issue rc=%d: %s", coord, rcRC, rcRaw)
+				return
+			}
+			var rData struct {
+				ReceiptID string `json:"receipt_id"`
+			}
+			if err := json.Unmarshal(rcEnv.Data, &rData); err != nil || rData.ReceiptID == "" {
+				t.Errorf("coord %s decode receipt: %v raw=%s", coord, err, rcRaw)
+				return
+			}
+			specJSON, _ := json.Marshal(map[string]string{
+				"mode":    "clean-write",
+				"target":  fmt.Sprintf("pkg/mc_%d.go", i),
+				"content": fmt.Sprintf("package pkg\n\nfunc MC%d() int { return %d }\n", i, i),
+			})
+			receiptIDs[i] = rData.ReceiptID
+			prompts[i] = "FAULTWORKER_SPEC:" + string(specJSON)
+			subEnv, subRC, subRaw, err := env.runNoFatal(
+				"submit",
+				"--provider", "faultworker",
+				"--model", "mock-v1",
+				"--role", "implementer",
+				"--permission", "workspace_write",
+				"--allow-workspace-write",
+				"--receipt-id", receiptIDs[i],
+				"--max-attempts", "2",
+				"--timeout", "30s",
+				"--idempotency-key", fmt.Sprintf("mc-task-%d", i),
+				"--prompt", prompts[i],
+				"--json",
+			)
+			if err != nil {
+				t.Errorf("coord %s submit exec: %v", coord, err)
+				return
+			}
+			if subRC != 0 {
+				t.Errorf("coord %s submit mc-task-%d rc=%d: %s", coord, i, subRC, subRaw)
+				return
+			}
+			var task controlplane.Task
+			if err := json.Unmarshal(subEnv.Data, &task); err != nil || task.TaskID == "" {
+				t.Errorf("coord %s decode submit task err=%v raw=%s", coord, err, subRaw)
+				return
+			}
+			taskIDs[i] = task.TaskID
+		}()
+	}
+	close(submitGate)
+	submitWG.Wait()
+	for i, tid := range taskIDs {
+		if tid == "" {
+			t.Fatalf("task %d failed to submit cleanly", i)
+		}
+	}
+
+	// Identical retry from a second coordinator returns the exact same TaskID.
+	dupID := env.submitWorkspaceWrite("mc-task-0", receiptIDs[0], "30s", "2", prompts[0])
+	if dupID != taskIDs[0] {
+		t.Fatalf("duplicate submit returned %q, want %q", dupID, taskIDs[0])
+	}
+	// Reusing an existing idempotency_key with a different payload must be rejected.
+	_, conflictRC, conflictRaw := env.run(
+		"submit",
+		"--provider", "faultworker",
+		"--model", "mock-v1",
+		"--role", "implementer",
+		"--permission", "workspace_write",
+		"--allow-workspace-write",
+		"--receipt-id", receiptIDs[0],
+		"--max-attempts", "2",
+		"--timeout", "30s",
+		"--idempotency-key", "mc-task-0",
+		"--prompt", "conflicting duplicate submit payload",
+		"--json",
+	)
+	if conflictRC == 0 || !strings.Contains(conflictRaw, "idempotency_key already exists with a different request") {
+		t.Fatalf("expected idempotency conflict error, got rc=%d raw=%s", conflictRC, conflictRaw)
+	}
+
+	// Launch 10 concurrent worker OS processes contending over the shared SQLite WAL queue.
+	workerGate := make(chan struct{})
+	var workerWG sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		w := w
+		workerWG.Add(1)
+		go func() {
+			defer workerWG.Done()
+			<-workerGate
+			cmd := exec.Command(env.g8sBin, "worker", "--once", "--lease", "15", "--provider", "faultworker", "--model", "mock-v1", "--json")
+			cmd.Dir = env.repoDir
+			cmd.Env = env.cmdEnv()
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Logf("worker-%d exited %v: %s", w, err, string(out))
+			}
+		}()
+	}
+	close(workerGate)
+	workerWG.Wait()
+
+	// Every task must reach WORKER_COMPLETED in 1 attempt, and verify -> SUPERVISOR_ACCEPTED.
+	for i, tid := range taskIDs {
+		tk := env.getTask(tid)
+		if tk.State != controlplane.StateWorkerCompleted || tk.Attempts != 1 {
+			t.Fatalf("task %d (%s) = state=%s attempts=%d, want WORKER_COMPLETED attempts=1", i, tid, tk.State, tk.Attempts)
+		}
+		vEnv, vRC, vOut := env.run("verify", "--task", tid, "--json")
+		if vRC != 0 {
+			t.Fatalf("verify task %s rc=%d out=%s", tid, vRC, vOut)
+		}
+		var verdict struct {
+			Outcome string `json:"outcome"`
+		}
+		if err := json.Unmarshal(vEnv.Data, &verdict); err != nil || verdict.Outcome != "pass" {
+			t.Fatalf("verify outcome task %s = %+v err=%v raw=%s", tid, verdict, err, vOut)
+		}
+		if accepted := env.getTask(tid); accepted.State != controlplane.StateSupervisorAccepted {
+			t.Fatalf("task %s state = %s, want SUPERVISOR_ACCEPTED", tid, accepted.State)
+		}
+	}
+
+	// For each task, race 2 coordinators on deliver WITHOUT --prune-worktree, then retry sequentially.
+	// SQLite ClaimDelivery fence ensures exactly-one accepted delivery per task.
+	for i, tid := range taskIDs {
+		raceGate := make(chan struct{})
+		var raceWG sync.WaitGroup
+		var winners atomic.Int32
+		for _, coord := range coordinators {
+			coord := coord
+			raceWG.Add(1)
+			go func() {
+				defer raceWG.Done()
+				<-raceGate
+				cmd := exec.Command(env.g8sBin, "deliver", tid, "--expected-head-oid", env.baseSHA, "--actor", coord, "--json")
+				cmd.Dir = env.repoDir
+				cmd.Env = env.cmdEnv()
+				if err := cmd.Run(); err == nil {
+					winners.Add(1)
+				}
+			}()
+		}
+		close(raceGate)
+		raceWG.Wait()
+		if winners.Load() != 1 {
+			t.Fatalf("task %d (%s) concurrent deliver winners = %d, want exactly 1", i, tid, winners.Load())
+		}
+
+		// Explicit sequential duplicate retry must be rejected by E_TASK_ALREADY_DELIVERED even with no lock contention.
+		_, retryRC, retryOut := env.run("deliver", tid, "--expected-head-oid", env.baseSHA, "--actor", "f0-coord-b", "--json")
+		if retryRC == 0 {
+			t.Fatalf("expected duplicate sequential deliver for task %s to fail, got rc=0: %s", tid, retryOut)
+		}
+		if !strings.Contains(retryOut, "E_TASK_ALREADY_DELIVERED") {
+			t.Fatalf("expected E_TASK_ALREADY_DELIVERED in duplicate deliver output for %s, got: %s", tid, retryOut)
+		}
+
+		targetFile := filepath.Join(env.repoDir, "pkg", fmt.Sprintf("mc_%d.go", i))
+		raw, err := os.ReadFile(targetFile)
+		if err != nil || !strings.Contains(string(raw), fmt.Sprintf("func MC%d()", i)) {
+			t.Fatalf("delivered file %s missing or corrupt: err=%v content=%q", targetFile, err, string(raw))
+		}
 	}
 }

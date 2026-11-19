@@ -54,7 +54,6 @@ type deliverCopyOp struct {
 func runDeliver(args []string) {
 	fs := flag.NewFlagSet("deliver", flag.ExitOnError)
 	actor, traceID, jsonl, jsonMode := cli.AddCommonFlags(fs)
-	_ = actor
 	dryRun := fs.Bool("dry-run", false, "perform validation and list files without copying")
 	pruneWorktree := fs.Bool("prune-worktree", false, "remove the isolated git worktree and wt/<task-id> branch after successful delivery")
 	taskIDFlag := fs.String("task-id", "", "task ID to deliver")
@@ -566,6 +565,24 @@ func runDeliver(args []string) {
 	applied := []string{}
 	var deleted []string
 	if !*dryRun {
+		actorName := strings.TrimSpace(*actor)
+		if actorName == "" {
+			actorName = "f0-supervisor"
+		}
+		if derr := store.ClaimDelivery(context.Background(), taskID, actorName, currentHeadOID); derr != nil {
+			if errors.Is(derr, controlplane.ErrTaskAlreadyDelivered) {
+				exitRuntime("deliver", "", *traceID, cli.CodeConflict, derr,
+					"Task has already been delivered (exactly-one delivery fence)", *jsonl)
+			}
+			exitRuntime("deliver", "", *traceID, cli.CodeRuntime, derr,
+				"Failed to acquire task delivery fence", *jsonl)
+		}
+		releaseClaimIfUnlanded := func() {
+			if len(applied) == 0 {
+				store.ReleaseDeliveryClaim(context.Background(), taskID)
+			}
+		}
+
 		type stagedFile struct {
 			tmpPath  string
 			destPath string
@@ -588,6 +605,7 @@ func runDeliver(args []string) {
 			srcInfo, err := os.Stat(srcPath)
 			if err != nil {
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -599,6 +617,7 @@ func runDeliver(args []string) {
 			destDir := filepath.Dir(destPath)
 			if err := os.MkdirAll(destDir, 0o755); err != nil {
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -610,6 +629,7 @@ func runDeliver(args []string) {
 			content, err := os.ReadFile(srcPath)
 			if err != nil {
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -626,6 +646,7 @@ func runDeliver(args []string) {
 			tmpFile, err := os.CreateTemp(destDir, ".g8s-deliver-*")
 			if err != nil {
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -639,6 +660,7 @@ func runDeliver(args []string) {
 			if _, err := tmpFile.Write(content); err != nil {
 				tmpFile.Close()
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -649,6 +671,7 @@ func runDeliver(args []string) {
 			_ = tmpFile.Chmod(mode)
 			if err := tmpFile.Close(); err != nil {
 				cleanupTemps()
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")
@@ -665,6 +688,7 @@ func runDeliver(args []string) {
 				for j := i; j < len(staged); j++ {
 					_ = os.Remove(staged[j].tmpPath)
 				}
+				releaseClaimIfUnlanded()
 				landedStr := "none"
 				if len(applied) > 0 {
 					landedStr = strings.Join(applied, ", ")

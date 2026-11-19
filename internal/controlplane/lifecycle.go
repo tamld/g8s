@@ -28,6 +28,18 @@ var ErrReceiptAlreadyConsumed = errors.New("write receipt already consumed")
 // exist or whose TTL has lapsed at consume time.
 var ErrReceiptUnknownOrExpired = errors.New("write receipt unknown or expired")
 
+// ErrTaskAlreadyDelivered is returned when a duplicate deliver attempt loses
+// the atomic SQLite WAL primary-key fence for a task (#942).
+var ErrTaskAlreadyDelivered = errors.New("E_TASK_ALREADY_DELIVERED")
+
+const taskDeliveriesEnsureDDL = `
+CREATE TABLE IF NOT EXISTS task_deliveries (
+	task_id      TEXT PRIMARY KEY,
+	actor        TEXT NOT NULL,
+	head_oid     TEXT,
+	delivered_at REAL NOT NULL
+)`
+
 // writeReceiptsEnsureDDL mirrors the write_receipts table from
 // internal/receipt/receipt.go `schema` so a worker-only control plane can
 // consume delegated-write receipts without booting a receipt.Manager.
@@ -1015,46 +1027,116 @@ func (s *Store) Events(_ context.Context, taskID string) ([]TaskEvent, error) {
 	return events, rows.Err()
 }
 
-// AcceptResult transitions a WORKER_COMPLETED task to SUPERVISOR_ACCEPTED.
+// AcceptResult transitions a WORKER_COMPLETED task to SUPERVISOR_ACCEPTED using
+// atomic CAS inside a busy-retried SQLite WAL transaction.
 func (s *Store) AcceptResult(ctx context.Context, taskID string, supervisorID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
-	var state string
-	if err := row.Scan(&state); err != nil {
-		return err
-	}
-	if state != StateWorkerCompleted {
-		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
-	}
+		row := tx.QueryRowContext(ctx, `SELECT state FROM tasks WHERE task_id = ?`, taskID)
+		var state string
+		if err := row.Scan(&state); err != nil {
+			return err
+		}
+		if state != StateWorkerCompleted {
+			return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+		}
 
-	now := float64(s.clock().UnixNano()) / 1e9
-	feedback := SupervisorFeedback{
-		Action:       "accept",
-		Reason:       "result accepted by supervisor",
-		Timestamp:    now,
-		SupervisorID: supervisorID,
-	}
-	feedbackJSON, _ := json.Marshal(feedback)
+		now := float64(s.clock().UnixNano()) / 1e9
+		feedback := SupervisorFeedback{
+			Action:       "accept",
+			Reason:       "result accepted by supervisor",
+			Timestamp:    now,
+			SupervisorID: supervisorID,
+		}
+		feedbackJSON, _ := json.Marshal(feedback)
 
-	_, err = tx.Exec(
-		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
-		StateSupervisorAccepted, string(feedbackJSON), now, taskID)
-	if err != nil {
-		return err
-	}
+		res, err := tx.ExecContext(ctx,
+			`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ? AND state = ?`,
+			StateSupervisorAccepted, string(feedbackJSON), now, taskID, StateWorkerCompleted)
+		if err != nil {
+			return err
+		}
+		if affected, _ := res.RowsAffected(); affected == 0 {
+			return fmt.Errorf("task %s is not in WORKER_COMPLETED state (concurrent transition)", taskID)
+		}
 
-	if err := insertTaskEvent(tx, taskID, "result_accepted", supervisorID, map[string]any{
-		"previous_state": state,
-	}, now); err != nil {
-		return err
-	}
+		if err := insertTaskEvent(tx, taskID, "result_accepted", supervisorID, map[string]any{
+			"previous_state": state,
+		}, now); err != nil {
+			return err
+		}
 
-	return tx.Commit()
+		return tx.Commit()
+	})
+}
+
+// ClaimDelivery atomically enforces an exactly-one delivery fence for taskID
+// across concurrent F0 coordinators sharing a SQLite WAL control-plane DB (#942).
+func (s *Store) ClaimDelivery(ctx context.Context, taskID, actor, headOID string) error {
+	if strings.TrimSpace(taskID) == "" {
+		return errors.New("claim delivery: empty task_id")
+	}
+	if strings.TrimSpace(actor) == "" {
+		actor = "f0-supervisor"
+	}
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.ExecContext(ctx, taskDeliveriesEnsureDDL); err != nil {
+			return fmt.Errorf("ensure task_deliveries schema: %w", err)
+		}
+
+		now := float64(s.clock().UnixNano()) / 1e9
+		res, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO task_deliveries (task_id, actor, head_oid, delivered_at) VALUES (?, ?, ?, ?)`,
+			taskID, actor, headOID, now)
+		if err != nil {
+			return err
+		}
+		if affected, _ := res.RowsAffected(); affected == 0 {
+			return fmt.Errorf("%w: task %s already delivered", ErrTaskAlreadyDelivered, taskID)
+		}
+
+		if err := insertTaskEvent(tx, taskID, "result_delivered", actor, map[string]any{
+			"head_oid": headOID,
+		}, now); err != nil {
+			return err
+		}
+
+		return tx.Commit()
+	})
+}
+
+// ReleaseDeliveryClaim rolls back a delivery fence claim when pre-rename staging
+// fails before any file lands in the target workspace.
+func (s *Store) ReleaseDeliveryClaim(ctx context.Context, taskID string) {
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	_ = withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.ExecContext(ctx, taskDeliveriesEnsureDDL); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM task_deliveries WHERE task_id = ?`, taskID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 // RejectResult transitions a WORKER_COMPLETED task to SUPERVISOR_REJECTED.
