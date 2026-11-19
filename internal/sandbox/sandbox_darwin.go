@@ -84,13 +84,14 @@ func hasExactEnvToken(out []byte, token []byte) bool {
 	}
 }
 
-func sweepDarwinSandboxProcesses(sandboxID string) {
+func findSandboxProcessesOS(sandboxID string) []int {
 	selfPID := os.Getpid()
 	out, err := exec.Command("ps", "-x", "-o", "pid=").Output()
 	if err != nil {
-		return
+		return nil
 	}
 	target := []byte("G8S_SANDBOX_ID=" + sandboxID)
+	var pids []int
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		pid, perr := strconv.Atoi(strings.TrimSpace(line))
 		if perr != nil || pid <= 1 || pid == selfPID {
@@ -101,9 +102,16 @@ func sweepDarwinSandboxProcesses(sandboxID string) {
 			continue
 		}
 		if hasExactEnvToken(envOut, target) {
-			if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
-				fmt.Fprintf(os.Stderr, "[warn] sandbox: kill survivor pid %d: %v\n", pid, kerr)
-			}
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func sweepDarwinSandboxProcesses(sandboxID string) {
+	for _, pid := range findSandboxProcessesOS(sandboxID) {
+		if kerr := syscall.Kill(pid, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+			fmt.Fprintf(os.Stderr, "[warn] sandbox: kill survivor pid %d: %v\n", pid, kerr)
 		}
 	}
 }

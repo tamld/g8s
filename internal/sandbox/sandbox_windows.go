@@ -15,6 +15,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func findSandboxProcessesOS(_ string) []int {
+	return nil
+}
+
 func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, ownTmp bool) (*PreparedLaunch, error) {
 	return &PreparedLaunch{
 		Argv:      append([]string{}, cfg.Argv...),

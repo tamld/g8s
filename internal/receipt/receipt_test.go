@@ -2081,3 +2081,62 @@ func TestReceiptDatabaseFileMode0600(t *testing.T) {
 		t.Fatalf("db mode %o", fi.Mode().Perm())
 	}
 }
+
+func TestNewReceiptManager_ConcurrentColdOpenAndIssue(t *testing.T) {
+	stateDir := t.TempDir()
+	if _, _, err := signing.EnsureOrLoadF0Signer(stateDir); err != nil {
+		t.Fatalf("bootstrap F0 signer: %v", err)
+	}
+	dbPath := filepath.Join(stateDir, "receipts.db")
+
+	const workers = 8
+	start := make(chan struct{})
+	ids := make([]string, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			mgr, err := NewReceiptManager(dbPath, nil)
+			if err != nil {
+				t.Errorf("worker %d NewReceiptManager: %v", i, err)
+				return
+			}
+			defer mgr.Close()
+			r, err := mgr.IssueReceipt(fmt.Sprintf("f0-coord-%d", i), []string{"pkg/**"}, 60*time.Second, withConcernBDisabled())
+			if err != nil {
+				t.Errorf("worker %d IssueReceipt: %v", i, err)
+				return
+			}
+			ids[i] = r.ReceiptID
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	seen := make(map[string]struct{}, workers)
+	for i, id := range ids {
+		if id == "" {
+			t.Fatalf("worker %d produced empty receipt ID", i)
+		}
+		if _, dup := seen[id]; dup {
+			t.Fatalf("duplicate receipt ID %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+
+	checkMgr, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen receipt manager: %v", err)
+	}
+	defer checkMgr.Close()
+	active, err := checkMgr.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("ListActiveReceipts: %v", err)
+	}
+	if len(active) != workers {
+		t.Fatalf("active receipts = %d, want %d", len(active), workers)
+	}
+}

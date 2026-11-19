@@ -21,6 +21,7 @@ import (
 
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/process"
+	"github.com/tamld/g8s/internal/sandbox"
 	_ "modernc.org/sqlite"
 )
 
@@ -753,6 +754,7 @@ type CleanupConfig struct {
 	RepoDir         string
 	HeartbeatDir    string
 	DBPath          string
+	StateDir        string
 	WorktreeBaseDir string
 	Targets         []string
 	DryRun          bool
@@ -1005,24 +1007,7 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 		}
 
 		// Force mode: SIGTERM, grace period, then SIGKILL
-		sigSent := "SIGTERM"
-		_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGTERM)
-
-		// Wait up to grace period for process to exit
-		start := time.Now()
-		killed := false
-		for time.Since(start) < cfg.GracePeriod {
-			if !cfg.ProcessManager.IsProcessAlive(proc.PID) {
-				killed = true
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-
-		if !killed && cfg.ProcessManager.IsProcessAlive(proc.PID) {
-			sigSent = "SIGKILL"
-			_ = cfg.ProcessManager.KillProcess(proc.PID, syscall.SIGKILL)
-		}
+		sigSent := terminateGhostPID(cfg, proc.PID)
 
 		// Append to audit log
 		now := time.Now().UTC()
@@ -1050,10 +1035,157 @@ func sweepGhostProcesses(ctx context.Context, cfg CleanupConfig) ([]CleanupItem,
 			Action: "killed",
 		})
 	}
+
+	stateDir := strings.TrimSpace(cfg.StateDir)
+	if stateDir == "" && strings.TrimSpace(cfg.DBPath) != "" {
+		stateDir = filepath.Dir(cfg.DBPath)
+	}
+	if stateDir != "" {
+		items = append(items, sweepSandboxOrphans(cfg, stateDir, auditLogPath)...)
+	}
+
 	if !cfg.DryRun {
 		pruneDeadHeartbeatFiles(cfg.HeartbeatDir, 5*time.Minute, cfg.Clock, cfg.ProcessManager)
 	}
 	return items, nil
+}
+
+func terminateGhostPID(cfg CleanupConfig, pid int) string {
+	sigSent := "SIGTERM"
+	_ = cfg.ProcessManager.KillProcess(pid, syscall.SIGTERM)
+
+	start := time.Now()
+	killed := false
+	for time.Since(start) < cfg.GracePeriod {
+		if !cfg.ProcessManager.IsProcessAlive(pid) {
+			killed = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !killed && cfg.ProcessManager.IsProcessAlive(pid) {
+		sigSent = "SIGKILL"
+		_ = cfg.ProcessManager.KillProcess(pid, syscall.SIGKILL)
+	}
+	return sigSent
+}
+
+func buildAncestorSet(pm ProcessManager) map[int]bool {
+	selfPID := os.Getpid()
+	parentPID := os.Getppid()
+	var lister process.ProcessLister
+	if dpm, ok := pm.(*DefaultProcessManager); ok && dpm != nil {
+		if dpm.AncestorSelfPID > 0 {
+			selfPID = dpm.AncestorSelfPID
+		}
+		if dpm.AncestorParentPID > 0 {
+			parentPID = dpm.AncestorParentPID
+		}
+		lister = dpm.getLister()
+	}
+
+	ancestors := map[int]bool{
+		selfPID:   true,
+		parentPID: true,
+	}
+	if lister == nil {
+		return ancestors
+	}
+	procs, err := lister.List()
+	if err != nil {
+		return ancestors
+	}
+	ppidByPID := make(map[int]int, len(procs))
+	for _, p := range procs {
+		if p.PID > 0 {
+			ppidByPID[p.PID] = p.PPID
+		}
+	}
+	ppidByPID[selfPID] = parentPID
+	curr := parentPID
+	for i := 0; i < 64; i++ {
+		next, ok := ppidByPID[curr]
+		if !ok || next <= 1 || ancestors[next] {
+			break
+		}
+		ancestors[next] = true
+		curr = next
+	}
+	return ancestors
+}
+
+func sweepSandboxOrphans(cfg CleanupConfig, stateDir, auditLogPath string) []CleanupItem {
+	markers, err := sandbox.ListSandboxMarkers(stateDir)
+	if err != nil || len(markers) == 0 {
+		return nil
+	}
+
+	ancestors := buildAncestorSet(cfg.ProcessManager)
+	seenPID := make(map[int]bool)
+	var items []CleanupItem
+
+	for _, m := range markers {
+		if m.SandboxID == "" {
+			continue
+		}
+		if m.WorkerPID > 0 && cfg.ProcessManager.IsProcessAlive(m.WorkerPID) {
+			continue
+		}
+
+		pids := sandbox.FindSandboxProcesses(m.SandboxID)
+		if len(pids) == 0 {
+			if !cfg.DryRun {
+				sandbox.RemoveSandboxMarker(stateDir, m.SandboxID)
+			}
+			continue
+		}
+
+		for _, pid := range pids {
+			if pid <= 1 || ancestors[pid] || seenPID[pid] {
+				continue
+			}
+			seenPID[pid] = true
+
+			detail := fmt.Sprintf("sandbox-orphan (dead worker pid %d, G8S_SANDBOX_ID=%s)", m.WorkerPID, m.SandboxID)
+			if cfg.DryRun {
+				items = append(items, CleanupItem{
+					Target: TargetGhostProcess,
+					ID:     strconv.Itoa(pid),
+					Detail: detail,
+					Action: "would_kill",
+				})
+				continue
+			}
+
+			sigSent := terminateGhostPID(cfg, pid)
+			now := time.Now().UTC()
+			if cfg.Clock != nil {
+				now = cfg.Clock().UTC()
+			}
+			_ = appendAuditLog(auditLogPath, CleanupAuditEntry{
+				Timestamp:   now.Format(time.RFC3339),
+				PID:         pid,
+				Binary:      "sandbox-orphan",
+				CommandLine: detail,
+				ParentPID:   m.WorkerPID,
+				Reason:      detail,
+				OperatorPID: os.Getpid(),
+				Signal:      sigSent,
+				ExitCode:    0,
+			})
+			items = append(items, CleanupItem{
+				Target: TargetGhostProcess,
+				ID:     strconv.Itoa(pid),
+				Detail: detail,
+				Action: "killed",
+			})
+		}
+
+		if !cfg.DryRun && len(sandbox.FindSandboxProcesses(m.SandboxID)) == 0 {
+			sandbox.RemoveSandboxMarker(stateDir, m.SandboxID)
+		}
+	}
+	return items
 }
 
 func pruneDeadHeartbeatFiles(baseDir string, maxAge time.Duration, clock func() time.Time, pm ProcessManager) {
