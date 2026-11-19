@@ -387,7 +387,7 @@ func (s *Supervisor) collect(
 			RequireKernelEnforced: s.requireKernelSandbox,
 			NoSandbox:             req.NoSandbox,
 			TransportKind:         "process",
-		}, sandbox.ContainmentMode(containmentMode), sandboxBackend, false, false)
+		}, sandbox.NewUnrestrictedProcessProof(sandbox.ContainmentMode(containmentMode), sandboxBackend))
 		policyReport = &rep
 	}
 

@@ -188,10 +188,7 @@ func (h *asyncRequestHandle) complete(rc Receipt, err error) {
 		} else {
 			rep := sandbox.EvaluatePolicyContract(
 				sandbox.RequestedPolicy{TransportKind: string(TransportKindRequest)},
-				sandbox.ModePolicyOnly,
-				"http_request_transport",
-				true,
-				false,
+				sandbox.NewMediatedTransportProof("http_request_transport"),
 			)
 			rc.PolicyEnforcement = &rep
 		}

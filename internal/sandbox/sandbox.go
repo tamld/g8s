@@ -59,6 +59,7 @@ type PreparedLaunch struct {
 	SandboxID    string
 	PolicyReport *PolicyEnforcementReport
 	Cleanup      func()
+	proof        EnforcementProof
 }
 
 // CanonicalPath cleans p and resolves symlinks on the longest existing prefix,
@@ -157,7 +158,7 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 	reqPolicy := requestedPolicyFromConfig(cfg)
 
 	if cfg.NoSandbox {
-		report := EvaluatePolicyContract(reqPolicy, ModePolicyOnly, "disabled", false, false)
+		report := EvaluatePolicyContract(reqPolicy, newSandboxDisabledProof())
 		if report.RejectedBeforeSpawn {
 			if ownTmp {
 				removeAllLogged(tmpDir)
@@ -246,7 +247,11 @@ func enforcePolicyRequirement(launch *PreparedLaunch, reqPolicy RequestedPolicy)
 	if launch == nil {
 		return nil, nil
 	}
-	report := EvaluatePolicyContract(reqPolicy, launch.Mode, launch.Backend, false, false)
+	proof := launch.proof
+	if !proof.sealed {
+		proof = newSandboxKernelProof(launch.Mode, launch.Backend, false, "")
+	}
+	report := EvaluatePolicyContract(reqPolicy, proof)
 	if report.RejectedBeforeSpawn {
 		if launch.Cleanup != nil {
 			launch.Cleanup()

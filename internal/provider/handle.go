@@ -16,10 +16,7 @@ import (
 func defaultProcessPolicyReport() *sandbox.PolicyEnforcementReport {
 	rep := sandbox.EvaluatePolicyContract(
 		sandbox.RequestedPolicy{TransportKind: string(TransportKindProcess)},
-		sandbox.ModePolicyOnly,
-		"direct_process",
-		false,
-		false,
+		sandbox.NewUnrestrictedProcessProof(sandbox.ModePolicyOnly, "direct_process"),
 	)
 	return &rep
 }
