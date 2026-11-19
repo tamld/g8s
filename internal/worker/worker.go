@@ -757,6 +757,10 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		ExtraWriteDirs: extraWriteDirs,
 		NoSandbox:      req.NoSandbox,
 	}
+	var baselineIgnored map[string]IgnoredFileStamp
+	if isolatedWorktreeDir != "" {
+		baselineIgnored, _ = SnapshotIgnoredFiles(isolatedWorktreeDir)
+	}
 	child, spawnErr := s.runner.Spawn(SpawnOptions{
 		Argv:       childArgv,
 		Dir:        spawnDir,
@@ -827,7 +831,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile.Close()
 	errFile.Close()
 	finalTask, collectErr := s.collect(ctx, child, reason, task.TaskID, opts.WorkerID, token,
-		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, startTime, isolatedWorktreeDir, req)
+		runDir, promptPath, resultPath, stdoutPath, stderrPath, req.ResultMode, req.Permission, req.ReceiptID, startTime, isolatedWorktreeDir, req, baselineIgnored)
 	if collectErr == nil && finalTask != nil && isAttemptResultOK(finalTask.Result) && req.Permission == "workspace_write" {
 		keepWorktree = true
 	}

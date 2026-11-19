@@ -120,6 +120,7 @@ const (
 var DefaultTrustBoundaries = []string{
 	"internal/receipt/*",
 	"internal/worker/proc_*",
+	"internal/worker/diff_firewall*",
 	"internal/server/*",
 	"internal/harness/*",
 	"internal/memory/*",

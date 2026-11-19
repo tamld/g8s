@@ -605,6 +605,7 @@ for pat in yml_lines:
 
 required = [
     'internal/receipt/*',
+    'internal/worker/diff_firewall*',
     'internal/sandbox/*',
     'internal/signing/*',
     'internal/charter/*',

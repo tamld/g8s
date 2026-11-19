@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,6 +118,124 @@ func resolveDefaultCLITemplate(provider, prompt, model, timeout string) ([]strin
 	return SubstituteTemplate(tmpl, prompt, model, timeout), true
 }
 
+const maxIgnoredHashBytes = 1 << 20 // 1 MiB threshold for exact pre/post hash comparison
+
+// IgnoredFileStamp records file metadata for pre-run gitignored paths so
+// post-run checks only flag newly created or modified ignored files (F13).
+type IgnoredFileStamp struct {
+	Size        int64
+	ModTimeNano int64
+	HasHash     bool
+	SHA256      [32]byte
+}
+
+// DiffFirewallOptions configures post-run worktree diff scope verification.
+type DiffFirewallOptions struct {
+	Claim           *receipt.ClaimBinding
+	BaselineIgnored map[string]IgnoredFileStamp
+	CheckIgnored    bool
+}
+
+var exemptCLIRuntimeDirs = []string{
+	".opencode",
+	".omo",
+	".commandcode",
+	".qwen",
+	".cursor",
+}
+
+func isExemptEphemeralRuntimePath(relSlash, permission string) bool {
+	matchesDir := func(dir string) bool {
+		return relSlash == dir || strings.HasPrefix(relSlash, dir+"/")
+	}
+	for _, dir := range exemptCLIRuntimeDirs {
+		if matchesDir(dir) {
+			return true
+		}
+	}
+	if !isDiffFirewallReadPermission(permission) && matchesDir(gitCommitRequestsDir) {
+		return true
+	}
+	return false
+}
+
+func stampIgnoredFile(absPath string) (IgnoredFileStamp, bool) {
+	fi, err := os.Lstat(absPath)
+	if err != nil || fi.IsDir() {
+		return IgnoredFileStamp{}, false
+	}
+	st := IgnoredFileStamp{
+		Size:        fi.Size(),
+		ModTimeNano: fi.ModTime().UnixNano(),
+	}
+	if fi.Mode().IsRegular() && fi.Size() <= maxIgnoredHashBytes {
+		f, oerr := os.Open(absPath)
+		if oerr == nil {
+			defer f.Close()
+			h := sha256.New()
+			if _, cerr := io.Copy(h, f); cerr == nil {
+				copy(st.SHA256[:], h.Sum(nil))
+				st.HasHash = true
+			}
+		}
+	}
+	return st, true
+}
+
+func ignoredFileUnchanged(worktreeDir, relSlash string, baseline map[string]IgnoredFileStamp) bool {
+	prev, existed := baseline[relSlash]
+	if !existed {
+		return false
+	}
+	cur, ok := stampIgnoredFile(filepath.Join(worktreeDir, filepath.FromSlash(relSlash)))
+	if !ok {
+		return false
+	}
+	if prev.Size != cur.Size {
+		return false
+	}
+	if prev.HasHash && cur.HasHash {
+		return prev.SHA256 == cur.SHA256
+	}
+	return prev.ModTimeNano == cur.ModTimeNano
+}
+
+// SnapshotIgnoredFiles captures pre-existing gitignored files in worktreeDir so
+// post-run diff verification only flags newly introduced or modified ignored paths.
+func SnapshotIgnoredFiles(worktreeDir string) (map[string]IgnoredFileStamp, error) {
+	dir := strings.TrimSpace(worktreeDir)
+	if dir == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return nil, nil
+	}
+	cmd := exec.Command("git", "-C", dir, "status", "--porcelain", "--untracked-files=all", "--ignored=traditional", "-z")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	stamps := make(map[string]IgnoredFileStamp)
+	entries := strings.Split(string(out), "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		xy := entry[:2]
+		if xy == "!!" {
+			relSlash := filepath.ToSlash(entry[3:])
+			if stamp, ok := stampIgnoredFile(filepath.Join(dir, filepath.FromSlash(relSlash))); ok {
+				stamps[relSlash] = stamp
+			}
+		}
+		if strings.ContainsAny(xy, "RC") && i+1 < len(entries) {
+			i++
+		}
+	}
+	return stamps, nil
+}
+
 // VerifyWorktreeDiffScope inspects git status --porcelain inside worktreeDir after a worker attempt
 // and enforces that any modified or untracked files comply with the task permission and WriteReceipt
 // allowed_paths (DELTA-39 Post-Run Worktree Diff Firewall).
@@ -126,6 +246,74 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 	if len(claims) > 0 {
 		claim = claims[0]
 	}
+	return VerifyWorktreeDiffScopeWithOptions(worktreeDir, permission, allowedPaths, DiffFirewallOptions{
+		Claim:        claim,
+		CheckIgnored: true,
+	})
+}
+
+func parsePorcelainZRecords(out []byte, worktreeDir, permission string, opts DiffFirewallOptions) ([]string, error) {
+	claim := opts.Claim
+	entries := strings.Split(string(out), "\x00")
+	var touched []string
+	seen := make(map[string]bool)
+	addTouched := func(p string) {
+		if p == "." || p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		touched = append(touched, p)
+	}
+
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if entry == "" {
+			continue
+		}
+		if len(entry) < 4 {
+			if claim != nil {
+				return nil, receipt.ErrClaimFenceStale
+			}
+			return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: malformed git status -z record %q", entry)
+		}
+		xy := entry[:2]
+		relSlash := filepath.ToSlash(entry[3:])
+		isUntrackedOrIgnored := xy == "??" || xy == "!!"
+
+		var origSlash string
+		if strings.ContainsAny(xy, "RC") {
+			i++
+			if i >= len(entries) || entries[i] == "" {
+				if claim != nil {
+					return nil, receipt.ErrClaimFenceStale
+				}
+				return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: missing rename/copy source in git status -z")
+			}
+			origSlash = filepath.ToSlash(entries[i])
+		}
+
+		if xy == "!!" && opts.BaselineIgnored != nil && ignoredFileUnchanged(worktreeDir, relSlash, opts.BaselineIgnored) {
+			continue
+		}
+
+		// Tool-owned ephemeral directories get no exemption when ClaimBinding is
+		// active, on tracked/renamed entries, or for .g8s governance paths (F01).
+		if claim == nil && isUntrackedOrIgnored && isExemptEphemeralRuntimePath(relSlash, permission) {
+			continue
+		}
+
+		addTouched(relSlash)
+		if origSlash != "" {
+			addTouched(origSlash)
+		}
+	}
+	return touched, nil
+}
+
+// VerifyWorktreeDiffScopeWithOptions inspects worktreeDir with unified NUL-delimited
+// git status parsing, fail-closed missing-.git handling, and optional .gitignore delta tracking.
+func VerifyWorktreeDiffScopeWithOptions(worktreeDir, permission string, allowedPaths []string, opts DiffFirewallOptions) ([]string, error) {
+	claim := opts.Claim
 	if claim != nil {
 		if err := claim.Validate(time.Now()); err != nil {
 			return nil, err
@@ -148,16 +336,15 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 		if claim != nil {
 			return nil, fmt.Errorf("%w: worktree unavailable: %v", receipt.ErrClaimFenceStale, err)
 		}
-		if isDiffFirewallReadPermission(permission) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: worktree dir missing or not a git worktree (%s): %w", dir, err)
 	}
 
-	cmd := exec.Command("git", "-C", dir, "status", "--porcelain", "--untracked-files=all")
-	if claim != nil {
-		cmd.Args = append(cmd.Args, "-z")
+	args := []string{"-C", dir, "status", "--porcelain", "--untracked-files=all"}
+	if opts.CheckIgnored {
+		args = append(args, "--ignored=traditional")
 	}
+	args = append(args, "-z")
+	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		if claim != nil {
@@ -166,54 +353,9 @@ func VerifyWorktreeDiffScope(worktreeDir, permission string, allowedPaths []stri
 		return nil, fmt.Errorf("E_DIFF_FIREWALL_UNVERIFIABLE: git status failed: %w", err)
 	}
 
-	var touched []string
-	seen := make(map[string]bool)
-	if claim != nil {
-		// NUL records preserve quoted/newline paths and both rename sides.
-		// Tool-owned directories receive no exemption from claim scope.
-		entries := strings.Split(string(out), "\x00")
-		for i := 0; i < len(entries); i++ {
-			entry := entries[i]
-			if entry == "" {
-				continue
-			}
-			if len(entry) < 4 {
-				return nil, receipt.ErrClaimFenceStale
-			}
-			touched = append(touched, filepath.ToSlash(entry[3:]))
-			if strings.ContainsAny(entry[:2], "RC") {
-				i++
-				if i >= len(entries) || entries[i] == "" {
-					return nil, receipt.ErrClaimFenceStale
-				}
-				touched = append(touched, filepath.ToSlash(entries[i]))
-			}
-		}
-	} else {
-		for _, rawLine := range strings.Split(string(out), "\n") {
-			if len(rawLine) < 4 {
-				continue
-			}
-			entry := strings.TrimSpace(rawLine[3:])
-			if idx := strings.Index(entry, " -> "); idx >= 0 {
-				entry = strings.TrimSpace(entry[idx+4:])
-			}
-			entry = strings.Trim(entry, `"`)
-			relSlash := filepath.ToSlash(filepath.Clean(entry))
-			if relSlash == "." || relSlash == "" ||
-				strings.HasPrefix(relSlash, ".g8s") ||
-				strings.HasPrefix(relSlash, ".opencode") ||
-				strings.HasPrefix(relSlash, ".omo") ||
-				strings.HasPrefix(relSlash, ".commandcode") ||
-				strings.HasPrefix(relSlash, ".qwen") ||
-				strings.HasPrefix(relSlash, ".cursor") {
-				continue
-			}
-			if !seen[relSlash] {
-				seen[relSlash] = true
-				touched = append(touched, relSlash)
-			}
-		}
+	touched, perr := parsePorcelainZRecords(out, dir, permission, opts)
+	if perr != nil {
+		return nil, perr
 	}
 	if claim != nil {
 		var violations []string
