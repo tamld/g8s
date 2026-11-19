@@ -559,6 +559,7 @@ func runWorker(args []string) {
 	lease := fs.Int("lease", 60, "lease duration seconds")
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
+	requireKernelSandbox := fs.Bool("require-kernel-sandbox", false, "fail closed unless OS containment achieves mode=kernel_enforced (also G8S_REQUIRE_KERNEL_SANDBOX=1)")
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "Usage: g8s worker [flags]")
@@ -690,6 +691,7 @@ func runWorker(args []string) {
 			PlatformDispatchNames: platformDispatchNames,
 			APICallNames:          apiCallNames,
 		})),
+		worker.WithRequireKernelSandbox(*requireKernelSandbox || strings.TrimSpace(os.Getenv("G8S_REQUIRE_KERNEL_SANDBOX")) == "1"),
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		if pool, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd, Prefix: "wt"}); poolErr == nil {

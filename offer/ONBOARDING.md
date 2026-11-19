@@ -75,13 +75,13 @@ Linux, and Windows so F1 workers never stall scanning `node_modules/`,
 Sibling repositories can consume `g8s` native Agent I/O and configured LLM providers without external CLI dependencies:
 
 ### 1. Direct LLM Invocation (`g8s llm-call`)
-Query any configured provider from `~/.config/g8s/providers.json` (see [`offer/templates/providers.example.json`](templates/providers.example.json) for ready-to-use `cliproxyapi`, `9router`, `openrouter`, `openai`, `anthropic`, and local CLI templates):
+Query any configured provider from `~/.config/g8s/providers.json` (see [`offer/templates/providers.example.json`](templates/providers.example.json) for ready-to-use `openai`, `anthropic`, `google`, `openrouter`, optional Layer 2 local gateway `9router`, and official CLI templates):
 ```bash
-# Synchronous model invocation via 9router
-g8s llm-call --provider 9router --model fast-agent --prompt "Summarize architecture"
+# Official OpenAI-compatible HTTP invocation
+g8s llm-call --provider openai --model gpt-5.5 --prompt "Summarize architecture"
 
-# Zero-config CLIProxyAPI invocation (defaults to http://127.0.0.1:8317/v1 or $CLIPROXYAPI_URL)
-g8s llm-call --provider cliproxyapi --model gemini-2.5-pro --prompt "Summarize architecture"
+# Optional Layer 2 self-hosted local gateway invocation (configured in ~/.config/g8s/providers.json)
+g8s llm-call --provider 9router --model fast-agent --prompt "Summarize architecture"
 
 # Any configured provider using default_model from ~/.config/g8s/providers.json
 cp offer/templates/providers.example.json ~/.config/g8s/providers.json

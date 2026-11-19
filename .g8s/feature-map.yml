@@ -485,7 +485,7 @@ features:
 
   - id: "FEAT-LLMCALL-01"
     title: "Universal Config-Driven LLM Consumer & Multi-Model Fleet"
-    persona_story: "As a heterogeneous agent team, I need a provider-agnostic LLM call adapter supporting CLIProxyAPI, OpenRouter, OpenAI, Anthropic, and 9router so that tasks route cleanly without vendor lock-in."
+    persona_story: "As a heterogeneous agent team, I need a provider-agnostic LLM call adapter supporting OpenAI, Anthropic, Google, OpenRouter, and optional self-hosted gateways so that tasks route cleanly without vendor lock-in."
     srs_reqs:
       - "FR-10"
     openspec_deltas:
@@ -552,7 +552,7 @@ features:
         - "internal/reflex"
         - "internal/contextpack"
     invariants:
-      - "OpenAI, Anthropic, CLIProxyAPI, and 9router protocol conformance"
+      - "OpenAI, Anthropic, and OpenAI/Anthropic-compatible gateway protocol conformance"
       - "DefaultModel resolution chain (--model -> entry.DefaultModel -> entry.Models[0].ID)"
       - "Two-layer public mechanism vs local policy separation"
       - "Non-Markovian loop oscillation breaker (A->B->A) and atomic per-turn file snapshot rollback (#663)"

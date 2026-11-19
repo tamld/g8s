@@ -2,11 +2,10 @@
   "providers": [
     {
       "class": "api_call",
-      "name": "cliproxyapi",
+      "name": "google",
       "protocol": "openai",
-      "base_url": "http://127.0.0.1:8317/v1",
-      "base_url_env": "CLIPROXYAPI_URL",
-      "auth_env": "CLIPROXY_API_KEY",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "auth_env": "GEMINI_API_KEY",
       "default_model": "gemini-2.5-pro",
       "allow_unlisted_models": true,
       "slots": 4,
@@ -20,14 +19,6 @@
           "effort_style": "named",
           "supported_efforts": ["low", "medium", "high"],
           "default_effort": "high"
-        },
-        {
-          "id": "claude-sonnet-4-5",
-          "context_window": 200000,
-          "family": "anthropic",
-          "cost_tier": "frontier",
-          "status": "active",
-          "effort_style": "named"
         }
       ]
     },
@@ -37,7 +28,7 @@
       "protocol": "9router",
       "base_url": "http://127.0.0.1:20128/v1",
       "base_url_env": "NINEROUTER_URL",
-      "auth_env": "OPENAI_API_KEY",
+      "auth_env": "NINEROUTER_API_KEY",
       "default_model": "reasoning-high",
       "allow_unlisted_models": true,
       "slots": 6,

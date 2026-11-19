@@ -17,7 +17,7 @@ func TestAccessAuditTransactionalAndRedacted(t *testing.T) {
 		IdempotencyKey: "audit-test-idem-1",
 		Role:           "collector",
 		Permission:     "read_only",
-		Model:          "cu/composer-2.5",
+		Model:          "composer-2.5",
 		AddDirs:        []string{t.TempDir()},
 	})
 	if err != nil {

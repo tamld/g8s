@@ -56,15 +56,15 @@ Source: issue #442.
 
 ## Empirical v0.19.0 9router Cross-Repo Audit Round (5 Sibling Repositories)
 
-During the `v0.19.0` release cycle, five live worker audit dispatches were executed across all onboarded sibling repositories using `9router` (`cx/gpt-6-luna` combo):
+During the `v0.19.0` release cycle, five live worker audit dispatches were executed across all onboarded sibling repositories using a Layer 2 gateway (`gpt-6-luna` combo):
 
 | Repository | Profile | Task ID | Model | Duration | Total Tokens | Findings / Returns |
 |------------|---------|---------|-------|----------|--------------|-------------------|
-| `adopter-utility-01` | utility | `16c4d69a` | `cx/gpt-6-luna` via 9router | `5.09s` | `1,157` | Audited Offer Bundle scaffolding & `.g8s/` registries; contributed to Mode-3 return #15 (`schema_version` unification) |
-| `defense-in-depth` | security | `ec7929b3` | `cx/gpt-6-luna` via 9router | `6.96s` | `1,235` | Verified cross-repo security policy sync; contributed to Mode-3 return #15 (`schema_version` unification) |
-| `aegis` | infra | `d27c246c` | `cx/gpt-6-luna` via 9router | `7.38s` | `1,147` | Flagged numeric hotfix lane key `"0":` in `.g8s/lane-bundles.yml`; produced Mode-3 return #17 and contributed to #15 |
-| `hash-checker` | utility | `ce2feca4` | `cx/gpt-6-luna` via 9router | `6.93s` | `1,146` | Audited verifier-classes config and Offer Bundle seed consistency; contributed to Mode-3 return #15 |
-| `homelab-proxmox` | infra | — | `cx/gpt-6-luna` via 9router | — | — | Validated infra-profile registry consistency; verified cross-repo worker dogfooding pattern |
+| `adopter-utility-01` | utility | `16c4d69a` | `gpt-6-luna` via Layer 2 gateway | `5.09s` | `1,157` | Audited Offer Bundle scaffolding & `.g8s/` registries; contributed to Mode-3 return #15 (`schema_version` unification) |
+| `defense-in-depth` | security | `ec7929b3` | `gpt-6-luna` via Layer 2 gateway | `6.96s` | `1,235` | Verified cross-repo security policy sync; contributed to Mode-3 return #15 (`schema_version` unification) |
+| `aegis` | infra | `d27c246c` | `gpt-6-luna` via Layer 2 gateway | `7.38s` | `1,147` | Flagged numeric hotfix lane key `"0":` in `.g8s/lane-bundles.yml`; produced Mode-3 return #17 and contributed to #15 |
+| `hash-checker` | utility | `ce2feca4` | `gpt-6-luna` via Layer 2 gateway | `6.93s` | `1,146` | Audited verifier-classes config and Offer Bundle seed consistency; contributed to Mode-3 return #15 |
+| `homelab-proxmox` | infra | — | `gpt-6-luna` via Layer 2 gateway | — | — | Validated infra-profile registry consistency; verified cross-repo worker dogfooding pattern |
 
 ### Mode-3 Returns Produced from the Audit Round
 

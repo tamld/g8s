@@ -18,9 +18,9 @@ type BuildWorkerArgvOptions struct {
 	SkipPermissions bool
 	NoSandbox       bool
 	Home            string
-	// Effort is the reasoning-effort level passed to agy via --effort.
-	// Empty means "leave agy's default in place". Set to "high" to fully
-	// exploit Gemini 3.8 Flash (High) on reasoning-heavy briefs.
+	// Effort is the reasoning-effort level passed to the worker CLI via --effort.
+	// Empty leaves the CLI default in place. Set to "high" to enable high
+	// reasoning effort on reasoning-heavy briefs.
 	Effort string
 	// ToolPolicy configures model tool use ("" | "default" | "none").
 	ToolPolicy string

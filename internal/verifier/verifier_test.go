@@ -1286,7 +1286,7 @@ func TestVerifyF2TelemetrySummaryAndLessonInjection(t *testing.T) {
 	if err := os.MkdirAll(f2Dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f2Lines := `{"task_id":"task-f2-test","model_requested":"reasoning-free","model_resolved":"cx/gpt-5.4-mini","duration_ms":1200,"total_tokens":450}
+	f2Lines := `{"task_id":"task-f2-test","model_requested":"reasoning-free","model_resolved":"openai/gpt-5.4-mini","duration_ms":1200,"total_tokens":450}
 {"task_id":"task-f2-test","model_requested":"fast-agent","model_resolved":"glm-4.7","duration_ms":800,"total_tokens":350}
 `
 	if err := os.WriteFile(filepath.Join(f2Dir, "task-f2-test.jsonl"), []byte(f2Lines), 0o600); err != nil {
@@ -1343,7 +1343,7 @@ classes:
 	if verdict.F2Summary.TotalCalls != 2 || verdict.F2Summary.TotalTokens != 800 || verdict.F2Summary.TotalDurationMs != 2000 {
 		t.Fatalf("unexpected F2Summary metrics: %+v", verdict.F2Summary)
 	}
-	if len(verdict.F2Summary.ModelsUsed) != 2 || verdict.F2Summary.ModelsUsed[0] != "cx/gpt-5.4-mini" || verdict.F2Summary.ModelsUsed[1] != "glm-4.7" {
+	if len(verdict.F2Summary.ModelsUsed) != 2 || verdict.F2Summary.ModelsUsed[0] != "glm-4.7" || verdict.F2Summary.ModelsUsed[1] != "openai/gpt-5.4-mini" {
 		t.Fatalf("unexpected F2Summary.ModelsUsed: %+v", verdict.F2Summary.ModelsUsed)
 	}
 	if verdict.F2Summary.TelemetrySHA256 == "" {

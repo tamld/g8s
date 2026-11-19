@@ -336,6 +336,7 @@ See [providers.md](providers.md) for multi-provider setup.
 | `--model` | `string` | `""` | Restrict claiming to tasks targeting this model (strict claim affinity in serial and concurrent modes). |
 | `--concurrency` | `int` | `1` | Number of concurrent worker goroutines running parallel claim loops. |
 | `--lease` | `int` | `60` | Lease duration in seconds. |
+| `--require-kernel-sandbox` | `bool` | `false` | Fail closed unless OS containment achieves `mode=kernel_enforced` (also `G8S_REQUIRE_KERNEL_SANDBOX=1`). |
 
 ---
 
@@ -861,7 +862,7 @@ g8s doctor --json --select .data.overall_status
 ---
 
 ### 33. `g8s llm-call` & `g8s providers discover` — Universal LLM Consumer & Bounded Agentic Loop (`DELTA-25..32`, `#661..#664`)
-Invokes any configured `api_call` provider (`9router`, `cliproxyapi`, `openai`, `anthropic`) synchronously or in a bounded multi-turn verify-and-repair loop with Pre-Turn-1 toolchain/Vault grounding, Non-Markovian cycle breaking (`A->B->A`), atomic per-turn file snapshot rollback, and `--verify-cmd` secret environment scrubbing.
+Invokes any configured `api_call` provider (`openai`, `anthropic`, `openrouter`, or an optional local gateway such as `9router` configured in `~/.config/g8s/providers.json`) synchronously or in a bounded multi-turn verify-and-repair loop with Pre-Turn-1 toolchain/Vault grounding, Non-Markovian cycle breaking (`A->B->A`), atomic per-turn file snapshot rollback, and `--verify-cmd` secret environment scrubbing.
 
 ```sh
 # Live model discovery and combo liveness / sunset-model (HTTP 410 EOL) audit

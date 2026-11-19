@@ -430,7 +430,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
-    notes: "9Router multi-model OpenAI/Anthropic gateway with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and disjoint model-family routes (cl/* family — catalog drifts; enumerate via GET /v1/models). cu/* combos proxy Cursor IDE AgentService and are PROTOCOL-BOUND: they 400 on the plain chat-completions surface (use the cursor provider CLI instead). nvidia/* ROUTING IDS are DOUBLE-PREFIX nvidia/nvidia/<model> — the single-prefix ids shown in /v1/models do not route (catalog display mismatch, cosmetic); audit combo/model liveness regularly via 'g8s providers eval-combos --provider 9router --json' (retired upstream NIM direct IDs return HTTP 410 MODEL_EOL_410)"
+    notes: "Optional self-hosted OpenAI/Anthropic-compatible gateway configured strictly in Layer 2 (~/.config/g8s/providers.json) with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and direct upstream prefixes; protocol-bound IDE endpoints return HTTP 400 on chat-completions (use official vendor CLI adapters instead). nvidia/* routing IDs use DOUBLE-PREFIX nvidia/nvidia/<model>; audit liveness regularly via 'g8s providers eval-combos --provider 9router --json' (retired upstream NIM direct IDs return HTTP 410 MODEL_EOL_410)"
     models:
       - id: reasoning-high
         supported_efforts: [low, medium, high, xhigh, max]

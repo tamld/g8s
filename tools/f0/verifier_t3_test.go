@@ -456,21 +456,21 @@ func TestRunT3Verification_MultiProviderFailoverAndProbeFallback(t *testing.T) {
 	t.Setenv("HOME", robustTempDir(t))
 	repoDir, _, headSHA := setupTestGitRepo(t)
 
-	// Subcase A: 9router is unreachable (returns err), automatically fails over to cliproxyapi which passes!
+	// Subcase A: 9router is unreachable (returns err), automatically fails over to custom-gateway which passes!
 	var tried []string
 	optsFailover := T3VerifyOptions{
 		RepoDir:            repoDir,
 		HeadSHA:            headSHA,
 		BaseRef:            "main",
 		F0Provider:         "agy",
-		AvailableProviders: []string{"9router", "cliproxyapi", "claude"},
+		AvailableProviders: []string{"9router", "custom-gateway", "claude"},
 		ProviderRunner: func(provider, repoDir, diff string) (bool, string, error) {
 			tried = append(tried, provider)
 			if provider == "9router" {
 				return false, "", errors.New("connection refused at 127.0.0.1:20128")
 			}
-			if provider == "cliproxyapi" {
-				return true, "cliproxyapi independent review passed", nil
+			if provider == "custom-gateway" {
+				return true, "custom-gateway independent review passed", nil
 			}
 			return false, "unexpected provider", nil
 		},
@@ -481,13 +481,13 @@ func TestRunT3Verification_MultiProviderFailoverAndProbeFallback(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if verdict.Status != "PASS" || !verdict.Approved {
-		t.Fatalf("expected PASS after failover to cliproxyapi, got %+v", verdict)
+		t.Fatalf("expected PASS after failover to custom-gateway, got %+v", verdict)
 	}
-	if verdict.SelectedVerifier != "cliproxyapi" {
-		t.Fatalf("expected SelectedVerifier cliproxyapi, got %q", verdict.SelectedVerifier)
+	if verdict.SelectedVerifier != "custom-gateway" {
+		t.Fatalf("expected SelectedVerifier custom-gateway, got %q", verdict.SelectedVerifier)
 	}
-	if len(tried) != 2 || tried[0] != "9router" || tried[1] != "cliproxyapi" {
-		t.Fatalf("expected tried=[9router cliproxyapi], got %v", tried)
+	if len(tried) != 2 || tried[0] != "9router" || tried[1] != "custom-gateway" {
+		t.Fatalf("expected tried=[9router custom-gateway], got %v", tried)
 	}
 
 	// Subcase B: All LLM providers unreachable, falls back to EvalProbeRunner!
@@ -497,7 +497,7 @@ func TestRunT3Verification_MultiProviderFailoverAndProbeFallback(t *testing.T) {
 		HeadSHA:            headSHA,
 		BaseRef:            "main",
 		F0Provider:         "agy",
-		AvailableProviders: []string{"9router", "cliproxyapi"},
+		AvailableProviders: []string{"9router", "custom-gateway"},
 		ProviderRunner: func(provider, repoDir, diff string) (bool, string, error) {
 			return false, "", errors.New("gateway offline")
 		},
@@ -542,7 +542,7 @@ func TestSanitizeT3DiffAndProvidersConfigLoad(t *testing.T) {
 
 	// Verify G8S_PROVIDERS auto-populates AvailableProviders in WireDefaultT3Options
 	tmpFile := t.TempDir() + "/providers.json"
-	cfgJSON := `{"providers":[{"name":"cliproxyapi"},{"name":"openrouter"},{"name":"agy"}]}`
+	cfgJSON := `{"providers":[{"name":"custom-gateway"},{"name":"openrouter"},{"name":"agy"}]}`
 	if err := os.WriteFile(tmpFile, []byte(cfgJSON), 0o600); err != nil {
 		t.Fatalf("write temp providers.json: %v", err)
 	}
@@ -550,8 +550,8 @@ func TestSanitizeT3DiffAndProvidersConfigLoad(t *testing.T) {
 
 	var opts T3VerifyOptions
 	WireDefaultT3Options(&opts)
-	if len(opts.AvailableProviders) != 3 || opts.AvailableProviders[0] != "cliproxyapi" || opts.AvailableProviders[1] != "openrouter" {
-		t.Fatalf("expected [cliproxyapi openrouter agy] from G8S_PROVIDERS, got %v", opts.AvailableProviders)
+	if len(opts.AvailableProviders) != 3 || opts.AvailableProviders[0] != "custom-gateway" || opts.AvailableProviders[1] != "openrouter" {
+		t.Fatalf("expected [custom-gateway openrouter agy] from G8S_PROVIDERS, got %v", opts.AvailableProviders)
 	}
 }
 
@@ -561,7 +561,7 @@ func TestExtractModelFamilyAndLineageDisjointness(t *testing.T) {
 		family string
 	}{
 		{"claude-3-7-sonnet", "anthropic"},
-		{"cc/claude-opus-4-6", "anthropic"},
+		{"openrouter/claude-opus-4-6", "anthropic"},
 		{"gpt-5.4", "openai"},
 		{"o3-mini", "openai"},
 		{"gemini-3.1-pro", "google"},
@@ -579,7 +579,7 @@ func TestExtractModelFamilyAndLineageDisjointness(t *testing.T) {
 		}
 	}
 
-	if AreModelFamiliesDisjoint("claude-3-7-sonnet", "cc/claude-haiku-4-5") {
+	if AreModelFamiliesDisjoint("claude-3-7-sonnet", "openrouter/claude-haiku-4-5") {
 		t.Fatalf("expected same family (anthropic) to NOT be disjoint")
 	}
 	if !AreModelFamiliesDisjoint("claude-3-7-sonnet", "gpt-5.4") {
@@ -602,13 +602,13 @@ func TestEvaluateT3Response_FailClosedAndLineageGuard(t *testing.T) {
 		t.Fatalf("expected ambiguous response without VERDICT: PASS to fail closed, got PASS (%s)", reason)
 	}
 
-	// 3. Same model family resolved through 9router combo -> fail-closed!
-	sameFamilyJSON := `{"kind":"llm_call","data":{"model_requested":"reasoning-high","model_resolved":"cc/claude-sonnet-4-6","response":"All invariants satisfied.\nVERDICT: PASS"}}`
+	// 3. Same model family resolved through gateway combo -> fail-closed!
+	sameFamilyJSON := `{"kind":"llm_call","data":{"model_requested":"reasoning-high","model_resolved":"openrouter/claude-sonnet-4-6","response":"All invariants satisfied.\nVERDICT: PASS"}}`
 	passedSame, resolvedSame, reasonSame := EvaluateT3Response(sameFamilyJSON, "claude-opus-4-6")
 	if passedSame {
 		t.Fatalf("expected model family collision (anthropic vs anthropic) to fail closed")
 	}
-	if resolvedSame != "cc/claude-sonnet-4-6" || !strings.Contains(reasonSame, "model family collision") {
+	if resolvedSame != "openrouter/claude-sonnet-4-6" || !strings.Contains(reasonSame, "model family collision") {
 		t.Fatalf("unexpected collision detail: model=%q reason=%q", resolvedSame, reasonSame)
 	}
 

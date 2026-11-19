@@ -499,7 +499,7 @@ func TestProviderEntry_ServesModel(t *testing.T) {
 			{ID: "gpt-4o"},
 			{ID: "nvidia/*"},
 			{ID: "openrouter/anthropic/*"},
-			{ID: "cc*"},
+			{ID: "openai*"},
 		},
 	}
 
@@ -521,8 +521,8 @@ func TestProviderEntry_ServesModel(t *testing.T) {
 	if !p.ServesModel("openrouter/anthropic/claude-3.5-sonnet") {
 		t.Error("expected openrouter/anthropic/* match")
 	}
-	if !p.ServesModel("cc/gpt-4") {
-		t.Error("expected cc* match")
+	if !p.ServesModel("openai/gpt-4") {
+		t.Error("expected openai* match")
 	}
 
 	// Non-matches

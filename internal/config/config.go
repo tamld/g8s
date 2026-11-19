@@ -44,7 +44,7 @@ type ProviderEntry struct {
 	BaseURLEnv          string            `json:"base_url_env,omitempty"` // optional env var overriding base_url at runtime (e.g. "NINEROUTER_URL")
 	AuthEnv             string            `json:"auth_env,omitempty"`
 	Headers             map[string]string `json:"headers,omitempty"`               // optional static HTTP headers
-	AllowUnlistedModels bool              `json:"allow_unlisted_models,omitempty"` // allow arbitrary upstream model IDs (e.g. nvidia/*, cc/*) when provider is explicitly targeted
+	AllowUnlistedModels bool              `json:"allow_unlisted_models,omitempty"` // allow arbitrary upstream model IDs (e.g. nvidia/*, openrouter/*) when provider is explicitly targeted
 	DisableQueueExec    bool              `json:"disable_queue_exec,omitempty"`    // opt-out of queue execution for api_call providers
 	Models              []ModelEntry      `json:"models"`
 	Slots               int               `json:"slots,omitempty"`

@@ -104,10 +104,10 @@ func TestClassifyProbeFailure(t *testing.T) {
 			expected:     "PROTOCOL_MISMATCH_400",
 		},
 		{
-			name:         "PROTOCOL_MISMATCH_400_agentservice",
+			name:         "PROTOCOL_MISMATCH_400_unsupported_tool",
 			success:      false,
 			verifyPassed: false,
-			errMsg:       "AgentService requested an unsupported IDE tool",
+			errMsg:       "upstream requested an unsupported IDE tool",
 			expected:     "PROTOCOL_MISMATCH_400",
 		},
 		{
@@ -149,7 +149,7 @@ func TestEvalCombosDiscoverCombos(t *testing.T) {
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-free"},{"id":"reasoning-high"},{"id":"deep-coding"},{"id":"docs-retriever"},{"id":"fast-agent"},{"id":"cu/claude-4"},{"id":"nvidia/nvidia/nemotron-3-ultra"}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"reasoning-free"},{"id":"reasoning-high"},{"id":"deep-coding"},{"id":"docs-retriever"},{"id":"fast-agent"},{"id":"openai/gpt-4o-mini"},{"id":"nvidia/nvidia/nemotron-3-ultra"}]}`))
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/v1/chat/completions") {

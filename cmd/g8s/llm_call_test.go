@@ -481,7 +481,7 @@ func TestLLMCallContextFiles(t *testing.T) {
 	}
 }
 
-func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
+func TestLLMCallCustomGatewayAndDefaultModel(t *testing.T) {
 	binPath := buildG8sBinary(t)
 	tempDir := t.TempDir()
 
@@ -501,27 +501,28 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 			requestedModel = reqBody.Model
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"chatcmpl-cliproxy","model":"gemini-2.5-pro","choices":[{"message":{"role":"assistant","content":"CLIPROXY_OK"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+			_, _ = w.Write([]byte(`{"id":"chatcmpl-gateway","model":"gemini-2.5-pro","choices":[{"message":{"role":"assistant","content":"GATEWAY_OK"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer mockServer.Close()
 
-	// 1. Zero-config cliproxyapi with CLIPROXYAPI_URL env
+	// 1. Zero-config openai provider with explicit --base-url
 	cmdZero := exec.Command(binPath, "llm-call",
-		"--provider", "cliproxyapi",
+		"--provider", "openai",
+		"--base-url", mockServer.URL+"/v1",
 		"--model", "gemini-2.5-pro",
-		"--prompt", "Ping cliproxyapi",
+		"--prompt", "Ping gateway",
 		"--json",
 	)
-	cmdZero.Env = isolatedEnv("CLIPROXYAPI_URL=" + mockServer.URL + "/v1")
+	cmdZero.Env = isolatedEnv()
 	outZero, err := cmdZero.CombinedOutput()
 	if err != nil {
-		t.Fatalf("zero-config cliproxyapi failed: %v\nOutput: %s", err, string(outZero))
+		t.Fatalf("zero-config custom gateway failed: %v\nOutput: %s", err, string(outZero))
 	}
-	if !strings.Contains(string(outZero), "CLIPROXY_OK") {
-		t.Errorf("expected CLIPROXY_OK in output, got %s", string(outZero))
+	if !strings.Contains(string(outZero), "GATEWAY_OK") {
+		t.Errorf("expected GATEWAY_OK in output, got %s", string(outZero))
 	}
 
 	// 2. Custom provider in providers.json using default_model without --model flag
@@ -529,7 +530,7 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 	providerJSON := fmt.Sprintf(`{
 		"providers": [
 			{
-				"name": "cliproxyapi",
+				"name": "custom-gateway",
 				"class": "api_call",
 				"protocol": "openai",
 				"slots": 2,
@@ -547,7 +548,7 @@ func TestLLMCallCLIProxyAPIAndDefaultModel(t *testing.T) {
 	requestedModel = ""
 	mu.Unlock()
 	cmdDef := exec.Command(binPath, "llm-call",
-		"--provider", "cliproxyapi",
+		"--provider", "custom-gateway",
 		"--prompt", "Ping via default_model",
 		"--json",
 	)

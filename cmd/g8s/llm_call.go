@@ -383,22 +383,38 @@ func runLLMCall(args []string) {
 				DefaultModel:        "composer-2.5",
 				AllowUnlistedModels: true,
 			}
-		} else if strings.EqualFold(*providerFlag, "cliproxyapi") || strings.EqualFold(*providerFlag, "cliproxy") {
+		} else if strings.EqualFold(*providerFlag, "openai") {
+			bURL := *baseURLFlag
+			if bURL == "" {
+				bURL = "https://api.openai.com/v1"
+			}
 			proto := *protocolFlag
 			if proto == "" {
 				proto = "openai"
 			}
+			entry = config.ProviderEntry{
+				Class:               "api_call",
+				Name:                "openai",
+				Protocol:            proto,
+				BaseURL:             bURL,
+				AuthEnv:             "OPENAI_API_KEY",
+				AllowUnlistedModels: true,
+			}
+		} else if strings.EqualFold(*providerFlag, "anthropic") {
 			bURL := *baseURLFlag
 			if bURL == "" {
-				bURL = "http://127.0.0.1:8317/v1"
+				bURL = "https://api.anthropic.com/v1"
+			}
+			proto := *protocolFlag
+			if proto == "" {
+				proto = "anthropic"
 			}
 			entry = config.ProviderEntry{
 				Class:               "api_call",
-				Name:                *providerFlag,
+				Name:                "anthropic",
 				Protocol:            proto,
 				BaseURL:             bURL,
-				BaseURLEnv:          "CLIPROXYAPI_URL",
-				AuthEnv:             "CLIPROXY_API_KEY",
+				AuthEnv:             "ANTHROPIC_API_KEY",
 				AllowUnlistedModels: true,
 			}
 		} else if strings.EqualFold(*providerFlag, "9router") || *baseURLFlag != "" || *providerFlag == "" {
@@ -418,20 +434,24 @@ func runLLMCall(args []string) {
 			if bURL == "" {
 				bURL = "http://localhost:20128/v1"
 			}
+			authEnv := "OPENAI_API_KEY"
+			if strings.EqualFold(name, "9router") {
+				authEnv = "NINEROUTER_API_KEY"
+			}
 			entry = config.ProviderEntry{
 				Class:               "api_call",
 				Name:                name,
 				Protocol:            proto,
 				BaseURL:             bURL,
 				BaseURLEnv:          "NINEROUTER_URL",
-				AuthEnv:             "OPENAI_API_KEY",
+				AuthEnv:             authEnv,
 				AllowUnlistedModels: true,
 			}
 		} else {
 			if resolveErr == nil {
 				resolveErr = fmt.Errorf("provider %q not found", *providerFlag)
 			}
-			exitUsage("llm-call", "provider", *traceID, resolveErr.Error(), "Declare provider in providers.json or use --provider 9router / cliproxyapi / --base-url", *jsonl)
+			exitUsage("llm-call", "provider", *traceID, resolveErr.Error(), "Declare provider in providers.json or use --provider openai / anthropic / 9router or --base-url", *jsonl)
 		}
 	}
 

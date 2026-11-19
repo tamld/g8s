@@ -30,6 +30,21 @@ func TestCatalogAndRecommend(t *testing.T) {
 	if len(entries) < 5 {
 		t.Fatalf("expected at least 5 catalog entries, got %d", len(entries))
 	}
+	for _, entry := range entries {
+		fields := append([]string{entry.Description, entry.InstallHint, entry.AuthEnv}, entry.Models...)
+		joined := strings.Join(fields, " ")
+		banned := []string{
+			"tamld" + "/agy",
+			"CLIPROXY" + "_API_KEY",
+			"Agent" + "Service",
+			"Gemini " + "3.8",
+		}
+		for _, tok := range banned {
+			if strings.Contains(joined, tok) {
+				t.Errorf("Catalog() entry %q contains banned token %q: %+v", entry.Name, tok, entry)
+			}
+		}
+	}
 
 	reg := NewRegistry()
 	cat := reg.Recommend(context.Background())

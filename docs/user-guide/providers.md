@@ -8,7 +8,7 @@ This guide covers configuring multi-provider execution in `g8s`, managing provid
 
 `g8s` is an **adapter-neutral control plane** — it orchestrates workers across heterogeneous backends without privileging any single provider. Supported adapter classes:
 
-- **`api_call`** (HTTP gateways): `9router`, `openai`, `anthropic`, `google`, `openrouter`, `cliproxyapi`
+- **`api_call`** (HTTP gateways): `openai`, `anthropic`, `google`, `openrouter`, plus optional self-hosted gateways configured in Layer 2 `~/.config/g8s/providers.json` (such as `9router`)
 - **`platform_dispatch`** (CLI binaries): `opencode`, `codex`, `claude`, `cursor`, `commandcode`, `qwen`, `agy`
 
 All adapters are peers. `agy` (Google Antigravity) is one `platform_dispatch` adapter among many — not a privileged default.

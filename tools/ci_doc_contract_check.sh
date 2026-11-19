@@ -633,6 +633,53 @@ print(f'Trust boundaries verified: {len(yml_lines)} patterns synchronized and gr
     FAILED=$((FAILED + 1))
 fi
 
+# 19. #945 ToS Hygiene & Vendor-Neutral Gateway Separation:
+#     Prevent subscription-proxy prefixes (cu/, cc/, cx/), CLIPROXY_API_KEY,
+#     AgentService, or personal fork InstallHints from re-entering tracked public files.
+echo "--> [19/19] Verifying ToS hygiene & vendor-neutral gateway separation (#945)..."
+if ! python3 - <<'PY'; then
+import os, re, subprocess, sys
+
+files = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+skip_prefixes = ('plans/', 'reference/', 'sites/')
+skip_exact = {'CHANGELOG.md', 'go.sum', 'tools/ci_doc_contract_check.sh'}
+literal_bans = [
+    'CLIPROXY_API_KEY',
+    'AgentService',
+    'https://github.com/tamld/agy',
+]
+prefix_re = re.compile(r'(?<![A-Za-z0-9._/-])(cu|cc|cx)/')
+
+scanned = 0
+err = False
+for path in files:
+    if not path or path.startswith(skip_prefixes) or path in skip_exact:
+        continue
+    if not os.path.isfile(path):
+        continue
+    with open(path, 'rb') as fp:
+        raw = fp.read()
+    if b'\x00' in raw:
+        continue
+    scanned += 1
+    txt = raw.decode('utf-8', errors='replace')
+    for lineno, line in enumerate(txt.splitlines(), 1):
+        for tok in literal_bans:
+            if tok in line:
+                print(f'::error::{path}:{lineno} contains banned token {tok!r} (#945)')
+                err = True
+        m = prefix_re.search(line)
+        if m:
+            print(f'::error::{path}:{lineno} contains banned proxy prefix {m.group(0)!r} (#945)')
+            err = True
+
+if err:
+    sys.exit(1)
+print(f'ToS hygiene verified: 0 banned proxy prefixes/tokens across {scanned} tracked public files.')
+PY
+    FAILED=$((FAILED + 1))
+fi
+
 if [ "$FAILED" -gt 0 ]; then
     echo ""
     echo "[DOC-CONTRACT] FAILED: $FAILED contract violation(s) found."

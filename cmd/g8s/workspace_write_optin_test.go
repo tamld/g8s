@@ -83,6 +83,15 @@ func TestWorkspaceWriteOptIn_FlagHelp(t *testing.T) {
 		if !strings.Contains(string(out), "allow-workspace-write") {
 			t.Errorf("%s --help output missing allow-workspace-write flag:\n%s", sub, string(out))
 		}
+		if sub == "worker" {
+			help := string(out)
+			if !strings.Contains(help, "require-kernel-sandbox") {
+				t.Errorf("worker --help output missing require-kernel-sandbox flag:\n%s", help)
+			}
+			if !strings.Contains(help, "G8S_REQUIRE_KERNEL_SANDBOX=1") {
+				t.Errorf("worker --help output missing G8S_REQUIRE_KERNEL_SANDBOX=1 hint:\n%s", help)
+			}
+		}
 	}
 	out, err := exec.Command(bin, "submit", "--help").CombinedOutput()
 	if err != nil {

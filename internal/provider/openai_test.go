@@ -604,11 +604,11 @@ func TestPoolRegistry_SelectForModel_PrefixGlob(t *testing.T) {
 			},
 		},
 		{
-			Name:           "cc-pool",
+			Name:           "anthropic-pool",
 			Class:          "api_call",
 			MaxConcurrency: 4,
 			Models: []ModelDescriptor{
-				{ID: "cc/*"},
+				{ID: "anthropic/*"},
 			},
 		},
 		{
@@ -624,7 +624,7 @@ func TestPoolRegistry_SelectForModel_PrefixGlob(t *testing.T) {
 	reg := NewPoolRegistry(configs, time.Now, func(string) (string, error) { return "/bin/echo", nil })
 	// Set them ready in states
 	reg.mu.Lock()
-	for _, name := range []string{"nvidia-pool", "cc-pool", "exact-pool"} {
+	for _, name := range []string{"nvidia-pool", "anthropic-pool", "exact-pool"} {
 		st := reg.states[name]
 		st.last = ProviderInfo{Name: name, Status: StatusReady}
 	}
@@ -637,10 +637,10 @@ func TestPoolRegistry_SelectForModel_PrefixGlob(t *testing.T) {
 	}
 	release()
 
-	// 2. cc/* prefix glob
-	name, release, err = reg.SelectForModel(context.Background(), "cc/claude-3-opus")
-	if err != nil || name != "cc-pool" {
-		t.Fatalf("cc/* match failed: name=%s, err=%v", name, err)
+	// 2. anthropic/* prefix glob
+	name, release, err = reg.SelectForModel(context.Background(), "anthropic/claude-3-opus")
+	if err != nil || name != "anthropic-pool" {
+		t.Fatalf("anthropic/* match failed: name=%s, err=%v", name, err)
 	}
 	release()
 
@@ -702,21 +702,21 @@ func TestPoolRegistry_probeHTTP_V1Fallback(t *testing.T) {
 	}
 }
 
-func TestOpenAIProvider_CursorAgentServiceHint(t *testing.T) {
+func TestOpenAIProvider_ProtocolMismatch400Hint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" || r.URL.Path == "/v1/models" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"Cursor AgentService requested an unsupported IDE tool: diff_view"}`))
+		_, _ = w.Write([]byte(`{"error":"upstream requested an unsupported IDE tool: diff_view"}`))
 	}))
 	defer srv.Close()
 
 	p := NewOpenAIProvider("9router", srv.URL, "")
 	spec := Spec{
-		Model: "cu/composer-2.5",
-		Brief: "Test Cursor AgentService Hint",
+		Model: "custom/ide-only-model",
+		Brief: "Test Protocol Mismatch 400 Hint",
 	}
 
 	handle, err := p.Spawn(context.Background(), spec)
@@ -731,7 +731,7 @@ func TestOpenAIProvider_CursorAgentServiceHint(t *testing.T) {
 	if receipt.Status != "FAILED" {
 		t.Fatalf("expected status FAILED, got %s", receipt.Status)
 	}
-	if !strings.Contains(err.Error(), "use --provider cursor or a non-cu/* model") {
+	if !strings.Contains(err.Error(), "protocol/tool mismatch on the chat-completions surface") {
 		t.Fatalf("expected remediation hint in error, got: %s", err.Error())
 	}
 }
