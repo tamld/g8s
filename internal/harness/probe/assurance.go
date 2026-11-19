@@ -86,12 +86,13 @@ func hasCompletedStatus(actual string) bool {
 
 // AssuranceEscapeMetrics captures escape containment test metrics (as-001).
 type AssuranceEscapeMetrics struct {
-	Status         string  `json:"status"`
-	SandboxMode    string  `json:"sandbox_mode"`
-	SandboxBackend string  `json:"sandbox_backend"`
-	VectorsTested  int     `json:"vectors_tested"`
-	VectorsBlocked int     `json:"vectors_blocked"`
-	BlockRate      float64 `json:"block_rate"`
+	Status         string                 `json:"status"`
+	SandboxMode    string                 `json:"sandbox_mode"`
+	SandboxBackend string                 `json:"sandbox_backend"`
+	VectorsTested  int                    `json:"vectors_tested"`
+	VectorsBlocked int                    `json:"vectors_blocked"`
+	BlockRate      float64                `json:"block_rate"`
+	EpistemicClass sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
 }
 
 // RunAssuranceEscapeContainment exercises 5 runtime escape vectors offline (#922).
@@ -238,16 +239,18 @@ func RunAssuranceEscapeContainment(ctx context.Context) (string, error) {
 		VectorsTested:  tested,
 		VectorsBlocked: blocked,
 		BlockRate:      1.0,
+		EpistemicClass: sandbox.EpistemicMeasuredMetric,
 	})
 }
 
 // AssuranceMutantMetrics captures anti-false-PASS metrics (as-002).
 type AssuranceMutantMetrics struct {
-	Status        string  `json:"status"`
-	MutantsSeeded int     `json:"mutants_seeded"`
-	MutantsCaught int     `json:"mutants_caught"`
-	FalsePasses   int     `json:"false_passes"`
-	FalsePassRate float64 `json:"false_pass_rate"`
+	Status         string                 `json:"status"`
+	MutantsSeeded  int                    `json:"mutants_seeded"`
+	MutantsCaught  int                    `json:"mutants_caught"`
+	FalsePasses    int                    `json:"false_passes"`
+	FalsePassRate  float64                `json:"false_pass_rate"`
+	EpistemicClass sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
 }
 
 // RunAssuranceMutantAntiFalsePass verifies verifier canary + reviewer false-PASS defenses (#922).
@@ -320,20 +323,22 @@ func RunAssuranceMutantAntiFalsePass(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("anti-false-PASS caught %d/%d checks", caught, totalCases)
 	}
 	return encodeAssuranceOutcome(AssuranceMutantMetrics{
-		Status:        OutcomeClassCompleted,
-		MutantsSeeded: totalCases,
-		MutantsCaught: caught,
-		FalsePasses:   0,
-		FalsePassRate: 0.0,
+		Status:         OutcomeClassCompleted,
+		MutantsSeeded:  totalCases,
+		MutantsCaught:  caught,
+		FalsePasses:    0,
+		FalsePassRate:  0.0,
+		EpistemicClass: sandbox.EpistemicMeasuredMetric,
 	})
 }
 
 // AssuranceCrashMetrics captures crash-lease recovery RTO metrics (as-003).
 type AssuranceCrashMetrics struct {
-	Status        string  `json:"status"`
-	Attempt       int     `json:"attempt"`
-	Reclaimed     bool    `json:"reclaimed"`
-	RecoveryRTOMs float64 `json:"recovery_rto_ms"`
+	Status         string                 `json:"status"`
+	Attempt        int                    `json:"attempt"`
+	Reclaimed      bool                   `json:"reclaimed"`
+	RecoveryRTOMs  float64                `json:"recovery_rto_ms"`
+	EpistemicClass sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
 }
 
 // RunAssuranceCrashLeaseRecovery measures deterministic stale-lease reclaim & recovery RTO (#922).
@@ -411,19 +416,21 @@ func RunAssuranceCrashLeaseRecovery(ctx context.Context) (string, error) {
 	}
 
 	return encodeAssuranceOutcome(AssuranceCrashMetrics{
-		Status:        OutcomeClassCompleted,
-		Attempt:       task.Attempts,
-		Reclaimed:     true,
-		RecoveryRTOMs: rtoMs,
+		Status:         OutcomeClassCompleted,
+		Attempt:        task.Attempts,
+		Reclaimed:      true,
+		RecoveryRTOMs:  rtoMs,
+		EpistemicClass: sandbox.EpistemicMeasuredMetric,
 	})
 }
 
 // AssuranceOverheadMetrics captures control-plane + signing latency (as-004).
 type AssuranceOverheadMetrics struct {
-	Status                 string  `json:"status"`
-	Iterations             int     `json:"iterations"`
-	AvgSubmitClaimMs       float64 `json:"avg_submit_claim_ms"`
-	AvgReceiptSignVerifyMs float64 `json:"avg_receipt_sign_verify_ms"`
+	Status                 string                 `json:"status"`
+	Iterations             int                    `json:"iterations"`
+	AvgSubmitClaimMs       float64                `json:"avg_submit_claim_ms"`
+	AvgReceiptSignVerifyMs float64                `json:"avg_receipt_sign_verify_ms"`
+	EpistemicClass         sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
 }
 
 // RunAssuranceControlPlaneOverhead benchmarks submit+claim CAS and Ed25519 receipt sign+verify latency (#922).
@@ -487,15 +494,17 @@ func RunAssuranceControlPlaneOverhead(ctx context.Context) (string, error) {
 		Iterations:             iterations,
 		AvgSubmitClaimMs:       avgCPMs,
 		AvgReceiptSignVerifyMs: avgRcMs,
+		EpistemicClass:         sandbox.EpistemicMeasuredMetric,
 	})
 }
 
 // AssuranceAuditMetrics captures cryptographic & audit-trail completeness metrics (as-005).
 type AssuranceAuditMetrics struct {
-	Status            string  `json:"status"`
-	ChecksTotal       int     `json:"checks_total"`
-	ChecksPassed      int     `json:"checks_passed"`
-	CompletenessRatio float64 `json:"completeness_ratio"`
+	Status            string                 `json:"status"`
+	ChecksTotal       int                    `json:"checks_total"`
+	ChecksPassed      int                    `json:"checks_passed"`
+	CompletenessRatio float64                `json:"completeness_ratio"`
+	EpistemicClass    sandbox.EpistemicClass `json:"epistemic_class,omitempty"`
 }
 
 // RunAssuranceAuditCompleteness verifies Ed25519 receipt/charter signatures, tamper rejection,
@@ -628,6 +637,7 @@ func RunAssuranceAuditCompleteness(ctx context.Context) (string, error) {
 		ChecksTotal:       total,
 		ChecksPassed:      passed,
 		CompletenessRatio: 1.0,
+		EpistemicClass:    sandbox.EpistemicMeasuredMetric,
 	})
 }
 

@@ -148,6 +148,7 @@ func BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles []string) (string, e
 	sb.WriteString(")\n")
 
 	var denyClauses []string
+	var denyWriteClauses []string
 	for _, d := range denyDirs {
 		if overlapsWritable(d, writableDirs) {
 			continue
@@ -157,6 +158,7 @@ func BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles []string) (string, e
 			return "", err
 		}
 		denyClauses = append(denyClauses, fmt.Sprintf("  (subpath \"%s\")\n", esc))
+		denyWriteClauses = append(denyWriteClauses, fmt.Sprintf("  (subpath \"%s\")\n", esc))
 	}
 	for _, f := range denyFiles {
 		if overlapsWritable(f, writableDirs) {
@@ -171,6 +173,13 @@ func BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles []string) (string, e
 	if len(denyClauses) > 0 {
 		sb.WriteString("(deny file-read*\n")
 		for _, clause := range denyClauses {
+			sb.WriteString(clause)
+		}
+		sb.WriteString(")\n")
+	}
+	if len(denyWriteClauses) > 0 {
+		sb.WriteString("(deny file-write*\n")
+		for _, clause := range denyWriteClauses {
 			sb.WriteString(clause)
 		}
 		sb.WriteString(")\n")

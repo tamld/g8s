@@ -159,6 +159,7 @@ func buildLinuxPolicyOnlyLaunch(cfg Config, env []string, tmpDir, sandboxID stri
 func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, ownTmp bool) (*PreparedLaunch, error) {
 	writableDirs := WritableDirsForConfig(cfg, tmpDir, gocacheDir)
 	denyDirs, denyFiles := SensitiveDenySpec(resolveHomeDir(cfg), cfg.StateDir, resolveSSHAuthSock(cfg))
+	denyDirs = MergeDenyDirs(denyDirs, cfg.DenyDirs)
 	cleanup := makeLinuxCleanup(sandboxID, tmpDir, ownTmp)
 
 	if bwrapBin, ok := probeBwrap(); ok {

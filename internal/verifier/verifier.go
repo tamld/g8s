@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // Registry stores registered verifier classes and handles fail-closed loading and matching.
@@ -341,16 +343,17 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 
 	if !registered && target.WorktreeDir == "" && len(target.DoDItems) == 0 && target.FeatureID == "" && strings.TrimSpace(target.HoldoutDir) == "" && len(target.ExtraChecks) == 0 {
 		verdict := Verdict{
-			Class:       "unregistered",
-			Registered:  false,
-			Status:      StatusAdvisory,
-			Outcome:     OutcomeUnregistered,
-			Checks:      []CheckResult{},
-			Scope:       false,
-			RecordedAt:  now,
-			WorktreeDir: target.WorktreeDir,
-			F2Summary:   loadF2TelemetrySummary(target.ID),
-			FeatureID:   target.FeatureID,
+			Class:          "unregistered",
+			Registered:     false,
+			Status:         StatusAdvisory,
+			Outcome:        OutcomeUnregistered,
+			Checks:         []CheckResult{},
+			Scope:          false,
+			RecordedAt:     now,
+			WorktreeDir:    target.WorktreeDir,
+			F2Summary:      loadF2TelemetrySummary(target.ID),
+			FeatureID:      target.FeatureID,
+			EpistemicClass: sandbox.EpistemicMeasuredMetric,
 		}
 		v.emitTelemetry(target.ID, verdict)
 		return verdict, nil
@@ -390,6 +393,38 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	runner := v.runner
 	if runner == nil {
 		runner = defaultCommandRunner(repoRoot)
+	}
+
+	var holdoutChecksOK *bool
+	var holdoutDigest string
+	var vetoReason string
+	var resolvedHoldoutDir string
+	var holdoutPreHash string
+	var holdoutPreHashErr error
+	if strings.TrimSpace(target.HoldoutDir) != "" {
+		resolvedHoldoutDir = strings.TrimSpace(target.HoldoutDir)
+		if !filepath.IsAbs(resolvedHoldoutDir) && repoRoot != "" {
+			resolvedHoldoutDir = filepath.Join(repoRoot, resolvedHoldoutDir)
+		}
+		if strings.TrimSpace(target.WorktreeDir) != "" {
+			if partErr := ValidateHoldoutPartition(target.WorktreeDir, resolvedHoldoutDir); partErr != nil {
+				okVal := false
+				holdoutChecksOK = &okVal
+				hasCheckFailure = true
+				vetoReason = partErr.Error()
+				checkResults = append(checkResults, CheckResult{
+					Type:   "holdout",
+					Target: resolvedHoldoutDir,
+					OK:     false,
+					Detail: partErr.Error(),
+				})
+				goto decideOutcome
+			}
+		}
+		holdoutPreHash, holdoutPreHashErr = HashHoldoutPartition(resolvedHoldoutDir)
+		if holdoutPreHashErr == nil {
+			holdoutDigest = holdoutPreHash
+		}
 	}
 
 	for _, chk := range class.Checks {
@@ -488,12 +523,8 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 	}
 
 	// Holdout checks execution
-	var holdoutChecksOK *bool
-	if strings.TrimSpace(target.HoldoutDir) != "" {
-		holdoutDir := strings.TrimSpace(target.HoldoutDir)
-		if !filepath.IsAbs(holdoutDir) && repoRoot != "" {
-			holdoutDir = filepath.Join(repoRoot, holdoutDir)
-		}
+	if resolvedHoldoutDir != "" {
+		holdoutDir := resolvedHoldoutDir
 		var holdoutChecks []CheckResult
 		var holdoutFailed bool
 		var scriptPaths []string
@@ -571,6 +602,15 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 			}
 		}
 
+		if holdoutPreHashErr == nil {
+			postHash, postHashErr := HashHoldoutPartition(holdoutDir)
+			if postHashErr != nil || postHash != holdoutPreHash {
+				holdoutFailed = true
+				hasCheckFailure = true
+				vetoReason = fmt.Sprintf("%s: holdout partition mutated during evaluation (%s -> %s)", CodeHoldoutMutated, holdoutPreHash, postHash)
+			}
+		}
+
 		okVal := len(holdoutChecks) > 0 && !holdoutFailed
 		holdoutChecksOK = &okVal
 		if !okVal {
@@ -578,10 +618,13 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		}
 	}
 
+decideOutcome:
 	// Determine overall outcome:
 	// Fail-open rule: check's runner error (infrastructure error) => outcome not-run
 	var outcome Outcome
 	switch {
+	case vetoReason != "":
+		outcome = OutcomeFail
 	case !registered:
 		outcome = OutcomeUnregistered
 	case hasRunnerError:
@@ -594,7 +637,6 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 
 	// Canary Check
 	var canaryResult *CanaryResult
-	var vetoReason string
 	if target.RunCanaryMutant {
 		candidateFiles := target.AllowedPaths
 		if len(candidateFiles) == 0 {
@@ -760,8 +802,10 @@ func (v *Verifier) VerifyContext(ctx context.Context, target TaskRef, caller Tas
 		InjectedLessons:    injectedLessons,
 		FeatureID:          target.FeatureID,
 		HoldoutChecksOK:    holdoutChecksOK,
+		HoldoutDigest:      holdoutDigest,
 		CanaryResult:       canaryResult,
 		VetoReason:         vetoReason,
+		EpistemicClass:     sandbox.EpistemicMeasuredMetric,
 	}
 
 	if target.GenerateBlindPacket {

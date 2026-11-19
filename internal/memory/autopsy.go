@@ -14,6 +14,7 @@ import (
 
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/dispatch"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/vault"
 )
 
@@ -132,6 +133,20 @@ func (a *LocalSQLiteMemoryAdapter) RunExperientialAutopsy(ctx context.Context, t
 		sessionID = "autopsy-" + traj.TaskID
 	}
 
+	appScope := pkg
+	if appScope == "" {
+		appScope = strings.TrimSpace(traj.File)
+	}
+	if appScope == "" {
+		appScope = "task:" + traj.TaskID
+	}
+	evRef := strings.TrimSpace(traj.TestCase)
+	if evRef == "" {
+		evRef = strings.TrimSpace(traj.TestFile)
+	}
+	if evRef == "" {
+		evRef = "autopsy:" + traj.TaskID
+	}
 	entry := &MemoryEntry{
 		ID:            entryID,
 		Kind:          KindProcedure,
@@ -141,6 +156,19 @@ func (a *LocalSQLiteMemoryAdapter) RunExperientialAutopsy(ctx context.Context, t
 		PromotedBy:    "experiential-autopsy",
 		Payload:       lesson,
 		Preconditions: preconds,
+		OutcomePath:   OutcomeFail,
+		Provenance: &MemoryProvenance{
+			TaskID:      traj.TaskID,
+			SessionID:   sessionID,
+			Actor:       "experiential-autopsy",
+			OutcomePath: OutcomeFail,
+			EvidenceRef: evRef,
+		},
+		Confidence:         0.5,
+		ConfidenceClass:    sandbox.EpistemicEstimatedHeuristic,
+		ApplicabilityScope: appScope,
+		PromotionStatus:    PromotionProposed,
+		Revocable:          true,
 	}
 
 	cand := vault.DistillationRecord{

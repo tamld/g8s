@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // TransportKind distinguishes process-oriented CLI backends from request-oriented HTTP API backends (#940).
@@ -143,25 +145,31 @@ func (r *liveStreamReader) Close() error {
 
 // asyncRequestHandle implements RequestHandle for in-flight HTTP requests.
 type asyncRequestHandle struct {
-	reqID     string
-	provider  string
-	start     time.Time
-	cancel    context.CancelFunc
-	cancelled atomic.Bool
-	streamBuf *liveStreamBuf
-	done      chan struct{}
-	receipt   Receipt
-	err       error
+	reqID        string
+	provider     string
+	start        time.Time
+	cancel       context.CancelFunc
+	cancelled    atomic.Bool
+	streamBuf    *liveStreamBuf
+	done         chan struct{}
+	policyReport *sandbox.PolicyEnforcementReport
+	receipt      Receipt
+	err          error
 }
 
 func newAsyncRequestHandle(providerName string, cancel context.CancelFunc) *asyncRequestHandle {
+	return newAsyncRequestHandleWithPolicy(providerName, cancel, nil)
+}
+
+func newAsyncRequestHandleWithPolicy(providerName string, cancel context.CancelFunc, report *sandbox.PolicyEnforcementReport) *asyncRequestHandle {
 	return &asyncRequestHandle{
-		reqID:     nextRequestID(providerName),
-		provider:  providerName,
-		start:     time.Now(),
-		cancel:    cancel,
-		streamBuf: newLiveStreamBuf(),
-		done:      make(chan struct{}),
+		reqID:        nextRequestID(providerName),
+		provider:     providerName,
+		start:        time.Now(),
+		cancel:       cancel,
+		streamBuf:    newLiveStreamBuf(),
+		done:         make(chan struct{}),
+		policyReport: report,
 	}
 }
 
@@ -173,6 +181,21 @@ func (h *asyncRequestHandle) complete(rc Receipt, err error) {
 	rc.Provider = h.provider
 	rc.TransportKind = TransportKindRequest
 	rc.RequestID = h.reqID
+	if rc.PolicyEnforcement == nil {
+		if h.policyReport != nil {
+			rep := *h.policyReport
+			rc.PolicyEnforcement = &rep
+		} else {
+			rep := sandbox.EvaluatePolicyContract(
+				sandbox.RequestedPolicy{TransportKind: string(TransportKindRequest)},
+				sandbox.ModePolicyOnly,
+				"http_request_transport",
+				true,
+				false,
+			)
+			rc.PolicyEnforcement = &rep
+		}
+	}
 	if rc.DurationMs <= 0 {
 		rc.DurationMs = time.Since(h.start).Milliseconds()
 	}

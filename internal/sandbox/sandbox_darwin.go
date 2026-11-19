@@ -28,6 +28,7 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 
 	writableDirs := WritableDirsForConfig(cfg, tmpDir, gocacheDir)
 	denyDirs, denyFiles := SensitiveDenySpec(resolveHomeDir(cfg), cfg.StateDir, resolveSSHAuthSock(cfg))
+	denyDirs = MergeDenyDirs(denyDirs, cfg.DenyDirs)
 	profile, err := BuildSeatbeltProfile(writableDirs, denyDirs, denyFiles)
 	if err != nil {
 		if ownTmp {

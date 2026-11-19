@@ -9,7 +9,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
 )
+
+func defaultProcessPolicyReport() *sandbox.PolicyEnforcementReport {
+	rep := sandbox.EvaluatePolicyContract(
+		sandbox.RequestedPolicy{TransportKind: string(TransportKindProcess)},
+		sandbox.ModePolicyOnly,
+		"direct_process",
+		false,
+		false,
+	)
+	return &rep
+}
 
 // extractCLIAPIErrorLine scans stderr/stdout for silent CLI agent API error lines
 // (such as qwen printing "[API Error: 404 ...]" on stderr while exiting 0).
@@ -74,12 +87,13 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 				_ = h.Cancel(context.Background())
 				<-h.done
 				return Receipt{
-					Provider:   h.provider,
-					Status:     "TIMEOUT",
-					Stdout:     h.stdout.String(),
-					Stderr:     h.stderr.String(),
-					ExitCode:   -1,
-					DurationMs: time.Since(h.start).Milliseconds(),
+					Provider:          h.provider,
+					Status:            "TIMEOUT",
+					Stdout:            h.stdout.String(),
+					Stderr:            h.stderr.String(),
+					ExitCode:          -1,
+					DurationMs:        time.Since(h.start).Milliseconds(),
+					PolicyEnforcement: defaultProcessPolicyReport(),
 				}, ctx.Err()
 			}
 		case <-h.done:
@@ -110,13 +124,14 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 	}
 
 	return Receipt{
-		Provider:      h.provider,
-		TransportKind: TransportKindProcess,
-		Status:        status,
-		Stdout:        stdoutStr,
-		Stderr:        stderrStr,
-		ExitCode:      exitCode,
-		DurationMs:    duration,
+		Provider:          h.provider,
+		TransportKind:     TransportKindProcess,
+		Status:            status,
+		Stdout:            stdoutStr,
+		Stderr:            stderrStr,
+		ExitCode:          exitCode,
+		DurationMs:        duration,
+		PolicyEnforcement: defaultProcessPolicyReport(),
 	}, waitErr
 }
 

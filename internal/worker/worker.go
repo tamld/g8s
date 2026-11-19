@@ -94,6 +94,10 @@ type taskRequest struct {
 
 	// AllowWorkerCommit opts in to harness-side git commit proxy (#822 option 3).
 	AllowWorkerCommit bool `json:"allow_worker_commit,omitempty"`
+
+	// AllowedPaths and HoldoutDir feed the unified RequestedPolicy -> EffectiveEnforcement contract (#943).
+	AllowedPaths []string `json:"allowed_paths,omitempty"`
+	HoldoutDir   string   `json:"holdout_dir,omitempty"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -760,14 +764,22 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if strings.TrimSpace(stateDir) == "" {
 		stateDir = filepath.Dir(pathutil.DefaultDatabasePath())
 	}
+	var denyDirs []string
+	if strings.TrimSpace(req.HoldoutDir) != "" {
+		denyDirs = append(denyDirs, strings.TrimSpace(req.HoldoutDir))
+	}
 	sbxCfg := &sandbox.Config{
 		WorktreeDir:           spawnDir,
 		RunDir:                runDir,
 		StateDir:              stateDir,
 		Permission:            req.Permission,
+		Role:                  req.Role,
+		ReceiptID:             req.ReceiptID,
+		AllowedPaths:          append([]string(nil), req.AllowedPaths...),
 		ProviderName:          resolvedTaskProvider.Name,
 		AddDirs:               req.AddDirs,
 		ExtraWriteDirs:        extraWriteDirs,
+		DenyDirs:              denyDirs,
 		NoSandbox:             req.NoSandbox,
 		RequireKernelEnforced: s.requireKernelSandbox,
 	}
@@ -796,20 +808,36 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		// Detect permission denied or fail-closed sandbox policy rejection - not retryable
 		retryable := true
 		status := "spawn_failed"
-		if errors.Is(spawnErr, sandbox.ErrKernelSandboxRequired) {
+		resMap := map[string]any{
+			"ok":     false,
+			"status": status,
+			"reason": firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed"),
+		}
+		var policyRej *sandbox.PolicyRejectionError
+		if errors.As(spawnErr, &policyRej) {
 			retryable = false
 			status = "sandbox_policy_rejected"
+			resMap["status"] = status
+			resMap["rejected_before_spawn"] = true
+			resMap["policy_enforcement"] = policyRej.Report
+		} else if errors.Is(spawnErr, sandbox.ErrKernelSandboxRequired) {
+			retryable = false
+			status = "sandbox_policy_rejected"
+			resMap["status"] = status
+			resMap["rejected_before_spawn"] = true
 		} else if strings.Contains(strings.ToLower(errMsg), "permission denied") {
 			retryable = false
 			status = "permission_denied"
 			errMsg = fmt.Sprintf("executable permission denied: %s (intent: worker lacks execute permission on binary)", errMsg)
+			resMap["status"] = status
+			resMap["reason"] = firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed")
 		}
 
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(map[string]any{"ok": false, "status": status, "reason": firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed")}),
+			Result:    mustJSON(resMap),
 			Success:   false,
 			Retryable: retryable,
 			Err:       errMsg,

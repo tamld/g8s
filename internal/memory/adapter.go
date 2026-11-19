@@ -152,6 +152,13 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 		failure_after_recall_count INTEGER NOT NULL DEFAULT 0,
 		corroborating_sessions TEXT NOT NULL DEFAULT '[]',
 		review_flag TEXT NOT NULL DEFAULT '',
+		outcome_path TEXT NOT NULL DEFAULT '',
+		provenance_json TEXT NOT NULL DEFAULT '{}',
+		confidence REAL NOT NULL DEFAULT 0,
+		confidence_class TEXT NOT NULL DEFAULT '',
+		applicability_scope TEXT NOT NULL DEFAULT '',
+		promotion_status TEXT NOT NULL DEFAULT '',
+		revocable INTEGER NOT NULL DEFAULT 1,
 		created_at REAL NOT NULL,
 		updated_at REAL NOT NULL
 	);
@@ -178,6 +185,13 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN failure_after_recall_count INTEGER NOT NULL DEFAULT 0`)
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN corroborating_sessions TEXT NOT NULL DEFAULT '[]'`)
 	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN review_flag TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN outcome_path TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN confidence REAL NOT NULL DEFAULT 0`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN confidence_class TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN applicability_scope TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN promotion_status TEXT NOT NULL DEFAULT ''`)
+	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN revocable INTEGER NOT NULL DEFAULT 1`)
 	return nil
 }
 

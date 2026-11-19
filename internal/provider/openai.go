@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamld/g8s/internal/config"
+	"github.com/tamld/g8s/internal/sandbox"
 )
 
 // OpenAIProvider implements the Provider and RequestTransport interfaces against
@@ -338,6 +339,24 @@ func resolveRequestCapabilitiesAndEffort(providerName string, isAnthropic bool, 
 
 // StartRequest starts an asynchronous HTTP chat/messages request and returns a typed RequestHandle (#940).
 func (p *OpenAIProvider) StartRequest(ctx context.Context, spec Spec) (RequestHandle, error) {
+	reqPolicy := sandbox.RequestedPolicy{
+		Permission:             spec.Permission,
+		Role:                   spec.Role,
+		ReceiptID:              spec.ReceiptID,
+		HoldoutDenyDirs:        sandbox.MergeDenyDirs(nil, spec.HoldoutDenyDirs),
+		RequireKernelEnforced:  spec.RequireKernelEnforced,
+		RequireNetworkEnforced: spec.RequireNetworkEnforced,
+		TransportKind:          string(TransportKindRequest),
+	}
+	policyReport := sandbox.EvaluatePolicyContract(reqPolicy, sandbox.ModePolicyOnly, "http_request_transport", true, false)
+	if policyReport.RejectedBeforeSpawn {
+		sentinel := sandbox.ErrKernelSandboxRequired
+		if policyReport.Evaluated.RejectionCode == sandbox.ErrNetworkEnforcementRequired.Error() {
+			sentinel = sandbox.ErrNetworkEnforcementRequired
+		}
+		return nil, &sandbox.PolicyRejectionError{Err: sentinel, Report: policyReport}
+	}
+
 	if err := p.Available(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
@@ -356,9 +375,9 @@ func (p *OpenAIProvider) StartRequest(ctx context.Context, spec Spec) (RequestHa
 	}
 
 	if isAnthropic {
-		return p.startAnthropicRequest(ctx, spec, effRes)
+		return p.startAnthropicRequest(ctx, spec, effRes, &policyReport)
 	}
-	return p.startOpenAIRequest(ctx, spec, effRes)
+	return p.startOpenAIRequest(ctx, spec, effRes, &policyReport)
 }
 
 // Spawn starts an HTTP request asynchronously and adapts RequestHandle for legacy Handle callers.
@@ -403,7 +422,7 @@ func (p *OpenAIProvider) applyEffortTelemetry(rc *Receipt, effRes requestEffortR
 	rc.EffortDegradeMsg = effRes.DegradeMsg
 }
 
-func (p *OpenAIProvider) startAnthropicRequest(ctx context.Context, spec Spec, effRes requestEffortResolution) (RequestHandle, error) {
+func (p *OpenAIProvider) startAnthropicRequest(ctx context.Context, spec Spec, effRes requestEffortResolution, policyReport *sandbox.PolicyEnforcementReport) (RequestHandle, error) {
 	baseURL := p.EffectiveBaseURL()
 	var endpoint string
 	if strings.HasSuffix(baseURL, "/v1") {
@@ -476,7 +495,7 @@ func (p *OpenAIProvider) startAnthropicRequest(ctx context.Context, spec Spec, e
 		req.Header.Set(k, v)
 	}
 
-	h := newAsyncRequestHandle(p.name, cancel)
+	h := newAsyncRequestHandleWithPolicy(p.name, cancel, policyReport)
 	client := p.clientForTimeout(spec.Timeout)
 
 	go func() {
@@ -666,7 +685,7 @@ func (p *OpenAIProvider) consumeAnthropicSSE(r io.Reader, h *asyncRequestHandle)
 	}
 }
 
-func (p *OpenAIProvider) startOpenAIRequest(ctx context.Context, spec Spec, effRes requestEffortResolution) (RequestHandle, error) {
+func (p *OpenAIProvider) startOpenAIRequest(ctx context.Context, spec Spec, effRes requestEffortResolution, policyReport *sandbox.PolicyEnforcementReport) (RequestHandle, error) {
 	baseURL := p.EffectiveBaseURL()
 	endpoint := baseURL + "/chat/completions"
 
@@ -727,7 +746,7 @@ func (p *OpenAIProvider) startOpenAIRequest(ctx context.Context, spec Spec, effR
 		req.Header.Set(k, v)
 	}
 
-	h := newAsyncRequestHandle(p.name, cancel)
+	h := newAsyncRequestHandleWithPolicy(p.name, cancel, policyReport)
 	client := p.clientForTimeout(spec.Timeout)
 
 	go func() {

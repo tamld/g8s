@@ -28,6 +28,7 @@ type processChild struct {
 	jobClose        sync.Once
 	containmentMode string
 	sandboxBackend  string
+	policyReport    *sandbox.PolicyEnforcementReport
 	sandboxCleanup  func()
 	cleanupOnce     sync.Once
 }
@@ -53,6 +54,11 @@ func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend
 // ContainmentInfo returns the truthful OS containment mode and sandbox backend.
 func (c *processChild) ContainmentInfo() (string, string) {
 	return c.containmentMode, c.sandboxBackend
+}
+
+// PolicyReport returns the unified PolicyEnforcementReport recorded at process prepare time.
+func (c *processChild) PolicyReport() *sandbox.PolicyEnforcementReport {
+	return c.policyReport
 }
 
 func (c *processChild) closeSandbox() {
@@ -123,6 +129,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	argv := opts.Argv
 	var cmdEnv []string
 	var containmentMode, sandboxBackend string
+	var policyReport *sandbox.PolicyEnforcementReport
 	var sandboxCleanup func()
 
 	if opts.Sandbox != nil {
@@ -140,6 +147,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		cmdEnv = prep.Env
 		containmentMode = string(prep.Mode)
 		sandboxBackend = prep.Backend
+		policyReport = prep.PolicyReport
 		sandboxCleanup = prep.Cleanup
 	} else if len(opts.Env) > 0 {
 		cmdEnv = append(os.Environ(), opts.Env...)
@@ -188,7 +196,9 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	if werr := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); werr != nil {
 		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", pidPath, werr)
 	}
-	return newProcessChild(cmd, job, containmentMode, sandboxBackend, sandboxCleanup), nil
+	child := newProcessChild(cmd, job, containmentMode, sandboxBackend, sandboxCleanup)
+	child.policyReport = policyReport
+	return child, nil
 }
 
 func isAttemptResultOK(raw json.RawMessage) bool {
