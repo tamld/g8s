@@ -19,6 +19,7 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/routing"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -2075,4 +2076,51 @@ func TestWorkerSuppliedTextToolPolicyEvidence(t *testing.T) {
 	if res.OfferedCount == nil || *res.OfferedCount != 1 || res.DeniedCount == nil || *res.DeniedCount != 1 || res.InvokedCount == nil || *res.InvokedCount != 0 {
 		t.Errorf("expected top-level counts 1/1/0, got %+v", res)
 	}
+}
+
+func TestWorkerRequireKernelSandboxPropagatesAndRejectsNonRetryable(t *testing.T) {
+	t.Run("WithRequireKernelSandbox propagates to SpawnOptions.Sandbox", func(t *testing.T) {
+		env := newWorkerEnv(t, nil, WithRequireKernelSandbox(true))
+		_ = submitTask(t, env, "req-kernel-1", 1, nil)
+		task, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-kernel", LeaseSeconds: 30})
+		if err != nil || task == nil {
+			t.Fatalf("RunOnce failed: task=%v err=%v", task, err)
+		}
+		if len(env.runner.spawned) != 1 || env.runner.spawned[0].Sandbox == nil || !env.runner.spawned[0].Sandbox.RequireKernelEnforced {
+			t.Fatalf("expected RequireKernelEnforced=true in SpawnOptions.Sandbox, got %+v", env.runner.spawned)
+		}
+	})
+
+	t.Run("ErrKernelSandboxRequired makes attempt non-retryable despite maxAttempts=3", func(t *testing.T) {
+		t.Setenv("G8S_REQUIRE_KERNEL_SANDBOX", "1")
+		env := newWorkerEnv(t, nil)
+		env.runner.err = fmt.Errorf("%w: mode=policy_only", sandbox.ErrKernelSandboxRequired)
+		submitted := submitTask(t, env, "req-kernel-fail", 3, nil)
+		task, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-kernel-fail", LeaseSeconds: 30})
+		if err != nil || task == nil {
+			t.Fatalf("RunOnce failed: task=%v err=%v", task, err)
+		}
+		got, err := env.store.GetTask(context.Background(), submitted.TaskID)
+		if err != nil || got == nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if got.State != controlplane.StateWorkerCompleted {
+			t.Fatalf("expected non-retryable WORKER_COMPLETED supervisor gate state, got %s", got.State)
+		}
+		if got.ReceiptHash == nil {
+			t.Fatal("non-retryable failure must seal a receipt")
+		}
+		// Prove task was NOT re-queued despite maxAttempts=3
+		second, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-kernel-retry", LeaseSeconds: 30})
+		if err != nil || second != nil {
+			t.Fatalf("expected queue empty (non-retryable), got task=%v err=%v", second, err)
+		}
+		var payload map[string]any
+		if uerr := json.Unmarshal(got.Result, &payload); uerr != nil {
+			t.Fatalf("unmarshal Result: %v", uerr)
+		}
+		if payload["status"] != "sandbox_policy_rejected" || payload["ok"] != false {
+			t.Fatalf("expected status=sandbox_policy_rejected ok=false, got %+v", payload)
+		}
+	})
 }

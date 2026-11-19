@@ -618,6 +618,7 @@ required = [
     'internal/memory/*',
     'internal/server/*',
     'cmd/g8s/deliver.go',
+    'scripts/install.sh',
 ]
 yml_set = set(yml_lines)
 for req in required:

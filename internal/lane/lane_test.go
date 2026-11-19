@@ -628,6 +628,7 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 		"internal/premise/*",
 		"internal/provider/conformance/*",
 		"cmd/g8s/deliver.go",
+		"scripts/install.sh",
 	}
 
 	if len(patterns) != len(expectedSubstrings) {
@@ -658,6 +659,7 @@ func TestTrustBoundaries_TrackedFileVerification(t *testing.T) {
 		"internal/premise/premise.go",
 		"internal/provider/conformance/store.go",
 		"cmd/g8s/deliver.go",
+		"scripts/install.sh",
 		"cmd/g8s/**",
 	}
 	for _, sample := range securitySamples {
