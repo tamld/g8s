@@ -53,17 +53,17 @@ The script executes atomically:
 1. **Pre-tag gates**: Runs `tools/pre_tag.sh` with `G8S_TARGET_VERSION=<VERSION>` (validates version sync, changelog, Go version, CI status, surface inventory).
 2. **Updates version.go**: Bumps `Version` constant in `cmd/g8s/version.go`.
 3. **Promotes `CHANGELOG.md`**: Inserts new version header after `## [Unreleased]`, preserving existing notes.
-4. **Updates `manifest.json`**: Sets `version` and `latest_release.tag` to `v<VERSION>` (does NOT touch `latest_release.commit` or `date` — those are post-tag).
+4. **Updates `manifest.json` pre-tag**: Sets `version`, `latest_release.tag` (`v<VERSION>`), `latest_release.date` (today), and `latest_release.commit` (`"see-g8s-version-ldflags"` so tagged release archives never embed a stale prior-release commit SHA while `g8s version --json` ldflags remain the tagged commit SSoT).
 5. **Updates packaging manifests**:
    - `packaging/windows/g8s.nsi`: `!define VERSION`
    - `packaging/windows/g8s.wxs`: `<?define Version?>`
-   - `packaging/chocolatey/tools/chocolateyinstall.ps1`: Download URL and MSI filename
+   - `packaging/chocolatey/tools/chocolateyinstall.ps1`: Download URL and ZIP filename (template guarded against unreplaced `<from checksums.txt>` placeholder)
    - `packaging/winget/manifest.yaml`: `PackageVersion` and download URL path
    - `packaging/chocolatey/g8s.nuspec`: `<version>` element
 6. **Commits**: Stages all modified files, creates commit `chore: release <VERSION>`.
 7. **Tags**: Creates annotated tag `v<VERSION>` with message `Release <VERSION>`.
 8. **Atomic push**: `git push --atomic origin main v<VERSION>`.
-9. **Post-tag manifest amendment**: Updates `manifest.json` `latest_release.commit` (short SHA of tag commit) and `latest_release.date` (today), commits `chore(release): record v<VERSION> commit/date in manifest latest_release`, pushes to `main`.
+9. **Post-tag manifest amendment**: Updates `manifest.json` `latest_release.commit` (exact 7-char tag commit SHA) and `latest_release.date` (tag commit date) on `main`, commits `chore(release): record v<VERSION> commit/date in manifest latest_release`, pushes to `main`.
 
 ### Step 3 — GoReleaser (Triggered by Tag Push)
 

@@ -180,8 +180,52 @@ run_test_with_output \
 # (g) committed docs/claims.yml registry passes cleanly
 run_test_with_output \
     "(g) committed docs/claims.yml passes cleanly" 0 \
-    "SCORECARD: 50 bound, 0 unbound, 0 broken (total 50 claims)" \
+    "SCORECARD: 59 bound, 0 unbound, 0 broken (total 59 claims)" \
     bash "$CHECK_SCRIPT"
+
+# (h) --test-report with PASS line verifies runtime proof -> exit 0
+cat > "$FIXTURE_ROOT/report_pass.log" <<'EOF'
+=== RUN   TestReleasePreservesDirtyWorktree
+--- PASS: TestReleasePreservesDirtyWorktree (0.01s)
+PASS
+EOF
+run_test_with_output \
+    "(h) --test-report with PASS line verifies runtime proof" 0 \
+    "RUNTIME_PROVEN: 1/1" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/valid.yml" --root "$REPO_ROOT" --test-report "$FIXTURE_ROOT/report_pass.log"
+
+# (i) --test-report with FAIL line fails closed -> exit 1
+cat > "$FIXTURE_ROOT/report_fail.log" <<'EOF'
+=== RUN   TestReleasePreservesDirtyWorktree
+--- FAIL: TestReleasePreservesDirtyWorktree (0.01s)
+FAIL
+EOF
+run_test_with_output \
+    "(i) --test-report with FAIL line fails closed" 1 \
+    "claim-valid-attempt" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/valid.yml" --root "$REPO_ROOT" --test-report "$FIXTURE_ROOT/report_fail.log"
+
+# (j) --test-report with only prefix-colliding test name fails closed -> exit 1
+cat > "$FIXTURE_ROOT/report_prefix.log" <<'EOF'
+=== RUN   TestReleasePreservesDirtyWorktreeExtra
+--- PASS: TestReleasePreservesDirtyWorktreeExtra (0.01s)
+PASS
+EOF
+run_test_with_output \
+    "(j) --test-report with only prefix-colliding test name fails closed" 1 \
+    "claim-valid-attempt" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/valid.yml" --root "$REPO_ROOT" --test-report "$FIXTURE_ROOT/report_prefix.log"
+
+# (k) --test-report with SKIP line fails closed -> exit 1
+cat > "$FIXTURE_ROOT/report_skip.log" <<'EOF'
+=== RUN   TestReleasePreservesDirtyWorktree
+--- SKIP: TestReleasePreservesDirtyWorktree (0.00s)
+PASS
+EOF
+run_test_with_output \
+    "(k) --test-report with SKIP line fails closed" 1 \
+    "claim-valid-attempt" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/valid.yml" --root "$REPO_ROOT" --test-report "$FIXTURE_ROOT/report_skip.log"
 
 if [ "$FAILURES" -gt 0 ]; then
     echo ""

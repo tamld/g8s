@@ -28,10 +28,12 @@ Issuing with an empty path pattern list is rejected.
 | --- | --- | --- | --- |
 | `read_only` | no | no | yes |
 | `automation_read` | no | yes | yes |
+| `supplied_text` | no | no | yes — disables model-initiated tools at adapter boundary |
 | `workspace_write` | yes (receipt-gated) | no | no — requires an explicit receipt |
 
 ## Role profiles
 
-Six roles ship out of the box: `collector`, `mcp-mapper`, `scout`, `summarizer`,
+Ten built-in roles ship out of the box: `analyst`, `collector`, `implementer`,
+`mcp-mapper`, `researcher`, `scout`, `sec-auditor`, `summarizer`,
 `test-runner`, `verifier`. Each carries a purpose statement and forbidden-action
 list rendered by `g8s roles`.

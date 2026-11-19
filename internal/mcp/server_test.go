@@ -181,7 +181,7 @@ func TestInitializeHandshakeReturnsServerInfo(t *testing.T) {
 	}
 }
 
-func TestToolsListExposesExactlyTheSpecElevenTools(t *testing.T) {
+func TestToolsListExposesAllRegisteredTools(t *testing.T) {
 	s, _, _, _ := newTestServer(t)
 	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
 	var result struct {

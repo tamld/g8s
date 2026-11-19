@@ -313,7 +313,7 @@ To maintain high reliability and performance, `g8s` explicitly bounds its produc
 | Target Domain | Architectural Decision & Non-Goal |
 | :--- | :--- |
 | **In-Process Plugins** | **Non-Goal**: Dynamic in-process C/Go plugins. `g8s` uses **Declarative Config + Standard Protocols** (`providers.json`, JSON-RPC MCP, CLI subprocesses) to prevent runtime compilation fragility and sandbox escapes. |
-| **Heavy Frameworks** | **Non-Goal**: Heavy Python runtimes (LangChain, AutoGen). `g8s` is a pure-Go, zero-dependency static binary. |
+| **Heavy Frameworks** | **Non-Goal**: Heavy Python runtimes (LangChain, AutoGen). `g8s` is a pure-Go, zero-CGO static binary (requiring only `git` for worktree isolation, plus optional `bwrap` on Linux). |
 | **GUI Dashboard Bloat** | **Non-Goal**: Bloated web dashboards. `g8s` is CLI-first; telemetry is stored in the Evidence Lake and queried via CLI/MCP envelopes. |
 | **Model Inference Hosting** | **Non-Goal**: In-process model weights execution. `g8s` orchestrates external processes and gateways; inference is owned by upstream providers. |
 

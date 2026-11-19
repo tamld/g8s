@@ -4,8 +4,8 @@
 # Validates release script version synchronization:
 #   (1) Dry-run on files pinned at 0.12.0 -> prints intended changes, files byte-identical afterwards
 #   (2) Real run bumping 0.12.0 -> 0.13.0 -> version.go, manifest.json (version + latest_release.tag),
-#       nsi, wxs, chocolatey URL all read 0.13.0/v0.13.0; latest_release.commit UNCHANGED;
-#       manifest guard & packaging drift checks pass cleanly
+#       nsi, wxs, chocolatey URL all read 0.13.0/v0.13.0; tagged manifest.json sets date & placeholder commit; post-tag HEAD stamps tag SHA;
+#       manifest guard & packaging drift checks pass cleanly on both HEAD and detached tag checkout
 #   (3) Idempotency: running again on already-0.13.0 files changes nothing and still exits 0
 #   (4) Missing packaging files (fixture omits one) -> script warns but does not abort, exit 0
 #
@@ -275,7 +275,7 @@ else
 fi
 
 # Case 2: Real run bumping 0.12.0 -> 0.13.0
-echo "Testing: (2) Real run bumping 0.12.0 -> 0.13.0 updates all files, preserves commit sha, passes sync checks"
+echo "Testing: (2) Real run bumping 0.12.0 -> 0.13.0 updates all files, stamps tag manifest date/placeholder + post-tag SHA, passes sync checks"
 FIXTURE_2="$TEST_TMP/fixture_2"
 setup_fixture "$FIXTURE_2" "0.12.0"
 
@@ -295,11 +295,15 @@ else
         FAILURES=$((FAILURES + 1))
     fi
 
-    # 2b. manifest.json version and latest_release.tag
+    # 2b. manifest.json version, latest_release.tag, tagged placeholder/date, and post-tag HEAD SHA
     manifest_ver=$(grep -E '^[[:space:]]*"version":' "$FIXTURE_2/manifest.json" | head -1 | sed -E 's/.*"version":[[:space:]]*"([^"]+)".*/\1/')
     manifest_tag=$(sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' "$FIXTURE_2/manifest.json" | grep -E '"tag":' | head -1 | sed -E 's/.*"tag":[[:space:]]*"([^"]+)".*/\1/')
     release_cut_sha=$(cd "$FIXTURE_2" && git log -1 --format=%H --grep='^chore: release 0\.13\.0$' 2>/dev/null || true)
     manifest_commit=$(cd "$FIXTURE_2" && git show "${release_cut_sha}:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
+    manifest_tag_date=$(cd "$FIXTURE_2" && git show "${release_cut_sha}:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"date":' | head -1 | sed -E 's/.*"date":[[:space:]]*"([^"]+)".*/\1/')
+    expected_tag_date=$(cd "$FIXTURE_2" && git show -s --format=%cs "${release_cut_sha}" 2>/dev/null || true)
+    expected_short_sha=$(cd "$FIXTURE_2" && git rev-parse --short=7 "${release_cut_sha}" 2>/dev/null || true)
+    head_manifest_commit=$(cd "$FIXTURE_2" && git show "HEAD:manifest.json" 2>/dev/null | sed -n '/"latest_release"[[:space:]]*:[[:space:]]*{/,/}/p' | grep -E '"commit":' | head -1 | sed -E 's/.*"commit":[[:space:]]*"([^"]+)".*/\1/')
 
     if [ "$manifest_ver" != "0.13.0" ]; then
         echo "  FAIL: manifest.json version is '$manifest_ver', expected '0.13.0'"
@@ -309,8 +313,16 @@ else
         echo "  FAIL: manifest.json latest_release.tag is '$manifest_tag', expected 'v0.13.0'"
         FAILURES=$((FAILURES + 1))
     fi
-    if [ "$manifest_commit" != "a255bd5" ]; then
-        echo "  FAIL: manifest.json latest_release.commit changed to '$manifest_commit', expected unchanged 'a255bd5'"
+    if [ "$manifest_commit" != "see-g8s-version-ldflags" ]; then
+        echo "  FAIL: tagged manifest.json latest_release.commit is '$manifest_commit', expected 'see-g8s-version-ldflags'"
+        FAILURES=$((FAILURES + 1))
+    fi
+    if [ "$manifest_tag_date" != "$expected_tag_date" ]; then
+        echo "  FAIL: tagged manifest.json latest_release.date is '$manifest_tag_date', expected '$expected_tag_date'"
+        FAILURES=$((FAILURES + 1))
+    fi
+    if [ "$head_manifest_commit" != "$expected_short_sha" ]; then
+        echo "  FAIL: post-tag HEAD manifest.json latest_release.commit is '$head_manifest_commit', expected '$expected_short_sha'"
         FAILURES=$((FAILURES + 1))
     fi
 
@@ -377,14 +389,22 @@ else
         fi
     done
 
-    # 2g. Run acceptance oracle: tools/ci_version_sync_check.sh
+    # 2g. Run acceptance oracle: tools/ci_version_sync_check.sh (on HEAD and detached tag v0.13.0)
     if [ -f "$FIXTURE_2/tools/ci_version_sync_check.sh" ]; then
         oracle_out=""
         oracle_code=0
         oracle_out=$( (cd "$FIXTURE_2" && bash tools/ci_version_sync_check.sh) 2>&1 ) || oracle_code=$?
         if [ "$oracle_code" -ne 0 ]; then
-            echo "  FAIL: ci_version_sync_check.sh failed on tree produced by release.sh"
+            echo "  FAIL: ci_version_sync_check.sh failed on HEAD produced by release.sh"
             echo "$oracle_out" | sed 's/^/    /'
+            FAILURES=$((FAILURES + 1))
+        fi
+        tag_oracle_out=""
+        tag_oracle_code=0
+        tag_oracle_out=$( (cd "$FIXTURE_2" && git checkout -q v0.13.0 && bash tools/ci_version_sync_check.sh; rc=$?; git checkout -q main; exit $rc) 2>&1 ) || tag_oracle_code=$?
+        if [ "$tag_oracle_code" -ne 0 ]; then
+            echo "  FAIL: ci_version_sync_check.sh failed on detached tag v0.13.0 produced by release.sh"
+            echo "$tag_oracle_out" | sed 's/^/    /'
             FAILURES=$((FAILURES + 1))
         fi
     fi
@@ -407,7 +427,7 @@ else
     fi
 
     if [ "$FAILURES" -eq 0 ]; then
-        echo "  ok (all files updated, commit sha unchanged, tags & sync check clean)"
+        echo "  ok (all files updated, tag manifest placeholder/date + post-tag SHA verified, tags & sync checks clean)"
     fi
 fi
 

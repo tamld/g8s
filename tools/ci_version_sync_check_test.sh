@@ -339,6 +339,99 @@ run_test_with_output \
     "Chocolatey download URL drift" \
     bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_DYNAMIC"
 
+# (p) fixture: tagged checkout with latest_release.commit = see-g8s-version-ldflags passes check (#939)
+FIXTURE_TAG_PLACEHOLDER="$FIXTURE_ROOT/tag_placeholder"
+mkdir -p "$FIXTURE_TAG_PLACEHOLDER/cmd/g8s"
+(
+    cd "$FIXTURE_TAG_PLACEHOLDER"
+    git init -q -b main
+    git config user.name "Test Runner"
+    git config user.email "test@example.com"
+    cat > "cmd/g8s/version.go" <<'EOF'
+package main
+var (
+	Version   = "0.23.0"
+	Commit    = "testcommit"
+	BuildTime = "testtime"
+)
+EOF
+    cat > "CHANGELOG.md" <<'EOF'
+# Changelog
+## [0.23.0] - 2026-10-01
+- Tagged release
+EOF
+    cat > "manifest.json" <<'EOF'
+{
+  "version": "0.23.0",
+  "latest_release": {
+    "tag": "v0.23.0",
+    "commit": "see-g8s-version-ldflags",
+    "date": "2026-10-01"
+  }
+}
+EOF
+    git add cmd/g8s/version.go CHANGELOG.md manifest.json
+    GIT_AUTHOR_DATE="2026-10-01T12:00:00Z" GIT_COMMITTER_DATE="2026-10-01T12:00:00Z" \
+        git commit -q -m "chore: release 0.23.0"
+    GIT_COMMITTER_DATE="2026-10-01T12:00:00Z" git tag -a "v0.23.0" -m "Release 0.23.0"
+)
+run_test_with_output \
+    "(p) tagged commit with see-g8s-version-ldflags passes check" 0 \
+    "valid on tagged commit" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_TAG_PLACEHOLDER"
+
+# (q) fixture: post-tag commit leaving latest_release.commit = see-g8s-version-ldflags fails check (#939)
+FIXTURE_POST_TAG_STALE="$FIXTURE_ROOT/post_tag_stale"
+cp -R "$FIXTURE_TAG_PLACEHOLDER" "$FIXTURE_POST_TAG_STALE"
+(
+    cd "$FIXTURE_POST_TAG_STALE"
+    GIT_AUTHOR_DATE="2026-10-02T12:00:00Z" GIT_COMMITTER_DATE="2026-10-02T12:00:00Z" \
+        git commit --allow-empty -q -m "post-tag commit without manifest commit update"
+)
+run_test_with_output \
+    "(q) post-tag commit leaving see-g8s-version-ldflags fails check" 1 \
+    "must be updated to" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_POST_TAG_STALE"
+
+# (r) fixture: chocolatey fail-closed placeholder guard passes; extra non-canonical statement fails (#939)
+FIXTURE_CHOCO_GUARD="$FIXTURE_ROOT/choco_guard"
+setup_fixture_repo "$FIXTURE_CHOCO_GUARD" "0.23.0" "0.23.0"
+mkdir -p "$FIXTURE_CHOCO_GUARD/packaging/chocolatey/tools"
+cat > "$FIXTURE_CHOCO_GUARD/packaging/chocolatey/g8s.nuspec" <<'EOF'
+<package><metadata><id>g8s</id><version>0.23.0</version></metadata></package>
+EOF
+cat > "$FIXTURE_CHOCO_GUARD/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+# TEMPLATE (demand-gated)
+$toolsDir = "$(Split-Path -Parent $MyInvocation.MyCommand.Definition)"
+$url = 'https://github.com/tamld/g8s/releases/download/v0.23.0/g8s_0.23.0_windows_amd64.zip'
+$checksum = '<from checksums.txt>'
+if ($checksum -eq '<from checksums.txt>') {
+  throw 'Chocolatey template checksum placeholder must be replaced'
+}
+$packageArgs = @{
+  packageName    = 'g8s'
+  unzipLocation  = $toolsDir
+  url            = $url
+  checksum       = $checksum
+  checksumType   = 'sha256'
+}
+Install-ChocolateyZipPackage @packageArgs
+EOF
+run_test_with_output \
+    "(r1) chocolatey canonical fail-closed placeholder guard passes check" 0 \
+    "Packaging templates match codebase version" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_GUARD"
+
+FIXTURE_CHOCO_GUARD_BAD="$FIXTURE_ROOT/choco_guard_bad"
+cp -R "$FIXTURE_CHOCO_GUARD" "$FIXTURE_CHOCO_GUARD_BAD"
+cat >> "$FIXTURE_CHOCO_GUARD_BAD/packaging/chocolatey/tools/chocolateyinstall.ps1" <<'EOF'
+Write-Host "unexpected"
+EOF
+run_test_with_output \
+    "(r2) chocolatey extra non-canonical statement still fails check" 1 \
+    "statement after Install-ChocolateyZipPackage" \
+    bash "$CHECK_SCRIPT" --root "$FIXTURE_CHOCO_GUARD_BAD"
+
 if [ "$FAILURES" -gt 0 ]; then
     echo ""
     echo "CI VERSION SYNC CHECK TEST SUITE: $FAILURES failure(s)."

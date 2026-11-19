@@ -199,26 +199,26 @@
     demo: 'bin/g8s receipt issue --path "src/**" --ttl 0'
     source: docs/user-guide/configuration.md
 
-- id: claim-permissions-three-profiles
-  claim: "Three built-in permission profiles active: read_only, automation_read, workspace_write"
+- id: claim-permissions-four-profiles
+  claim: "Four built-in permission profiles active: read_only, automation_read, supplied_text, workspace_write"
   evidence:
     test: TestListPermissionsMarksWorkspaceWriteDisabled
     eval: ""
     demo: "bin/g8s permissions"
     source: docs/user-guide/configuration.md
 
-- id: claim-roles-six-builtins
-  claim: "Six built-in roles active: collector, mcp-mapper, scout, summarizer, test-runner, verifier"
+- id: claim-roles-ten-builtins
+  claim: "Ten built-in roles active: analyst, collector, implementer, mcp-mapper, researcher, scout, sec-auditor, summarizer, test-runner, verifier"
   evidence:
     test: TestListRolesReturnsAllRegisteredProfiles
     eval: ""
     demo: "bin/g8s roles"
     source: docs/user-guide/configuration.md
 
-- id: claim-mcp-server-eleven-tools
-  claim: "Stdio MCP JSON-RPC server registers eleven tools"
+- id: claim-mcp-server-registered-tools
+  claim: "Stdio MCP JSON-RPC server registers all 23 canonical tools"
   evidence:
-    test: TestToolsListExposesExactlyTheSpecElevenTools
+    test: TestToolsListExposesAllRegisteredTools
     eval: ""
     demo: "bin/g8s mcp --help"
     source: docs/user-guide/mcp-tools.md

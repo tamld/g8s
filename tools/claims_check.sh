@@ -4,13 +4,14 @@
 #
 # Verifies docs/claims.yml against live code and artifacts:
 #   1. For each bound claim, 'test:' must match a 'func <Name>(' in *_test.go.
-#   2. For each claim, 'source:' must resolve to an existing file if specified.
-#   3. Every claim MUST carry either a test binding or a demo command.
+#   2. With --test-report <file>, each bound test must also PASS in go test -v output.
+#   3. For each claim, 'source:' must resolve to an existing file if specified.
+#   4. Every claim MUST carry either a test binding or a demo command.
 #      A claim with neither fails the check (the no-ambiguity standard).
-#   4. Demo commands are recorded, not executed, by the checker.
+#   5. Demo commands are recorded, not executed, by the checker.
 #
 # Usage:
-#   tools/claims_check.sh [--file <path>] [--root <dir>]
+#   tools/claims_check.sh [--file <path>] [--root <dir>] [--test-report <path>]
 #
 # Exit codes:
 #   0: all bound claims verified
@@ -24,6 +25,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CLAIMS_FILE=""
 ROOT_DIR=""
+TEST_REPORT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,8 +45,16 @@ while [ $# -gt 0 ]; do
             ROOT_DIR="$2"
             shift 2
             ;;
+        --test-report)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --test-report requires a file path" >&2
+                exit 2
+            fi
+            TEST_REPORT="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [--file <path>] [--root <dir>]"
+            echo "Usage: $0 [--file <path>] [--root <dir>] [--test-report <path>]"
             exit 0
             ;;
         -*)
@@ -76,6 +86,11 @@ if [ ! -f "$CLAIMS_FILE" ]; then
     exit 2
 fi
 
+if [ -n "$TEST_REPORT" ] && [ ! -f "$TEST_REPORT" ]; then
+    echo "ERROR: test report file not found: $TEST_REPORT" >&2
+    exit 2
+fi
+
 clean_val() {
     printf '%s\n' "$1" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
@@ -83,10 +98,11 @@ clean_val() {
 BOUND_COUNT=0
 UNBOUND_COUNT=0
 BROKEN_COUNT=0
+RUNTIME_PROVEN_COUNT=0
 
 current_id=""
 current_claim=""
-current_test=""
+current_tests=()
 current_eval=""
 current_demo=""
 current_source=""
@@ -106,12 +122,20 @@ validate_claim() {
         RECORDED_DEMOS+=("${current_id}: ${current_demo}")
     fi
 
-    # 1. Verify test binding or demo command (the no-ambiguity standard)
-    if [ -n "$current_test" ]; then
-        if ! grep -rn --exclude-dir=.git --exclude-dir=dist --include="*_test.go" "func ${current_test}(" "$ROOT_DIR" >/dev/null 2>&1; then
-            BROKEN_MESSAGES+=("claim ${current_id}: test '${current_test}' not found (missing 'func ${current_test}(' in *_test.go)")
-            claim_broken=1
-        fi
+    # 1. Verify test binding(s) or demo command (the no-ambiguity standard)
+    if [ "${#current_tests[@]}" -gt 0 ]; then
+        local t
+        for t in "${current_tests[@]}"; do
+            if ! grep -rn --exclude-dir=.git --exclude-dir=dist --include="*_test.go" "func ${t}(" "$ROOT_DIR" >/dev/null 2>&1; then
+                BROKEN_MESSAGES+=("claim ${current_id}: test '${t}' not found (missing 'func ${t}(' in *_test.go)")
+                claim_broken=1
+            elif [ -n "$TEST_REPORT" ]; then
+                if grep -Eq "^[[:space:]]*--- FAIL:[[:space:]]+${t}([[:space:]]|$)" "$TEST_REPORT" || ! grep -Eq "^[[:space:]]*--- PASS:[[:space:]]+${t}([[:space:]]|$)" "$TEST_REPORT"; then
+                    BROKEN_MESSAGES+=("claim ${current_id}: test '${t}' did not PASS in test report '${TEST_REPORT}'")
+                    claim_broken=1
+                fi
+            fi
+        done
     elif [ -n "$current_eval" ]; then
         : # eval binding specified
     elif [ -n "$current_demo" ]; then
@@ -132,10 +156,13 @@ validate_claim() {
 
     if [ "$claim_broken" -ne 0 ]; then
         BROKEN_COUNT=$((BROKEN_COUNT + 1))
-    elif [ "$current_unbound" -eq 1 ] || [ -z "$current_test" ]; then
+    elif [ "$current_unbound" -eq 1 ] || [ "${#current_tests[@]}" -eq 0 ]; then
         UNBOUND_COUNT=$((UNBOUND_COUNT + 1))
     else
         BOUND_COUNT=$((BOUND_COUNT + 1))
+        if [ -n "$TEST_REPORT" ]; then
+            RUNTIME_PROVEN_COUNT=$((RUNTIME_PROVEN_COUNT + 1))
+        fi
     fi
 }
 
@@ -151,7 +178,7 @@ while IFS= read -r line || [ -n "$line" ]; do
             validate_claim
             current_id=$(clean_val "${trimmed#- id:}")
             current_claim=""
-            current_test=""
+            current_tests=()
             current_eval=""
             current_demo=""
             current_source=""
@@ -161,7 +188,10 @@ while IFS= read -r line || [ -n "$line" ]; do
             current_claim=$(clean_val "${trimmed#claim:}")
             ;;
         "test:"*)
-            current_test=$(clean_val "${trimmed#test:}")
+            test_val=$(clean_val "${trimmed#test:}")
+            if [ -n "$test_val" ]; then
+                current_tests+=("$test_val")
+            fi
             ;;
         "eval:"*)
             current_eval=$(clean_val "${trimmed#eval:}")
@@ -183,7 +213,7 @@ validate_claim
 
 TOTAL_CLAIMS=$((BOUND_COUNT + UNBOUND_COUNT + BROKEN_COUNT))
 
-if [ ${#BROKEN_MESSAGES[@]} -gt 0 ]; then
+if [ "${#BROKEN_MESSAGES[@]}" -gt 0 ]; then
     echo "Broken claim bindings found in $CLAIMS_FILE:" >&2
     for msg in "${BROKEN_MESSAGES[@]}"; do
         echo "  - $msg" >&2
@@ -191,6 +221,9 @@ if [ ${#BROKEN_MESSAGES[@]} -gt 0 ]; then
 fi
 
 echo "SCORECARD: ${BOUND_COUNT} bound, ${UNBOUND_COUNT} unbound, ${BROKEN_COUNT} broken (total ${TOTAL_CLAIMS} claims)"
+if [ -n "$TEST_REPORT" ]; then
+    echo "RUNTIME_PROVEN: ${RUNTIME_PROVEN_COUNT}/${BOUND_COUNT} bound claims verified against ${TEST_REPORT}"
+fi
 
 if [ "$BROKEN_COUNT" -gt 0 ]; then
     exit 1
