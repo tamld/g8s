@@ -4,7 +4,7 @@
 
 # g8s (The Gatekeepers) — Bản tiếng Việt
 
-> **Harness thực thi đa tầng zero-trust bằng binary tĩnh thuần Go (<25MB, không CGO) cho các AI agent CLI worker — kết hợp sandbox nhân OS (`Seatbelt` / `bwrap`+Landlock / `JobObject`), biên nhận mật mã Ed25519, và tường lửa Git worktree.**  
+> **Hạ tầng Thực thi Zero-Trust & Tự cải tiến Có Kiểm chứng cho AI Agent tự hành (<20MB binary tĩnh thuần Go đã strip theo từng kiến trúc) — kết hợp sandbox nhân OS (`Seatbelt` / `bwrap`+Landlock / `JobObject`), biên nhận mật mã Ed25519, và tường lửa Git worktree.**  
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việc trên máy cục bộ, việc trao toàn quyền shell trực tiếp dễ dẫn đến sai sót nghiêm trọng: xóa nhầm file, sửa ngoài phạm vi cho phép, bỏ sót thay đổi, vòng lặp vô hạn và rò rỉ biến môi trường.
 
-`g8s` giải quyết bài toán này bằng cách thiết lập **ranh giới zero-trust đối xứng** giữa mô hình tư duy chiến lược ("Brain") và các tiến trình thực thi cơ học ("Muscle"). Được đóng gói dưới dạng một binary tĩnh thuần Go duy nhất (zero CGO), `g8s` cách ly thực thi vào các Git worktree độc lập, kiểm soát quyền sửa file bằng biên nhận có phạm vi, và niêm phong bằng chứng bền vững.
+`g8s` không giả định AI luôn đúng; thay vào đó, hệ thống chứng minh rằng ngay cả khi agent sai sót, bị thao túng prompt hay tự sửa hành vi, các ranh giới an toàn, kiểm chứng độc lập và khả năng phục hồi nguyên tử vẫn được giữ vững — agent được thử nghiệm và tự cải tiến trong giới hạn xác định nằm ngoài suy luận LLM, nhưng không bao giờ được tự cấp quyền hoặc nới lỏng luật bảo vệ ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)). Đóng gói thành một binary tĩnh thuần Go duy nhất (zero CGO), `g8s` cách ly worker vào Git worktree riêng, ép biên nhận sửa file ký Ed25519 và niêm phong bằng chứng (các hạng mục siết chặt tiếp theo đang được theo dõi tại Epic [#934](https://github.com/tamld/g8s/issues/934)).
 
 ### Khi không có g8s vs. Khi có g8s
 
@@ -36,7 +36,7 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 | :--- | :--- | :--- |
 | **Quyền hạn thực thi** | Trao toàn quyền máy chủ; worker có thể can thiệp bất kỳ đâu. | Cấu hình quyền theo role chặt chẽ (`read_only`, `workspace_write`). |
 | **An toàn hệ thống file** | Thay đổi file trực tiếp làm hỏng working tree chính. | Biên nhận `WriteReceipt` ký Ed25519 (`rc1:`) dùng một lần, sandbox ghi ở nhân OS trên Unix (`Seatbelt` / `bwrap` / Landlock) và tường lửa diff worktree hậu kiểm (`VerifyWorktreeDiffScope`). |
-| **Cách ly tiến trình** | Tiến trình con sót lại dưới dạng zombie khi crash; rò rỉ khóa API môi trường. | Lọc bí mật môi trường (`ScrubEnv`) + cô lập process group / JobObject OS (`Setpgid`, `Pdeathsig` với Landlock, Win32 `JobObject`). Xem [Ma trận Containment 3-OS](docs/security/containment-matrix.md). |
+| **Cách ly tiến trình** | Tiến trình con sót lại dưới dạng zombie khi crash; rò rỉ khóa API môi trường. | Lọc bí mật môi trường theo allowlist từng provider (`ScrubEnv`) + cô lập process group / JobObject OS (`Setpgid`, `Pdeathsig` với Landlock, Win32 `JobObject`). Xem [Ma trận Containment 3-OS](docs/security/containment-matrix.md). |
 | **Tính bền vững của task** | Lưu trong bộ nhớ agent tạm bợ; mất khi ngắt kết nối. | Hàng đợi SQLite WAL với khóa Compare-And-Swap (CAS) nguyên tử. |
 | **Truy cập Gateway LLM** | Dùng script Python chắp vá hoặc nền tảng cloud đóng kín. | Tiêu thụ gateway hướng cấu hình thuần Go (`g8s llm-call`, `9router`, OpenAI, Anthropic). |
 | **Ngữ cảnh Supervisor** | Bị tràn ngập bởi hàng megabyte log thô kiểm thử / CI. | Tường lửa thông tin không suy hao (`RoundReceiptSchema` lọc nhiễu, giữ nguyên lỗi). |
@@ -45,7 +45,7 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 
 | Thuật ngữ | Định nghĩa kiến trúc |
 | :--- | :--- |
-| **Brain (`F0`)** | Orchestrator tầng cao (Claude 3.7 Sonnet / Opus, GPT-4o, Codex) giữ quyền tư duy và commit Git. |
+| **Brain (`F0`)** | Orchestrator tầng cao (`claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) giữ quyền tư duy chiến lược và commit Git. |
 | **Worker (`F1`)** | Tiến trình cơ học (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) hoặc gateway consumer (`9router`, OpenAI, Anthropic) thực thi gói việc được giao. |
 | **Subagent (`F2`)** | Subagent tạm thời được sinh đệ quy bởi F1, chia sẻ chung worktree và biên nhận của F1 (`F2 ⊆ F1 ⊆ F0`). |
 | **Task** | Đơn vị công việc nguyên tử, bền vững nằm trong hàng đợi SQLite WAL kèm ngân sách và mã chống trùng. |
@@ -92,7 +92,7 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 
 ## 4. Cài đặt
 
-`g8s` được phân phối dưới dạng một file binary tĩnh duy nhất (<25MB), không yêu cầu cài thêm runtime nào khác. Chọn một đường dẫn cài đặt dưới đây; các bản phát hành cũng kèm `checksums.txt`, `checksums.txt.sigstore.json`, và file SPDX SBOM cùng với từng nén ([GitHub Releases](https://github.com/tamld/g8s/releases)).
+`g8s` được phân phối dưới dạng một file binary tĩnh thuần Go (<20MB bản release đã strip theo từng kiến trúc), không cần CGO hay thư viện runtime dùng chung (yêu cầu `git` cho worktree isolation; tùy chọn `bwrap` trên Linux). Chọn một đường dẫn cài đặt dưới đây; các bản phát hành cũng kèm `checksums.txt`, `checksums.txt.sigstore.json`, và file SPDX SBOM cùng với từng gói nén ([GitHub Releases](https://github.com/tamld/g8s/releases)).
 
 ### Cài đặt một dòng (khuyên dùng)
 
@@ -335,7 +335,8 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | [Chuẩn Bảo mật OWASP Agentic, SLSA & SBOM](docs/security/owasp-agentic-slsa-sbom.md) | Ánh xạ OWASP Top 10 cho LLM/Agent (2025), SLSA v1.0 và SPDX SBOM. |
 | [Ma trận Containment & Threat Model 3-OS](docs/security/containment-matrix.md) | Ranh giới thực thi nhân OS vs. Ed25519/CAS vs. Tường lửa diff worktree, chế độ suy giảm và hướng dẫn tái lập benchmark offline. |
 | [Khôi phục Phiên bản (Rollback)](docs/release/ROLLBACK.md) | Khôi phục binary bản phát hành trước khi nâng cấp thất bại. |
-| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0041 (kèm ghi chú tombstone). |
+| [Kim chỉ nam TRUST & Tự cải tiến (ADR-0042)](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md) | 7 nguyên tắc TRUST (gồm Non-Self-Certifying), Trust Root ngoài suy luận LLM, các cổng `TRUST-G1`–`TRUST-G6`, mediated vs. enforced isolation và ranh giới tự chủ 2 tầng. |
+| [Sổ ghi Quyết định (ADR)](docs/decisions/) | Lịch sử các quyết định kiến trúc từ ADR-0001 đến ADR-0042 (kèm ghi chú tombstone). |
 
 ### 4 trụ cột cổng chất lượng & AppSec
 
@@ -358,6 +359,9 @@ bash tools/assurance_benchmark.sh
 
 Chi tiết ma trận 3 hệ điều hành (`macOS`, `Linux`, `Windows`) và các giới hạn không cam kết: [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md).
 
+> [!NOTE]
+> **Ranh giới `v0.25.0` & Gia cố Đang mở**: `v0.25.0` chứng minh cơ chế cách ly nhiều tầng trên một máy với macOS/Linux (`kernel_enforced`) và Windows (`job_object_env_scrubbed` cách ly process tree + lọc env, chưa có filesystem ACL cùng UID). Các hạng mục gia cố tiếp theo cho tường lửa diff `-z` thống nhất (`#935`), cờ fail-closed `--require-kernel-sandbox` (`#936`), và supply-chain installer (`#937`) được theo dõi công khai tại Epic [#934](https://github.com/tamld/g8s/issues/934).
+
 ---
 
 ## 9. Lộ trình, Cấu trúc dự án & Giấy phép
@@ -376,9 +380,13 @@ Mọi mốc phát triển được nghiệm thu dựa trên bằng chứng kiể
 | **`v0.23.0`** (2026-11-08) | **Gia cố Cô lập, Cơ giới hóa SSoT & Phản tỉnh Quy trình** ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md), [ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), [ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)): hàng rào ghi gắn claim đầu-cuối, `RT-MESH v1.1` (`A1..A5`), khép kín chu trình phản xạ `D-09` (`SENSE->JUDGE->ACT`), sổ cái liêm chính dogfooding, cơ giới hóa kiểm định SSoT và proxy git-commit cho worker. | **Xong** |
 | **`v0.24.0`** (2026-11-15) | **Tiếp nhận Model Khai báo, Control Plane Trung lập Adapter & Đóng gói Zero-Implicit-Default** (`DELTA-48`, [#893](https://github.com/tamld/g8s/issues/893), [#894](https://github.com/tamld/g8s/issues/894), [#902](https://github.com/tamld/g8s/issues/902), [#904](https://github.com/tamld/g8s/pull/904), [#905](https://github.com/tamld/g8s/issues/905), [#906](https://github.com/tamld/g8s/issues/906), [#907](https://github.com/tamld/g8s/issues/907)): Onboarding Gemini 4 Element Series & catalog `.g8s/agent-models.yml` v3 (`status`, `replacement`, `sunset_at`), điều phối adapter-neutral đối xứng qua `9router`/`opencode`/`codex`/`claude`/`cursor`/`agy`, `ResolveProviderDefaultModel` dọn dẹp mặc định `gemini-3.8-*` lỗi thời, kế thừa timeout profile catalog trên triple tường minh, fallback `g8s verify` nhận biết scope, stamping phiên bản MCP server động, skill xác thực cơ giới hóa `gate_command` SSoT, và che giấu DLP lỗi probe RFC1918. | **Xong** |
 | **`v0.25.0`** (2026-11-18, Hiện tại) | **Sandbox Cấp Nhân 3 Hệ Điều Hành, Biên Nhận Mật Mã Ed25519 & Benchmark Kiểm Định Offline** (`DELTA-49`, Epic [#923](https://github.com/tamld/g8s/issues/923), [#916](https://github.com/tamld/g8s/issues/916)–[#922](https://github.com/tamld/g8s/issues/922)): Cách ly subprocess bằng macOS Seatbelt / Linux `bwrap`+Landlock / Windows `JobObject` kèm `ScrubEnv` (`internal/sandbox`), chữ ký Ed25519 cho `WriteReceipt` & `StratumCharter` cùng chuẩn quyền `0600`/`0700` (`internal/signing`, `internal/pathutil`), khóa cổng `SUPERVISOR_ACCEPTED` cho `deliver` + `ReviewReceipt`/`RealReviewer` fail-closed + tường lửa git rename `-z`, E2E fault-injection `tools/faultworker` 3 HĐH + probe `os_sandbox` trong `g8s doctor`, kiểm toán feature `19/19 RUNTIME_PROVEN` + 14 ranh giới trust-boundary + tự động leo thang `Lane S`, và bộ benchmark offline `as-001`..`as-005` kèm [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md). | **Xong** |
-| **`v0.30.0`** (Kế hoạch) | **Proxy Phân quyền MCP F0/F1/F2 & Vận hành Thực chiến Offer Đa Repo** ([#672](https://github.com/tamld/g8s/issues/672); các adapter CLI ngoài và tường lửa worktree `read_only` của `DELTA-39` đã phát hành từ `v0.20.0+`): proxy giới hạn năng lực MCP theo biên nhận trong worktree F1/F2 và kiểm chứng giữ chân Offer Bundle 90 ngày trên đa repo. | **Kế hoạch** |
+| **`v0.25.1`** (Kế hoạch) | **Gia cố P0 Trust Root, Diff Firewall, Strict Sandbox & Supply-Chain** (Epic [#934](https://github.com/tamld/g8s/issues/934), [#935](https://github.com/tamld/g8s/issues/935)–[#939](https://github.com/tamld/g8s/issues/939)): hợp nhất `VerifyWorktreeDiffScope` dùng `-z` & bỏ miễn trừ `.g8s`, thêm cờ fail-closed `--require-kernel-sandbox`, thu hẹp allowlist env `9router`, sửa `install.sh` (`darwin_all`, bỏ fallback `v0.1.0`, hỗ trợ ép kiểm Cosign), chứng minh runtime cho `claims_check.sh --test-report`, và đồng bộ `manifest.json` tại release tag. | **Kế hoạch** |
+| **`v0.26.0`** (Kế hoạch) | **Kiểm định Độc lập P1, Đồng bộ Năng lực Provider & Stress WAL** ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md), [#940](https://github.com/tamld/g8s/issues/940)–[#943](https://github.com/tamld/g8s/issues/943)): tách `ProcessTransport` vs `RequestTransport` + hủy HTTP `Handle.Cancel()` bất đồng bộ, cổng năng lực `agent-models.v2`, bộ contract test offline cho 8 CLI + HTTP gateway, E2E tự dọn orphan POSIX sau `SIGKILL`, E2E multi-coordinator WAL fencing trên cùng host, hợp đồng `PolicyEnforcementReport` thống nhất, holdout eval bất biến ngoài worktree, và cổng `TRUST-G6` chống đốt quota / thăng cấp tri thức cho cả nhánh `PASS` & `FAIL`. | **Kế hoạch** |
+| **`v0.30.0`** (Kế hoạch) | **Proxy Phân quyền MCP/Network F0/F1/F2, Vòng Tự cải tiến Có Kiểm soát v1 & Offer Đa Repo** ([#672](https://github.com/tamld/g8s/issues/672), [ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)): proxy giới hạn năng lực MCP/HTTP trong worktree F1/F2 (mediated access; enforced network isolation khi OS/container chặn kết nối trực tiếp), vòng tự cải tiến canary `Tier A` dưới bộ cổng `TRUST-G1`–`TRUST-G6`, và kiểm chứng giữ chân Offer Bundle 90 ngày trên đa repo. | **Kế hoạch** |
 | **`v0.40.0`** (Kế hoạch) | **Cổng Tiền thực thi Mật mã học & Đồng thuận Phản biện Đa tác tử**: biên nhận nghiên cứu CVE/NVD & phản biện Socratic bắt buộc trước khi cấp `WriteReceipt` cùng chứng thực SLSA/SBOM. | **Kế hoạch** |
-| **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0` và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **0 lỗi P0 lọt lưới** và **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
+| **`v1.0.0`** (GA Nghiệm thu Bằng chứng) | **Khóa Chuẩn Sản xuất GA**: nghiệm thu khi hoàn tất `v0.30.0` + `v0.40.0`, vượt qua toàn bộ cổng `TRUST-G1`–`TRUST-G6` của `ADR-0042` (`0` thoát ranh giới nghiêm trọng, `0` tự cấp quyền) và vượt qua **$\ge 50$ lượt thực thi thực tế có biên nhận** trên cả 4 hồ sơ miền chuẩn của Offer Bundle (`knowledge`, `security`, `infra`, `utility`) với **$\ge 90\%$ First-Pass Yield**. | **Kế hoạch** |
+
+> **Phạm vi & Non-Goals (`v0.25`–`v0.40`)**: `g8s` tập trung vào kiến trúc single-host SQLite WAL và liên hợp charter đọc-một-chiều `S1 -> S2`; đồng thuận phân tán đa node (Raft/network partition) và tường lửa mạng nhân Linux yêu cầu quyền root (eBPF/iptables) nằm ngoài phạm vi mục tiêu.
 
 ### Cấu trúc dự án
 
