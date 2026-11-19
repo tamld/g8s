@@ -29,7 +29,7 @@ func TestExperientialAutopsyExtractsFailureToFixAndBlocksSecrets(t *testing.T) {
 	}
 	defer adapter.Close()
 
-	gate := reflex.NewReflexGate()
+	gate := reflex.NewReflexGate(reflex.WithEnvFile(false), reflex.WithKeys([]string{}))
 	adapter.SetGateSensor(func(nakedPayload string) (string, error) {
 		return gate.EvaluateMemoryEntry(ctx, nakedPayload)
 	})
@@ -264,6 +264,11 @@ func TestRecordCrashAutopsy_AndLessonsBlockedRepeatPruning(t *testing.T) {
 		t.Fatalf("NewLocalSQLiteMemoryAdapter: %v", err)
 	}
 	defer adapter.Close()
+
+	gate := reflex.NewReflexGate(reflex.WithEnvFile(false), reflex.WithKeys([]string{}))
+	adapter.SetGateSensor(func(nakedPayload string) (string, error) {
+		return gate.EvaluateMemoryEntry(ctx, nakedPayload)
+	})
 
 	// 1. Sudden-Death CrashAutopsyHook (<200ms) with secret scrubbing (#695)
 	crashRep, err := adapter.RecordCrashAutopsy(ctx, CrashContext{
