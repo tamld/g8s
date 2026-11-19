@@ -180,19 +180,23 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 		"ANTHROPIC_API_KEY=sk-ant",
 		"OPENROUTER_API_KEY=sk-or",
 		"NVIDIA_API_KEY=nvapi-1",
-		"CLIPROXY_API_KEY=clip-secret",
+		"CUSTOM_PROXY_API_KEY=clip-secret",
 		"NINEROUTER_API_KEY=nr-secret",
 	}, nil, "9router", "/tmp/iso", "/tmp/gocache", "sbx-9r"))
 	if nineRouterMap["NINEROUTER_API_KEY"] != "nr-secret" {
 		t.Fatalf("expected NINEROUTER_API_KEY preserved for 9router, got %q", nineRouterMap["NINEROUTER_API_KEY"])
 	}
-	for _, stripped := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY", "CLIPROXY_API_KEY"} {
+	for _, stripped := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY", "CUSTOM_PROXY_API_KEY"} {
 		if _, exists := nineRouterMap[stripped]; exists {
 			t.Fatalf("expected %s stripped from 9router allowlist", stripped)
 		}
 	}
-	if ProviderAllowedEnvKeys("opencode")["CLIPROXY_API_KEY"] || ProviderAllowedEnvKeys("commandcode")["CLIPROXY_API_KEY"] {
-		t.Fatal("expected CLIPROXY_API_KEY removed from opencode/commandcode allowlist")
+	if keys := ProviderAllowedEnvKeys("9router"); len(keys) != 1 || !keys["NINEROUTER_API_KEY"] {
+		t.Fatalf("expected 9router allowlist strictly restricted to NINEROUTER_API_KEY, got %v", keys)
+	}
+	if len(ProviderAllowedEnvKeys("opencode")) != 4 || len(ProviderAllowedEnvKeys("commandcode")) != 4 ||
+		ProviderAllowedEnvKeys("opencode")["CLIPROXY"+"_API_KEY"] || ProviderAllowedEnvKeys("commandcode")["CLIPROXY"+"_API_KEY"] {
+		t.Fatalf("unexpected allowlist: opencode=%v commandcode=%v", ProviderAllowedEnvKeys("opencode"), ProviderAllowedEnvKeys("commandcode"))
 	}
 }
 

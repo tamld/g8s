@@ -21,9 +21,9 @@
    - `auth_env`: optional environment variable carrying the API key/token
    - `headers`: optional `map[string]string` of custom HTTP headers
    - `slots`: concurrency limit (`>= 1`)
-   - `allow_unlisted_models`: optional boolean allowing arbitrary upstream model IDs (e.g., `nvidia/minimaxai/minimax-m3`, `cc/claude-sonnet-5`, `cx/gpt-5.6-sol-xhigh`) when the task explicitly specifies `--provider <name>`
+   - `allow_unlisted_models`: optional boolean allowing arbitrary upstream model IDs (e.g., `nvidia/minimaxai/minimax-m3`, `openrouter/anthropic/claude-sonnet-4.5`) when the task explicitly specifies `--provider <name>`
    - `disable_queue_exec`: optional boolean to disable queue-path execution for an `api_call` entry
-   - `models`: array of `ModelEntry` descriptors (including `9router` combos `reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, or prefix patterns like `nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`).
+   - `models`: array of `ModelEntry` descriptors (including optional Layer 2 gateway combos `reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, or official prefix patterns like `nvidia/*`, `openrouter/*`).
 
 ### R2 — Multi-Protocol HTTP Execution (`internal/provider`)
 1. **`openai` / `9router` Chat Completions Protocol**:

@@ -68,6 +68,6 @@ Integrity and honesty are core operating laws of `g8s`:
 ## 5. Two-Layer Separation Rule (Public Mechanism vs. Operator Policy)
 
 To guarantee portability and prevent accidental leakage of private infrastructure:
-- **Layer 1 — Public Repository Mechanism**: All files tracked in Git declare only generic protocols (`openai`, `anthropic`, `9router`), standardized model combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`), standard wildcard patterns (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`), and localhost defaults (`http://127.0.0.1:20128/v1`).
+- **Layer 1 — Public Repository Mechanism**: All files tracked in Git declare only generic protocols (`openai`, `anthropic`, and OpenAI/Anthropic-compatible HTTP endpoints), official vendor prefixes (`nvidia/*`, `openrouter/*`), and localhost templates (`http://127.0.0.1:20128/v1`). Optional personal gateway combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) are declared in Layer 2.
 - **Layer 2 — Local Operator Policy**: Specific LAN IP addresses, private cluster hosts, API authentication tokens, and custom homelab routing combos reside strictly in untracked local configurations (`~/.config/g8s/providers.json` and `~/.agents/skills/`).
 - Never commit private LAN IPs, internal hostnames, or proprietary combo definitions to tracked repository files.

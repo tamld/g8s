@@ -59,7 +59,7 @@ Method: evidence-first — every finding cites file:line or issue/PR; claims-vs-
 ## 4. Campaign evidence informing this review
 
 - C13/C14/C15 (collision matrix, plans/261104-g8s-product-site/) — read_only escape, one-subagent-one-repo, header parity
-- 9router combo audit (2026-11-07, #786): 8/8 core combos live; cu/* protocol-bound; NIM routing ids double-prefix — registries drifted from reality and only live probes caught it (F6/R2 pattern)
+- 9router combo audit (2026-11-07, #786): 8/8 core combos live; IDE-proxy combos protocol-bound; NIM routing ids double-prefix — registries drifted from reality and only live probes caught it (F6/R2 pattern)
 - Stale-binary lesson: a local gate ran against a pre-merge binary and passed — R2's claims-vs-wiring class
 - Windows JSON-escape assertion bug (#785): platform-fair assertions law
 

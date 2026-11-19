@@ -270,7 +270,7 @@ func RunT3Verification(opts T3VerifyOptions) (T3Verdict, error) {
 
 // ExtractModelFamily maps a concrete model identifier or provider token to its
 // canonical foundation model family (#662). Generic proxy/combo names ("9router",
-// "cliproxyapi", "reasoning-high", etc.) return "" because their lineage is
+// "custom-gateway", "reasoning-high", etc.) return "" because their lineage is
 // only known after inspecting model_resolved.
 func ExtractModelFamily(modelOrProvider string) string {
 	s := strings.ToLower(strings.TrimSpace(modelOrProvider))

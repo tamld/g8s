@@ -36,7 +36,7 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 | **Filesystem Safety** | Unchecked file mutations directly corrupt working tree. | Ed25519-signed single-use `WriteReceipt`s (`rc1:`), OS write-scope jail (`Seatbelt` / `bwrap` / Landlock on Unix), and post-run Git worktree diff firewall (`VerifyWorktreeDiffScope`). |
 | **Process Containment** | Child processes survive crashes as orphan zombies; host API keys leak into subprocess env. | Ambient secret scrubbing with provider-scoped allowlists (`ScrubEnv`) + OS process-group/job isolation (`Setpgid`, `Pdeathsig` under Landlock, Win32 `JobObject`). See [3-OS Containment Matrix](docs/security/containment-matrix.md). |
 | **Task Durability** | Stored in ephemeral agent memory; lost on disconnect. | SQLite WAL task queue with atomic Compare-And-Swap (CAS) leases. |
-| **LLM Gateway Access** | Ad-hoc Python scripts or proprietary closed agent clouds. | Universal config-driven consumer (`g8s llm-call`, `9router`, OpenAI, Anthropic). |
+| **LLM Gateway Access** | Ad-hoc Python scripts or proprietary closed agent clouds. | Universal config-driven consumer (`g8s llm-call`, standard OpenAI/Anthropic-compatible HTTP endpoints, plus optional Layer 2 self-hosted gateways in `~/.config/g8s/providers.json`). |
 | **Supervisor Context** | Flooded with megabytes of noisy test/CI raw logs. | Lossless Information Firewall (`RoundReceiptSchema` strips noise, preserves failures). |
 
 ### Core Terminology
@@ -44,7 +44,7 @@ When autonomous AI coding agents (Claude, GPT, Codex, Gemini) execute tasks on l
 | Term | Architectural Definition |
 | :--- | :--- |
 | **Brain (`F0`)** | High-tier orchestrator (`claude-opus-5-5` / `claude-sonnet-5-5`, `gpt-5.6-sol`, `composer-2.5`) holding strategic reasoning and commit authority. |
-| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) or HTTP gateway consumer (`9router`, OpenAI, Anthropic) executing one scoped packet. |
+| **Worker (`F1`)** | Bounded CLI worker process (`agy`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `qwen`, `ollama`, …) or HTTP gateway consumer (OpenAI, Anthropic, or optional Layer 2 self-hosted gateways) executing one scoped packet. |
 | **Subagent (`F2`)** | Ephemeral subagent spawned recursively by F1 within F1's existing worktree and receipt boundary (`F2 ⊆ F1 ⊆ F0`). |
 | **Task** | An atomic, durable work item queued in the SQLite WAL store with an idempotency key and attempt budget. |
 | **Receipt** | A cryptographically validated single-use authorization token granting scoped filesystem write permissions (`AllowedPaths`). |
@@ -224,17 +224,17 @@ g8s worker --once --allow-workspace-write
 ```
 
 ### Paradigm 3: Universal Config-Driven LLM Gateway Consumer
-Directly invoke or queue tasks across configured remote LLM gateways (OpenAI, Anthropic, 9Router):
+Directly invoke or queue tasks across standard OpenAI/Anthropic-compatible HTTP endpoints (or optional Layer 2 self-hosted gateways such as `9router` declared in untracked `~/.config/g8s/providers.json`):
 ```bash
-# Direct synchronous execution with reasoning effort and file block application
+# Direct synchronous execution against an official OpenAI-compatible endpoint
 g8s llm-call \
-  --provider 9router \
-  --model reasoning-high \
+  --provider openai \
+  --model gpt-5.5 \
   --effort high \
   --prompt "Review internal/fsops for race conditions"
 
-# Live model discovery
-g8s providers discover --provider 9router --json
+# Live model discovery against configured providers
+g8s providers discover --provider openai --json
 ```
 
 ### Paradigm 4: Native Cross-Platform Agent I/O
@@ -388,7 +388,7 @@ Milestones are evidence-gated on test verification and burn-in stability:
 | **`v0.23.0`** (2026-11-08) | **Containment Hardened & Process-Reflective** — claim-scoped mutation fence end-to-end ([ADR-0038](docs/decisions/0038-mesh-fence-enforcement-point.md)): issuance-clip/TTL≤lease/renewal, fsops pre-mutation gate, claim-aware fail-closed harvest firewall, red matrix R1-R7 + conformance probe P9; **RT-MESH v1.1** A1-A5 (cumulative ack, flow window, retry budget, keepalive, screen-state gate — spec 46); **D-09 REFLEX-CYCLE closed** (SENSE→JUDGE→ACT→PRUNE-LAW, self-tombstoning); **provenance honesty ledger** ([ADR-0039](docs/decisions/0039-dogfooding-honesty-ledger.md), weekly receipt-ratio); Mechanized SSoT & worker git-commit proxy ([ADR-0040](docs/decisions/0040-mechanized-ssot.md), [ADR-0041](docs/decisions/0041-worker-git-proxy.md)); release-gate hardening (pre-tag surface inventory, fail-loud pre_push, doctor binary-vs-HEAD). | **Done** (tag v0.23.0 — attested, cosigned; live drill + agy co-sign recorded in spec 46) |
 | **`v0.24.0`** (2026-11-15) | **Declarative Model Adoption, Adapter-Neutral Control Plane & Zero-Implicit-Default Closure** (`DELTA-48`, [#893](https://github.com/tamld/g8s/issues/893), [#894](https://github.com/tamld/g8s/issues/894), [#902](https://github.com/tamld/g8s/issues/902), [#904](https://github.com/tamld/g8s/pull/904), [#905](https://github.com/tamld/g8s/issues/905), [#906](https://github.com/tamld/g8s/issues/906), [#907](https://github.com/tamld/g8s/issues/907)): Gemini 4 Element Series onboarding & `.g8s/agent-models.yml` catalog v3 (`status`, `replacement`, `sunset_at`), symmetric adapter-neutral governance across `9router`/`opencode`/`codex`/`claude`/`cursor`/`agy`, `ResolveProviderDefaultModel` purging deprecated `gemini-3.8-*` defaults, catalog profile timeout inheritance on explicit triples, scope-aware `g8s verify` fallback, dynamic MCP server version stamping, mechanized verification skill `gate_command` SSoT, and RFC1918 probe error DLP redaction. | **Done** |
 | **`v0.25.0`** (2026-11-18, Current) | **Kernel-Enforced 3-OS Sandboxing, Ed25519 Receipt Authority & Offline Assurance Benchmark** (`DELTA-49`, Epic [#923](https://github.com/tamld/g8s/issues/923), [#916](https://github.com/tamld/g8s/issues/916)–[#922](https://github.com/tamld/g8s/issues/922)): macOS Seatbelt / Linux `bwrap`+Landlock / Windows `JobObject` subprocess sandboxing & `ScrubEnv` (`internal/sandbox`), Ed25519-signed `WriteReceipt`s & `StratumCharter`s + `0600`/`0700` state hygiene (`internal/signing`, `internal/pathutil`), fail-closed `ReviewReceipt`/`RealReviewer`/`deliver` CAS + `-z` rename firewall, real `tools/faultworker` 3-OS crash-survival E2E + live `os_sandbox` doctor probe, `19/19 RUNTIME_PROVEN` feature audit + `14`-pattern trust-boundary SSoT + `Lane S` auto-escalation, and reproducible `as-001`..`as-005` offline assurance benchmark + [`docs/security/containment-matrix.md`](docs/security/containment-matrix.md). | **Done** |
-| **`v0.25.1`** (Planned) | **P0 Trust Root, Diff Firewall, Strict Sandbox & Supply-Chain Hardening** (Epic [#934](https://github.com/tamld/g8s/issues/934), [#935](https://github.com/tamld/g8s/issues/935)–[#939](https://github.com/tamld/g8s/issues/939)): unify `VerifyWorktreeDiffScope` on `-z` & remove `.g8s` exemption, fail-closed `--require-kernel-sandbox`, narrow `9router` env allowlist, fix `install.sh` (`darwin_all` + no `v0.1.0` fallback + optional Cosign verification), runtime-proven `claims_check.sh --test-report`, and accurate release tag `manifest.json`. | **Planned** |
+| **`v0.25.1`** (Planned) | **P0 Trust Root, Diff Firewall, Strict Sandbox, Supply-Chain & ToS Hygiene Hardening** (Epic [#934](https://github.com/tamld/g8s/issues/934), [#935](https://github.com/tamld/g8s/issues/935)–[#939](https://github.com/tamld/g8s/issues/939), [#945](https://github.com/tamld/g8s/issues/945)): unify `VerifyWorktreeDiffScope` on `-z` & remove `.g8s` exemption, fail-closed `--require-kernel-sandbox`, narrow `9router` env allowlist, fix `install.sh` (`darwin_all` + no `v0.1.0` fallback + optional Cosign verification), vendor-neutral Layer 1/Layer 2 gateway separation & ToS hygiene, runtime-proven `claims_check.sh --test-report`, and accurate release tag `manifest.json`. | **Planned** |
 | **`v0.26.0`** (Planned) | **P1 Independent Evaluator, Provider Parity & WAL Stress Proof** ([ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md), [#940](https://github.com/tamld/g8s/issues/940)–[#943](https://github.com/tamld/g8s/issues/943)): `ProcessTransport` vs `RequestTransport` split + async HTTP `Handle.Cancel()`, `agent-models.v2` capability gate, offline 8-CLI/HTTP adapter contract suite, automated POSIX `SIGKILL` orphan sweep E2E, single-host multi-coordinator WAL fencing stress E2E, unified `PolicyEnforcementReport`, immutable out-of-worktree holdout eval, and `TRUST-G6` bounded evolution / universal `PASS`+`FAIL` memory promotion gate. | **Planned** |
 | **`v0.30.0`** (Planned) | **Scoped MCP/Network Capability Proxy, Controlled Self-Improvement v1 & Multi-Repo Offer Burn-In** ([#672](https://github.com/tamld/g8s/issues/672), [ADR-0042](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)): in-worktree F1/F2 MCP/HTTP capability proxy (mediated access; enforced network isolation where OS/container blocks direct sockets), `Tier A` canary self-improvement loop under `TRUST-G1`–`TRUST-G6`, and 90-day multi-repo Offer retention burn-in. | **Planned** |
 | **`v0.40.0`** (Planned) | **Cryptographic Pre-Execution Gate & Multi-Agent Socratic Consensus**: artifact-bound CVE/NVD & Socratic debate receipts before `WriteReceipt` minting and SLSA/SBOM release attestation. | **Planned** |
@@ -488,3 +488,5 @@ g8s/
 ## 10. License
 
 Distributed under the **MIT License**. Copyright (c) 2026 TamLD. See [LICENSE](LICENSE) for details.
+
+**Independent OSS & Vendor ToS Compliance**: `g8s` is an independent open-source project and is not affiliated with, sponsored by, or endorsed by Google, Anthropic, OpenAI, Cursor, or any other model vendor. Operators supply their own official vendor CLIs and official API keys in accordance with each vendor's Terms of Service; `g8s` provides no credential sharing, free-tier account rotation, or proprietary protocol bypass.

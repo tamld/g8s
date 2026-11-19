@@ -22,7 +22,7 @@ func TestContextualMemoryPreconditionFilterAndSupersession(t *testing.T) {
 		Scope:         ScopeSession,
 		SessionID:     "sess-01",
 		PromotedBy:    "f0",
-		Payload:       "Route coding tasks to cu/composer-2.5 when frontier quota is below 45%",
+		Payload:       "Route coding tasks to composer-2.5 when frontier quota is below 45%",
 		Preconditions: map[string]string{"quota_mode": "saving", "provider": "9router"},
 	}
 	if err := adapter.ProposeEntry(ctx, e1); err != nil {
@@ -54,7 +54,7 @@ func TestContextualMemoryPreconditionFilterAndSupersession(t *testing.T) {
 		Scope:         ScopeSession,
 		SessionID:     "sess-01",
 		PromotedBy:    "f0",
-		Payload:       "Use Sandwich Architecture with batch verification on cu/composer-2.5",
+		Payload:       "Use Sandwich Architecture with batch verification on composer-2.5",
 		Preconditions: map[string]string{"quota_mode": "saving"},
 	}
 	if err := adapter.SupersedeEntry(ctx, "mem-quota-low-01", e2); err != nil {

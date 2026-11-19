@@ -377,7 +377,7 @@ func classifyProbeFailure(success bool, verifyPassed bool, errMsg string) string
 	if strings.Contains(lower, "status 404") || strings.Contains(lower, "[404]") || strings.Contains(lower, "not found") || strings.Contains(lower, "page not found") {
 		return "MODEL_NOT_FOUND_404"
 	}
-	if strings.Contains(lower, "status 400") || strings.Contains(lower, "agentservice") {
+	if strings.Contains(lower, "status 400") || strings.Contains(lower, "unsupported ide tool") || strings.Contains(lower, "protocol mismatch") {
 		return "PROTOCOL_MISMATCH_400"
 	}
 	if strings.Contains(lower, "context deadline exceeded") || strings.Contains(lower, "client.timeout") {

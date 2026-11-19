@@ -421,11 +421,11 @@ func (p *OpenAIProvider) spawnOpenAI(ctx context.Context, spec Spec) (Handle, er
 		bodyStr := string(respBody)
 		fullErr := fmt.Sprintf("%s returned status %d: %s", p.name, resp.StatusCode, bodyStr)
 
-		// ⚡ Bolt Optimization: Use EqualFold on a sliced substring for zero-allocation case-insensitive prefix checking
-		// instead of strings.HasPrefix(strings.ToLower()) which allocates a new string on the heap.
-		trimmedModel := strings.TrimSpace(spec.Model)
-		if strings.Contains(bodyStr, "AgentService requested an unsupported IDE tool") || (resp.StatusCode == http.StatusBadRequest && len(trimmedModel) >= 3 && strings.EqualFold(trimmedModel[:3], "cu/")) {
-			fullErr += " (hint: 9router cu/* proxies Cursor IDE AgentService which requires native IDE tool calls; use --provider cursor or a non-cu/* model such as 9router/deep-coding or 9router/fast-agent)"
+		if resp.StatusCode == http.StatusBadRequest {
+			lowerBody := strings.ToLower(bodyStr)
+			if strings.Contains(lowerBody, "unsupported ide tool") || strings.Contains(lowerBody, "protocol mismatch") {
+				fullErr += " (hint: upstream returned HTTP 400 protocol/tool mismatch on the chat-completions surface; verify the provider protocol or use a native CLI adapter / compatible chat-completions model)"
+			}
 		}
 		return newImmediateHandleWithMetadata(p.name, "FAILED", "", fullErr, 1, start, "", 0, 0, 0), nil
 	}

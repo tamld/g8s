@@ -17,7 +17,7 @@ Prior to `v0.19.0`, `g8s` declared a two-class provider pool in `providers.json`
 However, in `cmd/g8s/main.go` (`runWorker`), `api_call` providers were registered only in `apiCallNames` and rejected on the worker queue execution path (`"provider %q is an api_call provider and is not executable on the queue path"`), and `internal/provider/openai.go` lacked:
 - Direct CLI and queue-path LLM call consumption (`g8s llm-call` + `g8s worker`),
 - `g8s submit` validation for `supplied_text` (`tool_policy=none`) on `api_call` gateways,
-- Multi-protocol HTTP gateways (`9router` on `http://127.0.0.1:20128/v1` or `$G8S_9ROUTER_BASE_URL`) that expose both OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` plus virtual model combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and upstream provider prefixes (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`).
+- Multi-protocol HTTP gateways (standard OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, and optional self-hosted gateways such as `9router` on `http://127.0.0.1:20128/v1` or `$G8S_9ROUTER_BASE_URL`) exposing virtual model combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`) and official upstream provider prefixes (`nvidia/*`, `openrouter/*`).
 
 The operator's core architectural requirement for `v0.19.0` is:
 > **`g8s` must act as a universal, config-driven LLM call consumer**: any external, LAN, or local LLM source (`9router` multi-model combos, OpenAI-compatible `/v1/chat/completions`, Anthropic `/v1/messages`, Ollama HTTP) declared in config (`providers.json` / `.g8s/agent-models.yml`) must be directly consumable across CLI invocation (`g8s llm-call`), worker queue execution (`g8s submit` + `g8s worker`), and provider discovery (`g8s providers discover`) without code changes or external CLI binary wrappers.
@@ -34,7 +34,7 @@ Extend `internal/provider` and `internal/config` so any `api_call` provider entr
 - `base_url`: e.g., `"http://127.0.0.1:20128/v1"` or `$G8S_9ROUTER_BASE_URL`, with optional `base_url_env` override (e.g., `NINEROUTER_URL`).
 - `auth_env`: e.g., `"NINEROUTER_API_KEY"` or `"OPENAI_API_KEY"` (optional when gateway permits unauthenticated calls or when key is resolved from env).
 - `headers`: optional map of static HTTP headers.
-- `models`: explicit model and combo declarations (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`), plus wildcard/prefix matching (`allow_unlisted_models: true` or prefix globs like `nvidia/*`, `openrouter/*`, `cc/*`) so `9router`'s dynamic upstream models can be consumed as long as the gateway is declared in config.
+- `models`: explicit model and combo declarations (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`, `nvidia/*`, `openrouter/*`), plus wildcard/prefix matching (`allow_unlisted_models: true` or prefix globs like `nvidia/*`, `openrouter/*`) so configured gateway models can be consumed declaratively.
 
 ### 2.2. `g8s llm-call` & Native `api_call` Execution on the `g8s worker` Queue Path
 - Add `g8s llm-call` (`cmd/g8s/llm_call.go`) to invoke any declared `api_call` provider synchronously from the CLI or inside a supervised worker attempt.
@@ -53,7 +53,7 @@ Add `g8s providers discover [--provider <name>] [--json]` to query `GET <base_ur
 
 ### 2.5. Two-Layer Separation Rule (Public Repo Mechanism vs. Local Untracked Operator Policy)
 To prevent environment coupling and preserve zero-leakage boundaries:
-- **Public Repo Mechanism (Layer 1)**: Tracked files declare only generic protocols (`openai`, `anthropic`, `9router`), standard SWE combos (`reasoning-free`, `reasoning-high`, `deep-coding`, `fast-agent`, `docs-retriever`), standard wildcards (`nvidia/*`, `openrouter/*`, `cc/*`, `cx/*`), and localhost endpoints (`http://127.0.0.1:20128/v1`).
+- **Public Repo Mechanism (Layer 1)**: Tracked files declare only generic protocols (`openai`, `anthropic`, and OpenAI/Anthropic-compatible HTTP adapters), official vendor prefixes (`nvidia/*`, `openrouter/*`), and localhost templates (`http://127.0.0.1:20128/v1`). Personal/self-hosted gateway configs (including `9router` endpoint combos) live strictly in Layer 2 untracked `~/.config/g8s/providers.json`.
 - **Local Untracked Operator Policy (Layer 2)**: Specific LAN IPs, custom tokens, and proprietary homelab routing combos reside strictly in untracked local configurations (`~/.config/g8s/providers.json` and `~/.agents/skills/`). No homelab IP or private cluster topology is ever committed to the repository.
 
 ---

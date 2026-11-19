@@ -23,10 +23,10 @@ func Catalog() []CatalogEntry {
 		{
 			Name:        "agy",
 			Class:       "platform_dispatch",
-			Description: "Antigravity Gemini CLI (recommended default worker)",
+			Description: "Antigravity CLI worker adapter (official vendor CLI)",
 			Binary:      "agy",
-			InstallHint: "Install from https://github.com/tamld/agy",
-			Models:      []string{"Gemini 3.8 Flash (High)"},
+			InstallHint: "Install the official Antigravity CLI from Google's official documentation and authenticate with your own account/API key",
+			Models:      []string{"gemini-4-hydrogen-high"},
 		},
 		{
 			Name:        "claude",
@@ -116,10 +116,10 @@ func Catalog() []CatalogEntry {
 		{
 			Name:        "9router",
 			Class:       "api_call",
-			Description: "9Router OpenAI-compatible gateway (local 9router instance)",
-			BaseURL:     "http://localhost:20128/v1",
-			AuthEnv:     "OPENAI_API_KEY",
-			InstallHint: "Install from https://github.com/decolua/9router (runs at localhost:20128)",
+			Description: "Optional self-hosted OpenAI/Anthropic-compatible gateway (configure in Layer 2 ~/.config/g8s/providers.json)",
+			BaseURL:     "http://127.0.0.1:20128/v1",
+			AuthEnv:     "NINEROUTER_API_KEY",
+			InstallHint: "Optional self-hosted gateway declared in ~/.config/g8s/providers.json (default http://127.0.0.1:20128/v1)",
 			Models: []string{
 				"reasoning-free",
 				"reasoning-high",
