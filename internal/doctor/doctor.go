@@ -58,25 +58,27 @@ type CapabilityEntry struct {
 
 // DoctorReport contains all executed health and sanity checks.
 type DoctorReport struct {
-	OverallStatus    string             `json:"overall_status"`              // HEALTHY, DEGRADED, UNHEALTHY
-	CapabilityStatus string             `json:"capability_status,omitempty"` // FULL, PARTIAL, MINIMAL (#645)
-	Capabilities     []CapabilityEntry  `json:"capabilities,omitempty"`      // Optional capability matrix (#645)
-	Platform         string             `json:"platform"`
-	GoRuntime        string             `json:"go_runtime"`
-	ZeroCGO          bool               `json:"zero_cgo"`
-	Scope            string             `json:"scope,omitempty"`
-	ConfigDir        string             `json:"config_dir,omitempty"`
-	DataDir          string             `json:"data_dir,omitempty"`
-	CacheDir         string             `json:"cache_dir,omitempty"`
-	DatabasePath     string             `json:"database_path,omitempty"`
-	Checks           []DiagnosticResult `json:"checks"`
-	AppliedFixes     []string           `json:"applied_fixes,omitempty"`
+	OverallStatus    string                `json:"overall_status"`              // HEALTHY, DEGRADED, UNHEALTHY
+	CapabilityStatus string                `json:"capability_status,omitempty"` // FULL, PARTIAL, MINIMAL (#645)
+	Capabilities     []CapabilityEntry     `json:"capabilities,omitempty"`      // Optional capability matrix (#645)
+	TrustAssurance   *TrustAssuranceStatus `json:"trust_assurance_status,omitempty"`
+	Platform         string                `json:"platform"`
+	GoRuntime        string                `json:"go_runtime"`
+	ZeroCGO          bool                  `json:"zero_cgo"`
+	Scope            string                `json:"scope,omitempty"`
+	ConfigDir        string                `json:"config_dir,omitempty"`
+	DataDir          string                `json:"data_dir,omitempty"`
+	CacheDir         string                `json:"cache_dir,omitempty"`
+	DatabasePath     string                `json:"database_path,omitempty"`
+	Checks           []DiagnosticResult    `json:"checks"`
+	AppliedFixes     []string              `json:"applied_fixes,omitempty"`
 }
 
 // Doctor provides diagnostic health and environment checks.
 type Doctor struct {
-	Scope       string
-	DetectPaths bool
+	Scope            string
+	DetectPaths      bool
+	BinaryProvenance BinaryProvenance
 }
 
 // New creates a new Doctor instance.
@@ -352,6 +354,7 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 	}
 
 	report.CapabilityStatus, report.Capabilities = EvaluateCapabilities(report.Checks)
+	report.TrustAssurance = d.evaluateTrustAssurance(dbPath, report.Checks)
 
 	return report
 }
