@@ -110,12 +110,13 @@ func (h *execHandle) Wait(ctx context.Context) (Receipt, error) {
 	}
 
 	return Receipt{
-		Provider:   h.provider,
-		Status:     status,
-		Stdout:     stdoutStr,
-		Stderr:     stderrStr,
-		ExitCode:   exitCode,
-		DurationMs: duration,
+		Provider:      h.provider,
+		TransportKind: TransportKindProcess,
+		Status:        status,
+		Stdout:        stdoutStr,
+		Stderr:        stderrStr,
+		ExitCode:      exitCode,
+		DurationMs:    duration,
 	}, waitErr
 }
 

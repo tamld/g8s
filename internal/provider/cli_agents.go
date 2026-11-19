@@ -694,3 +694,35 @@ func (c *CursorProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	return newProcessHandle("cursor", cmd, start, &stdoutBuf, &stderrBuf), nil
 }
+
+// TransportKind returns TransportKindProcess for opencode.
+func (o *OpenCodeProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for opencode.
+func (o *OpenCodeProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return o.Spawn(ctx, spec)
+}
+
+// TransportKind returns TransportKindProcess for commandcode.
+func (c *CommandCodeProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for commandcode.
+func (c *CommandCodeProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return c.Spawn(ctx, spec)
+}
+
+// TransportKind returns TransportKindProcess for qwen.
+func (q *QwenProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for qwen.
+func (q *QwenProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return q.Spawn(ctx, spec)
+}
+
+// TransportKind returns TransportKindProcess for cursor.
+func (c *CursorProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for cursor.
+func (c *CursorProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return c.Spawn(ctx, spec)
+}

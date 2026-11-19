@@ -399,10 +399,18 @@ func TestOpenAIProvider_Extended(t *testing.T) {
 		t.Errorf("expected failed receipt on 500: %+v, err: %v", receipt, err)
 	}
 
-	// immediateHandle coverage: PID, Cancel, StdoutStream
-	imm := newImmediateHandle("test-prov", "COMPLETED", "output text", "", 0, time.Now())
-	if imm.PID() != 0 {
-		t.Errorf("expected PID 0, got %d", imm.PID())
+	// asyncRequestHandle + requestHandleAdapter coverage: NoPID, Cancel, StdoutStream, TransportKind
+	ctxImm, cancelImm := context.WithCancel(context.Background())
+	rh := newAsyncRequestHandle("test-prov", cancelImm)
+	rh.streamBuf.WriteString("output text")
+	rh.complete(Receipt{Status: "COMPLETED", Stdout: "output text", ExitCode: 0}, nil)
+	_ = ctxImm
+	imm := newRequestHandleAdapter(rh)
+	if imm.PID() != NoPID {
+		t.Errorf("expected PID NoPID (%d), got %d", NoPID, imm.PID())
+	}
+	if rh.TransportKind() != TransportKindRequest || rh.RequestID() == "" {
+		t.Errorf("unexpected RequestHandle metadata: kind=%q id=%q", rh.TransportKind(), rh.RequestID())
 	}
 	if err := imm.Cancel(context.Background()); err != nil {
 		t.Errorf("Cancel returned error: %v", err)
@@ -412,6 +420,19 @@ func TestOpenAIProvider_Extended(t *testing.T) {
 	if string(body) != "output text" {
 		t.Errorf("unexpected StdoutStream: %s", string(body))
 	}
+
+	// Interface verification: ProcessTransport (7 CLIs) vs RequestTransport (OpenAI, Ollama)
+	var (
+		_ ProcessTransport = NewAgyProvider()
+		_ ProcessTransport = NewCodexProvider()
+		_ ProcessTransport = NewClaudeProvider()
+		_ ProcessTransport = NewOpenCodeProvider()
+		_ ProcessTransport = NewCommandCodeProvider()
+		_ ProcessTransport = NewQwenProvider()
+		_ ProcessTransport = NewCursorProvider()
+		_ RequestTransport = NewOpenAIProvider("openai", "http://127.0.0.1:1/v1", "")
+		_ RequestTransport = NewOllamaProvider()
+	)
 }
 
 func TestExecHandle_Extended(t *testing.T) {

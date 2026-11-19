@@ -1,12 +1,10 @@
-# agent-models.v1 — the supported-models effort catalog (issue #550)
-# Transcribed EXCLUSIVELY from the 2026-10-04 research-verified data
-# (3 agents against official docs; tables in
-# plans/261004-effort-optimization/brief-AM1-catalog.md).
-# Consumed later by the config.File loader (#550 DoD).
+# agent-models.v2 — the supported-models effort & capability catalog (issues #550, #940)
+# Transcribed EXCLUSIVELY from verified provider docs & live telemetry
+# Consumed by internal/config and internal/routing capability gates (#940).
 # probed live 2026-11-14, combo audit PR #786, Gemini 4 element series onboarding
 
-schema_version: agent-models.v1
-catalog_version: 3
+schema_version: agent-models.v2
+catalog_version: 4
 verified_at: "2026-11-14"
 sources:
   - https://developers.openai.com/api/docs/models
@@ -40,6 +38,7 @@ providers:
     field: reasoning_effort        # reasoning.effort on the Responses API
     default_effort: adaptive
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "o-series and gpt-5.1 deprecated (o-series shutdown 2026-10-23); adaptive reasoning is the default posture"
     models:
       - id: gpt-6-astra
@@ -48,6 +47,7 @@ providers:
         family: openai
         cost_tier: frontier
         status: active
+        capabilities: {tool_calling: false, context_window: 200000}
         notes: "no none; Chat Completions lacks function calling for this model — use Responses"
       - id: gpt-6.1-sol
         supported_efforts: [low, medium, high, xhigh, max]
@@ -68,6 +68,7 @@ providers:
         family: openai
         cost_tier: standard
         status: active
+        capabilities: {context_window: 200000}
       - id: gpt-5.4
         supported_efforts: [none, minimal, low, medium, high, xhigh, max]
         default_effort: medium
@@ -110,6 +111,7 @@ providers:
     field: output_config.effort
     default_effort: high
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "budget_tokens deprecated (rejected 400 on 4.7+ models); adaptive thinking mode on Opus 5.5 (cannot disable); per-message effort variant available"
     models:
       - id: claude-opus-5-5
@@ -137,6 +139,7 @@ providers:
         family: anthropic
         cost_tier: economy
         status: active
+        capabilities: {reasoning_effort: false, context_window: 200000}
         notes: "no effort support"
 
   google:
@@ -144,6 +147,7 @@ providers:
     field: thinking_level
     default_effort: dynamic
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 1000000}
     notes: "dynamic = model-decided when omitted; thinkingBudget integer is legacy (do not set both); Gemini 4 element series: hydrogen (economy), argon (standard), carbon (frontier)"
     models:
       - id: gemini-4-hydrogen
@@ -152,6 +156,7 @@ providers:
         family: google
         cost_tier: economy
         status: active
+        capabilities: {context_window: 1000000}
       - id: gemini-4-argon
         supported_efforts: [low, medium, high]
         default_effort: high
@@ -212,6 +217,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: true
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 256000}
     notes: "reasoning cannot be disabled on current models"
     models:
       - id: grok-4.7
@@ -239,6 +245,7 @@ providers:
     field: reasoning_effort
     default_effort: medium
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 128000}
     notes: "V4 parameter-based: thinking:{type:'enabled'} + reasoning_effort; thinking default ON; omitting thinking = non-thinking (low-equivalent, recorded in notes not as a level)"
     models:
       - id: deepseek-flash
@@ -259,6 +266,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 128000}
     notes: "magistral-* deprecated"
     models:
       - id: mistral-medium-3.5
@@ -284,6 +292,7 @@ providers:
     effort_style: toggle
     field: think
     mandatory: false
+    capabilities: {tool_calling: false, structured_output: false, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 128000}
     notes: "think is bool OR model-defined strings (gpt-oss: low/medium/high; qwen3/deepseek-r1: boolean); discovery via /api/show is mandatory per model; hard 400 on non-thinking models"
     models: []
 
@@ -292,6 +301,7 @@ providers:
     field: model-name-suffix
     default_effort: high
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: false, streaming: false, reasoning_effort: true, cancel_inflight: true, context_window: 1000000}
     # Sources:
     # - providers.json model list (observed variants: gemini-3.8-flash-low, gemini-3.8-flash-medium, gemini-3.8-flash-high)
     # - agy --help effort levels (low|medium|high|xhigh|max)
@@ -430,6 +440,7 @@ providers:
     field: reasoning_effort
     default_effort: high
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "Optional self-hosted OpenAI/Anthropic-compatible gateway configured strictly in Layer 2 (~/.config/g8s/providers.json) with combo failover (deep-coding, reasoning-high, docs-retriever, reasoning-free, fast-agent) and direct upstream prefixes; protocol-bound IDE endpoints return HTTP 400 on chat-completions (use official vendor CLI adapters instead). nvidia/* routing IDs use DOUBLE-PREFIX nvidia/nvidia/<model>; audit liveness regularly via 'g8s providers eval-combos --provider 9router --json' (retired upstream NIM direct IDs return HTTP 410 MODEL_EOL_410)"
     models:
       - id: reasoning-high
@@ -515,6 +526,7 @@ providers:
     field: reasoning_effort
     default_effort: medium
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: false, streaming: false, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "OpenCode CLI built-in zero-cost (*free*) models verified live via opencode run; includes 9router combos via BYOK"
     models:
       - id: 9router/reasoning-high
@@ -589,6 +601,7 @@ providers:
     field: effort
     default_effort: medium
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: false, streaming: false, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "Command Code CLI (v1.88.0): built-in $0 models (reflection/beam:free, poolside/laguna-s-2.1-free, stealth/glyph-cluster:free on Go+ plan) plus zero-cost BYOK models via ~/.commandcode/providers.json (9router/*)"
     models:
       - id: reflection/beam:free
@@ -638,6 +651,7 @@ providers:
     field: reasoning_effort
     default_effort: medium
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: false, streaming: false, reasoning_effort: true, cancel_inflight: true, context_window: 128000}
     notes: "Qwen Code CLI (v0.15.9+): ready-to-use via ~/.qwen/settings.json OpenAI-compatible 9router gateway or Qwen OAuth free tier"
     models:
       - id: docs-retriever
@@ -658,6 +672,7 @@ providers:
     field: effort
     default_effort: high
     mandatory: false
+    capabilities: {tool_calling: true, structured_output: false, streaming: false, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
     notes: "Cursor Agent CLI (cursor-agent) & Cloud Agent API (https://api.cursor.com/v0/models) authenticated via CURSOR_API_KEY (#683)"
     models:
       - id: composer-2.5

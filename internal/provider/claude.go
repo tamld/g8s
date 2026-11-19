@@ -120,3 +120,11 @@ func (c *ClaudeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	return newProcessHandle("claude", cmd, start, &stdoutBuf, &stderrBuf), nil
 }
+
+// TransportKind returns TransportKindProcess for the claude CLI worker.
+func (c *ClaudeProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for claude.
+func (c *ClaudeProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return c.Spawn(ctx, spec)
+}

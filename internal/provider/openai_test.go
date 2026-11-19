@@ -3,10 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,19 +115,20 @@ func TestOpenAIProvider_SpawnSuccess(t *testing.T) {
 
 func TestOpenAIProvider_ReasoningEffortNormalization(t *testing.T) {
 	testCases := []struct {
-		inputEffort string
-		wantEffort  string
-		wantPresent bool
+		inputEffort  string
+		wantEffort   string
+		wantPresent  bool
+		wantDegraded bool
 	}{
-		{"minimal", "low", true},
-		{"low", "low", true},
-		{"medium", "medium", true},
-		{"high", "high", true},
-		{"xhigh", "high", true},
-		{"max", "high", true},
-		{"ultra", "high", true},
-		{"unsupported_level", "", false},
-		{"", "", false},
+		{"minimal", "low", true, true},
+		{"low", "low", true, false},
+		{"medium", "medium", true, false},
+		{"high", "high", true, false},
+		{"xhigh", "high", true, true},
+		{"max", "high", true, true},
+		{"ultra", "high", true, true},
+		{"unsupported_level", "", false, true},
+		{"", "", false, false},
 	}
 
 	for _, tc := range testCases {
@@ -155,8 +160,11 @@ func TestOpenAIProvider_ReasoningEffortNormalization(t *testing.T) {
 			srv.Close()
 			t.Fatalf("effort %q: Spawn failed: %v", tc.inputEffort, err)
 		}
-		_, _ = h.Wait(context.Background())
+		rcpt, err := h.Wait(context.Background())
 		srv.Close()
+		if err != nil {
+			t.Fatalf("effort %q: Wait failed: %v", tc.inputEffort, err)
+		}
 
 		if !tc.wantPresent {
 			if _, ok := gotReq["reasoning_effort"]; ok {
@@ -166,6 +174,12 @@ func TestOpenAIProvider_ReasoningEffortNormalization(t *testing.T) {
 			if got, ok := gotReq["reasoning_effort"].(string); !ok || got != tc.wantEffort {
 				t.Errorf("effort %q: got reasoning_effort %q, want %q", tc.inputEffort, got, tc.wantEffort)
 			}
+		}
+		if rcpt.EffortDegraded != tc.wantDegraded {
+			t.Errorf("effort %q: EffortDegraded = %v, want %v (msg=%q)", tc.inputEffort, rcpt.EffortDegraded, tc.wantDegraded, rcpt.EffortDegradeMsg)
+		}
+		if tc.wantDegraded && rcpt.EffortDegradeMsg == "" {
+			t.Errorf("effort %q: expected non-empty EffortDegradeMsg when EffortDegraded=true", tc.inputEffort)
 		}
 	}
 }
@@ -733,5 +747,300 @@ func TestOpenAIProvider_ProtocolMismatch400Hint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "protocol/tool mismatch on the chat-completions surface") {
 		t.Fatalf("expected remediation hint in error, got: %s", err.Error())
+	}
+}
+
+func TestOpenAIProvider_AsyncCancelInFlightRequest(t *testing.T) {
+	started := make(chan struct{})
+	canceledCh := make(chan struct{})
+	shutdown := make(chan struct{})
+	var startOnce, cancelOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/chat/completions" {
+			_, _ = io.Copy(io.Discard, r.Body)
+			startOnce.Do(func() { close(started) })
+			select {
+			case <-r.Context().Done():
+				cancelOnce.Do(func() { close(canceledCh) })
+			case <-shutdown:
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	defer close(shutdown)
+
+	p := NewOpenAIProvider("test-ai", srv.URL, "")
+	if p.TransportKind() != TransportKindRequest {
+		t.Fatalf("expected TransportKindRequest, got %q", p.TransportKind())
+	}
+
+	spawnStart := time.Now()
+	rh, err := p.StartRequest(context.Background(), Spec{Model: "gpt-5.5", Brief: "slow"})
+	if err != nil {
+		t.Fatalf("StartRequest: %v", err)
+	}
+	if time.Since(spawnStart) > 500*time.Millisecond {
+		t.Fatalf("StartRequest blocked synchronously (%v)", time.Since(spawnStart))
+	}
+	if rh.RequestID() == "" || rh.TransportKind() != TransportKindRequest {
+		t.Fatalf("invalid RequestHandle metadata: id=%q kind=%q", rh.RequestID(), rh.TransportKind())
+	}
+
+	<-started
+	if err := rh.Cancel(context.Background()); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	waitDone := make(chan Receipt, 1)
+	waitErrCh := make(chan error, 1)
+	go func() {
+		rc, wErr := rh.Wait(context.Background())
+		waitDone <- rc
+		waitErrCh <- wErr
+	}()
+
+	select {
+	case rc := <-waitDone:
+		wErr := <-waitErrCh
+		if rc.Status != "CANCELLED" || !errors.Is(wErr, context.Canceled) {
+			t.Fatalf("expected CANCELLED/context.Canceled, got status=%q err=%v", rc.Status, wErr)
+		}
+		if rc.TransportKind != TransportKindRequest || rc.RequestID != rh.RequestID() {
+			t.Fatalf("receipt missing request metadata: %+v", rc)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not abort promptly after Cancel()")
+	}
+	select {
+	case <-canceledCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected HTTP request context on server to be cancelled")
+	}
+
+	// Verify legacy Spawn wrapper returns NoPID (-1), never 0
+	h, err := p.Spawn(context.Background(), Spec{Model: "gpt-5.5", Brief: "slow2"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if h.PID() != NoPID {
+		t.Fatalf("expected NoPID (%d), got %d", NoPID, h.PID())
+	}
+	_ = h.Cancel(context.Background())
+	_, _ = h.Wait(context.Background())
+}
+
+func TestOpenAIProvider_SSEStreamingAndStdoutStream(t *testing.T) {
+	var gotStream bool
+	var gotIncludeUsage bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/chat/completions" {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			gotStream, _ = body["stream"].(bool)
+			if opts, ok := body["stream_options"].(map[string]any); ok {
+				gotIncludeUsage, _ = opts["include_usage"].(bool)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fl, _ := w.(http.Flusher)
+			_, _ = fmt.Fprintln(w, `data: {"id":"1","model":"gpt-5.5","choices":[{"delta":{"content":"Hello "}}]}`)
+			if fl != nil {
+				fl.Flush()
+			}
+			_, _ = fmt.Fprintln(w, `data: {"id":"1","model":"gpt-5.5","choices":[{"delta":{"content":"Stream"}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`)
+			_, _ = fmt.Fprintln(w, `data: [DONE]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider("test-ai", srv.URL, "")
+	h, err := p.Spawn(context.Background(), Spec{Model: "gpt-5.5", Brief: "stream it", Stream: true})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	rc, err := h.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if !gotStream || !gotIncludeUsage || !rc.Streamed {
+		t.Fatalf("expected streaming flags (gotStream=%v, includeUsage=%v, rc.Streamed=%v)", gotStream, gotIncludeUsage, rc.Streamed)
+	}
+	if rc.Stdout != "Hello Stream" || rc.TotalTokens != 15 || rc.ModelResolved != "gpt-5.5" {
+		t.Fatalf("unexpected SSE receipt: %+v", rc)
+	}
+	streamBytes, _ := io.ReadAll(h.StdoutStream())
+	if string(streamBytes) != "Hello Stream" {
+		t.Fatalf("StdoutStream() = %q, want %q", string(streamBytes), "Hello Stream")
+	}
+}
+
+func TestOpenAIProvider_ToolsAndResponseFormatForwarding(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/chat/completions" {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider("test-ai", srv.URL, "")
+	spec := Spec{
+		Model: "gpt-5.5",
+		Brief: "use tools",
+		Tools: []map[string]any{
+			{"type": "function", "function": map[string]any{"name": "read_file"}},
+		},
+		ResponseFormat: map[string]any{"type": "json_object"},
+	}
+	h, err := p.Spawn(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := h.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if tools, ok := gotBody["tools"].([]any); !ok || len(tools) != 1 {
+		t.Fatalf("expected 1 tool in request body, got %#v", gotBody["tools"])
+	}
+	if rf, ok := gotBody["response_format"].(map[string]any); !ok || rf["type"] != "json_object" {
+		t.Fatalf("expected response_format json_object, got %#v", gotBody["response_format"])
+	}
+}
+
+func TestOpenAIProvider_AnthropicEffortAndStreaming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/v1/messages" {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintln(w, `data: {"type":"message_start","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":10,"output_tokens":0}}}`)
+			_, _ = fmt.Fprintln(w, `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Anth "}}`)
+			_, _ = fmt.Fprintln(w, `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"SSE"}}`)
+			_, _ = fmt.Fprintln(w, `data: {"type":"message_delta","usage":{"output_tokens":7}}`)
+			_, _ = fmt.Fprintln(w, `data: {"type":"message_stop"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	p := NewHTTPProviderFromConfig(config.ProviderEntry{
+		Name:     "anthropic",
+		BaseURL:  srv.URL + "/v1",
+		Protocol: "anthropic",
+	})
+	h, err := p.Spawn(context.Background(), Spec{
+		Model:  "claude-sonnet-5-5",
+		Brief:  "stream",
+		Effort: "high",
+		Stream: true,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	rc, err := h.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if oc, ok := gotBody["output_config"].(map[string]any); !ok || oc["effort"] != "high" {
+		t.Fatalf("expected output_config.effort=high in anthropic request, got %#v", gotBody["output_config"])
+	}
+	if rc.Stdout != "Anth SSE" || !rc.Streamed || rc.InputTokens != 10 || rc.OutputTokens != 7 || rc.TotalTokens != 17 {
+		t.Fatalf("unexpected anthropic SSE receipt: %+v", rc)
+	}
+	if rc.EffortDegraded || rc.EffortApplied != "high" {
+		t.Fatalf("unexpected effort telemetry: %+v", rc)
+	}
+}
+
+func TestOpenAIProvider_StrictCapabilitiesRejectsUnsupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" || r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Fatalf("unexpected dispatch to %s despite failing capability gate", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	boolFalse := false
+	boolTrue := true
+	cat := &config.Catalog{
+		SchemaVersion:  config.CurrentCatalogSchemaVersion,
+		CatalogVersion: 4,
+		VerifiedAt:     "2026-11-19",
+		Providers: map[string]config.ProviderCatalog{
+			"openai": {
+				Name:         "openai",
+				EffortStyle:  config.EffortStyleNamed,
+				Capabilities: &config.ModelCapabilities{ToolCalling: &boolTrue, ReasoningEffort: &boolTrue},
+				Models: []config.ModelCatalog{
+					{
+						ID:           "gpt-6-astra",
+						Capabilities: &config.ModelCapabilities{ToolCalling: &boolFalse},
+					},
+				},
+			},
+			"anthropic": {
+				Name:         "anthropic",
+				EffortStyle:  config.EffortStyleNamed,
+				Capabilities: &config.ModelCapabilities{ReasoningEffort: &boolTrue},
+				Models: []config.ModelCatalog{
+					{
+						ID:           "claude-haiku-4-5",
+						Capabilities: &config.ModelCapabilities{ReasoningEffort: &boolFalse},
+					},
+				},
+			},
+		},
+	}
+
+	oai := NewOpenAIProvider("openai", srv.URL, "").WithCatalog(cat)
+	// 1. Strict unsupported OpenAI effort
+	if _, err := oai.StartRequest(context.Background(), Spec{Model: "gpt-6-astra", Brief: "x", Effort: "xhigh", StrictCapabilities: true}); !errors.Is(err, ErrCapabilityUnsupported) {
+		t.Fatalf("expected ErrCapabilityUnsupported for strict xhigh on openai, got %v", err)
+	}
+	if _, err := oai.StartRequest(context.Background(), Spec{Model: "gpt-6-astra", Brief: "x", Effort: "unsupported_level", StrictCapabilities: true}); !errors.Is(err, ErrCapabilityUnsupported) {
+		t.Fatalf("expected ErrCapabilityUnsupported for strict unknown effort, got %v", err)
+	}
+	// 2. Tools unsupported by catalog on gpt-6-astra
+	if _, err := oai.StartRequest(context.Background(), Spec{
+		Model: "gpt-6-astra",
+		Brief: "x",
+		Tools: []map[string]any{{"type": "function"}},
+	}); !errors.Is(err, ErrCapabilityUnsupported) {
+		t.Fatalf("expected ErrCapabilityUnsupported for tools on gpt-6-astra, got %v", err)
+	}
+
+	// 3. Anthropic strict unknown effort & catalog reasoning_effort=false
+	anth := NewHTTPProviderFromConfig(config.ProviderEntry{Name: "anthropic", BaseURL: srv.URL + "/v1", Protocol: "anthropic"}).WithCatalog(cat)
+	if _, err := anth.StartRequest(context.Background(), Spec{Model: "claude-sonnet-5-5", Brief: "x", Effort: "turbo", StrictCapabilities: true}); !errors.Is(err, ErrCapabilityUnsupported) {
+		t.Fatalf("expected ErrCapabilityUnsupported for strict anthropic effort, got %v", err)
+	}
+	if _, err := anth.StartRequest(context.Background(), Spec{Model: "claude-haiku-4-5", Brief: "x", Effort: "high", StrictCapabilities: true}); !errors.Is(err, ErrCapabilityUnsupported) {
+		t.Fatalf("expected ErrCapabilityUnsupported for haiku effort, got %v", err)
 	}
 }
