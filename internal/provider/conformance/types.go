@@ -12,9 +12,12 @@ import (
 	"time"
 )
 
+// SchemaVersionV1 is the initial conformance matrix schema identifier accepted on read.
+const SchemaVersionV1 = "g8s.provider-conformance/v1"
+
 // SchemaVersion is the versioned schema identifier written to
-// .g8s/provider-conformance.yml.
-const SchemaVersion = "g8s.provider-conformance/v1"
+// .g8s/provider-conformance.yml (v2 separates CI-verified contract_status from live_status).
+const SchemaVersion = "g8s.provider-conformance/v2"
 
 // DefaultMatrixPath is the repo-relative ground-truth file location.
 const DefaultMatrixPath = ".g8s/provider-conformance.yml"
@@ -121,13 +124,32 @@ type Evidence struct {
 
 // ProbeResult is one probe verdict with its evidence.
 type ProbeResult struct {
-	ID       ProbeID   `yaml:"id" json:"id"`
-	Name     string    `yaml:"name" json:"name"`
-	Required bool      `yaml:"required" json:"required"`
-	Mode     string    `yaml:"mode" json:"mode"` // "static" or "live"
-	Status   Status    `yaml:"status" json:"status"`
-	Reason   string    `yaml:"reason" json:"reason"`
-	Evidence *Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	ID             ProbeID   `yaml:"id" json:"id"`
+	Name           string    `yaml:"name" json:"name"`
+	Required       bool      `yaml:"required" json:"required"`
+	Mode           string    `yaml:"mode" json:"mode"`                                           // "static" or "live"
+	Status         Status    `yaml:"status" json:"status"`                                       // backward-compatible mirror of LiveStatus
+	ContractStatus Status    `yaml:"contract_status,omitempty" json:"contract_status,omitempty"` // CI-proven offline adapter contract status
+	LiveStatus     Status    `yaml:"live_status,omitempty" json:"live_status,omitempty"`         // operator live-probe status
+	Reason         string    `yaml:"reason" json:"reason"`
+	ContractReason string    `yaml:"contract_reason,omitempty" json:"contract_reason,omitempty"`
+	Evidence       *Evidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// EffectiveLiveStatus returns LiveStatus when set, falling back to legacy Status.
+func (r ProbeResult) EffectiveLiveStatus() Status {
+	if r.LiveStatus != "" {
+		return r.LiveStatus
+	}
+	return r.Status
+}
+
+// EffectiveContractStatus returns ContractStatus when set, defaulting to UNVERIFIED.
+func (r ProbeResult) EffectiveContractStatus() Status {
+	if r.ContractStatus != "" {
+		return r.ContractStatus
+	}
+	return StatusUnverified
 }
 
 // ProviderReport aggregates all probe verdicts for one provider.
@@ -157,7 +179,7 @@ func ApplyRoleProfile(r *ProviderReport) {
 	case "claude", "codex":
 		r.RolesEligible = []string{"brain", "worker", "scout"}
 		r.RecommendedFor = []string{"f0-brain", "t3-t4-architecture", "complex-decomposition"}
-	case "9router", "opencode", "commandcode", "qwen":
+	case "9router", "opencode", "commandcode", "qwen", "cursor":
 		r.RolesEligible = []string{"worker", "scout"}
 		r.RecommendedFor = []string{"f1-worker", "f1-scout", "bounded-swe"}
 	case "gemini":
@@ -167,6 +189,9 @@ func ApplyRoleProfile(r *ProviderReport) {
 		r.RolesEligible = []string{"brain", "worker", "scout"}
 		r.RecommendedFor = []string{"f0-brain", "f1-worker", "f1-scout", "s3a-blind-verifier"}
 		r.Note = "platform_dispatch CLI adapter; pin explicit economy/standard models (gemini-4-hydrogen-*, gemini-4-argon-*) for F1/S3-A to protect F0 Brain quota (Lesson #23)"
+	case "openai", "anthropic":
+		r.RolesEligible = []string{"brain", "worker", "scout"}
+		r.RecommendedFor = []string{"f0-brain", "f1-worker", "f1-scout", "s3a-blind-verifier"}
 	case "ollama":
 		r.RolesEligible = []string{"compatibility-only"}
 		r.RecommendedFor = []string{"tts", "voice", "light-offline"}
@@ -186,11 +211,11 @@ func (r ProviderReport) Probe(id ProbeID) (ProbeResult, bool) {
 	return ProbeResult{}, false
 }
 
-// FailedRequired lists required probes that FAILed.
+// FailedRequired lists required probes that FAILed in either live or contract checks.
 func (r ProviderReport) FailedRequired() []ProbeID {
 	var out []ProbeID
 	for _, p := range r.Probes {
-		if p.Required && p.Status == StatusFail {
+		if p.Required && (p.EffectiveLiveStatus() == StatusFail || p.ContractStatus == StatusFail) {
 			out = append(out, p.ID)
 		}
 	}
@@ -219,16 +244,31 @@ func (m *Matrix) Find(name string) (ProviderReport, bool) {
 }
 
 // Merge overlays the reports in update onto m (replacing same-named
-// providers) and returns the merged matrix sorted by provider name.
+// providers while preserving existing contract_status/contract_reason when
+// omitted in live updates) and returns the merged matrix sorted by provider name.
 func (m *Matrix) Merge(update Matrix) Matrix {
 	byName := map[string]ProviderReport{}
 	if m != nil {
 		for _, p := range m.Providers {
-			byName[strings.ToLower(p.Name)] = p
+			byName[strings.ToLower(p.Name)] = normalizeProviderReport(p)
 		}
 	}
 	for _, p := range update.Providers {
-		byName[strings.ToLower(p.Name)] = p
+		key := strings.ToLower(p.Name)
+		incoming := normalizeProviderReport(p)
+		if prev, ok := byName[key]; ok {
+			for i, pr := range incoming.Probes {
+				if pr.ContractStatus == "" {
+					if prevPr, found := prev.Probe(pr.ID); found && prevPr.ContractStatus != "" {
+						incoming.Probes[i].ContractStatus = prevPr.ContractStatus
+						if incoming.Probes[i].ContractReason == "" {
+							incoming.Probes[i].ContractReason = prevPr.ContractReason
+						}
+					}
+				}
+			}
+		}
+		byName[key] = incoming
 	}
 	out := Matrix{
 		SchemaVersion: SchemaVersion,
@@ -240,6 +280,24 @@ func (m *Matrix) Merge(update Matrix) Matrix {
 	}
 	sort.Slice(out.Providers, func(i, j int) bool { return out.Providers[i].Name < out.Providers[j].Name })
 	return out
+}
+
+func normalizeProviderReport(rep ProviderReport) ProviderReport {
+	if len(rep.Probes) == 0 {
+		return rep
+	}
+	probes := make([]ProbeResult, len(rep.Probes))
+	copy(probes, rep.Probes)
+	for i := range probes {
+		if probes[i].LiveStatus == "" && probes[i].Status != "" {
+			probes[i].LiveStatus = probes[i].Status
+		}
+		if probes[i].Status == "" && probes[i].LiveStatus != "" {
+			probes[i].Status = probes[i].LiveStatus
+		}
+	}
+	rep.Probes = probes
+	return rep
 }
 
 // sha256Hex returns the lowercase hex sha256 of b.
@@ -259,12 +317,13 @@ func newResult(class Class, id ProbeID, mode string, status Status, reason strin
 		ev = &cp
 	}
 	return ProbeResult{
-		ID:       id,
-		Name:     ProbeName(id),
-		Required: IsRequired(class, id),
-		Mode:     mode,
-		Status:   status,
-		Reason:   Sanitize(reason),
-		Evidence: ev,
+		ID:         id,
+		Name:       ProbeName(id),
+		Required:   IsRequired(class, id),
+		Mode:       mode,
+		Status:     status,
+		LiveStatus: status,
+		Reason:     Sanitize(reason),
+		Evidence:   ev,
 	}
 }

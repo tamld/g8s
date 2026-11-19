@@ -173,3 +173,124 @@ func TestStoreRunnerAndDispatchGate(t *testing.T) {
 		t.Fatalf("expected UNVERIFIED ollama not to refuse dispatch, got %+v (err=%v)", vUnv, err)
 	}
 }
+
+func TestMatrixV1CompatibilityAndContractStatusMerge(t *testing.T) {
+	dir := t.TempDir()
+	v1Path := filepath.Join(dir, "v1.yml")
+	v1YAML := `schema_version: g8s.provider-conformance/v1
+generated_at: "2026-11-14T00:00:00Z"
+generator: g8s providers conformance
+providers:
+  - name: agy
+    class: cli_agent
+    available: true
+    mode: static
+    live_policy: paid
+    probes:
+      - id: P0
+        name: presence_and_version
+        required: true
+        mode: static
+        status: PASS
+        reason: ok
+      - id: P1
+        name: non_interactive_one_shot
+        required: true
+        mode: static
+        status: UNVERIFIED
+        reason: requires --live
+`
+	if err := os.WriteFile(v1Path, []byte(v1YAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loadedV1, err := LoadMatrix(v1Path)
+	if err != nil {
+		t.Fatalf("LoadMatrix v1 failed: %v", err)
+	}
+	agyRep, ok := loadedV1.Find("agy")
+	if !ok {
+		t.Fatal("missing agy in loaded v1 matrix")
+	}
+	if p1, _ := agyRep.Probe(ProbeP1); p1.LiveStatus != StatusUnverified || p1.Status != StatusUnverified {
+		t.Fatalf("expected normalized LiveStatus=UNVERIFIED, got %+v", p1)
+	}
+
+	ApplyOfflineContractBaseline(loadedV1)
+	if agyApplied, _ := loadedV1.Find("agy"); agyApplied.Probes[1].ContractStatus != StatusPass {
+		t.Fatalf("expected ApplyOfflineContractBaseline to set P1 ContractStatus=PASS, got %+v", agyApplied.Probes[1])
+	}
+
+	// Merge an incoming live update that omits ContractStatus -> preserved from base
+	matrixPath := filepath.Join(dir, DefaultMatrixPath)
+	loadedV1.SchemaVersion = SchemaVersion
+	rawV2, err := MarshalMatrix(*loadedV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(matrixPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(matrixPath, rawV2, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	liveUpdate := Matrix{
+		GeneratedAt: "2026-11-19T00:00:00Z",
+		Generator:   "g8s providers conformance",
+		Providers: []ProviderReport{{
+			Name:       "agy",
+			Class:      ClassCLIAgent,
+			Available:  true,
+			Mode:       "live",
+			LivePolicy: "paid",
+			Probes: []ProbeResult{
+				newResult(ClassCLIAgent, ProbeP0, "static", StatusPass, "ok", nil),
+				newResult(ClassCLIAgent, ProbeP1, "live", StatusPass, "live ok", nil),
+			},
+		}},
+	}
+	merged, err := WriteMatrix(matrixPath, liveUpdate)
+	if err != nil {
+		t.Fatalf("WriteMatrix merge failed: %v", err)
+	}
+	if merged.SchemaVersion != SchemaVersion {
+		t.Fatalf("merged SchemaVersion = %q, want %q", merged.SchemaVersion, SchemaVersion)
+	}
+	agyMerged, _ := merged.Find("agy")
+	p1Merged, _ := agyMerged.Probe(ProbeP1)
+	if p1Merged.ContractStatus != StatusPass || p1Merged.LiveStatus != StatusPass {
+		t.Fatalf("expected both ContractStatus=PASS and LiveStatus=PASS after merge, got %+v", p1Merged)
+	}
+
+	// ContractStatus=FAIL on required probe triggers CheckDispatch refusal across disk roundtrip
+	failDir := t.TempDir()
+	failMatrixYAML, err := MarshalMatrix(Matrix{
+		SchemaVersion: SchemaVersion,
+		GeneratedAt:   "2026-11-19T00:00:00Z",
+		Providers: []ProviderReport{{
+			Name:  "broken-contract",
+			Class: ClassCLIAgent,
+			Probes: []ProbeResult{{
+				ID:             ProbeP1,
+				Name:           ProbeName(ProbeP1),
+				Required:       true,
+				Status:         StatusUnverified,
+				LiveStatus:     StatusUnverified,
+				ContractStatus: StatusFail,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failMatrixPath := filepath.Join(failDir, DefaultMatrixPath)
+	if err := os.MkdirAll(filepath.Dir(failMatrixPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(failMatrixPath, failMatrixYAML, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := CheckDispatchFromDir(failDir, "broken-contract"); err != nil || !v.Refuse {
+		t.Fatalf("expected CheckDispatch refusal on required ContractStatus=FAIL, got %+v (err=%v)", v, err)
+	}
+}

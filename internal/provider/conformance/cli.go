@@ -17,6 +17,7 @@ import (
 // CLIProfile describes how to probe one CLI agent binary.
 type CLIProfile struct {
 	Name        string
+	BinaryName  string // optional executable filename when distinct from Name (e.g. "cursor-agent")
 	BinEnv      string
 	VersionArgs []string
 	HelpArgs    [][]string
@@ -180,6 +181,30 @@ func DefaultCLIProfiles() []CLIProfile {
 			DefaultModel: "docs-retriever",
 			NewProvider:  func() provider.Provider { return provider.NewQwenProvider() },
 		},
+		{
+			Name:        "cursor",
+			BinaryName:  "cursor-agent",
+			BinEnv:      "CURSOR_BIN",
+			VersionArgs: []string{"--version"},
+			HelpArgs:    [][]string{{"--help"}},
+			OneShot: func(prompt, model string, extra []string) []string {
+				a := withModel([]string{"--print", "--trust", "--yolo"}, model)
+				a = append(a, extra...)
+				return append(a, prompt)
+			},
+			JSONArgs: []string{"--output-format", "json"},
+			SchemaArgs: func(schemaJSON, _ string) []string {
+				return []string{"--json-schema", schemaJSON}
+			},
+			Markers: map[ProbeID][]string{
+				ProbeP1: {"--print"},
+				ProbeP2: {"--output-format"},
+				ProbeP5: {"--workspace", "--add-dir"},
+				ProbeP7: {"--json-schema"},
+			},
+			Policy:      PolicyPaid,
+			NewProvider: func() provider.Provider { return provider.NewCursorProvider() },
+		},
 	}
 }
 
@@ -190,7 +215,11 @@ func resolveBinary(p CLIProfile) (string, error) {
 			return v, nil
 		}
 	}
-	return exec.LookPath(p.Name)
+	binName := p.BinaryName
+	if binName == "" {
+		binName = p.Name
+	}
+	return exec.LookPath(binName)
 }
 
 // CLIOptions tunes CLI probing.
