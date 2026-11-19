@@ -234,6 +234,7 @@ fi
 
 TAG_COMMIT=$(git rev-list -n1 "v$LATEST_TAG" 2>/dev/null || true)
 TAG_DATE=$(git show -s --format=%cs "v$LATEST_TAG^{commit}" 2>/dev/null || true)
+HEAD_COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
 if [ -z "$TAG_COMMIT" ] || [ -z "$TAG_DATE" ]; then
     warn "tag v$LATEST_TAG not resolvable in this checkout (shallow?)"
 else
@@ -241,10 +242,17 @@ else
     if [ -z "$MANIFEST_COMMIT" ]; then
         fail "Could not extract latest_release.commit from manifest.json"
     fi
-    if [ "$MANIFEST_COMMIT" != "$TAG_COMMIT_SHORT" ]; then
+    if [ "$MANIFEST_COMMIT" = "see-g8s-version-ldflags" ]; then
+        if [ -n "$HEAD_COMMIT" ] && [ "$HEAD_COMMIT" = "$TAG_COMMIT" ]; then
+            pass "manifest.json latest_release.commit ($MANIFEST_COMMIT) valid on tagged commit $TAG_COMMIT_SHORT"
+        else
+            fail "manifest.json latest_release.commit ($MANIFEST_COMMIT) must be updated to $TAG_COMMIT_SHORT on post-tag commits"
+        fi
+    elif [ "$MANIFEST_COMMIT" != "$TAG_COMMIT_SHORT" ]; then
         fail "manifest.json latest_release.commit mismatch: field 'latest_release.commit' ($MANIFEST_COMMIT) does not match v$LATEST_TAG commit ($TAG_COMMIT_SHORT)"
+    else
+        pass "manifest.json latest_release.commit ($MANIFEST_COMMIT) matches v$LATEST_TAG commit ($TAG_COMMIT_SHORT)"
     fi
-    pass "manifest.json latest_release.commit ($MANIFEST_COMMIT) matches v$LATEST_TAG commit ($TAG_COMMIT_SHORT)"
 
     if [ -z "$MANIFEST_DATE" ]; then
         fail "Could not extract latest_release.date from manifest.json"
@@ -410,7 +418,8 @@ if [ -f "packaging/chocolatey/g8s.nuspec" ]; then
     fi
 fi
 if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
-    CHOCO_ACTIVE=$(awk '
+    CHOCO_BOM="$(printf '\357\273\277')"
+    CHOCO_ACTIVE=$(sed "1s/^${CHOCO_BOM}//" packaging/chocolatey/tools/chocolateyinstall.ps1 | awk '
         BEGIN { in_blk = 0 }
         {
             line = $0
@@ -439,7 +448,7 @@ if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
         END {
             if (in_blk) { print "__UNCLOSED_BLOCK_COMMENT__" }
         }
-    ' packaging/chocolatey/tools/chocolateyinstall.ps1)
+    ')
     if printf '%s\n' "$CHOCO_ACTIVE" | grep -qiE '\.msi([^a-zA-Z0-9]|$)|fileType[[:space:]]*=[[:space:]]*['"'"'"]MSI['"'"'"]|Install-ChocolateyPackage([^a-zA-Z0-9]|$)'; then
         fail "Chocolatey installer script references unsupported .msi asset (expected GoReleaser .zip)"
     fi
@@ -448,25 +457,37 @@ if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
     fi
     CHOCO_VALIDATION=$(awk -v exp_url="$EXPECTED_ZIP_URL" '
         BEGIN {
-            in_args = 0; seen_url = 0; seen_args = 0; seen_args_close = 0; seen_bind_url = 0; seen_install = 0
+            in_args = 0; in_guard = 0; seen_url = 0; seen_args = 0; seen_args_close = 0; seen_bind_url = 0; seen_install = 0; seen_guard = 0; seen_guard_throw = 0
         }
         seen_install { print "statement after Install-ChocolateyZipPackage: " $0; exit 1 }
         /^\$toolsDir[[:space:]]*=[[:space:]]*"\$\(Split-Path -Parent \$MyInvocation\.MyCommand\.Definition\)"[[:space:]]*$/ {
-            if (in_args || seen_tools++) { print "duplicate or misplaced $toolsDir"; exit 1 }
+            if (in_args || in_guard || seen_tools++) { print "duplicate or misplaced $toolsDir"; exit 1 }
             next
         }
         /^\$url[[:space:]]*=[[:space:]]*'"'"'[^'"'"'\$]+'"'"'[[:space:]]*$/ {
-            if (in_args || seen_url++) { print "duplicate or misplaced $url assignment"; exit 1 }
+            if (in_args || in_guard || seen_url++) { print "duplicate or misplaced $url assignment"; exit 1 }
             val = $0; sub(/^\$url[[:space:]]*=[[:space:]]*'"'"'/, "", val); sub(/'"'"'[[:space:]]*$/, "", val)
             if (val != exp_url) { print "url=" val ", expected=" exp_url; exit 1 }
             next
         }
         /^\$checksum[[:space:]]*=[[:space:]]*'"'"'(<from checksums\.txt>|[0-9a-fA-F]{64})'"'"'[[:space:]]*$/ {
-            if (in_args || seen_csum++) { print "duplicate or misplaced $checksum"; exit 1 }
+            if (in_args || in_guard || seen_csum++) { print "duplicate or misplaced $checksum"; exit 1 }
             next
         }
+        !in_args && !in_guard && /^if[[:space:]]*\(\$checksum[[:space:]]+-eq[[:space:]]+'"'"'<from checksums\.txt>'"'"'\)[[:space:]]*\{[[:space:]]*$/ {
+            if (!seen_csum || seen_args || seen_guard++) { print "invalid or misplaced checksum placeholder guard"; exit 1 }
+            in_guard = 1; next
+        }
+        in_guard && /^[[:space:]]+throw[[:space:]]+'"'"'[^'"'"']*'"'"'[[:space:]]*$/ {
+            if (seen_guard_throw++) { print "duplicate throw in placeholder guard"; exit 1 }
+            next
+        }
+        in_guard && /^\}[[:space:]]*$/ {
+            if (!seen_guard_throw) { print "empty checksum placeholder guard"; exit 1 }
+            in_guard = 0; next
+        }
         /^\$packageArgs[[:space:]]*=[[:space:]]*@\{[[:space:]]*$/ {
-            if (in_args || !seen_url || seen_args++) { print "invalid $packageArgs block start"; exit 1 }
+            if (in_args || in_guard || !seen_url || seen_args++) { print "invalid $packageArgs block start"; exit 1 }
             in_args = 1; next
         }
         in_args && /^[[:space:]]+packageName[[:space:]]*=[[:space:]]*'"'"'g8s'"'"'[[:space:]]*$/ {
@@ -492,13 +513,13 @@ if [ -f "packaging/chocolatey/tools/chocolateyinstall.ps1" ]; then
         in_args && /^\}[[:space:]]*$/ {
             in_args = 0; seen_args_close = 1; next
         }
-        !in_args && /^Install-ChocolateyZipPackage[[:space:]]+@packageArgs[[:space:]]*$/ {
+        !in_args && !in_guard && /^Install-ChocolateyZipPackage[[:space:]]+@packageArgs[[:space:]]*$/ {
             if (!seen_args_close || !seen_bind_url) { print "Install-ChocolateyZipPackage invoked before valid $packageArgs"; exit 1 }
             seen_install = 1; next
         }
         { print "non-canonical PowerShell statement: " $0; exit 1 }
         END {
-            if (in_args || !seen_url || !seen_args || !seen_args_close || !seen_bind_url || !seen_install) {
+            if (in_args || in_guard || !seen_url || !seen_args || !seen_args_close || !seen_bind_url || !seen_install) {
                 print "incomplete Chocolatey zip installer template"
                 exit 1
             }

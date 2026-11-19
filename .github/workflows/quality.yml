@@ -312,6 +312,9 @@ jobs:
             exit 1
           fi
 
+          echo "=== Verifying 100% Runtime-Proven Quantitative Claims against live go test report (#938) ==="
+          bash tools/claims_check.sh --test-report "$COV_FILE"
+
           echo "=== Running Offline Assurance Benchmark Suite (#922) ==="
           bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null
           bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --markdown

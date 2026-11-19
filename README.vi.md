@@ -311,7 +311,7 @@ Các dự án khác có thể tích hợp `g8s` thông qua Offer Bundle ([`offer
 | Lĩnh vực | Quyết định kiến trúc & Non-Goal |
 | :--- | :--- |
 | **Plugin động in-process** | **Non-Goal**: Không dùng plugin dynamic C/Go. `g8s` chọn **Cấu hình khai báo + Giao thức chuẩn** (`providers.json`, JSON-RPC MCP, tiến trình con) để loại bỏ rủi ro biên dịch runtime và thoát sandbox. |
-| **Framework nặng nề** | **Non-Goal**: Không phụ thuộc vào môi trường Python cồng kềnh (LangChain, AutoGen). `g8s` là binary Go tĩnh hoàn toàn độc lập. |
+| **Framework nặng nề** | **Non-Goal**: Không phụ thuộc vào môi trường Python cồng kềnh (LangChain, AutoGen). `g8s` là binary tĩnh thuần Go không CGO (chỉ cần `git` cho worktree isolation và tùy chọn `bwrap` trên Linux). |
 | **Web UI cồng kềnh** | **Non-Goal**: Không dựng web dashboard rườm rà. `g8s` ưu tiên CLI; mọi trạng thái được theo dõi qua Evidence Lake và JSON envelope. |
 | **Hosting Model Inference** | **Non-Goal**: Không nạp trọng số model trực tiếp trong tiến trình g8s. g8s điều phối tiến trình ngoài và gateway HTTP. |
 

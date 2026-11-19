@@ -249,17 +249,18 @@ else
     echo -e "${YELLOW}Warning: internal/mcp/server.go not found, skipping server version update${NC}" >&2
 fi
 
-# Update manifest.json (version and latest_release.tag)
-# Note: latest_release.commit is intentionally NOT synced by this script
-# due to self-reference circularity: the release commit sha is only final
-# after the commit exists; the guard does not check it. commit and date
-# are left alone.
+# Update manifest.json before tagging: version, latest_release.tag,
+# latest_release.date (today), and latest_release.commit="see-g8s-version-ldflags"
+# so tagged release archives do not ship a stale prior-release commit SHA (#939).
 if [ -f "manifest.json" ]; then
+    RELEASE_DATE_NOW="$(date +%Y-%m-%d)"
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo -e "${YELLOW}Would update manifest.json: version = \"${NEW_VERSION}\", latest_release.tag = \"v${NEW_VERSION}\"${NC}"
+        echo -e "${YELLOW}Would update manifest.json: version = \"${NEW_VERSION}\", latest_release.tag = \"v${NEW_VERSION}\", latest_release.date = \"${RELEASE_DATE_NOW}\", latest_release.commit = \"see-g8s-version-ldflags\"${NC}"
     else
         sed -i.bak -E "s/^([[:space:]]*\"version\":[[:space:]]*\")[^\"]+(\".*)$/\1${NEW_VERSION}\2/" manifest.json
-        sed -i.bak -E "s/^([[:space:]]*\"tag\":[[:space:]]*\")v?[^\"]+(\".*)$/\1v${NEW_VERSION}\2/" manifest.json
+        sed -i.bak -E "/\"latest_release\"[[:space:]]*:/,/\}/ s/^([[:space:]]*\"tag\":[[:space:]]*\")v?[^\"]+(\".*)$/\1v${NEW_VERSION}\2/" manifest.json
+        sed -i.bak -E "/\"latest_release\"[[:space:]]*:/,/\}/ s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1see-g8s-version-ldflags\2/" manifest.json
+        sed -i.bak -E "/\"latest_release\"[[:space:]]*:/,/\}/ s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE_NOW}\2/" manifest.json
         rm -f manifest.json.bak
         echo -e "${GREEN}✓ Updated manifest.json${NC}"
     fi
@@ -383,8 +384,8 @@ fi
 if [ -f "manifest.json" ]; then
     RELEASE_SHA=$(git rev-parse --short=7 "v${NEW_VERSION}^{commit}")
     RELEASE_DATE=$(git show -s --format=%cs "v${NEW_VERSION}^{commit}")
-    sed -i.bak -E "s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
-    sed -i.bak -E "s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
+    sed -i.bak -E "/\"latest_release\"[[:space:]]*:/,/\}/ s/^([[:space:]]*\"commit\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_SHA}\2/" manifest.json
+    sed -i.bak -E "/\"latest_release\"[[:space:]]*:/,/\}/ s/^([[:space:]]*\"date\":[[:space:]]*\")[^\"]+(\".*)$/\1${RELEASE_DATE}\2/" manifest.json
     rm -f manifest.json.bak
     git add manifest.json
     if ! git diff --staged --quiet; then
