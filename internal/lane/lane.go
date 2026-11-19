@@ -133,6 +133,7 @@ var DefaultTrustBoundaries = []string{
 	"internal/premise/*",
 	"internal/provider/conformance/*",
 	"cmd/g8s/deliver.go",
+	"scripts/install.sh",
 }
 
 // Input represents a planned change submitted to the router.

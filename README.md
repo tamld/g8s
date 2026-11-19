@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh |
 irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
 ```
 
-The installers detect your CPU architecture, download the matching release asset, and **fail closed** on integrity: they require SHA-256 verification against `checksums.txt` from the release (via `sha256sum` / `shasum` on Unix, or `Get-FileHash` on Windows) and refuse to install if no checksum tool is available or verification fails. For Windows-specific notes, see [Windows installation guide](docs/WINDOWS_INSTALL.md).
+The installers detect your CPU architecture, download the matching release asset, and **fail closed** on integrity: they require SHA-256 verification against `checksums.txt` from the release (via `sha256sum` / `shasum` on Unix, or `Get-FileHash` on Windows) and refuse to install if no checksum tool is available or verification fails; pass `--verify-signature` (or `G8S_VERIFY_SIGNATURE=1`) to `scripts/install.sh` to enforce Cosign Sigstore bundle or GitHub artifact attestation verification. For Windows-specific notes, see [Windows installation guide](docs/WINDOWS_INSTALL.md).
 
 ### Package managers
 

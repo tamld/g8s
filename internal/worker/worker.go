@@ -8,6 +8,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -208,6 +209,13 @@ func WithQualityGate(g OutputQualityGate) Option {
 	return func(s *Supervisor) { s.qualityGate = g }
 }
 
+// WithRequireKernelSandbox enforces that OS containment achieves ModeKernelEnforced
+// before launching worker subprocesses (fail-closed refusal on policy_only or
+// non-kernel-enforced backends).
+func WithRequireKernelSandbox(require bool) Option {
+	return func(s *Supervisor) { s.requireKernelSandbox = require }
+}
+
 // SubstituteTemplate replaces {prompt}, {model} and {timeout} placeholders
 // verbatim in an operator-defined invocation template (DELTA-10 R6).
 func SubstituteTemplate(tmpl []string, prompt, model, timeout string) []string {
@@ -305,6 +313,10 @@ type Supervisor struct {
 	// isolation (legacy shared-checkout behavior).
 	isolator WorktreeIsolator
 
+	// requireKernelSandbox fails closed whenever OS containment cannot reach
+	// sandbox.ModeKernelEnforced (#936 / ADR-0042 TRUST-G1).
+	requireKernelSandbox bool
+
 	// Closed-loop telemetry ingestion (#253): opt-in via G8S_TELEMETRY=1
 	// (default ledger path) or G8S_TELEMETRY_DB=<path>. Lazily opened per
 	// process; refcounted per in-flight run so concurrent runs (#394) close
@@ -331,15 +343,16 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 	}
 
 	s := &Supervisor{
-		cp:              cp,
-		runRoot:         runRoot,
-		clock:           time.Now,
-		runner:          processRunner{},
-		pollInterval:    defaultPollInterval,
-		captureMaxBytes: defaultCaptureBytes,
-		binaryPath:      "",
-		providers:       config.BuiltinPlatformProviders(),
-		evidenceDir:     evidenceDir,
+		cp:                   cp,
+		runRoot:              runRoot,
+		clock:                time.Now,
+		runner:               processRunner{},
+		pollInterval:         defaultPollInterval,
+		captureMaxBytes:      defaultCaptureBytes,
+		binaryPath:           "",
+		providers:            config.BuiltinPlatformProviders(),
+		evidenceDir:          evidenceDir,
+		requireKernelSandbox: strings.TrimSpace(os.Getenv("G8S_REQUIRE_KERNEL_SANDBOX")) == "1",
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -748,14 +761,15 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		stateDir = filepath.Dir(pathutil.DefaultDatabasePath())
 	}
 	sbxCfg := &sandbox.Config{
-		WorktreeDir:    spawnDir,
-		RunDir:         runDir,
-		StateDir:       stateDir,
-		Permission:     req.Permission,
-		ProviderName:   resolvedTaskProvider.Name,
-		AddDirs:        req.AddDirs,
-		ExtraWriteDirs: extraWriteDirs,
-		NoSandbox:      req.NoSandbox,
+		WorktreeDir:           spawnDir,
+		RunDir:                runDir,
+		StateDir:              stateDir,
+		Permission:            req.Permission,
+		ProviderName:          resolvedTaskProvider.Name,
+		AddDirs:               req.AddDirs,
+		ExtraWriteDirs:        extraWriteDirs,
+		NoSandbox:             req.NoSandbox,
+		RequireKernelEnforced: s.requireKernelSandbox,
 	}
 	var baselineIgnored map[string]IgnoredFileStamp
 	if isolatedWorktreeDir != "" {
@@ -779,10 +793,13 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		outFile.Close()
 		errMsg := dispatch.SanitizeOutput(spawnErr.Error())
 
-		// Detect permission denied - not retryable, report intent
+		// Detect permission denied or fail-closed sandbox policy rejection - not retryable
 		retryable := true
 		status := "spawn_failed"
-		if strings.Contains(strings.ToLower(errMsg), "permission denied") {
+		if errors.Is(spawnErr, sandbox.ErrKernelSandboxRequired) {
+			retryable = false
+			status = "sandbox_policy_rejected"
+		} else if strings.Contains(strings.ToLower(errMsg), "permission denied") {
 			retryable = false
 			status = "permission_denied"
 			errMsg = fmt.Sprintf("executable permission denied: %s (intent: worker lacks execute permission on binary)", errMsg)

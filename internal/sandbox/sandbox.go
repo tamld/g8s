@@ -21,19 +21,25 @@ const (
 	ModePolicyOnly           ContainmentMode = "policy_only"
 )
 
+// ErrKernelSandboxRequired is returned when RequireKernelEnforced is set and
+// the host cannot provide ModeKernelEnforced containment (e.g., policy_only or
+// Windows JobObject without kernel filesystem ACLs).
+var ErrKernelSandboxRequired = errors.New("E_SANDBOX_KERNEL_ENFORCED_REQUIRED")
+
 // Config parameterizes per-attempt subprocess containment and environment scrubbing.
 type Config struct {
-	Argv           []string
-	WorktreeDir    string
-	RunDir         string
-	StateDir       string
-	Permission     string
-	ProviderName   string
-	AddDirs        []string
-	ExtraWriteDirs []string
-	BaseEnv        []string
-	TaskEnv        []string
-	NoSandbox      bool
+	Argv                  []string
+	WorktreeDir           string
+	RunDir                string
+	StateDir              string
+	Permission            string
+	ProviderName          string
+	AddDirs               []string
+	ExtraWriteDirs        []string
+	BaseEnv               []string
+	TaskEnv               []string
+	NoSandbox             bool
+	RequireKernelEnforced bool
 }
 
 // PreparedLaunch holds the wrapped command vector, scrubbed environment, containment
@@ -142,6 +148,12 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 	env := ScrubEnv(baseEnv, cfg.TaskEnv, cfg.ProviderName, tmpDir, gocacheDir, sandboxID)
 
 	if cfg.NoSandbox {
+		if cfg.RequireKernelEnforced {
+			if ownTmp {
+				removeAllLogged(tmpDir)
+			}
+			return nil, fmt.Errorf("%w: no_sandbox cannot be combined with require_kernel_enforced", ErrKernelSandboxRequired)
+		}
 		return &PreparedLaunch{
 			Argv:      append([]string{}, cfg.Argv...),
 			Env:       env,
@@ -157,7 +169,25 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 		}, nil
 	}
 
-	return prepareOS(cfg, env, tmpDir, gocacheDir, sandboxID, ownTmp)
+	launch, osErr := prepareOS(cfg, env, tmpDir, gocacheDir, sandboxID, ownTmp)
+	if osErr != nil {
+		return nil, osErr
+	}
+	return enforceContainmentRequirement(launch, cfg.RequireKernelEnforced)
+}
+
+func enforceContainmentRequirement(launch *PreparedLaunch, requireKernel bool) (*PreparedLaunch, error) {
+	if !requireKernel || launch == nil {
+		return launch, nil
+	}
+	if launch.Mode == ModeKernelEnforced {
+		return launch, nil
+	}
+	if launch.Cleanup != nil {
+		launch.Cleanup()
+	}
+	return nil, fmt.Errorf("%w: containment degraded to mode=%s backend=%s (kernel_enforced required)",
+		ErrKernelSandboxRequired, launch.Mode, launch.Backend)
 }
 
 func validatePathString(label, val string) error {

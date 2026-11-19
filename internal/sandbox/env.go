@@ -25,8 +25,10 @@ func ProviderAllowedEnvKeys(providerName string) map[string]bool {
 		allow("GEMINI_API_KEY", "GOOGLE_API_KEY")
 	case "qwen":
 		allow("DASHSCOPE_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL")
-	case "opencode", "commandcode", "9router":
-		allow("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY", "NINEROUTER_API_KEY", "CLIPROXY_API_KEY")
+	case "opencode", "commandcode":
+		allow("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY")
+	case "9router":
+		allow("NINEROUTER_API_KEY")
 	}
 	return out
 }

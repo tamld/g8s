@@ -20,3 +20,4 @@ trust_boundaries:
   - "internal/premise/*"
   - "internal/provider/conformance/*"
   - "cmd/g8s/deliver.go"
+  - "scripts/install.sh"

@@ -108,7 +108,7 @@ curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh |
 irm https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.ps1 | iex
 ```
 
-Bộ cài tự động phát hiện kiến trúc CPU, tải bản phát hành phù hợp, và **thất bại an toàn** về tính toàn vẹn: chúng yêu cầu xác minh SHA-256 dựa trên `checksums.txt` từ bản phát hành (qua `sha256sum` / `shasum` trên Unix, hoặc `Get-FileHash` trên Windows) và từ chối cài đặt nếu không có công cụ checksum hoặc xác minh thất bại. Xem thêm [Hướng dẫn cài đặt Windows](docs/WINDOWS_INSTALL.md).
+Bộ cài tự động phát hiện kiến trúc CPU, tải bản phát hành phù hợp, và **thất bại an toàn** về tính toàn vẹn: chúng yêu cầu xác minh SHA-256 dựa trên `checksums.txt` từ bản phát hành (qua `sha256sum` / `shasum` trên Unix, hoặc `Get-FileHash` trên Windows) và từ chối cài đặt nếu không có công cụ checksum hoặc xác minh thất bại; truyền `--verify-signature` (hoặc `G8S_VERIFY_SIGNATURE=1`) cho `scripts/install.sh` để bắt buộc xác minh chữ ký Cosign Sigstore hoặc GitHub attestation. Xem thêm [Hướng dẫn cài đặt Windows](docs/WINDOWS_INSTALL.md).
 
 ### Trình quản lý gói
 

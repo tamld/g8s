@@ -13,6 +13,10 @@ fi
 # Test 1: --help
 HELP_OUT="$(bash tools/assurance_benchmark.sh --help)"
 printf '%s\n' "$HELP_OUT" | grep -q 'g8s\.assurance' || true
+printf '%s\n' "$HELP_OUT" | grep -q -- '--require-kernel-enforced' || {
+    echo "FAIL: --help output missing --require-kernel-enforced" >&2
+    exit 1
+}
 printf '%s\n' "$HELP_OUT" | grep -q 'escape-containment' || {
     echo "FAIL: --help output missing escape-containment" >&2
     exit 1
@@ -32,6 +36,9 @@ CGO_ENABLED=0 go build -o "$BIN" ./cmd/g8s
 JSON_OUT="$(bash tools/assurance_benchmark.sh --bin "$BIN" --json)"
 printf '%s\n' "$JSON_OUT" | jq -e '
   .schema == "g8s.assurance-benchmark/v1" and
+  .epistemic_class == "measured_metric" and
+  (.kernel_enforced | type == "boolean") and
+  (.sandbox_mode | length > 0) and
   .score == 1 and
   .passed_probes == 5 and
   .failed_probes == 0 and
@@ -42,6 +49,20 @@ printf '%s\n' "$JSON_OUT" | jq -e '
     printf '%s\n' "$JSON_OUT" >&2
     exit 1
 }
+
+# Test 2b: --require-kernel-enforced matches host kernel_enforced state
+KERNEL_ENFORCED="$(printf '%s\n' "$JSON_OUT" | jq -r '.kernel_enforced')"
+if [ "$KERNEL_ENFORCED" = "true" ]; then
+    bash tools/assurance_benchmark.sh --bin "$BIN" --require-kernel-enforced --json >/dev/null || {
+        echo "FAIL: --require-kernel-enforced failed despite kernel_enforced=true" >&2
+        exit 1
+    }
+else
+    if bash tools/assurance_benchmark.sh --bin "$BIN" --require-kernel-enforced --json >/dev/null 2>&1; then
+        echo "FAIL: --require-kernel-enforced succeeded despite kernel_enforced=false" >&2
+        exit 1
+    fi
+fi
 
 # Test 3: --markdown
 MD_OUT="$(bash tools/assurance_benchmark.sh --bin "$BIN" --markdown)"

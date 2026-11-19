@@ -4,10 +4,15 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/tamld/g8s/main/scripts/install.sh | G8S_VERIFY_SIGNATURE=1 bash
+#
+# Flags:
+#   --verify-signature  Enforce fail-closed Cosign/GitHub attestation verification (same as G8S_VERIFY_SIGNATURE=1)
 #
 # Environment Overrides:
-#   G8S_VERSION      - Release version to install (e.g., v0.1.0; default: latest)
-#   G8S_INSTALL_DIR  - Directory to install binary (default: ~/.local/bin or /usr/local/bin)
+#   G8S_VERSION           - Release version to install (e.g., v0.25.0; default: latest from GitHub API)
+#   G8S_INSTALL_DIR       - Directory to install binary (default: ~/.local/bin or /usr/local/bin)
+#   G8S_VERIFY_SIGNATURE  - Set to 1 to require Cosign Sigstore or GitHub artifact attestation verification
 # ==============================================================================
 
 set -euo pipefail
@@ -106,7 +111,7 @@ detect_arch() {
     esac
 }
 
-# 3. Detect latest version if not set
+# 3. Detect latest version if not set (fail-closed on lookup failure — #937)
 get_latest_version() {
     if [ -n "${G8S_VERSION:-}" ]; then
         echo "${G8S_VERSION}"
@@ -115,12 +120,71 @@ get_latest_version() {
     local latest
     latest="$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || true)"
     if [ -z "$latest" ]; then
-        latest="v0.1.0"
+        error "Failed to determine latest release version from GitHub API; set G8S_VERSION=vX.Y.Z explicitly"
     fi
     echo "$latest"
 }
 
+resolve_asset_name() {
+    local os="$1"
+    local arch="$2"
+    local clean_version="$3"
+    if [ "$os" = "darwin" ]; then
+        echo "g8s_${clean_version}_darwin_all.tar.gz"
+    else
+        echo "g8s_${clean_version}_${os}_${arch}.tar.gz"
+    fi
+}
+
+verify_release_signature() {
+    local version="$1"
+    local tmp_dir="$2"
+    local asset_name="$3"
+
+    if [ "${G8S_VERIFY_SIGNATURE:-0}" != "1" ]; then
+        return 0
+    fi
+
+    if command -v cosign >/dev/null 2>&1; then
+        local bundle_url="${GITHUB_URL}/releases/download/${version}/checksums.txt.sigstore.json"
+        fetch_asset "$version" "checksums.txt.sigstore.json" "${tmp_dir}/checksums.txt.sigstore.json" \
+            "Failed to download ${bundle_url}; refusing unverified signature under G8S_VERIFY_SIGNATURE=1"
+        info "Verifying Sigstore Cosign bundle for checksums.txt..."
+        cosign verify-blob \
+            --bundle "${tmp_dir}/checksums.txt.sigstore.json" \
+            --certificate-identity-regexp "^https://github\\.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/${version}$" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${tmp_dir}/checksums.txt" || error "Sigstore Cosign signature verification failed for ${version}"
+        return 0
+    fi
+
+    if command -v gh >/dev/null 2>&1; then
+        info "Verifying GitHub artifact attestation for ${asset_name}..."
+        gh attestation verify "${tmp_dir}/${asset_name}" -R "${REPO}" --owner "${REPO%%/*}" \
+            || error "GitHub artifact attestation verification failed for ${asset_name}"
+        return 0
+    fi
+
+    error "G8S_VERIFY_SIGNATURE=1 requires either cosign or gh CLI to verify release signatures"
+}
+
 main() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --verify-signature)
+                export G8S_VERIFY_SIGNATURE=1
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: install.sh [--verify-signature]"
+                exit 0
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
     info "Installing g8s (The Gatekeepers)..."
 
     local os arch version
@@ -132,7 +196,8 @@ main() {
 
     # Clean version tag without leading v for tarball name
     local clean_version="${version#v}"
-    local asset_name="g8s_${clean_version}_${os}_${arch}.tar.gz"
+    local asset_name
+    asset_name="$(resolve_asset_name "$os" "$arch" "$clean_version")"
     local download_url="${GITHUB_URL}/releases/download/${version}/${asset_name}"
     local checksum_url="${GITHUB_URL}/releases/download/${version}/checksums.txt"
 
@@ -144,22 +209,20 @@ main() {
     info "Downloading ${asset_name}..."
     fetch_asset "$version" "$asset_name" "${tmp_dir}/${asset_name}" "Failed to download ${download_url}"
 
-    # Optional stronger verification (not enforced by this installer):
-    #   gh attestation verify <asset> -R tamld/g8s --owner tamld
-    #   cosign verify-blob --bundle checksums.txt.sigstore.json checksums.txt
     # Verify Checksum (Fail-Closed Supply Chain Enforcement - Issue #639)
     fetch_asset "$version" "checksums.txt" "${tmp_dir}/checksums.txt" \
         "Failed to download ${checksum_url}; refusing unverified binary installation"
+    verify_release_signature "$version" "$tmp_dir" "$asset_name"
     info "Verifying SHA-256 checksum..."
     (
         cd "$tmp_dir"
-        if ! grep -q "${asset_name}" checksums.txt; then
+        if ! grep -qE "[[:space:]]${asset_name}\$" checksums.txt; then
             error "Asset ${asset_name} not found in checksums.txt"
         fi
         if command -v sha256sum >/dev/null 2>&1; then
-            grep "${asset_name}" checksums.txt | sha256sum -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
+            grep -E "[[:space:]]${asset_name}\$" checksums.txt | sha256sum -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
         elif command -v shasum >/dev/null 2>&1; then
-            grep "${asset_name}" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
+            grep -E "[[:space:]]${asset_name}\$" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
         else
             error "Neither sha256sum nor shasum is installed; cannot verify binary integrity"
         fi

@@ -6,10 +6,11 @@ set -euo pipefail
 
 MODE="markdown"
 BIN_PATH=""
+REQUIRE_KERNEL="false"
 
 usage() {
     cat <<'EOF'
-Usage: bash tools/assurance_benchmark.sh [--json | --markdown] [--bin <path>] [-h | --help]
+Usage: bash tools/assurance_benchmark.sh [--json | --markdown] [--bin <path>] [--require-kernel-enforced] [-h | --help]
 
 Runs the deterministic offline g8s assurance benchmark suite (Category: assurance)
 across 5 runtime probes without external LLM credentials:
@@ -18,6 +19,9 @@ across 5 runtime probes without external LLM credentials:
   3. as-003 crash-lease-recovery-rto (stale SQLite WAL lease reclaim RTO)
   4. as-004 control-plane-cas-overhead (submit/claim CAS + Ed25519 sign/verify latency)
   5. as-005 audit-trail-cryptographic-completeness (Ed25519 tamper + replay + 0600/0700)
+
+Flags:
+  --require-kernel-enforced  Fail non-zero unless as-001 executes under mode=kernel_enforced
 EOF
 }
 
@@ -29,6 +33,10 @@ while [ $# -gt 0 ]; do
             ;;
         --markdown)
             MODE="markdown"
+            shift
+            ;;
+        --require-kernel-enforced)
+            REQUIRE_KERNEL="true"
             shift
             ;;
         --bin)
@@ -100,10 +108,18 @@ SUMMARY_JSON="$(jq -n \
     --argjson ver "$VER_JSON" \
     --argjson doc "$DOC_JSON" \
     --argjson ev "$EVAL_JSON" \
-    '{
+    '
+    (([$ev.data.details[] | select(.probe_id == "as-001") | (.actual_outcome | fromjson)][0]) // {}) as $as1 |
+    ($as1.sandbox_mode // "unknown") as $sbx_mode |
+    ($as1.sandbox_backend // "unknown") as $sbx_backend |
+    {
       schema: "g8s.assurance-benchmark/v1",
+      epistemic_class: "measured_metric",
       platform: (($ver.data.os // "unknown") + "/" + ($ver.data.arch // "unknown")),
       version: ($ver.data.version // "dev"),
+      sandbox_mode: $sbx_mode,
+      sandbox_backend: $sbx_backend,
+      kernel_enforced: ($sbx_mode == "kernel_enforced"),
       os_sandbox: (($doc.data.capabilities // []) | map(select(.name == "os_sandbox")) | .[0] // {available: false, verification_state: "unprobed", detail: "unknown"}),
       score: $ev.data.score,
       passed_probes: $ev.data.passed_probes,
@@ -121,6 +137,16 @@ SUMMARY_JSON="$(jq -n \
       ]
     }')"
 
+if [ "$REQUIRE_KERNEL" = "true" ]; then
+    KERNEL_OK="$(printf '%s\n' "$SUMMARY_JSON" | jq -r '.kernel_enforced')"
+    if [ "$KERNEL_OK" != "true" ]; then
+        SBX_MODE="$(printf '%s\n' "$SUMMARY_JSON" | jq -r '.sandbox_mode')"
+        SBX_BACKEND="$(printf '%s\n' "$SUMMARY_JSON" | jq -r '.sandbox_backend')"
+        echo "ERROR: --require-kernel-enforced failed: host sandbox_mode=${SBX_MODE} (backend=${SBX_BACKEND}) is not kernel_enforced" >&2
+        exit 1
+    fi
+fi
+
 if [ "$MODE" = "json" ]; then
     printf '%s\n' "$SUMMARY_JSON"
     exit 0
@@ -129,7 +155,8 @@ fi
 printf '### g8s Offline Assurance Benchmark Report\n\n'
 printf '%s\n' "$SUMMARY_JSON" | jq -r '
   "- **Platform**: `" + .platform + "` | **Version**: `" + .version + "`\n" +
-  "- **OS Sandbox**: `" + (.os_sandbox.detail // "unknown") + "` (`available=" + (.os_sandbox.available | tostring) + "`)\n" +
+  "- **OS Sandbox**: `" + (.os_sandbox.detail // "unknown") + "` (`kernel_enforced=" + (.kernel_enforced | tostring) + "`)\n" +
+  (if .kernel_enforced then "" else "- **Containment Warning**: Degraded mode (`sandbox_mode=" + .sandbox_mode + " != kernel_enforced`) — Vector 2 evaluated via post-run diff firewall fallback, not kernel filesystem isolation.\n" end) +
   "- **Overall Score**: `" + ((.score * 100) | tostring) + "%` (" + (.passed_probes | tostring) + "/" + (.total_probes | tostring) + " probes passed in " + (((.total_duration_ms * 10) | round) / 10 | tostring) + " ms)\n"
 '
 printf '\n| Probe | Dimension | Result | Measured Metrics | Duration (ms) |\n'

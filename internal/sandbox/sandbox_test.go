@@ -167,12 +167,32 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"agy", "GEMINI_API_KEY"},
 		{"qwen", "DASHSCOPE_API_KEY"},
-		{"9router", "OPENROUTER_API_KEY"},
+		{"9router", "NINEROUTER_API_KEY"},
 		{"opencode", "NVIDIA_API_KEY"},
 	} {
 		if !ProviderAllowedEnvKeys(tc.provider)[tc.wantKey] {
 			t.Fatalf("provider %q missing %q in allowlist", tc.provider, tc.wantKey)
 		}
+	}
+
+	nineRouterMap := envToMap(ScrubEnv([]string{
+		"OPENAI_API_KEY=sk-openai",
+		"ANTHROPIC_API_KEY=sk-ant",
+		"OPENROUTER_API_KEY=sk-or",
+		"NVIDIA_API_KEY=nvapi-1",
+		"CLIPROXY_API_KEY=clip-secret",
+		"NINEROUTER_API_KEY=nr-secret",
+	}, nil, "9router", "/tmp/iso", "/tmp/gocache", "sbx-9r"))
+	if nineRouterMap["NINEROUTER_API_KEY"] != "nr-secret" {
+		t.Fatalf("expected NINEROUTER_API_KEY preserved for 9router, got %q", nineRouterMap["NINEROUTER_API_KEY"])
+	}
+	for _, stripped := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY", "CLIPROXY_API_KEY"} {
+		if _, exists := nineRouterMap[stripped]; exists {
+			t.Fatalf("expected %s stripped from 9router allowlist", stripped)
+		}
+	}
+	if ProviderAllowedEnvKeys("opencode")["CLIPROXY_API_KEY"] || ProviderAllowedEnvKeys("commandcode")["CLIPROXY_API_KEY"] {
+		t.Fatal("expected CLIPROXY_API_KEY removed from opencode/commandcode allowlist")
 	}
 }
 
@@ -391,6 +411,55 @@ func TestPrepareValidationAndNoSandbox(t *testing.T) {
 	prep.Cleanup()
 	if _, err := os.Stat(prep.TempDir); !os.IsNotExist(err) {
 		t.Fatalf("expected TempDir removed after Cleanup, err=%v", err)
+	}
+}
+
+func TestPrepare_RequireKernelEnforced_FailClosed(t *testing.T) {
+	runDir := t.TempDir()
+	_, err := Prepare(Config{
+		Argv:                  []string{"sh", "-c", "true"},
+		WorktreeDir:           t.TempDir(),
+		RunDir:                runDir,
+		StateDir:              t.TempDir(),
+		Permission:            "read_only",
+		NoSandbox:             true,
+		RequireKernelEnforced: true,
+	})
+	if !errors.Is(err, ErrKernelSandboxRequired) {
+		t.Fatalf("expected ErrKernelSandboxRequired when NoSandbox+RequireKernelEnforced, got %v", err)
+	}
+
+	for _, degraded := range []struct {
+		mode    ContainmentMode
+		backend string
+	}{
+		{ModePolicyOnly, "linux_policy_only"},
+		{ModeJobObjectEnvScrubbed, "windows_job_object"},
+	} {
+		cleaned := false
+		_, cerr := enforceContainmentRequirement(&PreparedLaunch{
+			Argv:    []string{"true"},
+			Mode:    degraded.mode,
+			Backend: degraded.backend,
+			Cleanup: func() { cleaned = true },
+		}, true)
+		if !errors.Is(cerr, ErrKernelSandboxRequired) {
+			t.Fatalf("mode %s: expected ErrKernelSandboxRequired, got %v", degraded.mode, cerr)
+		}
+		if !cleaned {
+			t.Fatalf("mode %s: expected Cleanup hook invoked on fail-closed rejection", degraded.mode)
+		}
+	}
+
+	cleaned := false
+	okLaunch, oerr := enforceContainmentRequirement(&PreparedLaunch{
+		Argv:    []string{"true"},
+		Mode:    ModeKernelEnforced,
+		Backend: "seatbelt",
+		Cleanup: func() { cleaned = true },
+	}, true)
+	if oerr != nil || okLaunch == nil || cleaned {
+		t.Fatalf("expected ModeKernelEnforced accepted without cleanup, got launch=%v err=%v cleaned=%v", okLaunch, oerr, cleaned)
 	}
 }
 
