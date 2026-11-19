@@ -196,3 +196,11 @@ func (a *AgyProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	return newProcessHandle("agy", cmd, start, &stdoutBuf, &stderrBuf), nil
 }
+
+// TransportKind returns TransportKindProcess for the agy CLI worker.
+func (a *AgyProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for agy.
+func (a *AgyProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return a.Spawn(ctx, spec)
+}

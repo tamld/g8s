@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,8 +14,15 @@ import (
 	"github.com/tamld/g8s/internal/cli"
 )
 
-// CurrentCatalogSchemaVersion is the required schema version for agent-models catalogs.
-const CurrentCatalogSchemaVersion = "agent-models.v1"
+// ErrCapabilityUnsupported is returned when a model or provider lacks a required capability.
+var ErrCapabilityUnsupported = errors.New("capability unsupported")
+
+const (
+	// CatalogSchemaV1 is accepted for backwards-compatible fixtures.
+	CatalogSchemaV1 = "agent-models.v1"
+	// CurrentCatalogSchemaVersion is the active schema version for agent-models catalogs.
+	CurrentCatalogSchemaVersion = "agent-models.v2"
+)
 
 // DefaultCatalogPath is the repository-relative path to the catalog.
 const DefaultCatalogPath = ".g8s/agent-models.yml"
@@ -70,7 +78,47 @@ type Profile struct {
 	Permission string `json:"permission"`
 }
 
-// Catalog represents the agent-models catalog (agent-models.v1).
+// ModelCapabilities declares structured runtime capabilities for a provider or model (agent-models.v2).
+type ModelCapabilities struct {
+	ToolCalling      *bool `json:"tool_calling,omitempty"`
+	StructuredOutput *bool `json:"structured_output,omitempty"`
+	Streaming        *bool `json:"streaming,omitempty"`
+	ReasoningEffort  *bool `json:"reasoning_effort,omitempty"`
+	CancelInflight   *bool `json:"cancel_inflight,omitempty"`
+	ContextWindow    int   `json:"context_window,omitempty"`
+}
+
+// EffectiveCapabilities merges provider-level defaults with model-level overrides.
+func EffectiveCapabilities(prov ProviderCatalog, model ModelCatalog) ModelCapabilities {
+	var out ModelCapabilities
+	if prov.Capabilities != nil {
+		out = *prov.Capabilities
+	}
+	if model.Capabilities != nil {
+		mc := model.Capabilities
+		if mc.ToolCalling != nil {
+			out.ToolCalling = mc.ToolCalling
+		}
+		if mc.StructuredOutput != nil {
+			out.StructuredOutput = mc.StructuredOutput
+		}
+		if mc.Streaming != nil {
+			out.Streaming = mc.Streaming
+		}
+		if mc.ReasoningEffort != nil {
+			out.ReasoningEffort = mc.ReasoningEffort
+		}
+		if mc.CancelInflight != nil {
+			out.CancelInflight = mc.CancelInflight
+		}
+		if mc.ContextWindow > 0 {
+			out.ContextWindow = mc.ContextWindow
+		}
+	}
+	return out
+}
+
+// Catalog represents the agent-models catalog (agent-models.v1 / agent-models.v2).
 type Catalog struct {
 	SchemaVersion  string                     `json:"schema_version"`
 	CatalogVersion int                        `json:"catalog_version"`
@@ -82,13 +130,14 @@ type Catalog struct {
 
 // ProviderCatalog represents a provider's entry in the catalog.
 type ProviderCatalog struct {
-	Name          string         `json:"name,omitempty"`
-	EffortStyle   string         `json:"effort_style,omitempty"`
-	Field         string         `json:"field,omitempty"`
-	DefaultEffort string         `json:"default_effort,omitempty"`
-	Mandatory     bool           `json:"mandatory,omitempty"`
-	Notes         string         `json:"notes,omitempty"`
-	Models        []ModelCatalog `json:"models"`
+	Name          string             `json:"name,omitempty"`
+	EffortStyle   string             `json:"effort_style,omitempty"`
+	Field         string             `json:"field,omitempty"`
+	DefaultEffort string             `json:"default_effort,omitempty"`
+	Mandatory     bool               `json:"mandatory,omitempty"`
+	Notes         string             `json:"notes,omitempty"`
+	Capabilities  *ModelCapabilities `json:"capabilities,omitempty"`
+	Models        []ModelCatalog     `json:"models"`
 
 	// Declarative model metadata (issue #902 / Slice WF1)
 	Family   string `json:"family,omitempty"`
@@ -108,13 +157,14 @@ func (p ProviderCatalog) FindModel(id string) (ModelCatalog, bool) {
 
 // ModelCatalog represents a model's entry in the catalog.
 type ModelCatalog struct {
-	ID               string         `json:"id"`
-	EffortStyle      string         `json:"effort_style,omitempty"`
-	SupportedEfforts []string       `json:"supported_efforts"`
-	DefaultEffort    string         `json:"default_effort,omitempty"`
-	Mandatory        bool           `json:"mandatory,omitempty"`
-	EffortBudgetMap  map[string]int `json:"effort_budget_map,omitempty"`
-	Notes            string         `json:"notes,omitempty"`
+	ID               string             `json:"id"`
+	EffortStyle      string             `json:"effort_style,omitempty"`
+	SupportedEfforts []string           `json:"supported_efforts"`
+	DefaultEffort    string             `json:"default_effort,omitempty"`
+	Mandatory        bool               `json:"mandatory,omitempty"`
+	EffortBudgetMap  map[string]int     `json:"effort_budget_map,omitempty"`
+	Notes            string             `json:"notes,omitempty"`
+	Capabilities     *ModelCapabilities `json:"capabilities,omitempty"`
 
 	// Declarative model metadata (issue #902 / Slice WF1)
 	Family   string `json:"family,omitempty"`
@@ -458,6 +508,64 @@ func parseBool(s string) (bool, error) {
 	}
 }
 
+func applyCapabilityField(caps *ModelCapabilities, key, val string, lineNum int) error {
+	switch key {
+	case "tool_calling":
+		b, err := parseBool(val)
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.tool_calling %q", val)}
+		}
+		caps.ToolCalling = &b
+	case "structured_output":
+		b, err := parseBool(val)
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.structured_output %q", val)}
+		}
+		caps.StructuredOutput = &b
+	case "streaming":
+		b, err := parseBool(val)
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.streaming %q", val)}
+		}
+		caps.Streaming = &b
+	case "reasoning_effort":
+		b, err := parseBool(val)
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.reasoning_effort %q", val)}
+		}
+		caps.ReasoningEffort = &b
+	case "cancel_inflight":
+		b, err := parseBool(val)
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.cancel_inflight %q", val)}
+		}
+		caps.CancelInflight = &b
+	case "context_window":
+		cw, err := strconv.Atoi(cleanYAMLValue(val))
+		if err != nil {
+			return &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities.context_window %q: %v", val, err)}
+		}
+		caps.ContextWindow = cw
+	default:
+		return &ParseError{Line: lineNum, Msg: fmt.Sprintf("unknown capability field %q", key)}
+	}
+	return nil
+}
+
+func parseCapabilitiesFlowMap(flow string, lineNum int) (*ModelCapabilities, error) {
+	fields, err := parseFlowMapString(flow)
+	if err != nil {
+		return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("invalid capabilities map: %v", err)}
+	}
+	caps := &ModelCapabilities{}
+	for k, v := range fields {
+		if err := applyCapabilityField(caps, k, v, lineNum); err != nil {
+			return nil, err
+		}
+	}
+	return caps, nil
+}
+
 // ParseCatalog parses YAML data for an agent-models catalog using pure Go stdlib.
 func ParseCatalog(data []byte) (*Catalog, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -475,6 +583,8 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 		inModelsList           bool
 		inSupportedEffortsList bool
 		inBudgetMapBlock       bool
+		capTarget              *ModelCapabilities
+		capIndent              int
 	)
 
 	commitCurrentModel := func() {
@@ -484,6 +594,10 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 		}
 		inSupportedEffortsList = false
 		inBudgetMapBlock = false
+		if capIndent > 4 {
+			capTarget = nil
+			capIndent = 0
+		}
 	}
 
 	commitCurrentProvider := func() {
@@ -494,6 +608,8 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 			currentProviderName = ""
 		}
 		inModelsList = false
+		capTarget = nil
+		capIndent = 0
 	}
 
 	lineNum := 0
@@ -593,6 +709,18 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 				return nil, &ParseError{Line: lineNum, Msg: fmt.Sprintf("content outside provider definition: %q", trimmed)}
 			}
 
+			if capTarget != nil {
+				if leadingSpaces > capIndent && !strings.HasPrefix(trimmed, "- ") && strings.Contains(trimmed, ":") {
+					parts := strings.SplitN(trimmed, ":", 2)
+					if err := applyCapabilityField(capTarget, cleanYAMLValue(parts[0]), strings.TrimSpace(parts[1]), lineNum); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				capTarget = nil
+				capIndent = 0
+			}
+
 			// If indent is at provider level (<= 5 spaces) and doesn't start with "- ",
 			// we are at provider properties (commit any current model)
 			if leadingSpaces <= 5 && !strings.HasPrefix(trimmed, "- ") {
@@ -688,6 +816,19 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 						case "notes":
 							currentModel.Notes = cleanYAMLValue(propVal)
 							continue
+						case "capabilities":
+							if propVal == "" {
+								currentModel.Capabilities = &ModelCapabilities{}
+								capTarget = currentModel.Capabilities
+								capIndent = leadingSpaces
+							} else {
+								caps, err := parseCapabilitiesFlowMap(propVal, lineNum)
+								if err != nil {
+									return nil, err
+								}
+								currentModel.Capabilities = caps
+							}
+							continue
 						case "family":
 							currentModel.Family = cleanYAMLValue(propVal)
 							continue
@@ -735,6 +876,19 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 					currentProvider.Mandatory = b
 				case "notes":
 					currentProvider.Notes = pVal
+				case "capabilities":
+					rawCapsVal := strings.TrimSpace(trimmed[idx+1:])
+					if rawCapsVal == "" {
+						currentProvider.Capabilities = &ModelCapabilities{}
+						capTarget = currentProvider.Capabilities
+						capIndent = leadingSpaces
+					} else {
+						caps, err := parseCapabilitiesFlowMap(rawCapsVal, lineNum)
+						if err != nil {
+							return nil, err
+						}
+						currentProvider.Capabilities = caps
+					}
 				case "family":
 					currentProvider.Family = pVal
 				case "cost_tier":
@@ -758,7 +912,7 @@ func ParseCatalog(data []byte) (*Catalog, error) {
 
 	commitCurrentProvider()
 
-	if cat.SchemaVersion != CurrentCatalogSchemaVersion {
+	if cat.SchemaVersion != CatalogSchemaV1 && cat.SchemaVersion != CurrentCatalogSchemaVersion {
 		return nil, &SchemaVersionError{Got: cat.SchemaVersion, Want: CurrentCatalogSchemaVersion}
 	}
 
@@ -786,6 +940,9 @@ func (c *Catalog) validate() error {
 		}
 		if prov.Status != "" && !IsValidModelStatus(prov.Status) {
 			return &ValidationError{Provider: provName, Field: "status", Msg: fmt.Sprintf("invalid status %q", prov.Status)}
+		}
+		if prov.Capabilities != nil && prov.Capabilities.ContextWindow < 0 {
+			return &ValidationError{Provider: provName, Field: "capabilities.context_window", Msg: "context_window must be >= 0"}
 		}
 
 		for _, m := range prov.Models {
@@ -850,6 +1007,9 @@ func (c *Catalog) validate() error {
 			}
 			if m.Status != "" && !IsValidModelStatus(m.Status) {
 				return &ValidationError{Provider: provName, Model: name, Field: "status", Msg: fmt.Sprintf("invalid status %q", m.Status)}
+			}
+			if m.Capabilities != nil && m.Capabilities.ContextWindow < 0 {
+				return &ValidationError{Provider: provName, Model: name, Field: "capabilities.context_window", Msg: "context_window must be >= 0"}
 			}
 		}
 	}

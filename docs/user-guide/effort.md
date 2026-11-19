@@ -237,7 +237,7 @@ The research-verified Single Source of Truth (SSoT) for provider effort capabili
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `schema_version` | `string` | Catalog schema version (e.g. `agent-models.v1`). |
+| `schema_version` | `string` | Catalog schema version (`agent-models.v2`; backwards-compatible with `agent-models.v1`). |
 | `catalog_version` | `int` | Incremental catalog revision integer (3 for DELTA-48). |
 | `verified_at` | `string` | ISO date of latest research verification against official provider documentation. |
 | `sources` | `list` | Upstream official documentation URLs consulted for verification. |

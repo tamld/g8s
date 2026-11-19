@@ -7,7 +7,7 @@ import (
 )
 
 const testCatalogYAML = `
-schema_version: agent-models.v1
+schema_version: agent-models.v2
 catalog_version: 1
 verified_at: "2026-10-04"
 sources:
@@ -418,11 +418,11 @@ func TestParseCatalogWrongSchemaVersion(t *testing.T) {
 		{
 			name: "newer version",
 			yaml: `
-schema_version: agent-models.v2
+schema_version: agent-models.v99
 verified_at: "2026-10-04"
 providers: {}
 `,
-			wantGot: "agent-models.v2",
+			wantGot: "agent-models.v99",
 		},
 		{
 			name: "older version",
@@ -1445,5 +1445,106 @@ profiles:
 				t.Errorf("error = %v, want substring %q", err, tc.wantSub)
 			}
 		})
+	}
+}
+
+func TestParseCatalog_V2Capabilities(t *testing.T) {
+	v2YAML := `
+schema_version: agent-models.v2
+catalog_version: 4
+verified_at: "2026-11-19"
+sources:
+  - https://developers.openai.com/api/docs/models
+providers:
+  openai:
+    effort_style: named
+    field: reasoning_effort
+    default_effort: medium
+    capabilities: {tool_calling: true, structured_output: true, streaming: true, reasoning_effort: true, cancel_inflight: true, context_window: 200000}
+    models:
+      - id: gpt-6-astra
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+        capabilities:
+          tool_calling: false
+          context_window: 128000
+      - id: gpt-5.5
+        supported_efforts: [low, medium, high]
+        default_effort: medium
+`
+	cat, err := ParseCatalog([]byte(v2YAML))
+	if err != nil {
+		t.Fatalf("ParseCatalog v2 failed: %v", err)
+	}
+	if cat.SchemaVersion != CurrentCatalogSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", cat.SchemaVersion, CurrentCatalogSchemaVersion)
+	}
+	prov := cat.Providers["openai"]
+	if prov.Capabilities == nil || prov.Capabilities.ContextWindow != 200000 || prov.Capabilities.ToolCalling == nil || !*prov.Capabilities.ToolCalling {
+		t.Fatalf("unexpected provider capabilities: %+v", prov.Capabilities)
+	}
+
+	astra, ok := prov.FindModel("gpt-6-astra")
+	if !ok {
+		t.Fatal("gpt-6-astra not found")
+	}
+	effAstra := EffectiveCapabilities(prov, astra)
+	if effAstra.ToolCalling == nil || *effAstra.ToolCalling {
+		t.Fatalf("expected gpt-6-astra ToolCalling=false override, got %+v", effAstra.ToolCalling)
+	}
+	if effAstra.Streaming == nil || !*effAstra.Streaming {
+		t.Fatalf("expected gpt-6-astra to inherit Streaming=true from provider, got %+v", effAstra.Streaming)
+	}
+	if effAstra.ContextWindow != 128000 {
+		t.Fatalf("expected gpt-6-astra ContextWindow=128000, got %d", effAstra.ContextWindow)
+	}
+
+	gpt55, ok := prov.FindModel("gpt-5.5")
+	if !ok {
+		t.Fatal("gpt-5.5 not found")
+	}
+	eff55 := EffectiveCapabilities(prov, gpt55)
+	if eff55.ContextWindow != 200000 || eff55.ToolCalling == nil || !*eff55.ToolCalling {
+		t.Fatalf("expected gpt-5.5 to inherit provider defaults, got %+v", eff55)
+	}
+
+	// Negative context_window rejected
+	badYAML := `
+schema_version: agent-models.v2
+catalog_version: 4
+verified_at: "2026-11-19"
+providers:
+  openai:
+    effort_style: named
+    capabilities: {context_window: -10}
+    models: []
+`
+	if _, err := ParseCatalog([]byte(badYAML)); err == nil {
+		t.Fatal("expected error on negative context_window")
+	}
+
+	// Live repository .g8s/agent-models.yml verification
+	liveCat, err := LoadDefaultCatalog()
+	if err != nil {
+		t.Fatalf("LoadDefaultCatalog: %v", err)
+	}
+	if liveCat.SchemaVersion != CurrentCatalogSchemaVersion {
+		t.Fatalf("live SchemaVersion = %q, want %q", liveCat.SchemaVersion, CurrentCatalogSchemaVersion)
+	}
+	oaiProv := liveCat.Providers["openai"]
+	liveAstra, ok := oaiProv.FindModel("gpt-6-astra")
+	if !ok {
+		t.Fatal("live openai/gpt-6-astra missing")
+	}
+	if eff := EffectiveCapabilities(oaiProv, liveAstra); eff.ToolCalling == nil || *eff.ToolCalling {
+		t.Fatalf("live gpt-6-astra expected ToolCalling=false, got %+v", eff.ToolCalling)
+	}
+	anthProv := liveCat.Providers["anthropic"]
+	liveHaiku, ok := anthProv.FindModel("claude-haiku-4-5")
+	if !ok {
+		t.Fatal("live anthropic/claude-haiku-4-5 missing")
+	}
+	if eff := EffectiveCapabilities(anthProv, liveHaiku); eff.ReasoningEffort == nil || *eff.ReasoningEffort {
+		t.Fatalf("live claude-haiku-4-5 expected ReasoningEffort=false, got %+v", eff.ReasoningEffort)
 	}
 }

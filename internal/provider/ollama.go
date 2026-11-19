@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -124,56 +125,11 @@ func (o *OllamaProvider) Version(ctx context.Context) (string, error) {
 	return "v0.1.0", nil
 }
 
-type ollamaHandle struct {
-	provider string
-	model    string
-	stdout   string
-	stderr   string
-	status   string
-	exitCode int
-	start    time.Time
-	cancel   context.CancelFunc
-	done     chan struct{}
-}
+// TransportKind returns TransportKindRequest for Ollama HTTP inference.
+func (o *OllamaProvider) TransportKind() TransportKind { return TransportKindRequest }
 
-func (h *ollamaHandle) PID() int { return 0 }
-
-func (h *ollamaHandle) Wait(_ context.Context) (Receipt, error) {
-	<-h.done
-	var err error
-	if h.status != "COMPLETED" {
-		if h.stderr != "" {
-			err = fmt.Errorf("%s", h.stderr)
-		} else {
-			err = fmt.Errorf("ollama generate failed")
-		}
-	}
-	return Receipt{
-		Provider:      h.provider,
-		Status:        h.status,
-		Stdout:        h.stdout,
-		Stderr:        h.stderr,
-		ExitCode:      h.exitCode,
-		DurationMs:    time.Since(h.start).Milliseconds(),
-		ModelResolved: h.model,
-		OutputTokens:  len(h.stdout),
-		TotalTokens:   len(h.stdout),
-	}, err
-}
-
-func (h *ollamaHandle) Cancel(_ context.Context) error {
-	if h.cancel != nil {
-		h.cancel()
-	}
-	return nil
-}
-
-func (h *ollamaHandle) StdoutStream() io.ReadCloser {
-	return io.NopCloser(bytes.NewReader([]byte(h.stdout)))
-}
-
-// Spawn runs a single non-streaming Ollama /api/generate request.
-func (o *OllamaProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
+// StartRequest starts an asynchronous Ollama /api/generate request returning a typed RequestHandle (#940).
+func (o *OllamaProvider) StartRequest(ctx context.Context, spec Spec) (RequestHandle, error) {
 	if err := o.Available(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
@@ -188,8 +144,15 @@ func (o *OllamaProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	}
 
 	host := o.getHost()
-	reqCtx, cancel := context.WithCancel(ctx)
-	start := time.Now()
+	var (
+		reqCtx context.Context
+		cancel context.CancelFunc
+	)
+	if spec.Timeout > 0 {
+		reqCtx, cancel = context.WithTimeout(ctx, spec.Timeout)
+	} else {
+		reqCtx, cancel = context.WithCancel(ctx)
+	}
 
 	body, err := json.Marshal(map[string]any{
 		"model":  model,
@@ -209,56 +172,85 @@ func (o *OllamaProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		cancel()
-		if reqCtx.Err() != nil {
-			return nil, reqCtx.Err()
+	h := newAsyncRequestHandle(o.Name(), cancel)
+	client := o.httpClient
+
+	go func() {
+		resp, err := client.Do(req)
+		if err != nil {
+			rc := Receipt{Status: "FAILED", Stderr: err.Error(), ExitCode: 1, ModelResolved: model}
+			if errors.Is(reqCtx.Err(), context.Canceled) {
+				rc.Status = "CANCELLED"
+				rc.ExitCode = -1
+				h.complete(rc, context.Canceled)
+				return
+			}
+			if errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
+				rc.Status = "TIMEOUT"
+				rc.ExitCode = -1
+				h.complete(rc, reqCtx.Err())
+				return
+			}
+			h.complete(rc, fmt.Errorf("ollama generate request: %w", err))
+			return
 		}
-		return nil, fmt.Errorf("ollama generate request: %w", err)
-	}
-	defer resp.Body.Close()
+		defer resp.Body.Close()
 
-	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if readErr != nil {
-		cancel()
-		if reqCtx.Err() != nil {
-			return nil, reqCtx.Err()
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if readErr != nil {
+			rc := Receipt{Status: "FAILED", Stderr: readErr.Error(), ExitCode: 1, ModelResolved: model}
+			if errors.Is(reqCtx.Err(), context.Canceled) {
+				rc.Status = "CANCELLED"
+				rc.ExitCode = -1
+				h.complete(rc, context.Canceled)
+				return
+			}
+			h.complete(rc, fmt.Errorf("ollama generate read body: %w", readErr))
+			return
 		}
-		return nil, fmt.Errorf("ollama generate read body: %w", readErr)
-	}
-	cancel()
 
-	h := &ollamaHandle{
-		provider: o.Name(),
-		model:    model,
-		start:    start,
-		cancel:   cancel,
-		done:     make(chan struct{}),
-	}
+		if resp.StatusCode != http.StatusOK {
+			h.complete(Receipt{
+				Status:        "FAILED",
+				Stderr:        string(respBody),
+				ExitCode:      resp.StatusCode,
+				ModelResolved: model,
+			}, nil)
+			return
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		h.status = "FAILED"
-		h.exitCode = resp.StatusCode
-		h.stderr = string(respBody)
-		close(h.done)
-		return h, nil
-	}
+		var genResp struct {
+			Response string `json:"response"`
+		}
+		if err := json.Unmarshal(respBody, &genResp); err != nil {
+			h.complete(Receipt{
+				Status:        "FAILED",
+				Stderr:        err.Error(),
+				ExitCode:      1,
+				ModelResolved: model,
+			}, nil)
+			return
+		}
 
-	var genResp struct {
-		Response string `json:"response"`
-	}
-	if err := json.Unmarshal(respBody, &genResp); err != nil {
-		h.status = "FAILED"
-		h.exitCode = 1
-		h.stderr = err.Error()
-		close(h.done)
-		return h, nil
-	}
+		h.streamBuf.WriteString(genResp.Response)
+		h.complete(Receipt{
+			Status:        "COMPLETED",
+			Stdout:        genResp.Response,
+			ExitCode:      0,
+			ModelResolved: model,
+			OutputTokens:  len(genResp.Response),
+			TotalTokens:   len(genResp.Response),
+		}, nil)
+	}()
 
-	h.stdout = genResp.Response
-	h.status = "COMPLETED"
-	h.exitCode = 0
-	close(h.done)
 	return h, nil
+}
+
+// Spawn starts an Ollama request asynchronously and adapts RequestHandle for legacy Handle callers.
+func (o *OllamaProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
+	rh, err := o.StartRequest(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return newRequestHandleAdapter(rh), nil
 }

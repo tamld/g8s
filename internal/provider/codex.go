@@ -411,3 +411,11 @@ func (c *CodexProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 
 	return newProcessHandle("codex", cmd, start, &stdoutBuf, &stderrBuf), nil
 }
+
+// TransportKind returns TransportKindProcess for the codex CLI worker.
+func (c *CodexProvider) TransportKind() TransportKind { return TransportKindProcess }
+
+// SpawnProcess satisfies ProcessTransport for codex.
+func (c *CodexProvider) SpawnProcess(ctx context.Context, spec Spec) (ProcessHandle, error) {
+	return c.Spawn(ctx, spec)
+}
