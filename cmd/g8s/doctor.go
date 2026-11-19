@@ -48,6 +48,12 @@ func runDoctor(args []string) {
 	doc := &doctor.Doctor{
 		Scope:       *scopeFlag,
 		DetectPaths: *detectPathsFlag,
+		BinaryProvenance: doctor.BinaryProvenance{
+			Version:     Version,
+			Commit:      Commit,
+			BuildSource: BuildSource,
+			VCSModified: VCSModified == "true",
+		},
 	}
 
 	if *antiPatternCatalog {
@@ -170,7 +176,36 @@ func runDoctor(args []string) {
 	}
 	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 
+	if report.TrustAssurance != nil {
+		fmt.Println()
+		printTrustAssuranceHuman(report.TrustAssurance)
+	}
+
 	if report.OverallStatus == "UNHEALTHY" {
 		os.Exit(1)
 	}
+}
+
+func printTrustAssuranceHuman(ta *doctor.TrustAssuranceStatus) {
+	if ta == nil {
+		return
+	}
+	fmt.Printf("TRUST Assurance Status (ADR-0042): Verdict=%s | NonCompensatoryVeto=%t | Platform=%s | BinaryCommit=%s | Network=%s\n",
+		ta.OverallVerdict, ta.NonCompensatoryVeto, ta.Platform, ta.BinaryCommit, ta.NetworkEnforcement)
+
+	var td pterm.TableData
+	td = append(td, []string{"Gate", "Status", "Evidence", "Detail"})
+	for _, g := range ta.Gates {
+		var statusStr string
+		switch g.Status {
+		case doctor.TrustGateEnforced:
+			statusStr = pterm.Green(string(g.Status))
+		case doctor.TrustGateMediatedOnly:
+			statusStr = pterm.Yellow(string(g.Status))
+		default:
+			statusStr = pterm.Red(string(g.Status))
+		}
+		td = append(td, []string{g.Gate, statusStr, g.EvidenceSource, g.Detail})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(td).Render()
 }

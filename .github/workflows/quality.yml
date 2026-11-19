@@ -316,9 +316,17 @@ jobs:
           echo "=== Verifying 100% Runtime-Proven Quantitative Claims against live go test report (#938) ==="
           bash tools/claims_check.sh --test-report "$COV_FILE"
 
-          echo "=== Running Offline Assurance Benchmark Suite (#922) ==="
-          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null
-          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --markdown
+          echo "=== Running Offline Assurance Benchmark Suite (#922, #959) ==="
+          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --require-binary-match --json | jq -e '
+            .score == 1 and
+            .failed_probes == 0 and
+            .passed_probes == 5 and
+            .trust_assurance_status.schema == "g8s.trust-assurance/v1" and
+            .trust_assurance_status.binary_matches_source == true and
+            .trust_assurance_status.non_compensatory_veto == false and
+            (.trust_assurance_status.gates | length == 6)
+          ' > /dev/null
+          bash tools/assurance_benchmark.sh --bin "$AUDIT_BIN" --require-binary-match --markdown
           rm -f "$AUDIT_BIN"
 
       - name: Coverage Ratchet
@@ -507,12 +515,21 @@ jobs:
         if: env.CI_LANE != 'docs'
         run: go vet ./...
 
-      - name: Offline Assurance Benchmark (Windows, #922)
+      - name: Offline Assurance Benchmark (Windows, #922, #959)
         if: env.CI_LANE != 'docs'
         shell: bash
         run: |
-          bash tools/assurance_benchmark.sh --json | jq -e '.score == 1 and .failed_probes == 0 and .passed_probes == 5' > /dev/null
-          bash tools/assurance_benchmark.sh --markdown
+          bash tools/assurance_benchmark.sh --require-binary-match --json | jq -e '
+            .score == 1 and
+            .failed_probes == 0 and
+            .passed_probes == 5 and
+            .trust_assurance_status.schema == "g8s.trust-assurance/v1" and
+            .trust_assurance_status.binary_matches_source == true and
+            .trust_assurance_status.non_compensatory_veto == false and
+            .trust_assurance_status.overall_verdict == "MEDIATED_ONLY" and
+            (.trust_assurance_status.gates | length == 6)
+          ' > /dev/null
+          bash tools/assurance_benchmark.sh --require-binary-match --markdown
 
   cross-platform:
     name: Cross-Platform Build

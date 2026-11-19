@@ -383,3 +383,9 @@ func TestPromoteToVault_LivePromotionGateGuards(t *testing.T) {
 		}
 	})
 }
+
+func TestVerifyPromotionGateContract(t *testing.T) {
+	if err := VerifyPromotionGateContract(); err != nil {
+		t.Fatalf("VerifyPromotionGateContract: %v", err)
+	}
+}

@@ -80,6 +80,36 @@ jobs:
           CGO_ENABLED: '0'
         run: go build ./...
 
+      - name: Verify Linux release binary TRUST Assurance Status (#959)
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          VERIFY_DIR="$(mktemp -d)"
+          VERIFY_BIN="${VERIFY_DIR}/g8s"
+          go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildSource=release" -o "$VERIFY_BIN" ./cmd/g8s
+          ASSURE_JSON="$(bash tools/assurance_benchmark.sh --bin "$VERIFY_BIN" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --json)"
+          printf '%s\n' "$ASSURE_JSON" | jq -e '
+            .score == 1 and
+            .failed_probes == 0 and
+            .passed_probes == 5 and
+            .trust_assurance_status.schema == "g8s.trust-assurance/v1" and
+            .trust_assurance_status.binary_matches_source == true and
+            .trust_assurance_status.vcs_modified == false and
+            .trust_assurance_status.non_compensatory_veto == false and
+            (.trust_assurance_status.gates | length == 6)
+          ' > /dev/null
+          printf '%s\n' "$ASSURE_JSON" > "${RUNNER_TEMP}/trust-assurance-linux.json"
+          bash tools/assurance_benchmark.sh --bin "$VERIFY_BIN" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --markdown
+          rm -rf "$VERIFY_DIR"
+
+      - name: Upload Linux TRUST Assurance artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: trust-assurance-linux
+          path: ${{ runner.temp }}/trust-assurance-linux.json
+          retention-days: 7
+
   build-darwin:
     name: Build darwin/amd64 + darwin/arm64 archives
     runs-on: macos-latest
@@ -101,15 +131,41 @@ jobs:
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
-            GOOS=darwin GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/g8s-darwin-${arch} ./cmd/g8s
+            GOOS=darwin GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildSource=release" -o dist/g8s-darwin-${arch} ./cmd/g8s
             (cd dist && zip g8s-darwin-${arch}.zip g8s-darwin-${arch})
           done
+
+      - name: Verify darwin binary TRUST Assurance Status (#959)
+        run: |
+          set -euo pipefail
+          HOST_ARCH="$(go env GOARCH | tr -d '\r')"
+          ASSURE_JSON="$(bash tools/assurance_benchmark.sh --bin "dist/g8s-darwin-${HOST_ARCH}" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --require-kernel-enforced --json)"
+          printf '%s\n' "$ASSURE_JSON" | jq -e '
+            .score == 1 and
+            .failed_probes == 0 and
+            .passed_probes == 5 and
+            .trust_assurance_status.schema == "g8s.trust-assurance/v1" and
+            .trust_assurance_status.binary_matches_source == true and
+            .trust_assurance_status.vcs_modified == false and
+            .trust_assurance_status.non_compensatory_veto == false and
+            .trust_assurance_status.overall_verdict == "ENFORCED" and
+            (.trust_assurance_status.gates | length == 6)
+          ' > /dev/null
+          printf '%s\n' "$ASSURE_JSON" > "${RUNNER_TEMP}/trust-assurance-darwin-${HOST_ARCH}.json"
+          bash tools/assurance_benchmark.sh --bin "dist/g8s-darwin-${HOST_ARCH}" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --require-kernel-enforced --markdown
 
       - name: Upload darwin artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: g8s-darwin
           path: dist/*.zip
+          retention-days: 7
+
+      - name: Upload darwin TRUST Assurance artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: trust-assurance-darwin
+          path: ${{ runner.temp }}/trust-assurance-darwin-*.json
           retention-days: 7
 
   build-windows:
@@ -134,12 +190,32 @@ jobs:
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
-            GOOS=windows GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/g8s-windows-${arch}.exe ./cmd/g8s
+            GOOS=windows GOARCH=${arch} go build -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME#v} -X main.Commit=${GITHUB_SHA} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildSource=release" -o dist/g8s-windows-${arch}.exe ./cmd/g8s
             # Windows runner ships tar.exe (Windows 10 1803+/Server 2019+) — use it
             # instead of `zip` which is not preinstalled on windows-latest images.
             # tar.gz is the dominant Windows distribution format alongside .zip.
             (cd dist && tar -czf g8s-windows-${arch}.tar.gz g8s-windows-${arch}.exe)
           done
+
+      - name: Verify windows binary TRUST Assurance Status (#959)
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST_ARCH="$(go env GOARCH | tr -d '\r')"
+          ASSURE_JSON="$(bash tools/assurance_benchmark.sh --bin "dist/g8s-windows-${HOST_ARCH}.exe" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --json)"
+          printf '%s\n' "$ASSURE_JSON" | jq -e '
+            .score == 1 and
+            .failed_probes == 0 and
+            .passed_probes == 5 and
+            .trust_assurance_status.schema == "g8s.trust-assurance/v1" and
+            .trust_assurance_status.binary_matches_source == true and
+            .trust_assurance_status.vcs_modified == false and
+            .trust_assurance_status.non_compensatory_veto == false and
+            .trust_assurance_status.overall_verdict == "MEDIATED_ONLY" and
+            (.trust_assurance_status.gates | length == 6)
+          ' > /dev/null
+          printf '%s\n' "$ASSURE_JSON" > "${RUNNER_TEMP}/trust-assurance-windows-${HOST_ARCH}.json"
+          bash tools/assurance_benchmark.sh --bin "dist/g8s-windows-${HOST_ARCH}.exe" --verify-binary-commit "$GITHUB_SHA" --require-clean-vcs --markdown
 
       - name: Upload windows artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -148,10 +224,17 @@ jobs:
           path: dist/*.tar.gz
           retention-days: 7
 
+      - name: Upload windows TRUST Assurance artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: trust-assurance-windows
+          path: ${{ runner.temp }}/trust-assurance-windows-*.json
+          retention-days: 7
+
   publish:
     name: Publish GitHub Release with Linux archives
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [verify, build-darwin, build-windows]
     permissions:
       contents: write
       id-token: write
