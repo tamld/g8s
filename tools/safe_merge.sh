@@ -199,12 +199,21 @@ run_provenance_check() {
     fi
 }
 
+PR_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/safe_merge_err_XXXXXX")"
+BODY_FILE=""
+FULL_MSG_FILE=""
+cleanup() {
+    rm -f "${PR_ERR_FILE:-}" "${BODY_FILE:-}" "${FULL_MSG_FILE:-}"
+}
+trap cleanup EXIT
+
 # -----------------------------------------------------------------------------
 # Gate 1: Fetch PR metadata & enforce OPEN state + 100% green statusCheckRollup
 # -----------------------------------------------------------------------------
 PR_JSON=""
-if ! PR_JSON="$("$GH_CMD" pr view "$PR_NUM" --json title,body,state,statusCheckRollup 2>&1)"; then
-    echo "GATE pr: fail — failed to query PR #${PR_NUM}: ${PR_JSON}" >&2
+if ! PR_JSON="$("$GH_CMD" pr view "$PR_NUM" --json title,body,state,statusCheckRollup 2>"$PR_ERR_FILE")"; then
+    PR_ERR="$(cat "$PR_ERR_FILE" 2>/dev/null || true)"
+    echo "GATE pr: fail — failed to query PR #${PR_NUM}: ${PR_ERR:-$PR_JSON}" >&2
     exit 1
 fi
 
@@ -344,10 +353,6 @@ fi
 
 BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/safe_merge_body_XXXXXX")"
 FULL_MSG_FILE="$(mktemp "${TMPDIR:-/tmp}/safe_merge_full_XXXXXX")"
-cleanup() {
-    rm -f "$BODY_FILE" "$FULL_MSG_FILE"
-}
-trap cleanup EXIT
 
 {
     printf '%s\n' "$SUMMARY"

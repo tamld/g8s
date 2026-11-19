@@ -27,6 +27,9 @@ if [ "$cmd" = "pr" ] && [ "$sub" = "view" ]; then
     if [ -n "${MOCK_GH_VIEW_LOG:-}" ]; then
         printf '%s\n' "$*" >> "$MOCK_GH_VIEW_LOG"
     fi
+    if [ -n "${MOCK_GH_STDERR_HINT:-}" ]; then
+        printf '%s\n' "$MOCK_GH_STDERR_HINT" >&2
+    fi
     cat "$MOCK_GH_PR_JSON_FILE"
     exit 0
 fi
@@ -199,11 +202,13 @@ EOF
 export MOCK_GH_PR_JSON_FILE="$ZERO_PR"
 expect_rc 1 "rejects zero checks (fail-closed)" "$SAFE_MERGE" --pr 953 --f0-direct "should fail on empty rollup"
 
-# 9. Passes --dry-run on green PR with --receipt and does NOT call gh pr merge
+# 9. Passes --dry-run on green PR with --receipt (even with gh stderr hints) and does NOT call gh pr merge
 export MOCK_GH_PR_JSON_FILE="$GREEN_PR"
 export MOCK_GH_MERGE_LOG="${TMP_DIR}/merge_calls_dry.log"
+export MOCK_GH_STDERR_HINT="hint: if you need to wait for this pull request to be reviewed, use gh event listen"
 rm -f "$MOCK_GH_MERGE_LOG"
 DRY_OUT="$("$SAFE_MERGE" --pr 953 --receipt task-20261119-001 --dry-run)"
+unset MOCK_GH_STDERR_HINT
 if [ -e "$MOCK_GH_MERGE_LOG" ]; then
     echo "FAIL [dry-run]: gh pr merge was unexpectedly invoked during --dry-run" >&2
     exit 1
