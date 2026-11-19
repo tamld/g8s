@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"os"
 	"time"
+
+	"github.com/tamld/g8s/internal/verifier"
 )
 
 // Config holds the autopilot scheduler configuration.
@@ -39,6 +41,9 @@ type Config struct {
 
 	// CodebasePath is the local path to scan for TODO comments and static analysis.
 	CodebasePath string `json:"codebase_path" yaml:"codebase_path"`
+
+	// EvolutionBudget configures TRUST-G6 hard resource and anti-oscillation caps.
+	EvolutionBudget *verifier.EvolutionBudget `json:"evolution_budget,omitempty" yaml:"evolution_budget,omitempty"`
 }
 
 // PriorityWeights defines the weights for the priority scoring formula.

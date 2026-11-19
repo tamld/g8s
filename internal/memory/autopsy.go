@@ -55,17 +55,18 @@ type AutopsyTrajectory struct {
 
 // AutopsyReport is the distilled output of an Experiential Autopsy (#689).
 type AutopsyReport struct {
-	Trajectory      AutopsyTrajectory        `json:"trajectory"`
-	SanitizedLesson string                   `json:"sanitized_lesson"`
-	ProposedEntry   *MemoryEntry             `json:"proposed_entry,omitempty"`
-	CandidateRecord vault.DistillationRecord `json:"candidate_record"`
-	AutoProposed    bool                     `json:"auto_proposed"`
+	Trajectory        AutopsyTrajectory        `json:"trajectory"`
+	SanitizedLesson   string                   `json:"sanitized_lesson"`
+	ProposedEntry     *MemoryEntry             `json:"proposed_entry,omitempty"`
+	PromotionDecision *PromotionDecision       `json:"promotion_decision,omitempty"`
+	CandidateRecord   vault.DistillationRecord `json:"candidate_record"`
+	AutoProposed      bool                     `json:"auto_proposed"`
 }
 
 var autopsySecretRegexes = []*regexp.Regexp{
-	regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`),
-	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{16,}`),
-	regexp.MustCompile(`AIza[0-9A-Za-z_-]{20,}`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{12,}`),
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{16,}`),
+	regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}`),
 	regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+-]{12,}["']?`),
 }
 
@@ -134,10 +135,10 @@ func (a *LocalSQLiteMemoryAdapter) RunExperientialAutopsy(ctx context.Context, t
 	}
 
 	appScope := pkg
-	if appScope == "" {
+	if isOverBroadApplicabilityScope(appScope) || appScope == "." {
 		appScope = strings.TrimSpace(traj.File)
 	}
-	if appScope == "" {
+	if isOverBroadApplicabilityScope(appScope) || appScope == "." {
 		appScope = "task:" + traj.TaskID
 	}
 	evRef := strings.TrimSpace(traj.TestCase)
@@ -147,23 +148,24 @@ func (a *LocalSQLiteMemoryAdapter) RunExperientialAutopsy(ctx context.Context, t
 	if evRef == "" {
 		evRef = "autopsy:" + traj.TaskID
 	}
+	prov := &MemoryProvenance{
+		TaskID:      traj.TaskID,
+		SessionID:   sessionID,
+		Actor:       "experiential-autopsy",
+		OutcomePath: OutcomeFail,
+		EvidenceRef: evRef,
+	}
 	entry := &MemoryEntry{
-		ID:            entryID,
-		Kind:          KindProcedure,
-		Scope:         ScopeGlobal,
-		SessionID:     sessionID,
-		TaskID:        traj.TaskID,
-		PromotedBy:    "experiential-autopsy",
-		Payload:       lesson,
-		Preconditions: preconds,
-		OutcomePath:   OutcomeFail,
-		Provenance: &MemoryProvenance{
-			TaskID:      traj.TaskID,
-			SessionID:   sessionID,
-			Actor:       "experiential-autopsy",
-			OutcomePath: OutcomeFail,
-			EvidenceRef: evRef,
-		},
+		ID:                 entryID,
+		Kind:               KindProcedure,
+		Scope:              ScopeGlobal,
+		SessionID:          sessionID,
+		TaskID:             traj.TaskID,
+		PromotedBy:         "experiential-autopsy",
+		Payload:            lesson,
+		Preconditions:      preconds,
+		OutcomePath:        OutcomeFail,
+		Provenance:         prov,
 		Confidence:         0.5,
 		ConfidenceClass:    sandbox.EpistemicEstimatedHeuristic,
 		ApplicabilityScope: appScope,
@@ -200,9 +202,35 @@ func (a *LocalSQLiteMemoryAdapter) RunExperientialAutopsy(ctx context.Context, t
 	}
 
 	if autoPropose {
-		if err := a.ProposeEntry(ctx, entry); err != nil {
-			return nil, fmt.Errorf("memory: propose experiential autopsy entry: %w", err)
+		artifact := &KnowledgeArtifact{
+			ID:                 entry.ID,
+			Kind:               entry.Kind,
+			Scope:              entry.Scope,
+			SessionID:          entry.SessionID,
+			TaskID:             entry.TaskID,
+			PromotedBy:         entry.PromotedBy,
+			Payload:            entry.Payload,
+			OutcomePath:        OutcomeFail,
+			Provenance:         prov,
+			Confidence:         entry.Confidence,
+			ConfidenceClass:    entry.ConfidenceClass,
+			ApplicabilityScope: entry.ApplicabilityScope,
+			PromotionStatus:    PromotionProposed,
+			Revocable:          true,
+			Preconditions:      entry.Preconditions,
 		}
+		if _, err := a.ProposeKnowledgeArtifact(ctx, artifact); err != nil {
+			return nil, fmt.Errorf("memory: stage experiential autopsy artifact: %w", err)
+		}
+		promDec, err := a.VerifyAndPromoteArtifact(ctx, artifact.ID)
+		if err != nil {
+			return nil, fmt.Errorf("memory: verify experiential autopsy artifact: %w", err)
+		}
+		entry.Lifecycle = promDec.Lifecycle
+		entry.PromotionStatus = promDec.PromotionStatus
+		entry.Trust = promDec.Trust
+		entry.PayloadHash = payloadHash(entry.Payload)
+		report.PromotionDecision = promDec
 	}
 
 	return report, nil

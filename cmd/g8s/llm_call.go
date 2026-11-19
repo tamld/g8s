@@ -31,7 +31,9 @@ import (
 	"github.com/tamld/g8s/internal/provider"
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/routing"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/vault"
+	"github.com/tamld/g8s/internal/verifier"
 )
 
 type fileBlock struct {
@@ -231,6 +233,9 @@ func runLLMCall(args []string) {
 	verifyCmdFlag := fs.String("verify-cmd", "", "optional shell command run inside scope root after applying files to verify changes")
 	skillsFlag := fs.String("skills", "", "comma-separated skill names or skill://g8s/ URIs to hydrate with SHA-256 digest verification (DELTA-34)")
 	contextBudgetFlag := fs.Int("context-budget", 0, "optional token budget for 4-tier AST + PageRank + Knapsack context compression (DELTA-36)")
+	maxCycleTokensFlag := fs.Int("max-cycle-tokens", 0, "optional TRUST-G6 per-cycle token cap for multi-turn loop")
+	maxCycleWallClockFlag := fs.Duration("max-cycle-wall-clock", 0, "optional TRUST-G6 per-cycle wall-clock cap for multi-turn loop")
+	maxNonImprovingFlag := fs.Int("max-non-improving-rounds", 0, "optional TRUST-G6 consecutive non-improving round cap")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: g8s llm-call [flags]")
@@ -647,7 +652,36 @@ func runLLMCall(args []string) {
 	seenTreeHashes := make(map[string]int)
 	var falsifiedLedger []string
 
+	evoBudget := verifier.DefaultEvolutionBudget()
+	if *maxCycleTokensFlag > 0 {
+		evoBudget.MaxTokensPerCycle = *maxCycleTokensFlag
+	} else if envTok := strings.TrimSpace(os.Getenv("G8S_MAX_CYCLE_TOKENS")); envTok != "" {
+		if n, pErr := strconv.Atoi(envTok); pErr == nil && n > 0 {
+			evoBudget.MaxTokensPerCycle = n
+		}
+	}
+	if *maxCycleWallClockFlag > 0 {
+		evoBudget.MaxWallClockPerCycle = *maxCycleWallClockFlag
+	} else if envDur := strings.TrimSpace(os.Getenv("G8S_MAX_CYCLE_WALL_CLOCK")); envDur != "" {
+		if d, pErr := time.ParseDuration(envDur); pErr == nil && d > 0 {
+			evoBudget.MaxWallClockPerCycle = d
+		}
+	}
+	if *maxNonImprovingFlag > 0 {
+		evoBudget.MaxNonImprovingRounds = *maxNonImprovingFlag
+	} else if envNonImp := strings.TrimSpace(os.Getenv("G8S_MAX_NON_IMPROVING_ROUNDS")); envNonImp != "" {
+		if n, pErr := strconv.Atoi(envNonImp); pErr == nil && n > 0 {
+			evoBudget.MaxNonImprovingRounds = n
+		}
+	}
+	evoGuard := verifier.NewEvolutionGuard(evoBudget, time.Now)
+
 	for turn := 1; turn <= maxTurns; turn++ {
+		if guardErr := evoGuard.AllowNextRound(); guardErr != nil {
+			stagnationDetected = true
+			stagnationReason = guardErr.Error()
+			break
+		}
 		turnsUsed = turn
 		turnCtx, turnCancel := context.WithTimeout(context.Background(), timeoutDur)
 		handle, spawnErr := p.Spawn(turnCtx, spec)
@@ -739,7 +773,23 @@ func runLLMCall(args []string) {
 			}
 		}
 
+		retriesUsed := 0
+		if turn > 1 {
+			retriesUsed = 1
+		}
 		if verifyCmd == "" {
+			if _, guardErr := evoGuard.RecordRound(verifier.EvolutionRoundRecord{
+				Round:         turn,
+				TokensUsed:    turnRes.TotalTokens,
+				RetriesUsed:   retriesUsed,
+				HoldoutScore:  1.0,
+				HoldoutPassed: true,
+				ScoreClass:    sandbox.EpistemicMeasuredMetric,
+				RecordedAt:    time.Now(),
+			}); guardErr != nil {
+				stagnationDetected = true
+				stagnationReason = guardErr.Error()
+			}
 			break
 		}
 
@@ -755,6 +805,18 @@ func runLLMCall(args []string) {
 		vCancel()
 		if vErr == nil {
 			verifyPassed = true
+			if _, guardErr := evoGuard.RecordRound(verifier.EvolutionRoundRecord{
+				Round:         turn,
+				TokensUsed:    turnRes.TotalTokens,
+				RetriesUsed:   retriesUsed,
+				HoldoutScore:  1.0,
+				HoldoutPassed: true,
+				ScoreClass:    sandbox.EpistemicMeasuredMetric,
+				RecordedAt:    time.Now(),
+			}); guardErr != nil {
+				stagnationDetected = true
+				stagnationReason = guardErr.Error()
+			}
 			break
 		}
 
@@ -779,17 +841,35 @@ func runLLMCall(args []string) {
 			if prevTurn, seen := seenTreeHashes[treeHash]; seen {
 				stagnationDetected = true
 				stagnationReason = fmt.Sprintf("oscillating file state %s (matches turn %d)", treeHash, prevTurn)
-				break
+			} else {
+				seenTreeHashes[treeHash] = turn
 			}
-			seenTreeHashes[treeHash] = turn
 		}
-		if vOutStr != "" || treeHash == "" {
+		if !stagnationDetected && (vOutStr != "" || treeHash == "") {
 			if prevTurn, seen := seenErrorSigs[errSig]; seen {
 				stagnationDetected = true
 				stagnationReason = fmt.Sprintf("repeated error signature %s (matches turn %d)", errSig, prevTurn)
-				break
+			} else {
+				seenErrorSigs[errSig] = turn
 			}
-			seenErrorSigs[errSig] = turn
+		}
+
+		_, guardErr := evoGuard.RecordRound(verifier.EvolutionRoundRecord{
+			Round:         turn,
+			TokensUsed:    turnRes.TotalTokens,
+			RetriesUsed:   1,
+			HoldoutScore:  0.0,
+			HoldoutPassed: false,
+			ScoreClass:    sandbox.EpistemicMeasuredMetric,
+			RecordedAt:    time.Now(),
+		})
+		if stagnationDetected {
+			break
+		}
+		if guardErr != nil {
+			stagnationDetected = true
+			stagnationReason = guardErr.Error()
+			break
 		}
 
 		if turn < maxTurns {
@@ -886,6 +966,10 @@ func runLLMCall(args []string) {
 			if stagnationReason != "" {
 				data["stagnation_reason"] = stagnationReason
 			}
+		}
+		evoStatus := evoGuard.Status()
+		if verifyCmd != "" || maxTurns > 1 || evoStatus.Halted {
+			data["evolution_guard"] = evoStatus
 		}
 		if len(contextFileList) > 0 {
 			data["context_files"] = contextFileList

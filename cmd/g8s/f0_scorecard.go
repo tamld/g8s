@@ -20,6 +20,7 @@ import (
 	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/reflex"
 	"github.com/tamld/g8s/internal/routing"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/vault"
 )
 
@@ -202,12 +203,58 @@ func recordVerifyTaskTelemetry(task *controlplane.Task, passed bool, dbPathOverr
 				}
 			}
 
-			// 2. Automatically run experiential autopsy and compound ready rules
+			// 2. Automatically run experiential autopsy, quarantine FAIL artifacts, and compound ready rules
+			autopsyAttempted := false
 			if store, sErr := controlplane.NewControlPlane(dbPath, nil); sErr == nil {
 				defer store.Close()
 				if traj, ok := memory.ExtractTrajectoryFromTask(ctx, store, task); ok && traj != nil {
+					autopsyAttempted = true
 					_, _ = adapter.RunExperientialAutopsy(ctx, *traj, passed)
 				}
+			}
+			if !passed && (!autopsyAttempted || task != nil) {
+				appScope := "task:" + task.TaskID
+				for _, p := range resolvedPaths {
+					cleanP := strings.TrimSpace(p)
+					if cleanP != "" && cleanP != "*" && cleanP != "**" && cleanP != "." {
+						appScope = "path:" + cleanP
+						break
+					}
+				}
+				diagSummary := memory.SanitizeAutopsyText(string(task.Result))
+				if diagSummary == "" && task.LastError != nil {
+					diagSummary = memory.SanitizeAutopsyText(*task.LastError)
+				}
+				if diagSummary == "" {
+					diagSummary = "verification failed without clean verdict"
+				}
+				if len(diagSummary) > 400 {
+					diagSummary = diagSummary[:400]
+				}
+				failArtifact := &memory.KnowledgeArtifact{
+					ID:                 "verify-fail-" + task.TaskID,
+					Kind:               memory.KindJudgment,
+					Scope:              memory.ScopeTask,
+					SessionID:          "verify-" + task.TaskID,
+					TaskID:             task.TaskID,
+					PromotedBy:         "g8s-verify",
+					Payload:            fmt.Sprintf("Verify FAIL observation for task %s (%s): %s", task.TaskID, appScope, diagSummary),
+					OutcomePath:        memory.OutcomeFail,
+					Confidence:         0.4,
+					ConfidenceClass:    sandbox.EpistemicEstimatedHeuristic,
+					ApplicabilityScope: appScope,
+					Revocable:          true,
+					Provenance: &memory.MemoryProvenance{
+						TaskID:      task.TaskID,
+						SessionID:   "verify-" + task.TaskID,
+						Actor:       "g8s-verify",
+						Model:       mod,
+						OutcomePath: memory.OutcomeFail,
+						EvidenceRef: "verify:" + task.TaskID,
+					},
+				}
+				// Stage strictly as non-active PROPOSED so FAIL observations require explicit VerifyAndPromoteArtifact before recall.
+				_, _ = adapter.ProposeKnowledgeArtifact(ctx, failArtifact)
 			}
 			if passed {
 				var defFile, defTestFile string

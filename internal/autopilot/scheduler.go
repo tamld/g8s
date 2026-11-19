@@ -13,20 +13,25 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/tamld/g8s/internal/sandbox"
+	"github.com/tamld/g8s/internal/verifier"
 )
 
 // Scheduler is the main autopilot scheduler that runs on a cron schedule.
 type Scheduler struct {
-	config  Config
-	queue   *PriorityQueue
-	scanner *Scanner
-	cron    *cron.Cron
-	logger  *log.Logger
-	handler WorkHandler
-	mu      sync.RWMutex
-	running bool
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	config         Config
+	queue          *PriorityQueue
+	scanner        *Scanner
+	cron           *cron.Cron
+	logger         *log.Logger
+	handler        WorkHandler
+	guard          *verifier.EvolutionGuard
+	roundCount     int
+	succeededCount int
+	mu             sync.RWMutex
+	running        bool
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
 }
 
 // WorkHandler is called for each work item that should be processed.
@@ -44,12 +49,18 @@ func NewScheduler(config Config, handler WorkHandler) (*Scheduler, error) {
 		return nil, fmt.Errorf("create scanner: %w", err)
 	}
 
+	budget := verifier.DefaultEvolutionBudget()
+	if config.EvolutionBudget != nil {
+		budget = *config.EvolutionBudget
+	}
+
 	s := &Scheduler{
 		config:  config,
 		queue:   queue,
 		scanner: scanner,
 		handler: handler,
 		logger:  log.Default(),
+		guard:   verifier.NewEvolutionGuard(budget, time.Now),
 		stopCh:  make(chan struct{}),
 	}
 
@@ -62,6 +73,26 @@ func NewScheduler(config Config, handler WorkHandler) (*Scheduler, error) {
 	}
 
 	return s, nil
+}
+
+// SetEvolutionGuard replaces the TRUST-G6 EvolutionGuard used by the scheduler (primarily for deterministic clock tests).
+func (s *Scheduler) SetEvolutionGuard(g *verifier.EvolutionGuard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if g != nil {
+		s.guard = g
+	}
+}
+
+// EvolutionStatus returns the current TRUST-G6 guard status snapshot for this scheduler.
+func (s *Scheduler) EvolutionStatus() verifier.EvolutionGuardStatus {
+	s.mu.RLock()
+	guard := s.guard
+	s.mu.RUnlock()
+	if guard == nil {
+		return verifier.EvolutionGuardStatus{}
+	}
+	return guard.Status()
 }
 
 // SetLogger sets a custom logger.
@@ -149,7 +180,7 @@ func (s *Scheduler) runTick() {
 	}
 }
 
-// processQueue processes items from the priority queue.
+// processQueue processes items from the priority queue under TRUST-G6 EvolutionGuard bounds.
 func (s *Scheduler) processQueue(ctx context.Context) {
 	processed := 0
 	maxProcess := s.config.MaxItemsPerTick
@@ -161,6 +192,16 @@ func (s *Scheduler) processQueue(ctx context.Context) {
 		case <-s.stopCh:
 			return
 		default:
+		}
+
+		s.mu.RLock()
+		guard := s.guard
+		s.mu.RUnlock()
+		if guard != nil {
+			if guardErr := guard.AllowNextRound(); guardErr != nil {
+				s.logger.Printf("Autopilot: evolution guard halted queue processing: %v", guardErr)
+				return
+			}
 		}
 
 		var item *WorkItem
@@ -178,11 +219,45 @@ func (s *Scheduler) processQueue(ctx context.Context) {
 
 		s.logger.Printf("Autopilot: processing item %s (score=%.3f)", item.ID, item.Score)
 
-		if err := s.handler(ctx, item); err != nil {
+		err := s.handler(ctx, item)
+
+		var guardErr error
+		if guard != nil {
+			s.mu.Lock()
+			s.roundCount++
+			round := s.roundCount
+			rec := verifier.EvolutionRoundRecord{
+				Round:      round,
+				ScoreClass: sandbox.EpistemicMeasuredMetric,
+				RecordedAt: time.Now(),
+			}
+			if err == nil {
+				s.succeededCount++
+				rec.HoldoutPassed = true
+				rec.HoldoutScore = float64(s.succeededCount)
+			} else {
+				rec.RetriesUsed = 1
+				rec.HoldoutPassed = false
+				rec.HoldoutScore = 0
+			}
+			s.mu.Unlock()
+
+			_, guardErr = guard.RecordRound(rec)
+		}
+
+		if err != nil {
 			s.logger.Printf("Autopilot: handler error for %s: %v", item.ID, err)
-			// Re-queue with lower score for retry
+		}
+		if guardErr != nil {
+			s.logger.Printf("Autopilot: evolution guard halted after item %s: %v", item.ID, guardErr)
+			return
+		}
+		if err != nil {
+			// Re-queue with lower score for retry while guard permits
+			s.queue.mu.Lock()
 			item.Score *= 0.5
 			heap.Push(s.queue, item)
+			s.queue.mu.Unlock()
 		}
 
 		processed++

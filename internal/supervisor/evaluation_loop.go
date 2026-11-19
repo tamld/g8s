@@ -10,6 +10,9 @@ import (
 	"errors"
 	"math"
 	"time"
+
+	"github.com/tamld/g8s/internal/sandbox"
+	"github.com/tamld/g8s/internal/verifier"
 )
 
 // EvaluationConfig configures the evaluation loop behavior.
@@ -37,6 +40,9 @@ type EvaluationConfig struct {
 
 	// Clock is an injectable clock for deterministic time handling.
 	Clock func() time.Time
+
+	// EvolutionBudget configures TRUST-G6 hard resource and anti-oscillation caps.
+	EvolutionBudget *verifier.EvolutionBudget
 }
 
 // DefaultEvaluationConfig returns sensible defaults for the evaluation loop.
@@ -83,23 +89,26 @@ type EvaluationResult struct {
 
 // EvaluationOutcome holds the result of comparing two configs.
 type EvaluationOutcome struct {
-	TrainingResult           EvaluationResult `json:"training_result"`
-	HoldoutResult            EvaluationResult `json:"holdout_result"`
-	PValue                   float64          `json:"p_value"`
-	EffectSize               float64          `json:"effect_size"`
-	StatisticallySignificant bool             `json:"statistically_significant"`
-	Accepted                 bool             `json:"accepted"`
-	Reason                   string           `json:"reason"`
+	TrainingResult           EvaluationResult               `json:"training_result"`
+	HoldoutResult            EvaluationResult               `json:"holdout_result"`
+	PValue                   float64                        `json:"p_value"`
+	EffectSize               float64                        `json:"effect_size"`
+	StatisticallySignificant bool                           `json:"statistically_significant"`
+	Accepted                 bool                           `json:"accepted"`
+	Reason                   string                         `json:"reason"`
+	EvolutionStatus          *verifier.EvolutionGuardStatus `json:"evolution_status,omitempty"`
 }
 
 // EvaluationLoop orchestrates the evaluation-driven improvement process.
 type EvaluationLoop struct {
-	store      EvalStore
-	optimizer  Optimizer
-	config     EvaluationConfig
-	versions   []ConfigVersion
-	currentIdx int // index into versions for current config
-	splitter   *TaskSplitter
+	store        EvalStore
+	optimizer    Optimizer
+	config       EvaluationConfig
+	versions     []ConfigVersion
+	currentIdx   int // index into versions for current config
+	splitter     *TaskSplitter
+	guard        *verifier.EvolutionGuard
+	roundCounter int
 }
 
 // TaskSplitter handles deterministic splitting of tasks into training/holdout sets.
@@ -188,10 +197,23 @@ type EvalStore interface {
 // NewEvaluationLoop creates a new evaluation loop.
 func NewEvaluationLoop(store EvalStore, optimizer Optimizer, config EvaluationConfig) *EvaluationLoop {
 	if config.HoldoutFraction == 0 {
+		customBudget := config.EvolutionBudget
+		customClock := config.Clock
 		config = DefaultEvaluationConfig()
+		if customBudget != nil {
+			config.EvolutionBudget = customBudget
+		}
+		if customClock != nil {
+			config.Clock = customClock
+		}
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
+	}
+
+	budget := verifier.DefaultEvolutionBudget()
+	if config.EvolutionBudget != nil {
+		budget = *config.EvolutionBudget
 	}
 
 	// Initialize with current default config as version 0
@@ -207,6 +229,7 @@ func NewEvaluationLoop(store EvalStore, optimizer Optimizer, config EvaluationCo
 		optimizer: optimizer,
 		config:    config,
 		splitter:  NewTaskSplitter(config.Clock().UnixNano()),
+		guard:     verifier.NewEvolutionGuard(budget, config.Clock),
 		versions: []ConfigVersion{
 			{
 				Version:       0,
@@ -220,6 +243,11 @@ func NewEvaluationLoop(store EvalStore, optimizer Optimizer, config EvaluationCo
 		},
 		currentIdx: 0,
 	}
+}
+
+// EvolutionStatus returns the current TRUST-G6 guard status snapshot for this loop.
+func (el *EvaluationLoop) EvolutionStatus() verifier.EvolutionGuardStatus {
+	return el.guard.Status()
 }
 
 // CurrentConfig returns the currently active configuration.
@@ -244,10 +272,24 @@ func (el *EvaluationLoop) VersionHistory() []ConfigVersion {
 }
 
 // RunEvaluation evaluates a proposed config against the current config
-// using both training and holdout sets. Returns the evaluation outcome.
+// using both training and holdout sets under TRUST-G6 EvolutionGuard bounds.
 func (el *EvaluationLoop) RunEvaluation(ctx context.Context, proposedConfig SupervisorConfig) (EvaluationOutcome, error) {
+	return el.RunEvaluationWithUsage(ctx, proposedConfig, 0, 0)
+}
+
+// RunEvaluationWithUsage evaluates a proposed config while charging measured tokens
+// and retries to the TRUST-G6 EvolutionGuard before and after holdout comparison.
+func (el *EvaluationLoop) RunEvaluationWithUsage(ctx context.Context, proposedConfig SupervisorConfig, tokensUsed, retriesUsed int) (EvaluationOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return EvaluationOutcome{}, err
+	}
+	if err := el.guard.AllowNextRound(); err != nil {
+		st := el.guard.Status()
+		return EvaluationOutcome{
+			Accepted:        false,
+			Reason:          err.Error(),
+			EvolutionStatus: &st,
+		}, err
 	}
 
 	// Fetch all completed supervisor tasks with metrics
@@ -268,9 +310,27 @@ func (el *EvaluationLoop) RunEvaluation(ctx context.Context, proposedConfig Supe
 	}
 
 	if len(completedTaskIDs) < el.config.MinimumSampleSize*2 {
+		el.roundCounter++
+		st, guardErr := el.guard.RecordRound(verifier.EvolutionRoundRecord{
+			Round:         el.roundCounter,
+			TokensUsed:    tokensUsed,
+			RetriesUsed:   retriesUsed,
+			HoldoutScore:  0,
+			HoldoutPassed: false,
+			ScoreClass:    sandbox.EpistemicMeasuredMetric,
+			RecordedAt:    el.config.Clock(),
+		})
+		if guardErr != nil {
+			return EvaluationOutcome{
+				Accepted:        false,
+				Reason:          guardErr.Error(),
+				EvolutionStatus: &st,
+			}, guardErr
+		}
 		return EvaluationOutcome{
-			Accepted: false,
-			Reason:   "insufficient task history for evaluation",
+			Accepted:        false,
+			Reason:          "insufficient task history for evaluation",
+			EvolutionStatus: &st,
 		}, nil
 	}
 
@@ -309,6 +369,27 @@ func (el *EvaluationLoop) RunEvaluation(ctx context.Context, proposedConfig Supe
 		trainingResult, proposedTrainingResult,
 		currentHoldoutResult, proposedHoldoutResult,
 	)
+
+	el.roundCounter++
+	roundRetries := retriesUsed
+	if !outcome.Accepted && roundRetries == 0 {
+		roundRetries = 1
+	}
+	st, guardErr := el.guard.RecordRound(verifier.EvolutionRoundRecord{
+		Round:         el.roundCounter,
+		TokensUsed:    tokensUsed,
+		RetriesUsed:   roundRetries,
+		HoldoutScore:  outcome.HoldoutResult.Score,
+		HoldoutPassed: outcome.Accepted,
+		ScoreClass:    sandbox.EpistemicMeasuredMetric,
+		RecordedAt:    el.config.Clock(),
+	})
+	outcome.EvolutionStatus = &st
+	if guardErr != nil {
+		outcome.Accepted = false
+		outcome.Reason = guardErr.Error()
+		return outcome, guardErr
+	}
 
 	return outcome, nil
 }
@@ -459,8 +540,17 @@ func (el *EvaluationLoop) compareResults(
 }
 
 // ProposeAndEvaluate runs the full evaluation loop: proposes a new config via
-// optimizer, evaluates it, and accepts if it passes holdout validation.
+// optimizer, evaluates it, and accepts if it passes holdout validation and TRUST-G6 bounds.
 func (el *EvaluationLoop) ProposeAndEvaluate(ctx context.Context) (EvaluationOutcome, error) {
+	if err := el.guard.AllowNextRound(); err != nil {
+		st := el.guard.Status()
+		return EvaluationOutcome{
+			Accepted:        false,
+			Reason:          err.Error(),
+			EvolutionStatus: &st,
+		}, err
+	}
+
 	// Get current metrics for optimizer
 	tasks, err := el.store.ListSupervisorTasks(ctx)
 	if err != nil {
@@ -481,18 +571,35 @@ func (el *EvaluationLoop) ProposeAndEvaluate(ctx context.Context) (EvaluationOut
 	currentConfig := el.CurrentConfig()
 	proposedConfig := el.optimizer.Propose(currentConfig, metrics)
 
-	// If no change proposed, return early
+	// If no change proposed, record a non-improving round and check stop bounds.
 	if configsEqual(currentConfig, proposedConfig) {
+		el.roundCounter++
+		st, guardErr := el.guard.RecordRound(verifier.EvolutionRoundRecord{
+			Round:         el.roundCounter,
+			RetriesUsed:   1,
+			HoldoutScore:  0,
+			HoldoutPassed: false,
+			ScoreClass:    sandbox.EpistemicMeasuredMetric,
+			RecordedAt:    el.config.Clock(),
+		})
+		if guardErr != nil {
+			return EvaluationOutcome{
+				Accepted:        false,
+				Reason:          guardErr.Error(),
+				EvolutionStatus: &st,
+			}, guardErr
+		}
 		return EvaluationOutcome{
-			Accepted: false,
-			Reason:   "optimizer proposed no change",
+			Accepted:        false,
+			Reason:          "optimizer proposed no change",
+			EvolutionStatus: &st,
 		}, nil
 	}
 
-	// Run evaluation
+	// Run evaluation (records the guard round once)
 	outcome, err := el.RunEvaluation(ctx, proposedConfig)
 	if err != nil {
-		return EvaluationOutcome{}, err
+		return outcome, err
 	}
 
 	// If accepted, create new version

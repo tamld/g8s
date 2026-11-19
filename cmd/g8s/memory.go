@@ -19,12 +19,13 @@ import (
 	"github.com/tamld/g8s/internal/controlplane"
 	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/reflex"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/vault"
 )
 
 func runMemory(args []string) {
 	if len(args) == 0 {
-		exitUsage("memory", "", "", "usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]", "Use 'g8s memory --help' for subcommand usage", false)
+		exitUsage("memory", "", "", "usage: g8s memory <list|revoke|propose|verify-promote|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]", "Use 'g8s memory --help' for subcommand usage", false)
 	}
 	sub := args[0]
 	switch sub {
@@ -34,6 +35,8 @@ func runMemory(args []string) {
 		runMemoryRevoke(args[1:])
 	case "propose":
 		runMemoryPropose(args[1:])
+	case "verify-promote":
+		runMemoryVerifyPromote(args[1:])
 	case "supersede":
 		runMemorySupersede(args[1:])
 	case "recall":
@@ -53,11 +56,12 @@ func runMemory(args []string) {
 	case "compound":
 		runMemoryCompound(args[1:])
 	case "--help", "-h", "help":
-		fmt.Println("Usage: g8s memory <list|revoke|propose|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]")
+		fmt.Println("Usage: g8s memory <list|revoke|propose|verify-promote|supersede|recall|promote|verify-anchors|export|import|autopsy|outcome|compound> [flags]")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  list                     List memory entries with lifecycle/trust labels")
-		fmt.Println("  revoke --session <id>    Bulk-revoke every entry promoted by a session (payload-hash tombstones, monotone)")
-		fmt.Println("  propose                  Propose a contextual memory entry with optional --preconditions k=v,...")
+		fmt.Println("  revoke --session <id> | --id <id>  Revoke entries by session or rollback an individual artifact with tombstone")
+		fmt.Println("  propose                  Propose a scoped PASS/FAIL knowledge artifact through the TRUST-G6 promotion gate")
+		fmt.Println("  verify-promote --id <id> Verify and promote a staged PROPOSED artifact via Jev L3 and poisoned-trace checks")
 		fmt.Println("  supersede                Supersede an older memory entry with a newer decision")
 		fmt.Println("  recall                   Recall active non-superseded entries matching --context k=v,...")
 		fmt.Println("  promote                  Promote a memory entry to the self-contained Knowledge Vault with mechanical anchors")
@@ -68,7 +72,7 @@ func runMemory(args []string) {
 		fmt.Println("  outcome                  Record application outcome feedback (corroboration or counter-example) for recalled memories (#690)")
 		fmt.Println("  compound                 Auto-promote corroborated READY_FOR_DOCTRINE entries into the Knowledge Vault (#690)")
 	default:
-		exitUsage("memory", sub, "", fmt.Sprintf("unknown memory subcommand %q (valid: list, revoke, propose, supersede, recall, promote, verify-anchors, export, import, autopsy, outcome, compound)", sub), "", false)
+		exitUsage("memory", sub, "", fmt.Sprintf("unknown memory subcommand %q (valid: list, revoke, propose, verify-promote, supersede, recall, promote, verify-anchors, export, import, autopsy, outcome, compound)", sub), "", false)
 	}
 }
 
@@ -123,7 +127,7 @@ func runMemoryList(args []string) {
 	fs := flag.NewFlagSet("memory list", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	session := fs.String("session", "", "filter by promoting session id")
-	state := fs.String("state", "", "filter by lifecycle state (working|scratch|active|distilled|archived|revoked|doctrine)")
+	state := fs.String("state", "", "filter by lifecycle state (working|scratch|proposed|active|distilled|archived|revoked|doctrine)")
 	kind := fs.String("kind", "", "filter by kind (fact|judgment|decision|procedure)")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("memory", "list", *traceID, err.Error(), "", *jsonl)
@@ -153,16 +157,41 @@ func runMemoryList(args []string) {
 func runMemoryRevoke(args []string) {
 	fs := flag.NewFlagSet("memory revoke", flag.ExitOnError)
 	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
-	session := fs.String("session", "", "revoke every entry promoted by this session id (required)")
+	session := fs.String("session", "", "revoke every entry promoted by this session id")
+	id := fs.String("id", "", "revoke & rollback a single knowledge artifact ID with tombstone")
+	reason := fs.String("reason", "", "optional rollback rationale when using --id")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("memory", "revoke", *traceID, err.Error(), "", *jsonl)
 	}
-	if *session == "" {
-		exitUsage("memory", "revoke", *traceID, "--session <id> is required", "usage: g8s memory revoke --session <id>", *jsonl)
+	hasSession := strings.TrimSpace(*session) != ""
+	hasID := strings.TrimSpace(*id) != ""
+	if (!hasSession && !hasID) || (hasSession && hasID) {
+		exitUsage("memory", "revoke", *traceID, "specify exactly one of --session <id> or --id <entry-id>", "usage: g8s memory revoke (--session <id> | --id <entry-id> [--reason <text>])", *jsonl)
 	}
 	adapter := openMemoryAdapter()
 	defer adapter.Close()
-	n, err := adapter.RevokeBySession(context.Background(), *session)
+	if adapter.Vault() != nil {
+		defer adapter.Vault().Close()
+	}
+	if hasID {
+		entryID := strings.TrimSpace(*id)
+		if err := adapter.RevokeAndRollbackArtifact(context.Background(), entryID, strings.TrimSpace(*reason)); err != nil {
+			exitRuntime("memory", "revoke", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+		if *jsonMode || *jsonl {
+			env := cli.NewEnvelope("memory_revoke", "memory", "revoke", map[string]any{
+				"entry_id": entryID,
+				"revoked":  true,
+				"reason":   strings.TrimSpace(*reason),
+			})
+			env.TraceID = *traceID
+			_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+			return
+		}
+		fmt.Printf("revoked artifact %s (tombstone written)\n", entryID)
+		return
+	}
+	n, err := adapter.RevokeBySession(context.Background(), strings.TrimSpace(*session))
 	if err != nil {
 		exitRuntime("memory", "revoke", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
@@ -205,7 +234,7 @@ func memorySensorAdapter(triage func(ctx context.Context, req reflex.TriageReque
 
 func runMemoryPropose(args []string) {
 	fs := flag.NewFlagSet("memory propose", flag.ExitOnError)
-	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	actor, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
 	id := fs.String("id", "", "entry ID (required)")
 	kind := fs.String("kind", "decision", "entry kind (fact|judgment|decision|procedure)")
 	scope := fs.String("scope", "session", "entry scope (task|session|global)")
@@ -213,37 +242,145 @@ func runMemoryPropose(args []string) {
 	payload := fs.String("payload", "", "entry payload (required)")
 	preconds := fs.String("preconditions", "", "comma-separated key=value contextual preconditions")
 	validUntil := fs.Float64("valid-until", 0, "optional unix timestamp expiration")
+	outcomePathFlag := fs.String("outcome-path", string(memory.OutcomePass), "source execution outcome (PASS|FAIL)")
+	taskFlag := fs.String("task", "", "source task ID for provenance")
+	evidenceRefFlag := fs.String("evidence-ref", "", "verification/evidence reference for provenance")
+	appScopeFlag := fs.String("applicability-scope", "", "bounded applicability scope (e.g. pkg:internal/verifier); explicit broad/wildcard scopes are rejected")
+	confidenceFlag := fs.Float64("confidence", 0.7, "artifact confidence score in (0, 1]")
+	confidenceClassFlag := fs.String("confidence-class", string(sandbox.EpistemicEstimatedHeuristic), "epistemic class (measured_metric|estimated_heuristic)")
+	corrSessionsFlag := fs.String("corroborating-sessions", "", "comma-separated corroborating session IDs")
+	stageOnlyFlag := fs.Bool("stage-only", false, "stage as non-active PROPOSED without running VerifyAndPromoteArtifact")
 	if err := fs.Parse(args); err != nil {
 		exitUsage("memory", "propose", *traceID, err.Error(), "", *jsonl)
 	}
-	if strings.TrimSpace(*id) == "" || strings.TrimSpace(*payload) == "" {
+	trimmedID := strings.TrimSpace(*id)
+	if trimmedID == "" || strings.TrimSpace(*payload) == "" {
 		exitUsage("memory", "propose", *traceID, "--id and --payload are required", "", *jsonl)
+	}
+	parsedPreconds := parseContextKeyValuePairs(*preconds)
+	trimmedSession := strings.TrimSpace(*session)
+	if trimmedSession == "" {
+		trimmedSession = "f0"
+	}
+	trimmedTask := strings.TrimSpace(*taskFlag)
+	if trimmedTask == "" {
+		trimmedTask = "cli-" + trimmedID
+	}
+	trimmedEvRef := strings.TrimSpace(*evidenceRefFlag)
+	if trimmedEvRef == "" {
+		trimmedEvRef = "cli:memory-propose:" + trimmedID
+	}
+	actorName := strings.TrimSpace(*actor)
+	if actorName == "" {
+		actorName = "f0"
+	}
+	outcomePath := memory.OutcomePath(strings.ToUpper(strings.TrimSpace(*outcomePathFlag)))
+
+	appScopeExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "applicability-scope" {
+			appScopeExplicit = true
+		}
+	})
+	appScope := strings.TrimSpace(*appScopeFlag)
+	if !appScopeExplicit {
+		if f := strings.TrimSpace(parsedPreconds["file"]); f != "" {
+			appScope = "file:" + f
+		} else if p := strings.TrimSpace(parsedPreconds["package"]); p != "" {
+			appScope = "pkg:" + p
+		} else {
+			appScope = "session:" + trimmedSession
+		}
+	}
+
+	var corrSessions []string
+	for _, s := range strings.Split(*corrSessionsFlag, ",") {
+		if t := strings.TrimSpace(s); t != "" {
+			corrSessions = append(corrSessions, t)
+		}
+	}
+
+	adapter := openMemoryAdapter()
+	defer adapter.Close()
+	if adapter.Vault() != nil {
+		defer adapter.Vault().Close()
+	}
+
+	artifact := &memory.KnowledgeArtifact{
+		ID:                    trimmedID,
+		Kind:                  memory.MemoryKind(*kind),
+		Scope:                 memory.MemoryScope(*scope),
+		SessionID:             trimmedSession,
+		TaskID:                trimmedTask,
+		PromotedBy:            actorName,
+		Payload:               *payload,
+		OutcomePath:           outcomePath,
+		Confidence:            *confidenceFlag,
+		ConfidenceClass:       sandbox.EpistemicClass(strings.TrimSpace(*confidenceClassFlag)),
+		ApplicabilityScope:    appScope,
+		Revocable:             true,
+		Preconditions:         parsedPreconds,
+		ValidUntil:            *validUntil,
+		CorroboratingSessions: corrSessions,
+		Provenance: &memory.MemoryProvenance{
+			TaskID:      trimmedTask,
+			SessionID:   trimmedSession,
+			Actor:       actorName,
+			OutcomePath: outcomePath,
+			EvidenceRef: trimmedEvRef,
+		},
+	}
+
+	ctx := context.Background()
+	dec, err := adapter.ProposeKnowledgeArtifact(ctx, artifact)
+	if err != nil {
+		exitRuntime("memory", "propose", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	}
+	if !*stageOnlyFlag {
+		dec, err = adapter.VerifyAndPromoteArtifact(ctx, artifact.ID)
+		if err != nil {
+			exitRuntime("memory", "propose", *traceID, cli.CodeRuntime, err, "", *jsonl)
+		}
+	}
+	if *jsonMode || *jsonl {
+		env := cli.NewEnvelope("memory_propose", "memory", "propose", dec)
+		env.TraceID = *traceID
+		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+		return
+	}
+	fmt.Printf("proposed %s (outcome=%s lifecycle=%s promotion_status=%s trust=%s)\n", dec.EntryID, dec.OutcomePath, dec.Lifecycle, dec.PromotionStatus, dec.Trust)
+}
+
+func runMemoryVerifyPromote(args []string) {
+	fs := flag.NewFlagSet("memory verify-promote", flag.ExitOnError)
+	_, traceID, jsonl, jsonMode := cli.AddCommonFlagsWithDefaults(fs, false)
+	entryID := fs.String("id", "", "staged PROPOSED knowledge artifact ID to verify & promote (required)")
+	if err := fs.Parse(args); err != nil {
+		exitUsage("memory", "verify-promote", *traceID, err.Error(), "", *jsonl)
+	}
+	trimmedID := strings.TrimSpace(*entryID)
+	if trimmedID == "" && fs.NArg() > 0 {
+		trimmedID = strings.TrimSpace(fs.Arg(0))
+	}
+	if trimmedID == "" {
+		exitUsage("memory", "verify-promote", *traceID, "--id <entry-id> is required", "usage: g8s memory verify-promote --id <entry-id>", *jsonl)
 	}
 	adapter := openMemoryAdapter()
 	defer adapter.Close()
 	if adapter.Vault() != nil {
 		defer adapter.Vault().Close()
 	}
-	entry := &memory.MemoryEntry{
-		ID:            strings.TrimSpace(*id),
-		Kind:          memory.MemoryKind(*kind),
-		Scope:         memory.MemoryScope(*scope),
-		SessionID:     strings.TrimSpace(*session),
-		PromotedBy:    "f0",
-		Payload:       *payload,
-		Preconditions: parseContextKeyValuePairs(*preconds),
-		ValidUntil:    *validUntil,
-	}
-	if err := adapter.ProposeEntry(context.Background(), entry); err != nil {
-		exitRuntime("memory", "propose", *traceID, cli.CodeRuntime, err, "", *jsonl)
+	dec, err := adapter.VerifyAndPromoteArtifact(context.Background(), trimmedID)
+	if err != nil {
+		exitRuntime("memory", "verify-promote", *traceID, cli.CodeRuntime, err, "", *jsonl)
 	}
 	if *jsonMode || *jsonl {
-		env := cli.NewEnvelope("memory_propose", "memory", "propose", entry)
+		env := cli.NewEnvelope("memory_verify_promote", "memory", "verify-promote", dec)
 		env.TraceID = *traceID
 		_ = cli.WriteResponse(os.Stdout, env, *jsonl)
 		return
 	}
-	fmt.Printf("proposed %s (%s)\n", entry.ID, entry.Lifecycle)
+	fmt.Printf("verified & promoted %s (%s/%s trust=%s)\n", dec.EntryID, dec.Lifecycle, dec.PromotionStatus, dec.Trust)
 }
 
 func runMemorySupersede(args []string) {

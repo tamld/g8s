@@ -237,6 +237,12 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 		return ErrMetaEntry
 	}
 
+	// Universal FAIL/PASS poisoned-trace & secret guard even before optional sensor evaluation.
+	if poisonReason := detectPoisonedTrace(e.Payload); poisonReason != "" {
+		a.sink("gate_rejected", "poisoned trace: "+poisonReason)
+		return fmt.Errorf("%w: %s", ErrPoisonedTraceRejected, poisonReason)
+	}
+
 	// G3: the sensor sees the NAKED payload — no trust labels, no provenance.
 	// Verdict allowlist: only "clean" grants trust; "blocked" rejects; any
 	// other verdict is a sensor fault (fail-closed). Sensor-down errors fail
@@ -740,7 +746,7 @@ func (a *LocalSQLiteMemoryAdapter) RecallHybridRRF(ctx context.Context, query st
 
 // PromoteToVault promotes a contextual MemoryEntry into a Tri-Anchor Knowledge
 // Vault record inside g8s's own SQLite Vault (zero external dependencies) and
-// transitions the MemoryEntry to LifecycleDoctrine.
+// transitions the MemoryEntry to LifecycleDoctrine after passing PromotionGate checks.
 func (a *LocalSQLiteMemoryAdapter) PromoteToVault(ctx context.Context, entryID string, rec vault.DistillationRecord) (*vault.DistillationRecord, error) {
 	if a.vault == nil {
 		return nil, fmt.Errorf("memory: semantic vault not configured")
@@ -752,6 +758,104 @@ func (a *LocalSQLiteMemoryAdapter) PromoteToVault(ctx context.Context, entryID s
 	if err != nil {
 		return nil, err
 	}
+	if e.Lifecycle == LifecycleRevoked || e.PromotionStatus == PromotionRevoked || e.PromotionStatus == PromotionRejected {
+		return nil, fmt.Errorf("%w: entry %s is %s/%s", ErrIllegalTransition, entryID, e.Lifecycle, e.PromotionStatus)
+	}
+	if e.Lifecycle == LifecycleScratch || e.Lifecycle == LifecycleWorking {
+		return nil, ErrGateRequired
+	}
+	if e.Lifecycle == LifecycleProposed {
+		if _, vErr := a.VerifyAndPromoteArtifact(ctx, entryID); vErr != nil {
+			return nil, vErr
+		}
+		e, err = a.GetEntry(ctx, entryID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Enforce Tombstone Monotonicity on both entry payload and candidate Vault TradeOff.
+	hash := e.PayloadHash
+	if hash == "" {
+		hash = payloadHash(e.Payload)
+	}
+	a.mu.RLock()
+	var tombstoned int
+	tErr := a.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM memory_tombstones WHERE payload_hash = ?`, hash).Scan(&tombstoned)
+	if tErr == nil && tombstoned == 0 && strings.TrimSpace(rec.Causality.TradeOff) != "" {
+		tradeOffHash := payloadHash(rec.Causality.TradeOff)
+		if tradeOffHash != hash {
+			tErr = a.db.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM memory_tombstones WHERE payload_hash = ?`, tradeOffHash).Scan(&tombstoned)
+		}
+	}
+	sensor := a.gateSensor
+	a.mu.RUnlock()
+	if tErr != nil {
+		return nil, fmt.Errorf("memory: tombstone lookup: %w", tErr)
+	}
+	if tombstoned > 0 {
+		return nil, ErrTombstoned
+	}
+
+	// Block poisoned traces / unredacted secrets across entry payload and Vault anchors.
+	for _, field := range []string{e.Payload, rec.Causality.Problem, rec.Causality.TradeOff, rec.Causality.RootCause} {
+		if strings.TrimSpace(field) == "" {
+			continue
+		}
+		if poisonReason := detectPoisonedTrace(field); poisonReason != "" {
+			a.sink("gate_rejected", "vault poisoned trace: "+poisonReason)
+			return nil, fmt.Errorf("%w: %s", ErrPoisonedTraceRejected, poisonReason)
+		}
+	}
+
+	// Over-generalized PASS guard: single-run PASS cannot self-promote to global DOCTRINE without corroboration.
+	if e.OutcomePath == OutcomePass && e.Trust != TrustOperatorRatified &&
+		countDistinctNonEmpty(e.CorroboratingSessions) < 2 && e.FirstPassSuccessCount < 2 {
+		a.sink("gate_rejected", "over-generalized PASS lesson: "+entryID)
+		return nil, ErrOverGeneralizedPassLesson
+	}
+
+	// Fail-closed Jev L3 verification for universal PASS/FAIL artifacts or altered Vault TradeOff content.
+	if e.OutcomePath != "" && e.Trust != TrustJevChecked && e.Trust != TrustOperatorRatified {
+		if sensor == nil {
+			a.sink("broker_failure", "jev L3 sensor not configured for vault promotion")
+			return nil, ErrJevL3VerificationRequired
+		}
+		verdict, serr := sensor(e.Payload)
+		switch {
+		case serr != nil:
+			a.sink("broker_failure", "sensor down: "+serr.Error())
+			return nil, fmt.Errorf("%w: %v", ErrJevL3VerificationRequired, serr)
+		case strings.EqualFold(verdict, "blocked"):
+			a.sink("gate_rejected", "sensor blocked: "+entryID)
+			return nil, ErrGateBlocked
+		case strings.EqualFold(verdict, "clean"):
+		default:
+			a.sink("broker_failure", "unrecognized sensor verdict: "+verdict)
+			return nil, fmt.Errorf("%w: %q", ErrSensorFault, verdict)
+		}
+	}
+	if sensor != nil && strings.TrimSpace(rec.Causality.TradeOff) != "" && rec.Causality.TradeOff != e.Payload {
+		verdict, serr := sensor(rec.Causality.TradeOff)
+		switch {
+		case serr != nil:
+			if e.OutcomePath != "" {
+				a.sink("broker_failure", "sensor down on vault tradeoff: "+serr.Error())
+				return nil, fmt.Errorf("%w: %v", ErrJevL3VerificationRequired, serr)
+			}
+			a.sink("broker_failure", "sensor down on vault tradeoff: "+serr.Error())
+		case strings.EqualFold(verdict, "blocked"):
+			a.sink("gate_rejected", "sensor blocked vault tradeoff: "+entryID)
+			return nil, ErrGateBlocked
+		case strings.EqualFold(verdict, "clean"):
+		default:
+			a.sink("broker_failure", "unrecognized sensor verdict: "+verdict)
+			return nil, fmt.Errorf("%w: %q", ErrSensorFault, verdict)
+		}
+	}
+
 	if rec.Status == "" {
 		rec.Status = "DOCTRINE"
 	}
@@ -767,8 +871,8 @@ func (a *LocalSQLiteMemoryAdapter) PromoteToVault(ctx context.Context, entryID s
 	defer a.mu.Unlock()
 	now := float64(time.Now().UnixNano()) / 1e9
 	if _, err := a.db.ExecContext(ctx, `
-		UPDATE memory_entries SET lifecycle = ?, updated_at = ? WHERE id = ?`,
-		string(LifecycleDoctrine), now, entryID); err != nil {
+		UPDATE memory_entries SET lifecycle = ?, promotion_status = ?, updated_at = ? WHERE id = ?`,
+		string(LifecycleDoctrine), string(PromotionActive), now, entryID); err != nil {
 		return nil, fmt.Errorf("memory: transition %s to doctrine: %w", entryID, err)
 	}
 	return stored, nil
