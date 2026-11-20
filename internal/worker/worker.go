@@ -489,7 +489,19 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	var req taskRequest
 	if uerr := json.Unmarshal(task.Request, &req); uerr != nil {
-		return nil, fmt.Errorf("decode task request: %w", uerr)
+		// A-4 (#984): a claimed attempt must never drain silently — route
+		// pre-start failures through StartTask + FinishAttempt with a typed
+		// error result, mirroring the read-only refusal path below.
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.cp.GetTask(ctx, task.TaskID)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "task_request_invalid",
+				"code": "E_TASK_REQUEST_INVALID", "error": uerr.Error(), "reason": uerr.Error(),
+			}),
+			Success: false, Retryable: false, Err: uerr.Error(),
+		})
 	}
 	s.ingestTrace(telemetry.TraceEventWorkerStarted, task.TaskID, nil, "")
 	if req.Model == "" {
@@ -538,7 +550,17 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	if req.ToolPolicy == "none" {
 		hookDir, evidenceLogPath, cleanupHook, hErr := dispatch.SetupToolPolicyNoneWorkspace()
 		if hErr != nil {
-			return nil, hErr
+			// A-4 (#984): consume the claimed attempt instead of stranding it.
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.cp.GetTask(ctx, task.TaskID)
+			}
+			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result: mustJSON(map[string]any{
+					"ok": false, "status": "tool_policy_setup_failed",
+					"code": "E_TOOL_POLICY_SETUP_FAILED", "error": hErr.Error(), "reason": hErr.Error(),
+				}),
+				Success: false, Retryable: false, Err: hErr.Error(),
+			})
 		}
 		defer cleanupHook()
 		req.ToolPolicyEvidenceLog = evidenceLogPath
@@ -569,7 +591,17 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	runDir := filepath.Join(s.runRoot, task.TaskID, fmt.Sprintf("attempt-%d", task.Attempts))
 	if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
-		return nil, fmt.Errorf("create run dir: %w", mkErr)
+		// A-4 (#984): consume the claimed attempt instead of stranding it.
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.cp.GetTask(ctx, task.TaskID)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "run_dir_unavailable",
+				"code": "E_RUN_DIR_UNAVAILABLE", "error": mkErr.Error(), "reason": mkErr.Error(),
+			}),
+			Success: false, Retryable: false, Err: mkErr.Error(),
+		})
 	}
 	promptPath := filepath.Join(runDir, "prompt.txt")
 	resultPath := filepath.Join(runDir, "result.json")
@@ -577,18 +609,50 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	stderrPath := filepath.Join(runDir, "worker.stderr")
 
 	if werr := os.WriteFile(promptPath, []byte(req.Prompt), 0o600); werr != nil {
-		return nil, fmt.Errorf("write prompt: %w", werr)
+		// A-4 (#984): consume the claimed attempt instead of stranding it.
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "prompt_write_failed",
+				"code": "E_PROMPT_WRITE_FAILED", "error": werr.Error(), "reason": werr.Error(),
+			}),
+			Success: false, Retryable: false, Err: werr.Error(),
+		})
 	}
 	defer os.Remove(promptPath) // prompt.txt never survives an attempt.
 
 	outFile, oerr := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if oerr != nil {
-		return nil, fmt.Errorf("open stdout capture: %w", oerr)
+		// A-4 (#984): consume the claimed attempt instead of stranding it.
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "stdout_capture_unavailable",
+				"code": "E_STDOUT_CAPTURE_FAILED", "error": oerr.Error(), "reason": oerr.Error(),
+			}),
+			Success: false, Retryable: false, Err: oerr.Error(),
+		})
 	}
 	defer outFile.Close()
 	errFile, eerr := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if eerr != nil {
-		return nil, fmt.Errorf("open stderr capture: %w", eerr)
+		// A-4 (#984): consume the claimed attempt instead of stranding it;
+		// the already-open stdout capture must not leak.
+		outFile.Close()
+		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+		}
+		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result: mustJSON(map[string]any{
+				"ok": false, "status": "stderr_capture_unavailable",
+				"code": "E_STDERR_CAPTURE_FAILED", "error": eerr.Error(), "reason": eerr.Error(),
+			}),
+			Success: false, Retryable: false, Err: eerr.Error(),
+		})
 	}
 	defer errFile.Close()
 
@@ -646,7 +710,26 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	useWorktreeIsolation := req.Permission == "workspace_write" || ephemeralReadOnly
 	if useWorktreeIsolation {
 		if err := cleanupFailedWorktree(filepath.Dir(runDir)); err != nil {
-			return nil, err
+			// A-4 (#984): consume the claimed attempt instead of stranding it,
+			// mirroring the isolation-unavailable fail-closed path below.
+			outWriter.Close()
+			errWriter.Close()
+			outFile.Close()
+			errFile.Close()
+			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+			}
+			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result: mustJSON(map[string]any{
+					"ok":     false,
+					"status": "worktree_cleanup_failed",
+					"error":  err.Error(),
+					"reason": err.Error(),
+				}),
+				Success:   false,
+				Retryable: false,
+				Err:       err.Error(),
+			})
 		}
 		if s.isolator == nil {
 			cwd, _ := os.Getwd()

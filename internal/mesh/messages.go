@@ -530,6 +530,9 @@ func msgAck(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 	})
 }
 
+// snapshotClaimLimit bounds the claims list in a snapshot response (C-8, #984).
+const snapshotClaimLimit = 5000
+
 func msgSnapshot(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 	var req msgSnapshotReq
 	if err := decode(input, &req); err != nil {
@@ -602,7 +605,12 @@ func msgSnapshot(ctx context.Context, s *Store, input json.RawMessage) (any, err
 	qR.Close()
 
 	claims := []Claim{}
-	cR, err := tx.QueryContext(ctx, "SELECT task_id, node_id, incarnation, resource, paths, context_revision, expires_at, state, artifact_ref, artifact_sha256 FROM claims ORDER BY task_id ASC LIMIT 1000")
+	// C-8 (#984): the legacy LIMIT 1000 silently truncated claim visibility —
+	// operators saw a healthy-looking fleet while rows beyond 1000 were
+	// invisible (claims are small rows; 5000 bounds the snapshot payload
+	// without hiding mid-size deployments). Raise this constant, don't shrink
+	// it, if snapshot size ever becomes a concern again.
+	cR, err := tx.QueryContext(ctx, "SELECT task_id, node_id, incarnation, resource, paths, context_revision, expires_at, state, artifact_ref, artifact_sha256 FROM claims ORDER BY task_id ASC LIMIT ?", snapshotClaimLimit)
 	if err != nil {
 		return nil, err
 	}

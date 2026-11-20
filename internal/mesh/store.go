@@ -31,6 +31,111 @@ CREATE TABLE IF NOT EXISTS claims(task_id TEXT PRIMARY KEY, node_id TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS meta(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
 INSERT OR IGNORE INTO meta(id, revision) VALUES(1, 0);`
 
+// meshLedgerSchemaVersion is the current mesh ledger schema version. It starts
+// at 1 = the schema above (C-5, #984). Bump it when schemaSQL changes and add
+// an entry to ledgerColumnMigrations (for columns) or rely on the idempotent
+// CREATE TABLE IF NOT EXISTS statements (for whole tables) so pre-existing
+// ledger.db files migrate on reopen instead of bricking every INSERT.
+const meshLedgerSchemaVersion = 1
+
+// meshLedgerBusyTimeoutMs is the mesh ledger busy_timeout. 15s sits between
+// the 5s used by non-mesh side ledgers (cleanup/charter) and the 30s used by
+// the controlplane/receipt/telemetry stores: mesh READ paths perform writes
+// (keepalive inserts inside every inbox poll, messages.go msgGetPending) and
+// msgWait polls every 100ms, so transient write-write contention is the norm.
+// 5s was observed to surface SQLITE_BUSY under concurrent poll + prune/check-
+// point spikes (C-6, #984); 30s would stall interactive CLI callers before
+// they can report contention. 15s absorbs WAL checkpoint + prune sweeps
+// without turning a contended poll into a multi-second CLI hang.
+const meshLedgerBusyTimeoutMs = 15000
+
+// ledgerColumnMigration declares one defensively-added column: when an
+// existing ledger.db predates the column, PRAGMA table_info misses it and the
+// migrator adds it with ALTER TABLE ADD COLUMN. def MUST carry a DEFAULT so
+// the ALTER succeeds on populated tables (mirrors the controlplane pattern,
+// internal/controlplane/store.go migrateTasksTable).
+type ledgerColumnMigration struct {
+	table  string
+	column string
+	def    string
+}
+
+// ledgerColumnMigrations lists columns added after meshLedgerSchemaVersion 1.
+// The v1 schema above already contains every column the handlers reference,
+// so the registry starts empty; append one entry per future column bump.
+var ledgerColumnMigrations = []ledgerColumnMigration{}
+
+// migrateLedger brings an opened ledger.db up to meshLedgerSchemaVersion:
+// fresh databases (user_version 0) get the base schema, pre-versioning
+// databases get any missing columns added, and both are stamped with the
+// current version. Defensive column migrations re-run even on a
+// current-version database so a hand-mangled or partially-written ledger
+// heals on reopen. Newer-than-code databases are rejected (no downgrade).
+func migrateLedger(db *sql.DB, colMigrations []ledgerColumnMigration) error {
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("read mesh ledger schema version: %w", err)
+	}
+	if version > meshLedgerSchemaVersion {
+		return fmt.Errorf("unsupported mesh ledger schema version %d; expected <= %d (database written by a newer binary)", version, meshLedgerSchemaVersion)
+	}
+	if version == meshLedgerSchemaVersion && len(colMigrations) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin schema migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	if version < meshLedgerSchemaVersion {
+		if _, err := tx.Exec(schemaSQL); err != nil {
+			return fmt.Errorf("init schema: %w", err)
+		}
+	}
+	for _, m := range colMigrations {
+		rows, err := tx.Query("PRAGMA table_info(" + m.table + ")")
+		if err != nil {
+			return fmt.Errorf("inspect %s columns: %w", m.table, err)
+		}
+		present := false
+		for rows.Next() {
+			var cid, notNull, pk int
+			var name, ctype string
+			var dflt any
+			if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan %s columns: %w", m.table, err)
+			}
+			if name == m.column {
+				present = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspect %s columns: %w", m.table, err)
+		}
+		rows.Close()
+		if present {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE " + m.table + " ADD COLUMN " + m.column + " " + m.def); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", m.table, m.column, err)
+		}
+	}
+
+	if version < meshLedgerSchemaVersion {
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", meshLedgerSchemaVersion)); err != nil {
+			return fmt.Errorf("record mesh ledger schema version: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema migration: %w", err)
+	}
+	return nil
+}
+
 type Store struct {
 	db  *sql.DB
 	now func() time.Time
@@ -48,8 +153,8 @@ func Open(dir string) (*Store, error) {
 	dbPath := filepath.Join(dir, "ledger.db")
 
 	dsn := fmt.Sprintf(
-		"file:%s?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
-		sqlitePathEscape(dbPath),
+		"file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)",
+		sqlitePathEscape(dbPath), meshLedgerBusyTimeoutMs,
 	)
 
 	db, err := sql.Open("sqlite", dsn)
@@ -58,9 +163,9 @@ func Open(dir string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 
-	if _, err := db.Exec(schemaSQL); err != nil {
+	if err := migrateLedger(db, ledgerColumnMigrations); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("init schema: %w", err)
+		return nil, err
 	}
 	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		db.Close()
