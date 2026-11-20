@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **TRUST Compliance Wave (issues #972–#989, blind-audit-driven)**:
+  - `CAPABILITY_DETECTED` trust-gate status (#974): policy-contract capability without a live adversarial probe no longer reports ENFORCED at the per-gate level; non-compensatory verdict vetoes on it; benchmark upgrades G1 only on live as-001 pass.
+  - MCP protocol conformance (#976): JSON-RPC notifications produce no response line; `tools/list`/`tools/call` gated behind `initialize` with typed -32002; conforming-client updates (sa-008 DAST probe, coordinator-mesh parity); spec pin updated to the handshake happy-path test.
+  - Claim refusal API (#987): `controlplane.RefuseClaim` releases claims back to QUEUED with attempt restore, `task_claim_refused` audit event, and `$.not_before` deferral; `worker.ErrWorkerCwdNotGitRepo` (`E_WORKER_CWD_NOT_GIT_REPO`) refuses ephemeral read-only attempts pre-consume — isolation-incapable pollers can no longer burn attempts on tasks they cannot honor; drain CLI handles refusals as claim-skips.
+  - S0 custody runbook (`docs/security/s0-custody-runbook.md`) and Context Authority Firewall threat model with source-to-sink map (#975/#977 PR-1).
+  - Policy epoch & revocation consistency audit (`docs/audits/policy-epoch-revocation-audit.md`, #978): five divergent revocation rules documented, charter-enforcement gap classified with red-test proposals.
+
+### Changed
+
+- **Bounded operations (#981)**: PipeTee scanner buffer sized to the capture budget with reader-side `CloseWithError` (Go 1.27 io.Pipe semantics probed) — >64KB stdout lines no longer deadlock the child; fsops Read/Edit/ApplyBatchEdits 64MiB stat-guards (`ErrFileTooLarge`); deliverable digest 512MiB cap; contextpack read-guard aligned to the collect budget; `g8s select`/`edit --batch` 64MiB stdin/file caps.
+- **Uniform secret scrubbing (#985)**: agy AND claude provider spawns route through `scrubProviderEnv` (ambient secrets no longer inherited); scrub vocabulary covers `*_URL`/`*_URI`/`*_DSN` shapes (DATABASE_URL, REDIS_URL, SLACK_WEBHOOK_URL, SENTRY_DSN, NETRC); offline adapter-contract suite structurally asserts scrubbing for all 7 CLI adapters.
+- **CI supply-chain hardening (#983)**: syft/wrangler/goreleaser/golangci-lint/govulncheck pinned to exact versions with SHA-256 verification (`ci_fetch` fail-closed); 18 jobs timeout-bounded; workflow permissions narrowed to least privilege (release jobs read-only, dogfood PR runs read-only with dedicated notify job, quality ratchet split); new static gate `tools/ci_workflow_supply_check.sh` wired into quality.
+- **Trust assurance honesty (#974)**: gate statuses distinguish policy-contract capability from adversarially-verified enforcement; benchmark counts CAPABILITY_DETECTED distinctly and upgrades only on live probe pass.
+
+### Fixed
+
+- **Cross-process S0 nonce replay race (#972)**: `FileS0NonceStore.CheckAndConsume` holds a cross-process file lock (5s fail-closed budget, windows-runner hardened) across read-check-commit — concurrent coordinators sharing a state dir can no longer consume the same approval; nil NonceStore on real Tier-B application denies with `E_TRUST_ROOT_S0_NONCE_STORE_REQUIRED`.
+- **Deliver TOCTOU (#973)**: the Trust Root gate returns the per-file content snapshot it hashed; staging writes from that snapshot — applied bytes are by construction the S0-approved bytes; snapshot-missing rels refuse with `E_TRUST_ROOT_DIGEST_MISMATCH` before any rename.
+- **Protected-path case-variant bypass (#979)**: `.git`/`.g8s` write denial folds case on case-insensitive filesystems (deny-side; grant-side deliberately case-sensitive).
+- **Stale-pid orphan kills (#980)**: `reapOrphans`/layer-1 sweep verify a spawn-time identity record (child.run.json: pid + owner + start times, per-platform probes) before any SIGKILL; `child.pid` retired at attempt end per its documented lifecycle.
+- **Zombie-session reap (#982)**: transactional liveness re-verification before removal; dirty worktrees get full evidence capture (diff + porcelain + verbatim untracked + recovery notes) instead of blind `os.RemoveAll`; capture failure refuses removal.
+- **Ledger durability (#984 slice 1)**: receipts.db `synchronous(FULL)`; telemetry flush retains acknowledged events on persist failure (bounded overflow outbox + idempotent replay + failure metrics); retention period enforced on every tick.
+- **Claims checker accounting (#986 part 1)**: `in_unbound` state reset per claim — scorecard bound/unbound counts no longer corrupted by one unbound entry.
+
+
 ## [0.26.0] - 2026-11-20
 
 ### Added
