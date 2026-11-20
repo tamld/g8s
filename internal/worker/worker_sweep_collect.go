@@ -49,17 +49,28 @@ func GetInstanceID() string {
 // the attempt has ended, verify the attempt's process group is gone — a
 // worker that exits while its same-group grandchildren keep running leaves
 // silent orphans. Survivors get SIGKILL (best-effort) and an
-// `orphan_killed` trace event; the stale pid file is removed either way.
-// Windows containment lands in #415 PR-2 (Job Objects).
+// `orphan_killed` trace event. The kill here targets the live Child handle
+// itself, so it is inherently identity-correct; the attempt's child.pid and
+// child.run.json identity record are retired either way, so a completed
+// attempt can never be mistaken for a crashed predecessor's stale record by
+// reapOrphans (#980). Windows containment lands in #415 PR-2 (Job Objects).
 // Layer 2 (#439): If a marker is provided, candidate processes outside the
 // process group (e.g. grandchildren that escaped via setsid) are swept.
 func (s *Supervisor) sweepAttemptGroup(child Child, taskID string, marker ...string) {
 	if child != nil {
 		pid := child.PID()
 		if groupAlive(pid) {
-			_ = killProcessGroup(pid, syscallSIGKILL)
+			_ = s.killGroupFn(pid, syscallSIGKILL)
 			if s != nil {
 				s.ingestTrace(telemetry.TraceEventOrphanKilled, taskID, nil, fmt.Sprintf("same-group survivor killed after attempt end (instance=%s)", GetInstanceID()))
+			}
+		}
+		// #980: retire the spawn-time pid/identity files — the attempt has
+		// ended, so reapOrphans must never see them again.
+		if rd, ok := child.(interface{ RunDir() string }); ok {
+			if dir := rd.RunDir(); dir != "" {
+				_ = os.Remove(filepath.Join(dir, "child.pid"))
+				_ = os.Remove(filepath.Join(dir, childRunMarkerName))
 			}
 		}
 	}

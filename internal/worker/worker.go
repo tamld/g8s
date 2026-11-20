@@ -321,6 +321,11 @@ type Supervisor struct {
 	// sandbox.ModeKernelEnforced (#936 / ADR-0042 TRUST-G1).
 	requireKernelSandbox bool
 
+	// killGroup is the injectable process-group kill seam used by reapOrphans
+	// and the post-run sweep; tests install a spy to assert kill decisions
+	// without real signals (#980). Nil = the platform killProcessGroup.
+	killGroup groupKiller
+
 	// Closed-loop telemetry ingestion (#253): opt-in via G8S_TELEMETRY=1
 	// (default ledger path) or G8S_TELEMETRY_DB=<path>. Lazily opened per
 	// process; refcounted per in-flight run so concurrent runs (#394) close
