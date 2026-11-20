@@ -328,6 +328,12 @@ func VerifyScope(filePath, scopeRoot string, allowedPaths []string) (string, err
 // hasExplicitPrefixGrant reports whether allowedPaths contains an explicit
 // pattern targeting prefix (e.g. ".git/" or ".g8s/") rather than a generic
 // wildcard ("*", "**", "./**").
+// Grant matching is deliberately case-sensitive (#979): only an explicitly
+// authored lowercase ".git"/".g8s" pattern unlocks the protected directories,
+// while the deny-side protected-name matching folds case. A case-variant
+// grant (".GIT/**") therefore never unlocks ".git/**", keeping the grant
+// check fail-closed on case-sensitive filesystems where ".GIT" and ".git"
+// are distinct directories.
 func hasExplicitPrefixGrant(prefix string, allowedPaths []string) bool {
 	prefix = strings.TrimSuffix(prefix, "/")
 	for _, raw := range allowedPaths {
@@ -346,6 +352,10 @@ func hasExplicitPrefixGrant(prefix string, allowedPaths []string) bool {
 // explicitly granted in allowedPaths; writes to .g8s/** are denied when
 // operating under a receipt/wildcard scope or delegated F1/F2 tier unless
 // allowedPaths contains an explicit .g8s/** pattern.
+// Protected-name matching folds case (#979): on case-insensitive filesystems
+// (macOS APFS, Windows NTFS) a case-variant request such as
+// ".GIT/hooks/pre-commit" resolves to the real ".git" directory, so comparing
+// the protected prefixes case-insensitively is required to prevent bypass.
 func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string, error) {
 	if err := verifyDelegatedClaim(filePath, scopeRoot); err != nil {
 		return "", err
@@ -358,12 +368,15 @@ func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string
 		return "", err
 	}
 	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relSlash)), "./")
-	if clean == ".git" || strings.HasPrefix(clean, ".git/") || strings.Contains(clean, "/.git/") || strings.HasSuffix(clean, "/.git") {
+	// Case-folded copy used only for the protected-name deny comparisons; the
+	// caller-supplied path casing is preserved for scope/grant matching.
+	cleanFolded := strings.ToLower(clean)
+	if cleanFolded == ".git" || strings.HasPrefix(cleanFolded, ".git/") || strings.Contains(cleanFolded, "/.git/") || strings.HasSuffix(cleanFolded, "/.git") {
 		if !hasExplicitPrefixGrant(".git", allowedPaths) {
 			return "", fmt.Errorf("path %q targets protected git metadata (.git/**); write denied", filePath)
 		}
 	}
-	if clean == ".g8s" || strings.HasPrefix(clean, ".g8s/") || strings.Contains(clean, "/.g8s/") || strings.HasSuffix(clean, "/.g8s") {
+	if cleanFolded == ".g8s" || strings.HasPrefix(cleanFolded, ".g8s/") || strings.Contains(cleanFolded, "/.g8s/") || strings.HasSuffix(cleanFolded, "/.g8s") {
 		envTier := strings.TrimSpace(os.Getenv("G8S_TIER"))
 		isDelegated := strings.EqualFold(envTier, "F1") || strings.EqualFold(envTier, "F2")
 		if (len(allowedPaths) > 0 || isDelegated) && !hasExplicitPrefixGrant(".g8s", allowedPaths) {
