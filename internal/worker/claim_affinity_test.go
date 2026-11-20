@@ -47,11 +47,14 @@ func TestWorkerClaimAffinity_RunOnce_FilterPermutations(t *testing.T) {
 	env := newWorkerEnv(t, nil, WithPollInterval(5*time.Millisecond))
 	ctx := context.Background()
 
-	// Enqueue 4 tasks across 2 providers and 2 models
+	// Enqueue 4 tasks across 2 providers and 2 models. Provider "prov-b" is a
+	// neutral non-firewall token: read_only claims for external-CLI firewall
+	// providers (codex/cursor/...) are claim-refused on an isolator-less
+	// worker (#987), which would collide with these affinity permutations.
 	t1 := submitAffinityTask(t, env, "t-agy-flash", "agy", "gemini-3.8-flash-high", 10)
 	t2 := submitAffinityTask(t, env, "t-agy-sonnet", "agy", "claude-3-7-sonnet", 20)
-	t3 := submitAffinityTask(t, env, "t-codex-flash", "codex", "gemini-3.8-flash-high", 30)
-	t4 := submitAffinityTask(t, env, "t-codex-sonnet", "codex", "claude-3-7-sonnet", 40)
+	t3 := submitAffinityTask(t, env, "t-provb-flash", "prov-b", "gemini-3.8-flash-high", 30)
+	t4 := submitAffinityTask(t, env, "t-provb-sonnet", "prov-b", "claude-3-7-sonnet", 40)
 
 	// 1. Both set: Provider="agy", Model="gemini-3.8-flash-high" MUST claim t1
 	claimed1, err := env.sup.RunOnce(ctx, RunOptions{
@@ -80,11 +83,11 @@ func TestWorkerClaimAffinity_RunOnce_FilterPermutations(t *testing.T) {
 		t.Fatalf("expected claimed t4 (%s), got %+v", t4.TaskID, claimed2)
 	}
 
-	// 3. Provider only: Provider="codex" -> should claim t3 (remaining codex task)
+	// 3. Provider only: Provider="prov-b" -> should claim t3 (remaining prov-b task)
 	claimed3, err := env.sup.RunOnce(ctx, RunOptions{
 		WorkerID:     "w-prov",
 		LeaseSeconds: 60,
-		Provider:     "codex",
+		Provider:     "prov-b",
 	})
 	if err != nil {
 		t.Fatalf("RunOnce provider only: %v", err)
@@ -211,15 +214,17 @@ func TestWorkerClaimAffinity_ConcurrentDrain(t *testing.T) {
 	env := newWorkerEnv(t, nil, WithPollInterval(5*time.Millisecond))
 	ctx := context.Background()
 
-	// 6 matching tasks and 4 non-matching tasks
+	// 6 matching tasks and 4 non-matching tasks. Provider "prov-b" is a
+	// neutral non-firewall token so read_only claims never hit the #987
+	// isolation refusal on this isolator-less test worker.
 	var matchIDs []string
 	for i := 0; i < 6; i++ {
-		tMatch := submitAffinityTask(t, env, fmt.Sprintf("conc-match-%d", i), "codex", "model-x", i)
+		tMatch := submitAffinityTask(t, env, fmt.Sprintf("conc-match-%d", i), "prov-b", "model-x", i)
 		matchIDs = append(matchIDs, tMatch.TaskID)
 	}
 	var mismatchIDs []string
 	for i := 0; i < 4; i++ {
-		tMismatch := submitAffinityTask(t, env, fmt.Sprintf("conc-mismatch-%d", i), "codex", "model-y", 50+i)
+		tMismatch := submitAffinityTask(t, env, fmt.Sprintf("conc-mismatch-%d", i), "prov-b", "model-y", 50+i)
 		mismatchIDs = append(mismatchIDs, tMismatch.TaskID)
 	}
 
@@ -228,7 +233,7 @@ func TestWorkerClaimAffinity_ConcurrentDrain(t *testing.T) {
 	code := env.sup.RunLoop(ctx, LoopOptions{
 		WorkerID:     "w-conc",
 		LeaseSeconds: 60,
-		Provider:     "codex",
+		Provider:     "prov-b",
 		Model:        "model-x",
 		Concurrency:  3,
 		OnTask: func(t *controlplane.Task) {

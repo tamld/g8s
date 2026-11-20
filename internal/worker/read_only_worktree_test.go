@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +106,19 @@ func TestExternalCLIReadOnlyMutationFailsDiffFirewall(t *testing.T) {
 	_ = task
 }
 
+// TestExternalCLIReadOnlyIsolationUnavailable (#987): a read_only
+// platform_dispatch attempt claimed by a worker whose cwd is not a git
+// repository (nil isolator — e.g. a launchd-spawned background worker with
+// cwd=/) must REFUSE THE CLAIM before consuming the task, instead of the
+// legacy consume-then-fail (FinishAttempt ok=false) that terminally killed
+// freshly submitted tasks within seconds. The task stays QUEUED and
+// claimable by an isolation-capable worker; RunOnce surfaces the typed
+// E_WORKER_CWD_NOT_GIT_REPO error.
 func TestExternalCLIReadOnlyIsolationUnavailable(t *testing.T) {
+	prevDefer := claimRefusalDeferSeconds
+	claimRefusalDeferSeconds = 3600
+	t.Cleanup(func() { claimRefusalDeferSeconds = prevDefer })
+
 	env := newWorkerEnv(t, nil)
 	env.sup = NewSupervisor(env.store, env.runDir,
 		WithRunner(env.runner),
@@ -114,22 +127,147 @@ func TestExternalCLIReadOnlyIsolationUnavailable(t *testing.T) {
 			PlatformDispatchNames: []string{"codex"},
 		})),
 	)
-	submitTask(t, env, "ro-cli-no-iso", 1, map[string]any{
+	task := submitTask(t, env, "ro-cli-no-iso", 1, map[string]any{
 		"provider":   "codex",
 		"permission": "read_only",
 	})
 	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-ro-no-iso", LeaseSeconds: 60})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected typed claim-refusal error from RunOnce, got nil")
 	}
-	var result map[string]any
-	if err := json.Unmarshal(final.Result, &result); err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrWorkerCwdNotGitRepo) {
+		t.Fatalf("expected ErrWorkerCwdNotGitRepo, got %v", err)
 	}
-	if result["status"] != "isolation_unavailable" {
-		t.Fatalf("expected isolation_unavailable, got %+v", result)
+	if !strings.Contains(err.Error(), "E_WORKER_CWD_NOT_GIT_REPO") {
+		t.Fatalf("refusal error must carry typed code E_WORKER_CWD_NOT_GIT_REPO, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "is not a git repository") {
+		t.Fatalf("refusal error must name the cwd defect, got %v", err)
+	}
+	if final != nil {
+		t.Fatalf("refused claim must not return a consumed task, got %+v", final)
 	}
 	if len(env.runner.spawned) != 0 {
 		t.Fatal("must not spawn child when read_only external CLI lacks isolator")
+	}
+
+	got, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != "QUEUED" {
+		t.Fatalf("task must stay QUEUED (claimable) after refusal, got %q", got.State)
+	}
+	if got.LeaseToken != nil {
+		t.Fatalf("claim must be released: lease_token=%v", *got.LeaseToken)
+	}
+	if got.LeaseOwner != nil {
+		t.Fatalf("claim must be released: lease_owner=%v", *got.LeaseOwner)
+	}
+	if got.Result != nil {
+		t.Fatalf("refused task must not carry a consumed result, got %s", string(got.Result))
+	}
+	if got.Attempts != 0 {
+		t.Fatalf("refusal must restore the attempt budget, got attempts=%d", got.Attempts)
+	}
+
+	var req map[string]any
+	if err := json.Unmarshal(got.Request, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	nb, ok := req["not_before"].(float64)
+	if !ok {
+		t.Fatalf("expected deferred not_before in request_json, got %v", req["not_before"])
+	}
+	if nb <= float64(time.Now().UnixNano())/1e9 {
+		t.Fatalf("not_before %v must defer re-claim visibility into the future", nb)
+	}
+
+	foundRefusal := false
+	events, evErr := env.store.Events(context.Background(), task.TaskID)
+	if evErr != nil {
+		t.Fatalf("events: %v", evErr)
+	}
+	for _, e := range events {
+		if e.EventType != "task_claim_refused" {
+			continue
+		}
+		foundRefusal = true
+		var details map[string]any
+		if json.Unmarshal(e.Details, &details) != nil {
+			t.Fatalf("refusal event details must decode, got %s", string(e.Details))
+		}
+		if details["code"] != "E_WORKER_CWD_NOT_GIT_REPO" {
+			t.Fatalf("refusal event must carry typed code, got %v", details)
+		}
+	}
+	if !foundRefusal {
+		t.Fatalf("expected task_claim_refused event, got %+v", events)
+	}
+}
+
+// TestReadOnlyClaimRefusalRestoresClaimability (#987): after a refusal the
+// SAME task is claimable and executable by an isolation-capable worker on the
+// shared queue — the deterministic single-executor handoff. With the legacy
+// consume-then-fail the refusal burned the single attempt and the second
+// worker had nothing left to claim.
+func TestReadOnlyClaimRefusalRestoresClaimability(t *testing.T) {
+	prevDefer := claimRefusalDeferSeconds
+	claimRefusalDeferSeconds = 0
+	t.Cleanup(func() { claimRefusalDeferSeconds = prevDefer })
+
+	env := newWorkerEnv(t, nil)
+	// First supervisor has NO isolator (worker cwd not a git repository).
+	env.sup = NewSupervisor(env.store, env.runDir,
+		WithRunner(env.runner),
+		WithPollInterval(2*time.Millisecond),
+		WithProviderCommandResolver(NewProviderCommandResolver(ProviderResolverOptions{
+			PlatformDispatchNames: []string{"cursor"},
+		})),
+	)
+	task := submitTask(t, env, "ro-refusal-reclaim", 1, map[string]any{
+		"provider":    "cursor",
+		"permission":  "read_only",
+		"result_mode": "stdout",
+	})
+	if _, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-incapable", LeaseSeconds: 60}); !errors.Is(err, ErrWorkerCwdNotGitRepo) {
+		t.Fatalf("expected typed refusal from incapable worker, got %v", err)
+	}
+
+	// Second supervisor on the SAME store runs inside a git checkout: claims
+	// the still-queued task and executes it to completion.
+	wt := initGitRepoForDiffFirewall(t)
+	done := make(chan struct{})
+	close(done)
+	capable := NewSupervisor(env.store, env.runDir,
+		WithRunner(env.runner),
+		WithPollInterval(2*time.Millisecond),
+		WithWorktreeIsolator(&fakeWorktreeIsolator{dir: wt}),
+		WithProviderCommandResolver(NewProviderCommandResolver(ProviderResolverOptions{
+			PlatformDispatchNames: []string{"cursor"},
+		})),
+	)
+	env.runner.factory = func(opts SpawnOptions) Child {
+		if opts.Dir != wt {
+			t.Fatalf("capable worker spawn dir = %q, want isolated worktree %q", opts.Dir, wt)
+		}
+		return &instantChild{done: done}
+	}
+	final, err := capable.RunOnce(context.Background(), RunOptions{WorkerID: "w-capable", LeaseSeconds: 60})
+	if err != nil {
+		t.Fatalf("capable worker RunOnce: %v", err)
+	}
+	if final == nil {
+		t.Fatal("capable worker must claim the refused task")
+	}
+	got, err := env.store.GetTask(context.Background(), task.TaskID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.State != "WORKER_COMPLETED" {
+		t.Fatalf("capable worker must consume the task to completion, got %q", got.State)
+	}
+	if got.Attempts != 1 {
+		t.Fatalf("task must be consumed exactly once, got attempts=%d", got.Attempts)
 	}
 }

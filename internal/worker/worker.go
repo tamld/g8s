@@ -55,6 +55,16 @@ type WorkerControlPlane interface {
 
 	// Receipt export outcome persistence (issue #658)
 	RecordReceiptExport(ctx context.Context, taskID string, status controlplane.ReceiptExportStatus) error
+
+	// RefuseClaim releases a claimed task back to the queue WITHOUT burning
+	// the claim's attempt budget (#987 fail-before-consume). Used when the
+	// claim context cannot honor a hard task requirement — e.g. ephemeral
+	// read-only worktree isolation (#880) with a worker cwd that is not a git
+	// repository — so the task stays claimable by a capable worker instead of
+	// being consumed and terminally failed. deferSeconds defers re-claim
+	// visibility (request_json $.not_before) to keep the incapable poller
+	// from hot-looping the same claim.
+	RefuseClaim(ctx context.Context, taskID, workerID, leaseToken, code, reason string, deferSeconds int) error
 }
 
 // taskRequest mirrors the worker-facing payload stored on every task.
@@ -133,6 +143,20 @@ const (
 	maxHeartbeatInterval = 5 * time.Second
 	terminateGrace       = 2 * time.Second
 )
+
+// ErrWorkerCwdNotGitRepo is the typed refusal returned when a claimed task
+// requires ephemeral worktree isolation (the #880 read_only platform_dispatch
+// firewall) but the worker process cwd is not a git repository, so no
+// isolator exists. The claim is RELEASED back to the queue without consuming
+// the attempt (#987 fail-before-consume); the task stays claimable by a
+// worker launched inside a git checkout. Callers must match with errors.Is.
+var ErrWorkerCwdNotGitRepo = errors.New("E_WORKER_CWD_NOT_GIT_REPO: worker cwd is not a git repository")
+
+// claimRefusalDeferSeconds defers re-claim visibility (request_json
+// $.not_before) of a refused task so an isolation-incapable poller (e.g. a
+// launchd worker with cwd=/) cannot hot-loop the same claim. Package var so
+// tests can shorten the deferral.
+var claimRefusalDeferSeconds = 60
 
 // Option customizes optional Supervisor dependencies.
 type Option func(*Supervisor)
@@ -625,31 +649,51 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			return nil, err
 		}
 		if s.isolator == nil {
-			outWriter.Close()
-			errWriter.Close()
-			outFile.Close()
-			errFile.Close()
 			cwd, _ := os.Getwd()
 			if cwd == "" {
 				cwd = "."
 			}
 			errMsg := fmt.Sprintf("worktree isolation unavailable: worker cwd %s is not a git repository — launch the worker from a repo checkout", cwd)
 			fmt.Fprintf(os.Stderr, "[warn] worker: %s for %s\n", errMsg, task.TaskID)
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			// #656 terminal fail-closed path: consume the attempt with a
+			// structured isolation_unavailable result so no lease leaks.
+			consumeIsolationFailure := func() (*controlplane.Task, error) {
+				outWriter.Close()
+				errWriter.Close()
+				outFile.Close()
+				errFile.Close()
+				if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+					return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+				}
+				_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+					Result: mustJSON(map[string]any{
+						"ok":     false,
+						"status": "isolation_unavailable",
+						"error":  errMsg,
+						"reason": errMsg,
+					}),
+					Success:   false,
+					Retryable: false,
+					Err:       errMsg,
+				})
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
-			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-				Result: mustJSON(map[string]any{
-					"ok":     false,
-					"status": "isolation_unavailable",
-					"error":  errMsg,
-					"reason": errMsg,
-				}),
-				Success:   false,
-				Retryable: false,
-				Err:       errMsg,
-			})
-			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
+			// #987 fail-before-consume: a read_only platform_dispatch attempt
+			// must NOT be consumed by an isolation-incapable worker (e.g. a
+			// launchd-spawned worker with cwd=/ winning the claim race within
+			// seconds of submit). Release the claim so the task stays QUEUED
+			// and claimable by a worker launched inside a git checkout; the
+			// store defers re-claim visibility so this poller cannot
+			// hot-loop the same refusal.
+			if ephemeralReadOnly {
+				if rerr := s.cp.RefuseClaim(ctx, task.TaskID, opts.WorkerID, token, "E_WORKER_CWD_NOT_GIT_REPO", errMsg, claimRefusalDeferSeconds); rerr != nil && !errors.Is(rerr, controlplane.ErrClaimNotHeld) {
+					// Unexpected release failure: keep #656 lease hygiene by
+					// falling back to the terminal fail-closed path.
+					return consumeIsolationFailure()
+				}
+				return nil, fmt.Errorf("%w: %s", ErrWorkerCwdNotGitRepo, errMsg)
+			}
+			return consumeIsolationFailure()
 		}
 
 		var (
