@@ -773,9 +773,11 @@ func (s *Supervisor) collect(
 			_ = s.cp.AddErrorCall(ctx, taskID, ec)
 		}
 
-		// Store validation result
+		// Store validation result — best-effort (A-8, #984): a persist failure
+		// must not strand the attempt in RUNNING with a live lease; flow
+		// always reaches FinishAttempt below.
 		if verr := s.cp.ValidateResult(ctx, taskID, validation); verr != nil {
-			return nil, fmt.Errorf("store validation result: %w", verr)
+			fmt.Fprintf(os.Stderr, "[warn] worker: store validation result for %s (best-effort): %v\n", taskID, verr)
 		}
 
 		// If validation fails, mark as non-retryable failure
@@ -805,9 +807,10 @@ func (s *Supervisor) collect(
 			_ = s.cp.AddErrorCall(ctx, taskID, ec)
 		}
 
-		// Store contract validation result
+		// Store contract validation result — best-effort (A-8, #984), same
+		// rationale as ValidateResult above: FinishAttempt must always run.
 		if cverr := s.cp.ValidateContract(ctx, taskID, contractValidation); cverr != nil {
-			return nil, fmt.Errorf("store contract validation result: %w", cverr)
+			fmt.Fprintf(os.Stderr, "[warn] worker: store contract validation result for %s (best-effort): %v\n", taskID, cverr)
 		}
 
 		// If contract validation fails, mark as non-retryable failure

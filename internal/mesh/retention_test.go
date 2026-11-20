@@ -182,6 +182,112 @@ func TestMeshRetentionPrune(t *testing.T) {
 	}
 }
 
+// TestMeshRetentionPruneTombstonesAndClaims covers the C-8 prune gaps
+// (issue #984): message_tombstones and dead claims rows must also age out of
+// the ledger, while claims with live (unexpired) leases must survive.
+func TestMeshRetentionPruneTombstonesAndClaims(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	retentionSetupPair(t, s)
+
+	// A tombstone older than the retention window: ACK the message at T-400h,
+	// then prune at T-200h (the message is then older than the 168h window),
+	// leaving a tombstone stamped pruned_at=T-200h — 32h beyond the final
+	// cutoff of T-168h.
+	s.now = func() time.Time { return now.Add(-400 * time.Hour) }
+	retentionSend(t, s, "ancient_msg")
+	retentionAck(t, s, "ancient_msg")
+	s.now = func() time.Time { return now.Add(-200 * time.Hour) }
+	msgMustExec(t, s, "prune", map[string]any{"older_than": "168h"})
+	if retentionTombstoneCount(t, s) != 1 {
+		t.Fatalf("setup: expected 1 tombstone, got %d", retentionTombstoneCount(t, s))
+	}
+
+	claim := func(taskID, resource string, rev int64, at time.Time, leaseSeconds int) {
+		t.Helper()
+		s.now = func() time.Time { return at }
+		msgMustExec(t, s, "claim", map[string]any{
+			"node_id": "sender", "incarnation": "s1", "task_id": taskID,
+			"resource": resource, "paths": []string{"a.go"},
+			"context_revision": rev, "lease_seconds": leaseSeconds,
+		})
+	}
+
+	// Released claim whose lease expired well before the cutoff.
+	claim("rel_task", "res_rel", 0, now.Add(-200*time.Hour), 60)
+	s.now = func() time.Time { return now.Add(-200 * time.Hour).Add(30 * time.Second) }
+	msgMustExec(t, s, "release", map[string]any{"node_id": "sender", "incarnation": "s1", "task_id": "rel_task"})
+
+	// Expired-active claim from the same ancient era.
+	claim("exp_old_task", "res_exp", 0, now.Add(-200*time.Hour), 60)
+
+	// Accepted claim (artifact record) whose lease expired before the cutoff.
+	claim("acc_task", "res_acc", 0, now.Add(-199*time.Hour), 60)
+	msgMustExec(t, s, "accept", map[string]any{
+		"node_id": "sender", "incarnation": "s1", "task_id": "acc_task",
+		"context_revision": 0, "artifact_ref": "art://acc", "artifact_sha256": strings.Repeat("a", 64),
+	})
+
+	// Expired but WITHIN the retention window: must survive.
+	claim("exp_recent_task", "res_recent", 1, now.Add(-100*time.Hour), 60)
+
+	// Live lease (unexpired): must always survive.
+	claim("live_task", "res_live", 1, now.Add(-5*time.Second), 300)
+
+	s.now = func() time.Time { return now }
+	if retentionClaimCount(t, s) != 5 {
+		t.Fatalf("setup: expected 5 claims before prune, got %d", retentionClaimCount(t, s))
+	}
+
+	pruneRaw := msgMustExec(t, s, "prune", map[string]any{"older_than": "168h"})
+	var pr msgPruneResp
+	if err := json.Unmarshal(pruneRaw, &pr); err != nil {
+		t.Fatal(err)
+	}
+	if pr.TombstonesPruned != 1 {
+		t.Fatalf("expected 1 tombstone pruned, got %d (resp %+v)", pr.TombstonesPruned, pr)
+	}
+	if pr.ClaimsPruned != 3 {
+		t.Fatalf("expected 3 dead claims pruned, got %d (resp %+v)", pr.ClaimsPruned, pr)
+	}
+	if retentionTombstoneCount(t, s) != 0 {
+		t.Fatalf("expected 0 tombstones after prune, got %d", retentionTombstoneCount(t, s))
+	}
+	if retentionClaimCount(t, s) != 2 {
+		t.Fatalf("expected 2 claims after prune (live + recent-expired), got %d", retentionClaimCount(t, s))
+	}
+
+	// Live leases must be untouched: the fence lookup still sees the claim.
+	var snap msgSnapResp
+	if err := json.Unmarshal(msgMustExec(t, s, "snapshot", map[string]any{}), &snap); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, c := range snap.Claims {
+		ids[c.TaskID] = true
+	}
+	if !ids["live_task"] || !ids["exp_recent_task"] {
+		t.Fatalf("surviving claims missing from snapshot: %+v", ids)
+	}
+	if ids["rel_task"] || ids["exp_old_task"] || ids["acc_task"] {
+		t.Fatalf("dead claims must be pruned: %+v", ids)
+	}
+
+	// Idempotent second pass.
+	var second msgPruneResp
+	if err := json.Unmarshal(msgMustExec(t, s, "prune", map[string]any{"older_than": "168h"}), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.ClaimsPruned != 0 || second.TombstonesPruned != 0 {
+		t.Fatalf("second prune must be idempotent: %+v", second)
+	}
+}
+
 func TestMeshRetentionPruneDefaultOlderThan(t *testing.T) {
 	s, err := Open(t.TempDir())
 	if err != nil {

@@ -20,9 +20,11 @@ type msgPruneReq struct {
 }
 
 type msgPruneResp struct {
-	Pruned int64  `json:"pruned"`
-	DryRun bool   `json:"dry_run"`
-	Cutoff string `json:"cutoff"`
+	Pruned           int64  `json:"pruned"`
+	TombstonesPruned int64  `json:"tombstones_pruned"`
+	ClaimsPruned     int64  `json:"claims_pruned"`
+	DryRun           bool   `json:"dry_run"`
+	Cutoff           string `json:"cutoff"`
 }
 
 func parsePruneOlderThan(raw string) (time.Duration, error) {
@@ -41,6 +43,14 @@ func parsePruneOlderThan(raw string) (time.Duration, error) {
 
 // msgPrune deletes ACKed messages whose created_at is before the retention cutoff.
 // The messages table has no ack timestamp column; created_at is the retention clock.
+//
+// C-8 (#984): the same cutoff also ages out the ledger's auxiliary rows that
+// previously grew unboundedly — message_tombstones (pruned_at before the
+// cutoff) and dead claims (lease expired before the cutoff, any state).
+// Claims safety: a claim's lease is live iff expires_at > now; since the
+// cutoff epoch is <= now, `expires_at < cutoff` can never match a live lease,
+// so active-but-unexpired claims (including accepted tasks whose idempotent
+// re-accept is still reachable) always survive the window.
 func msgPrune(ctx context.Context, s *Store, input json.RawMessage) (any, error) {
 	var r msgPruneReq
 	if err := decode(input, &r); err != nil {
@@ -52,12 +62,24 @@ func msgPrune(ctx context.Context, s *Store, input json.RawMessage) (any, error)
 	}
 	cutoff := s.now().UTC().Add(-olderThan)
 	cutoffStr := cutoff.Format(time.RFC3339)
+	cutoffEpoch := cutoff.Unix()
 
-	var pruned int64
+	var pruned, tombstonesPruned, claimsPruned int64
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM messages WHERE acked = 1 AND created_at < ?`, cutoffStr,
 		).Scan(&pruned); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM message_tombstones WHERE pruned_at < ?`, cutoffStr,
+		).Scan(&tombstonesPruned); err != nil {
+			return err
+		}
+		// Live leases (expires_at > now >= cutoffEpoch) can never match.
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM claims WHERE expires_at < ?`, cutoffEpoch,
+		).Scan(&claimsPruned); err != nil {
 			return err
 		}
 		if r.DryRun {
@@ -82,10 +104,20 @@ func msgPrune(ctx context.Context, s *Store, input json.RawMessage) (any, error)
 			return err
 		}
 		pruned = n
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM message_tombstones WHERE pruned_at < ?`, cutoffStr,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM claims WHERE expires_at < ?`, cutoffEpoch,
+		); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return msgPruneResp{Pruned: pruned, DryRun: r.DryRun, Cutoff: cutoffStr}, nil
+	return msgPruneResp{Pruned: pruned, TombstonesPruned: tombstonesPruned, ClaimsPruned: claimsPruned, DryRun: r.DryRun, Cutoff: cutoffStr}, nil
 }

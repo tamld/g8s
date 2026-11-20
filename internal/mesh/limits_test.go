@@ -149,7 +149,10 @@ func TestMeshSnapshotClaimListBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	for i := 1000; i >= 0; i-- {
+	// C-8 (#984): the bound moved from the silently-truncating 1000 to the
+	// snapshotClaimLimit constant; overflow rows remain in the ledger.
+	total := snapshotClaimLimit + 1
+	for i := total - 1; i >= 0; i-- {
 		if _, err := tx.Exec(`INSERT INTO claims(task_id,node_id,incarnation,resource,paths,context_revision,expires_at,state)
 			VALUES(?, 's', 'i', 'repo', '["file"]', 0, 1, 'released')`, fmt.Sprintf("task-%04d", i)); err != nil {
 			t.Fatal(err)
@@ -162,8 +165,8 @@ func TestMeshSnapshotClaimListBound(t *testing.T) {
 	if err := json.Unmarshal(msgMustExec(t, s, "snapshot", map[string]any{}), &snap); err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Claims) != 1000 {
-		t.Fatalf("snapshot claims=%d want 1000", len(snap.Claims))
+	if len(snap.Claims) != snapshotClaimLimit {
+		t.Fatalf("snapshot claims=%d want %d", len(snap.Claims), snapshotClaimLimit)
 	}
 	for i, claim := range snap.Claims {
 		if want := fmt.Sprintf("task-%04d", i); claim.TaskID != want {
@@ -171,7 +174,7 @@ func TestMeshSnapshotClaimListBound(t *testing.T) {
 		}
 	}
 	var count int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM claims").Scan(&count); err != nil || count != 1001 {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM claims").Scan(&count); err != nil || count != total {
 		t.Fatalf("snapshot deleted overflow: count=%d err=%v", count, err)
 	}
 }
