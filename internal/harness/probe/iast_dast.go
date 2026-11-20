@@ -222,6 +222,33 @@ type mcpRPCError struct {
 	Data    map[string]any `json:"data"`
 }
 
+// mcpHandshake performs the MCP initialize/initialized sequence required by
+// the conformance gate (#976): initialize (id 0) is answered, the initialized
+// notification is dropped by the server (no response line).
+func mcpHandshake(w io.Writer, r *bufio.Reader) error {
+	initReq, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      0,
+		"method":  "initialize",
+		"params":  map[string]any{},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "%s\n", initReq); err != nil {
+		return err
+	}
+	if _, err := r.ReadBytes('\n'); err != nil {
+		return err
+	}
+	notif, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "%s\n", notif)
+	return err
+}
+
 func sendMCPToolCall(w io.Writer, r *bufio.Reader, id int, tool string, args map[string]any) (*mcpRPCError, error) {
 	req, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -644,6 +671,11 @@ func AuditHTTPMCPDASTBoundary(ctx context.Context) (outcome string, err error) {
 	}()
 
 	mcpReader := bufio.NewReader(outR)
+
+	// MCP conformance gate (#976): initialize before any tools/call.
+	if err := mcpHandshake(inW, mcpReader); err != nil {
+		return "", fmt.Errorf("mcp handshake: %w", err)
+	}
 
 	// MCP Call 1: valid edit
 	rpcErr1, err := sendMCPToolCall(inW, mcpReader, 1, "g8s_edit", map[string]any{

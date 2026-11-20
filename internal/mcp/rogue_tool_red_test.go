@@ -79,6 +79,7 @@ func TestRed_ASI02_ASI04_RogueToolRegistrationAndSchemaDrift(t *testing.T) {
 
 	t.Run("stdio_replay_does_not_widen_tool_scope", func(t *testing.T) {
 		in := strings.Join([]string{
+			string(requestLine("initialize", map[string]any{})),
 			string(requestLine("tools/list", nil)),
 			string(requestLine("tools/list", nil)),
 			string(requestLine("tools/call", map[string]any{
@@ -96,21 +97,22 @@ func TestRed_ASI02_ASI04_RogueToolRegistrationAndSchemaDrift(t *testing.T) {
 			t.Fatalf("ASI04: replay changed tool count %d -> %d", len(baseline), len(after))
 		}
 		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-		if len(lines) != 3 {
-			t.Fatalf("want 3 JSON-RPC responses, got %d", len(lines))
+		if len(lines) != 4 {
+			t.Fatalf("want 4 JSON-RPC responses, got %d", len(lines))
 		}
-		var third jsonRPCResponse
-		if err := json.Unmarshal([]byte(lines[2]), &third); err != nil {
-			t.Fatalf("decode third response: %v", err)
+		var fourth jsonRPCResponse
+		if err := json.Unmarshal([]byte(lines[3]), &fourth); err != nil {
+			t.Fatalf("decode fourth response: %v", err)
 		}
-		if third.Error == nil || !strings.Contains(third.Error.Message, "unknown tool") {
-			t.Fatalf("ASI04: replayed rogue tools/call should fail closed, got %+v", third.Error)
+		if fourth.Error == nil || !strings.Contains(fourth.Error.Message, "unknown tool") {
+			t.Fatalf("ASI04: replayed rogue tools/call should fail closed, got %+v", fourth.Error)
 		}
 	})
 }
 
 func toolsListNames(t *testing.T, s *Server) []string {
 	t.Helper()
+	initSession(t, s)
 	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
 	if resp.Error != nil {
 		t.Fatalf("tools/list error: %+v", resp.Error)

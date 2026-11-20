@@ -98,7 +98,7 @@ contains prompt text.
 ## Scenario Verification
 
 #### Scenario: MCP JSON-RPC 2.0 stdio server round-trips initialize and tool calls
-<!-- tests: TestServeStdioRoundTripsTwoRequestsEndToEnd -->
+<!-- tests: TestServeStdioFullHandshakeHappyPath -->
 - **GIVEN** an MCP stdio server attached to a control-plane store and receipt manager
 - **WHEN** a client sends JSON-RPC 2.0 `initialize` and `tools/call` requests over stdio
 - **THEN** the server responds with valid JSON-RPC envelopes without leaking raw task prompts

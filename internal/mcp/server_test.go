@@ -117,9 +117,21 @@ func newTestServer(t *testing.T) (*Server, *fakeControlPlane, *fakeIssuer, *fake
 	return NewServer(strings.NewReader(""), &bytes.Buffer{}, cp, issuer, providers), cp, issuer, providers
 }
 
+// initSession performs the MCP initialize handshake against handleLine so the
+// session-gated methods (tools/list, tools/call) are reachable, mirroring a
+// conformant client (issue #976).
+func initSession(t *testing.T, s *Server) {
+	t.Helper()
+	resp := s.handleLine(context.Background(), requestLine("initialize", map[string]any{}))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("initialize handshake failed: %+v", resp)
+	}
+}
+
 // callTool drives tools/call directly and decodes the content envelope.
 func callTool(t *testing.T, s *Server, name string, args map[string]any) (json.RawMessage, *jsonRPCError) {
 	t.Helper()
+	initSession(t, s)
 	encodedArgs, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
@@ -154,6 +166,23 @@ func requestLine(method string, params any) []byte {
 	return line
 }
 
+// requestLineWithID builds one JSON-RPC request line with an explicit id so
+// response id-echoing can be asserted.
+func requestLineWithID(method string, id int, params any) []byte {
+	line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	return line
+}
+
+// notificationLine builds one JSON-RPC 2.0 notification line (no "id" member).
+func notificationLine(method string, params any) []byte {
+	m := map[string]any{"jsonrpc": "2.0", "method": method}
+	if params != nil {
+		m["params"] = params
+	}
+	line, _ := json.Marshal(m)
+	return line
+}
+
 func mustParams(v any) []byte {
 	encoded, err := json.Marshal(v)
 	if err != nil {
@@ -183,6 +212,7 @@ func TestInitializeHandshakeReturnsServerInfo(t *testing.T) {
 
 func TestToolsListExposesAllRegisteredTools(t *testing.T) {
 	s, _, _, _ := newTestServer(t)
+	initSession(t, s)
 	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
 	var result struct {
 		Tools []toolDescriptor `json:"tools"`
@@ -350,13 +380,19 @@ func TestBlastRadiusToolExecution(t *testing.T) {
 	}
 }
 
-func TestServeStdioRoundTripsTwoRequestsEndToEnd(t *testing.T) {
+// TestServeStdioFullHandshakeHappyPath drives the conformant client sequence
+// initialize -> notifications/initialized -> tools/list -> tools/call and
+// asserts the notification produces no response line while every request
+// gets its own echoed id back (issue #976, happy path unchanged).
+func TestServeStdioFullHandshakeHappyPath(t *testing.T) {
 	cp := &fakeControlPlane{}
 	issuer := &fakeIssuer{rc: &receipt.WriteReceipt{ReceiptID: "rc-9"}}
 	providers := &fakeProviders{infos: nil}
 	in := strings.Join([]string{
-		string(requestLine("tools/list", nil)),
-		string(requestLine("tools/call", map[string]any{
+		string(requestLineWithID("initialize", 1, map[string]any{})),
+		string(notificationLine("notifications/initialized", nil)),
+		string(requestLineWithID("tools/list", 2, nil)),
+		string(requestLineWithID("tools/call", 3, map[string]any{
 			"name":      "g8s_submit",
 			"arguments": map[string]any{"idempotency_key": "e2e", "payload": map[string]any{"prompt": "p"}},
 		})),
@@ -367,15 +403,31 @@ func TestServeStdioRoundTripsTwoRequestsEndToEnd(t *testing.T) {
 		t.Fatalf("ServeStdio: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("want 2 responses, got %d: %q", len(lines), out.String())
+	if len(lines) != 3 {
+		t.Fatalf("4 input lines (1 notification) must yield exactly 3 responses, got %d: %q", len(lines), out.String())
 	}
-	var second jsonRPCResponse
-	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatalf("decode second response: %v", err)
+	responses := make([]jsonRPCResponse, 0, len(lines))
+	for i, line := range lines {
+		var resp jsonRPCResponse
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatalf("decode response %d: %v", i, err)
+		}
+		responses = append(responses, resp)
 	}
-	if second.Error != nil || !strings.Contains(string(second.Result), "task-123") {
-		t.Fatalf("submit response unexpected: %s", lines[1])
+	for i, wantID := range []int{1, 2, 3} {
+		var gotID int
+		if err := json.Unmarshal(responses[i].ID, &gotID); err != nil || gotID != wantID {
+			t.Fatalf("response %d id = %s, want %d", i, responses[i].ID, wantID)
+		}
+	}
+	if responses[0].Error != nil || !strings.Contains(string(responses[0].Result), `"serverInfo"`) {
+		t.Fatalf("initialize response unexpected: %s", lines[0])
+	}
+	if responses[1].Error != nil || !strings.Contains(string(responses[1].Result), `"tools"`) {
+		t.Fatalf("tools/list response unexpected: %s", lines[1])
+	}
+	if responses[2].Error != nil || !strings.Contains(string(responses[2].Result), "task-123") {
+		t.Fatalf("submit response unexpected: %s", lines[2])
 	}
 }
 
@@ -1397,5 +1449,83 @@ func TestServer_WithVersionDynamicBinding(t *testing.T) {
 	// The provenance lineage tool_version should contain "g8s/0.99.1"
 	if rc.ProvenanceLineage == nil || !strings.Contains(rc.ProvenanceLineage.ToolVersion, "g8s/0.99.1") {
 		t.Fatalf("receipt provenance lineage missing g8s/0.99.1: %+v", rc.ProvenanceLineage)
+	}
+}
+
+// --- Issue #976: stdio JSON-RPC conformance (notifications + initialize gate) ---
+
+func TestInitializedNotificationProducesNoResponse(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	for _, method := range []string{"notifications/initialized", "notifications/cancelled"} {
+		if resp := s.handleLine(context.Background(), notificationLine(method, nil)); resp != nil {
+			t.Fatalf("%s notification must never be answered, got %s", method, mustJSONString(resp))
+		}
+	}
+}
+
+func TestUnknownNotificationProducesNoResponse(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	if resp := s.handleLine(context.Background(), notificationLine("notifications/totally-unknown", nil)); resp != nil {
+		t.Fatalf("unknown notifications must be silently ignored per JSON-RPC 2.0, got %s", mustJSONString(resp))
+	}
+}
+
+func TestSessionGateRejectsToolsBeforeInitialize(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	listResp := s.handleLine(context.Background(), requestLine("tools/list", nil))
+	if listResp.Error == nil || listResp.Error.Code != codeServerNotInitialized {
+		t.Fatalf("tools/list before initialize: want code %d, got %+v", codeServerNotInitialized, listResp.Error)
+	}
+	callResp := s.handleLine(context.Background(), requestLine("tools/call", map[string]any{
+		"name":      "g8s_receipt_issue",
+		"arguments": map[string]any{"allowed_paths": []string{"src/**"}},
+	}))
+	if callResp.Error == nil || callResp.Error.Code != codeServerNotInitialized {
+		t.Fatalf("tools/call before initialize: want code %d, got %+v", codeServerNotInitialized, callResp.Error)
+	}
+	if !strings.Contains(callResp.Error.Message, "server not initialized") {
+		t.Fatalf("gate error must say server not initialized, got %q", callResp.Error.Message)
+	}
+}
+
+func TestInitializeAlwaysAllowedAndUnlocksSession(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	// initialize is allowed before, during, and after the session.
+	for i := 0; i < 2; i++ {
+		if resp := s.handleLine(context.Background(), requestLine("initialize", map[string]any{})); resp.Error != nil {
+			t.Fatalf("initialize #%d must always be allowed, got %+v", i+1, resp.Error)
+		}
+	}
+	if resp := s.handleLine(context.Background(), requestLine("tools/list", nil)); resp.Error != nil {
+		t.Fatalf("tools/list after initialize must succeed, got %+v", resp.Error)
+	}
+}
+
+func TestIDNullIsARequestNotANotification(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	// An explicit "id": null is a (discouraged) request, not a notification:
+	// it must still be answered so the caller can correlate the response.
+	resp := s.handleLine(context.Background(), []byte(`{"jsonrpc":"2.0","id":null,"method":"resources/list"}`))
+	if resp == nil {
+		t.Fatal("explicit id:null must still be answered; only an absent id is a notification")
+	}
+	if resp.Error == nil || resp.Error.Code != codeMethodNotFound {
+		t.Fatalf("want method-not-found for id:null request, got %+v", resp.Error)
+	}
+}
+
+func TestServeStdioDropsAllNotificationLines(t *testing.T) {
+	in := strings.Join([]string{
+		string(notificationLine("notifications/initialized", nil)),
+		string(notificationLine("notifications/cancelled", map[string]any{"requestId": 7})),
+		string(notificationLine("notifications/totally-unknown", nil)),
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	server := NewServer(strings.NewReader(in), &out, &fakeControlPlane{}, &fakeIssuer{}, &fakeProviders{})
+	if err := server.ServeStdio(context.Background()); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("notification-only stream must produce zero output bytes, got %q", out.String())
 	}
 }
