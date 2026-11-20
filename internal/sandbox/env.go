@@ -54,6 +54,21 @@ var exactSensitiveEnvKeys = map[string]bool{
 	"G8S_SIGNING_KEY":                true,
 	"G8S_STRATUM_TOKEN":              true,
 	"GOCOVERDIR":                     true,
+	// Connection-string secret shapes (#985): URLs/URIs/DSNs that embed
+	// credentials. Most are also caught by the _URL/_URI/_DSN suffixes below;
+	// the exact entries keep the vocabulary explicit and survive future suffix
+	// list edits.
+	"DATABASE_URL":      true,
+	"POSTGRES_URL":      true,
+	"POSTGRESQL_URL":    true,
+	"POSTGRES_DSN":      true,
+	"MONGODB_URI":       true,
+	"MONGO_URL":         true,
+	"REDIS_URL":         true,
+	"SMTP_URL":          true,
+	"SLACK_WEBHOOK_URL": true,
+	"SENTRY_DSN":        true,
+	"NETRC":             true,
 }
 
 var sensitiveEnvSuffixes = []string{
@@ -64,6 +79,14 @@ var sensitiveEnvSuffixes = []string{
 	"_PASSWORD",
 	"_PRIVATE_KEY",
 	"_CREDENTIALS",
+	// Connection-string shapes (#985): *_URL / *_URI / *_DSN almost always
+	// embed credentials or webhook tokens. Non-secret connectivity vars
+	// (HTTP_PROXY/HTTPS_PROXY/NO_PROXY) do not match, and per-provider
+	// allowlisted base URLs (OPENAI_BASE_URL, ANTHROPIC_BASE_URL,
+	// CURSOR_API_BASE_URL, ...) are exempted before these suffixes are applied.
+	"_URL",
+	"_URI",
+	"_DSN",
 }
 
 func isStrippedAmbientKey(upperKey string, allowed map[string]bool) bool {

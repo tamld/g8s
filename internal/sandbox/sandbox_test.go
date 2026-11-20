@@ -93,6 +93,17 @@ func TestCanonicalPathAndWorktreeAdmin(t *testing.T) {
 	}
 }
 
+// envToMap converts a KEY=VALUE environment slice into a map.
+func envToMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 	baseEnv := []string{
 		"PATH=/usr/bin:/bin",
@@ -111,16 +122,6 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 		"OPENAI_API_KEY=sk-openai",
 		"CURSOR_API_KEY=crsr-secret",
 		"OPENCODE_BIN=/usr/local/bin/opencode",
-	}
-
-	envToMap := func(env []string) map[string]string {
-		m := make(map[string]string, len(env))
-		for _, kv := range env {
-			if k, v, ok := strings.Cut(kv, "="); ok {
-				m[k] = v
-			}
-		}
-		return m
 	}
 
 	codexMap := envToMap(ScrubEnv(baseEnv, []string{"path=/custom/bin"}, "codex", "/tmp/iso", "/tmp/gocache", "sbx-123"))
@@ -197,6 +198,93 @@ func TestScrubEnvAndProviderAllowlist(t *testing.T) {
 	if len(ProviderAllowedEnvKeys("opencode")) != 4 || len(ProviderAllowedEnvKeys("commandcode")) != 4 ||
 		ProviderAllowedEnvKeys("opencode")["CLIPROXY"+"_API_KEY"] || ProviderAllowedEnvKeys("commandcode")["CLIPROXY"+"_API_KEY"] {
 		t.Fatalf("unexpected allowlist: opencode=%v commandcode=%v", ProviderAllowedEnvKeys("opencode"), ProviderAllowedEnvKeys("commandcode"))
+	}
+}
+
+// TestScrubEnv_ConnectionStringSecretShapes pins the connection-string secret
+// vocabulary (#985): DATABASE_URL-style keys, webhook URLs, DSNs, and NETRC
+// must be scrubbed from the ambient environment for every provider, while
+// non-secret connectivity vars (proxy settings) and the per-provider allowlist
+// (base URLs) still flow, and spec.Env remains the operator override path.
+func TestScrubEnv_ConnectionStringSecretShapes(t *testing.T) {
+	baseEnv := []string{
+		"PATH=/usr/bin:/bin",
+		"HOME=/home/operator",
+		"DATABASE_URL=postgres://user:secret@db.internal:5432/app",
+		"POSTGRES_URL=postgres://user:secret@db.internal:5432/app",
+		"POSTGRESQL_URL=postgres://user:secret@db.internal:5432/app",
+		"POSTGRES_DSN=host=db.internal user=app password=secret",
+		"MONGODB_URI=mongodb://user:secret@mongo.internal:27017/app",
+		"MONGO_URL=mongodb://user:secret@mongo.internal:27017/app",
+		"REDIS_URL=redis://:secret@redis.internal:6379/0",
+		"SMTP_URL=smtp://user:secret@smtp.internal:587",
+		"SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX",
+		"SENTRY_DSN=https://key@o0.ingest.sentry.io/1",
+		"NETRC=/home/operator/.netrc",
+		"MQTT_URI=mqtt://user:secret@mqtt.internal:1883",
+		// Non-secret connectivity vars that must survive the scrub:
+		"HTTP_PROXY=http://proxy.internal:3128",
+		"HTTPS_PROXY=http://proxy.internal:3128",
+		"NO_PROXY=localhost,127.0.0.1",
+		// Allowlisted provider base URLs that must survive per provider:
+		"OPENAI_BASE_URL=https://gateway.internal/v1",
+		"ANTHROPIC_BASE_URL=https://gateway.internal/v1",
+		"CURSOR_API_BASE_URL=https://gateway.internal/v1",
+		"GEMINI_API_KEY=gemini-provider-key",
+	}
+
+	secretKeys := []string{
+		"DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL", "POSTGRES_DSN",
+		"MONGODB_URI", "MONGO_URL", "REDIS_URL", "SMTP_URL",
+		"SLACK_WEBHOOK_URL", "SENTRY_DSN", "NETRC", "MQTT_URI",
+	}
+
+	for _, provider := range []string{"agy", "codex", "claude", "opencode", "commandcode", "qwen", "cursor", "9router"} {
+		got := envToMap(ScrubEnv(baseEnv, nil, provider, "/tmp/iso", "/tmp/gocache", "sbx-"+provider))
+		for _, key := range secretKeys {
+			if v, exists := got[key]; exists {
+				t.Errorf("provider %s: connection-string secret %s leaked (value %q)", provider, key, v)
+			}
+		}
+		// Proxy variables carry endpoints, not credentials — they must survive.
+		if got["HTTPS_PROXY"] != "http://proxy.internal:3128" || got["NO_PROXY"] != "localhost,127.0.0.1" {
+			t.Errorf("provider %s: proxy vars unexpectedly stripped: %+v", provider, got)
+		}
+	}
+
+	// Per-provider allowlist is the override path for connection-shaped URLs:
+	codexMap := envToMap(ScrubEnv(baseEnv, nil, "codex", "", "", ""))
+	if codexMap["OPENAI_BASE_URL"] != "https://gateway.internal/v1" {
+		t.Errorf("expected OPENAI_BASE_URL allowlisted for codex, got %q", codexMap["OPENAI_BASE_URL"])
+	}
+	claudeMap := envToMap(ScrubEnv(baseEnv, nil, "claude", "", "", ""))
+	if claudeMap["ANTHROPIC_BASE_URL"] != "https://gateway.internal/v1" {
+		t.Errorf("expected ANTHROPIC_BASE_URL allowlisted for claude, got %q", claudeMap["ANTHROPIC_BASE_URL"])
+	}
+	cursorMap := envToMap(ScrubEnv(baseEnv, nil, "cursor", "", "", ""))
+	if cursorMap["CURSOR_API_BASE_URL"] != "https://gateway.internal/v1" {
+		t.Errorf("expected CURSOR_API_BASE_URL allowlisted for cursor, got %q", cursorMap["CURSOR_API_BASE_URL"])
+	}
+	agyMap := envToMap(ScrubEnv(baseEnv, nil, "agy", "", "", ""))
+	if agyMap["GEMINI_API_KEY"] != "gemini-provider-key" {
+		t.Errorf("expected GEMINI_API_KEY allowlisted for agy, got %q", agyMap["GEMINI_API_KEY"])
+	}
+	// OPENAI_BASE_URL is NOT on agy's allowlist — ambient value must be scrubbed.
+	if _, exists := agyMap["OPENAI_BASE_URL"]; exists {
+		t.Errorf("expected ambient OPENAI_BASE_URL stripped for agy (not allowlisted)")
+	}
+
+	// spec.Env (taskEnv) overrides scrubbing for operator-declared provider config:
+	agyOverride := envToMap(ScrubEnv(baseEnv, []string{"OPENAI_BASE_URL=https://task-declared.internal/v1"}, "agy", "", "", ""))
+	if agyOverride["OPENAI_BASE_URL"] != "https://task-declared.internal/v1" {
+		t.Errorf("expected taskEnv OPENAI_BASE_URL override to win for agy, got %q", agyOverride["OPENAI_BASE_URL"])
+	}
+	// ...but even taskEnv cannot resurrect a secret-shaped key once it is the
+	// declared vocabulary — taskEnv wins over scrubbing by design, so verify the
+	// documented behavior: taskEnv entries are applied verbatim.
+	agyTask := envToMap(ScrubEnv(nil, []string{"DATABASE_URL=postgres://task-declared@db.internal/app"}, "agy", "", "", ""))
+	if agyTask["DATABASE_URL"] != "postgres://task-declared@db.internal/app" {
+		t.Errorf("expected taskEnv entries applied verbatim, got %+v", agyTask)
 	}
 }
 

@@ -52,6 +52,9 @@ func main() {
 		if b, mErr := json.Marshal(args); mErr == nil {
 			_ = os.WriteFile(".contract_argv.json", b, 0o600)
 		}
+		if b, mErr := json.Marshal(os.Environ()); mErr == nil {
+			_ = os.WriteFile(".contract_env.json", b, 0o600)
+		}
 	}
 
 	joined := strings.Join(args, " ")
@@ -190,6 +193,25 @@ func readContractArgv(t *testing.T, workDir string) []string {
 		t.Fatalf("decode .contract_argv.json: %v", err)
 	}
 	return argv
+}
+
+func readContractEnv(t *testing.T, workDir string) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(workDir, ".contract_env.json"))
+	if err != nil {
+		t.Fatalf("read .contract_env.json: %v", err)
+	}
+	var env []string
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode .contract_env.json: %v", err)
+	}
+	m := make(map[string]string, len(env))
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			m[k] = v
+		}
+	}
+	return m
 }
 
 type contractHTTPMock struct {
@@ -405,6 +427,35 @@ func TestOfflineAdapterContractSuite(t *testing.T) {
 				t.Fatalf("%s read_only argv %v missing %q", cs.name, argv, cs.expectReadOnly)
 			}
 			v["one_shot"] = "PASS"
+
+			// 1b. Uniform secret-scrub contract (#985): the spawned child env
+			// must be routed through sandbox.ScrubEnv — ambient secrets
+			// (token-shaped AND connection-string-shaped) never reach the
+			// child, while spec.Env (operator override path) still wins.
+			scrubDir := makeContractWorkDir(t)
+			t.Setenv("GITHUB_TOKEN", "ghp-ambient-contract-secret")
+			t.Setenv("DATABASE_URL", "postgres://user:ambient-contract-secret@db.internal:5432/app")
+			hScrub, err := pt.SpawnProcess(context.Background(), Spec{
+				Brief:       "[CONTRACT:ONE_SHOT]",
+				WorktreeDir: scrubDir,
+				Env:         map[string]string{"G8S_TASK_ID": "task-985"},
+			})
+			if err != nil {
+				t.Fatalf("SpawnProcess env-scrub: %v", err)
+			}
+			rcScrub, waitErr := hScrub.Wait(context.Background())
+			if waitErr != nil || rcScrub.Status != "COMPLETED" {
+				t.Fatalf("env-scrub receipt=%+v err=%v", rcScrub, waitErr)
+			}
+			childEnv := readContractEnv(t, scrubDir)
+			for _, leaked := range []string{"GITHUB_TOKEN", "DATABASE_URL"} {
+				if v, exists := childEnv[leaked]; exists {
+					t.Fatalf("%s: ambient secret %s leaked into child env (value %q)", cs.name, leaked, v)
+				}
+			}
+			if childEnv["G8S_TASK_ID"] != "task-985" {
+				t.Fatalf("%s: expected spec.Env overlay G8S_TASK_ID=task-985 in child env, got %q", cs.name, childEnv["G8S_TASK_ID"])
+			}
 
 			// 2. Structured JSON/schema output parsing + Spawn ResponseFormat surface
 			jsonDir := makeContractWorkDir(t)

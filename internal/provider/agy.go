@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -172,17 +171,10 @@ func (a *AgyProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
-	if len(spec.Env) > 0 {
-		cmd.Env = append([]string{}, os.Environ()...)
-		keys := make([]string, 0, len(spec.Env))
-		for k := range spec.Env {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			cmd.Env = append(cmd.Env, k+"="+spec.Env[k])
-		}
-	}
+	// Uniform secret scrubbing (#985): the child environment must flow through
+	// sandbox.ScrubEnv like every other CLI provider. scrubProviderEnv combines
+	// os.Environ -> ScrubEnv -> spec.Env overlay, so spec.Env still wins.
+	cmd.Env = scrubProviderEnv("agy", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
