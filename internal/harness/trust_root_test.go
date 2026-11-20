@@ -497,3 +497,63 @@ func TestComputeDeliverableArtifactDigestDeterministicAndSensitive(t *testing.T)
 		t.Fatal("expected deleted file removal to alter deliverable artifact digest")
 	}
 }
+
+// TestComputeDeliverableArtifactDigestWithContents is the #973 structural
+// guarantee: the digest's content snapshot (a) reproduces the disk digest
+// byte-for-byte, (b) carries the exact hashed bytes, and (c) stays bound to
+// the approved bytes even after the on-disk file mutates — so staging from
+// the snapshot cannot apply content different from what was approved.
+func TestComputeDeliverableArtifactDigestWithContents(t *testing.T) {
+	wt := t.TempDir()
+	relA := "internal/sandbox/a.go"
+	relB := "internal/sandbox/b.go"
+	for rel, body := range map[string]string{relA: "package sandbox\n", relB: "package sandbox // b\n"} {
+		if err := os.MkdirAll(filepath.Join(wt, filepath.Dir(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(wt, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	onDisk, err := ComputeDeliverableArtifactDigest(wt, []string{relA, relB}, nil)
+	if err != nil {
+		t.Fatalf("disk digest: %v", err)
+	}
+	digest, contents, err := ComputeDeliverableArtifactDigestWithContents(wt, []string{relA, relB}, nil)
+	if err != nil {
+		t.Fatalf("contents digest: %v", err)
+	}
+	if digest != onDisk {
+		t.Fatalf("snapshot digest %q != disk digest %q", digest, onDisk)
+	}
+	if string(contents[relA]) != "package sandbox\n" || string(contents[relB]) != "package sandbox // b\n" {
+		t.Fatalf("snapshot bytes diverge from hashed bytes: %+v", contents)
+	}
+
+	fromSnapshot, err := ComputeDeliverableDigestFromContents([]string{relA, relB}, nil, contents)
+	if err != nil {
+		t.Fatalf("digest from snapshot: %v", err)
+	}
+	if fromSnapshot != onDisk {
+		t.Fatalf("snapshot-recomputed digest %q != approved digest %q", fromSnapshot, onDisk)
+	}
+
+	// Adversarial mutation AFTER approval: disk changes, snapshot does not.
+	if err := os.WriteFile(filepath.Join(wt, filepath.FromSlash(relA)), []byte("package sandbox\n// TAMPERED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tampered, err := ComputeDeliverableArtifactDigest(wt, []string{relA, relB}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tampered == onDisk {
+		t.Fatal("tampered disk digest unexpectedly equals approved digest")
+	}
+	if fromSnapshot == tampered {
+		t.Fatal("snapshot digest followed the tampered disk bytes — TOCTOU not closed")
+	}
+	if _, err := ComputeDeliverableDigestFromContents([]string{relA, relB}, nil, nil); err == nil {
+		t.Fatal("nil contents map must be refused")
+	}
+}

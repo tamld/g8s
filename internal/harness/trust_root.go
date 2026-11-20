@@ -435,10 +435,10 @@ func ComputeChecksDigest(raw []byte) string {
 }
 
 // ComputeDeliverableArtifactDigest deterministically hashes all staged additions/modifications and deletions.
-func ComputeDeliverableArtifactDigest(worktreeDir string, applyPaths, deletePaths []string) (string, error) {
-	if strings.TrimSpace(worktreeDir) == "" {
-		return "", errors.New("trust-root: deliverable worktree dir is empty")
-	}
+// deliverableDigest is the single source of framing truth for the deliverable
+// artifact digest (#973): every variant — disk-backed or content-backed — must
+// produce byte-identical digests for identical (applyPaths, deletePaths, contents).
+func deliverableDigest(applyPaths, deletePaths []string, read func(rel string) ([]byte, error)) (string, error) {
 	normApply := CanonicalizeTCBPaths(applyPaths)
 	normDelete := CanonicalizeTCBPaths(deletePaths)
 
@@ -449,9 +449,7 @@ func ComputeDeliverableArtifactDigest(worktreeDir string, applyPaths, deletePath
 		if rel == ".." || strings.HasPrefix(rel, "../") {
 			return "", fmt.Errorf("trust-root: unsafe deliverable path %q", rel)
 		}
-		fullPath := filepath.Join(worktreeDir, filepath.FromSlash(rel))
-		// #nosec G304 -- rel has already been normalized and checked against traversal above.
-		data, err := os.ReadFile(fullPath)
+		data, err := read(rel)
 		if err != nil {
 			return "", fmt.Errorf("trust-root: read deliverable artifact %q: %w", rel, err)
 		}
@@ -466,6 +464,61 @@ func ComputeDeliverableArtifactDigest(worktreeDir string, applyPaths, deletePath
 		_, _ = fmt.Fprintf(h, "D:%s\x00", rel)
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// ComputeDeliverableArtifactDigest deterministically hashes all staged additions/modifications and deletions from disk.
+func ComputeDeliverableArtifactDigest(worktreeDir string, applyPaths, deletePaths []string) (string, error) {
+	if strings.TrimSpace(worktreeDir) == "" {
+		return "", errors.New("trust-root: deliverable worktree dir is empty")
+	}
+	return deliverableDigest(applyPaths, deletePaths, func(rel string) ([]byte, error) {
+		fullPath := filepath.Join(worktreeDir, filepath.FromSlash(rel))
+		// #nosec G304 -- rel has already been normalized and checked against traversal above.
+		return os.ReadFile(fullPath)
+	})
+}
+
+// ComputeDeliverableArtifactDigestWithContents hashes from disk AND returns the
+// exact bytes covered by the digest (#973): the caller stages from this map
+// instead of re-reading disk, so the applied content is by construction the
+// content the S0 approval digest binds — the digest/apply TOCTOU window closes.
+func ComputeDeliverableArtifactDigestWithContents(worktreeDir string, applyPaths, deletePaths []string) (string, map[string][]byte, error) {
+	if strings.TrimSpace(worktreeDir) == "" {
+		return "", nil, errors.New("trust-root: deliverable worktree dir is empty")
+	}
+	contents := make(map[string][]byte, len(applyPaths))
+	digest, err := deliverableDigest(applyPaths, deletePaths, func(rel string) ([]byte, error) {
+		fullPath := filepath.Join(worktreeDir, filepath.FromSlash(rel))
+		// #nosec G304 -- rel has already been normalized and checked against traversal above.
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		cp := make([]byte, len(data))
+		copy(cp, data)
+		contents[rel] = cp
+		return data, nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return digest, contents, nil
+}
+
+// ComputeDeliverableDigestFromContents recomputes the digest from in-memory
+// contents (#973): used to re-verify that staged bytes equal approved bytes
+// immediately before any rename lands.
+func ComputeDeliverableDigestFromContents(applyPaths, deletePaths []string, contents map[string][]byte) (string, error) {
+	if contents == nil {
+		return "", errors.New("trust-root: contents map is nil")
+	}
+	return deliverableDigest(applyPaths, deletePaths, func(rel string) ([]byte, error) {
+		data, ok := contents[rel]
+		if !ok {
+			return nil, fmt.Errorf("content for %q not in approved snapshot", rel)
+		}
+		return data, nil
+	})
 }
 
 func s0ApprovalCanonicalFields(att *S0ApprovalAttestation) []string {
