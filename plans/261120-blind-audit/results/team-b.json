@@ -1,0 +1,17 @@
+{
+  "team": "B",
+  "source": "zcode-subagent (g8s transport fallback, recorded justification)",
+  "completed_at": "2026-11-20",
+  "coverage": {"files_reviewed": 38, "files_skipped": 0, "notes": "fsops/receipt/signing/harness/mcp/server deep-read + sampled charter/provider/worker/search/contextpack/dispatch. Verified positives: evalCanonicalPath symlink+depth handling; receipt ValidateAndConsume CAS single-use across processes (loser gets SQLITE_BUSY_SNAPSHOT, not double-consume); TCB gate signs approver/nonce/paths/digests, consumes nonce last fail-closed; MCP stdio 4MiB cap, HTTP 1MiB fail-closed; secret redaction on output paths."},
+  "summary": "12 findings: 1 high, 3 medium, 8 low",
+  "highlights": [
+    "B-1 HIGH fsops.go:361 - .git/.g8s write-deny is CASE-SENSITIVE on case-insensitive FS (macOS APFS/Windows): g8s edit .GIT/hooks/pre-commit passes scope + deny check => planted git hook = code execution on operator's git run. NEW - not in #972-#978, not in Codex review",
+    "B-2 MED trust_root.go:120 - nonce cross-process race: BLIND REDISCOVERY of issue #972 (independent convergence)",
+    "B-3 LOW trust_root.go:701 - nil NonceStore fail-open: blind confirm of #972's nil-guard half",
+    "B-4 MED agy.go:176 - agy spawn uses raw os.Environ() BYPASSING ScrubEnv (all other providers scrub)",
+    "B-5 MED env.go:59 - ScrubEnv misses *_URL/*_URI/*_DSN (DATABASE_URL etc. leak embedded creds)",
+    "B-6 MED fsops.go:405 - unbounded os.ReadFile before 2MiB cap (SHA-256 + split on full buffer)",
+    "B-12 LOW tools_ext.go:660 - MCP charter/receipt tools lack worker-tier guard that mesh tool HAS; issuer from client args"
+  ],
+  "full_findings": "see notification log / agent output"
+}

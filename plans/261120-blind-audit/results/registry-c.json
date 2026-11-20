@@ -1,0 +1,16 @@
+{"team":"C","lens":"state/data integrity","findings":[
+{"id":"C-1","sev":"high","loc":"internal/cleanup/session_reap.go:162","sum":"zombie reap os.RemoveAll force-destroys DIRTY worktrees from autopilot hygiene tick (10min grace; contradicts own stated intent; committed tips preserved, uncommitted destroyed)"},
+{"id":"C-2","sev":"medium","loc":"internal/receipt/receipt.go:281","sum":"receipts.db synchronous(NORMAL): consume ack lost on power loss => receipt replayable (controlplane/mesh use FULL)"},
+{"id":"C-3","sev":"medium","loc":"internal/telemetry/engine.go:258","sum":"batch flush discards acknowledged events on persist failure; no retry/outbox/metric"},
+{"id":"C-4","sev":"medium","loc":"internal/telemetry/engine.go:90","sum":"retention 30d configured but NEVER enforced (no-op; prompt summaries retained forever)"},
+{"id":"C-5","sev":"medium","loc":"internal/mesh/store.go:61","sum":"mesh ledger.db NO schema versioning/migration (vs controlplane v11, receipt v5)"},
+{"id":"C-6","sev":"low","loc":"internal/mesh/store.go:51","sum":"mesh busy_timeout 5s with writes inside read paths (keepalive in inbox poll)"},
+{"id":"C-7","sev":"low","loc":"internal/memory/adapter.go:180","sum":"memory/vault migrations swallow ALL ALTER errors (vs controlplane duplicate-column-only)"},
+{"id":"C-8","sev":"low","loc":"internal/mesh/retention.go:67","sum":"tombstones+claims never pruned; msgSnapshot truncates at 1000"},
+{"id":"C-9","sev":"low","loc":"internal/receipt/receipt.go:1372","sum":"PurgeExpired has no production caller (receipts append-forever)"},
+{"id":"C-10","sev":"low","loc":"internal/controlplane/store_claims.go:666","sum":"signal rotation rename vs sibling open handles (DUP of A-5 — cross-team convergence)"},
+{"id":"C-11","sev":"low","loc":"internal/memory/adapter.go:168","sum":"unique-index creation fails permanently on legacy duplicate rows; old DB unreadable"},
+{"id":"C-12","sev":"low","loc":"internal/memory/lifecycle.go:222","sum":"ProposeEntry tombstone-check and insert not in one tx across processes; revoked payload can re-enter"},
+{"id":"C-13","sev":"low","loc":"internal/controlplane/store.go:530","sum":"migrateSupervisorSchema adds all columns as TEXT regardless of declared type"},
+{"id":"C-14","sev":"low","loc":"internal/controlplane/retry.go:302","sum":"ADR-0029 hourly retry budget process-local (DUP of A-9)"}],
+"verified_positives":["all prune queries scoped safe (acked-only, expired-unconsumed-only, age-gated dry-run)","lease fencing token+state CAS with reconcile in claim tx","idempotent replay receipt/mesh/telemetry/submit"]}

@@ -1,0 +1,17 @@
+{
+  "team": "C",
+  "source": "zcode-subagent (g8s transport fallback, recorded justification)",
+  "completed_at": "2026-11-20",
+  "coverage": {"files_reviewed": 45, "files_skipped": 68, "notes": "All 45 non-test Go files in scope (controlplane/memory/mesh/lifecycle/cleanup/telemetry/state/receipt) + 10 supporting. Verified positives: prune queries scoped safe (acked-only, expired-unconsumed-only, age-gated dry-run); lease fencing token+state CAS; idempotent replay on receipt/mesh/telemetry/submit."},
+  "summary": "14 findings: 1 high, 4 medium, 9 low",
+  "highlights": [
+    "C-1 HIGH session_reap.go:162 - zombie reap os.RemoveAll dirty worktrees from autopilot tick (contradicts own stated intent; no dirty check, no liveness re-verify)",
+    "C-2 MED receipt.go:281 - receipts.db synchronous(NORMAL): consume ack lost on power loss => receipt replayable (controlplane/mesh use FULL)",
+    "C-3 MED telemetry engine.go:258 - batch flush discards acknowledged events on persist failure, no retry/outbox",
+    "C-4 MED telemetry retention 30d configured but NEVER enforced (no-op; prompt summaries retained forever)",
+    "C-5 MED mesh/store.go:61 - ledger.db NO schema versioning/migration (vs controlplane v11, receipt v5)",
+    "C-9 LOW receipt.go:1372 - PurgeExpired has NO production caller (receipts append-forever)",
+    "C-14 LOW retry.go:302 - ADR-0029 hourly retry budget process-local (restart resets; multiplies across coordinators)"
+  ],
+  "full_findings": "see notification log / agent output"
+}
