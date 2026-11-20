@@ -445,7 +445,7 @@ func runDeliver(args []string) {
 	}
 
 	// 4b. TRUST-G2 gate: cryptographically signed S0 Human custody for any TCB path
-	if tcbErr := enforceDeliverTrustRootGate(
+	tcContents, tcbErr := enforceDeliverTrustRootGate(
 		filepath.Dir(dbPath),
 		*actor,
 		deliverableDir,
@@ -458,7 +458,8 @@ func runDeliver(args []string) {
 		*s0ApprovalFlag,
 		*s0PubKeyFlag,
 		*dryRun,
-	); tcbErr != nil {
+	)
+	if tcbErr != nil {
 		exitRuntime("deliver", "", *traceID, cli.CodeDenied, tcbErr,
 			"Tier B TCB deliveries require passing deterministic checks and a valid signed S0 approval attestation", *jsonl)
 	}
@@ -650,7 +651,31 @@ func runDeliver(args []string) {
 					fmt.Errorf("create parent directory for %s: %w (files landed: %s)", rel, err, landedStr), "", *jsonl)
 			}
 
-			content, err := os.ReadFile(srcPath)
+			// #973: for Tier-B TCB deliveries stage from the gate's hashed
+			// snapshot so the applied bytes are by construction the bytes the
+			// S0 approval digest binds — no second disk read between digest
+			// and apply. A rel missing from the snapshot is refused outright.
+			var content []byte
+			if tcContents != nil {
+				mapped, ok := tcContents[rel]
+				if !ok {
+					if canonRel := harness.CanonicalizeTCBPaths([]string{rel}); len(canonRel) == 1 {
+						mapped, ok = tcContents[canonRel[0]]
+					}
+				}
+				if !ok {
+					cleanupTemps()
+					releaseClaimIfUnlanded()
+					exitRuntime("deliver", "", *traceID, cli.CodeDenied,
+						fmt.Errorf("%s: gate snapshot has no content for %s — refusing to apply unverified bytes", harness.CodeTrustRootDigestMismatch, rel),
+						"Every applied file must be covered by the S0 approval artifact digest snapshot", *jsonl)
+				}
+				content = mapped
+			} else {
+				var readErr error
+				content, readErr = os.ReadFile(srcPath)
+				err = readErr
+			}
 			if err != nil {
 				cleanupTemps()
 				releaseClaimIfUnlanded()
@@ -950,7 +975,7 @@ func enforceDeliverTrustRootGate(
 	s0ApprovalPath string,
 	s0PubKeyPath string,
 	dryRun bool,
-) error {
+) (map[string][]byte, error) {
 	applyPaths := append([]string(nil), candidates...)
 	for _, op := range copyOps {
 		applyPaths = append(applyPaths, op.newPath)
@@ -976,7 +1001,7 @@ func enforceDeliverTrustRootGate(
 		}
 	}
 	if !touchesTCB {
-		return nil
+		return nil, nil
 	}
 
 	actorID := strings.TrimSpace(actorFlag)
@@ -984,9 +1009,9 @@ func enforceDeliverTrustRootGate(
 		actorID = "f0-supervisor"
 	}
 
-	observedArtifactDigest, err := harness.ComputeDeliverableArtifactDigest(deliverableDir, applyPaths, deletePaths)
+	observedArtifactDigest, tcContents, err := harness.ComputeDeliverableArtifactDigestWithContents(deliverableDir, applyPaths, deletePaths)
 	if err != nil {
-		return fmt.Errorf("%s: compute deliverable artifact digest: %w", harness.CodeTrustRootDigestMismatch, err)
+		return nil, fmt.Errorf("%s: compute deliverable artifact digest: %w", harness.CodeTrustRootDigestMismatch, err)
 	}
 	var observedChecksDigest string
 	if verifiedOK {
@@ -1015,11 +1040,11 @@ func enforceDeliverTrustRootGate(
 	if trimmedAttPath != "" {
 		rawAtt, readErr := os.ReadFile(trimmedAttPath)
 		if readErr != nil {
-			return fmt.Errorf("%s: read S0 approval file %q: %w", harness.CodeTrustRootS0ApprovalRequired, trimmedAttPath, readErr)
+			return nil, fmt.Errorf("%s: read S0 approval file %q: %w", harness.CodeTrustRootS0ApprovalRequired, trimmedAttPath, readErr)
 		}
 		var parsed harness.S0ApprovalAttestation
 		if jErr := json.Unmarshal(rawAtt, &parsed); jErr != nil {
-			return fmt.Errorf("%s: parse S0 approval JSON %q: %w", harness.CodeTrustRootS0SignatureInvalid, trimmedAttPath, jErr)
+			return nil, fmt.Errorf("%s: parse S0 approval JSON %q: %w", harness.CodeTrustRootS0SignatureInvalid, trimmedAttPath, jErr)
 		}
 		s0Approval = &parsed
 	}
@@ -1040,9 +1065,9 @@ func enforceDeliverTrustRootGate(
 		S0Approval:                s0Approval,
 	})
 	if !dec.Allowed {
-		return fmt.Errorf("%s: %s", dec.Code, dec.Reason)
+		return nil, fmt.Errorf("%s: %s", dec.Code, dec.Reason)
 	}
-	return nil
+	return tcContents, nil
 }
 
 func deliverGlobstarMatch(fileSegs, patSegs []string) bool {
