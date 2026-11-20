@@ -21,6 +21,7 @@ func TestCoordinatorMeshNativeRegistrationAndParity(t *testing.T) {
 	s := NewServer(strings.NewReader(""), &bytes.Buffer{}, nil, nil, nil)
 
 	// Verify tool is registered in tools/list
+	initSession(t, s)
 	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
 	if resp.Error != nil {
 		t.Fatalf("tools/list error: %+v", resp.Error)
@@ -274,6 +275,7 @@ func TestCoordinatorMeshMCPEnumMatchesMeshHandlers(t *testing.T) {
 	t.Setenv("G8S_STRATUM", "")
 
 	s := NewServer(strings.NewReader(""), &bytes.Buffer{}, nil, nil, nil)
+	initSession(t, s)
 	resp := s.handleLine(context.Background(), requestLine("tools/list", nil))
 	if resp.Error != nil {
 		t.Fatalf("tools/list error: %+v", resp.Error)

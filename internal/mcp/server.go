@@ -56,6 +56,11 @@ const (
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
 	codeInternal       = -32603
+
+	// codeServerNotInitialized sits in the JSON-RPC 2.0 reserved server-error
+	// range and rejects tools/list and tools/call before the MCP initialize
+	// handshake completes (issue #976; mirrors LSP's ServerNotInitialized).
+	codeServerNotInitialized = -32002
 )
 
 // defaultServerVersion is the fallback server version when none is provided via WithVersion.
@@ -113,17 +118,23 @@ type ProviderSource interface {
 }
 
 // Server is the stdio JSON-RPC MCP server. Construct with NewServer.
+//
+// It enforces the MCP session lifecycle (issue #976): tools/list and
+// tools/call are rejected with codeServerNotInitialized until an initialize
+// request completes, and JSON-RPC notifications (requests without an "id")
+// never receive any response.
 type Server struct {
-	in        io.Reader
-	out       io.Writer
-	cp        ControlPlaneAPI
-	receipts  ReceiptIssuer
-	providers ProviderSource
-	dispatch  SyncDispatcher
-	prober    BinaryProber
-	tools     map[string]toolHandler
-	list      []toolDescriptor
-	version   string
+	in          io.Reader
+	out         io.Writer
+	cp          ControlPlaneAPI
+	receipts    ReceiptIssuer
+	providers   ProviderSource
+	dispatch    SyncDispatcher
+	prober      BinaryProber
+	tools       map[string]toolHandler
+	list        []toolDescriptor
+	version     string
+	initialized bool
 }
 
 // Option customizes optional Server dependencies; unspecified options keep the
@@ -250,29 +261,57 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 }
 
 // handleLine parses one request line and dispatches it. A nil return means
-// the line was a notification and needs no response.
+// the line was a JSON-RPC notification and must not be answered (issue #976).
 func (s *Server) handleLine(ctx context.Context, line []byte) *jsonRPCResponse {
 	var req jsonRPCRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		return errorResponse(nil, &jsonRPCError{Code: codeParseError, Message: "parse error: request is not valid JSON"})
+	}
+	// JSON-RPC 2.0 (§4.1) and the MCP stdio transport: a request object
+	// without an "id" member is a notification and MUST NOT receive any
+	// response — not even an error — for known lifecycle notifications
+	// (notifications/initialized, notifications/cancelled, ...) and unknown
+	// notification methods alike. jsonRPCRequest.ID is a json.RawMessage, so
+	// an absent "id" key unmarshals to a zero-length value while an explicit
+	// "id": null keeps its 4-byte literal ("null") and is still answered as a
+	// (discouraged) request.
+	if len(req.ID) == 0 {
+		return nil
 	}
 	if req.Method == "" {
 		return errorResponse(req.ID, &jsonRPCError{Code: codeInvalidParams, Message: "missing method"})
 	}
 	switch req.Method {
 	case "initialize":
+		// The handshake is always allowed and is what unlocks the session.
+		s.initialized = true
 		return okResponse(req.ID, map[string]any{
 			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "g8s", "version": s.version},
 		})
 	case "tools/list":
+		if !s.initialized {
+			return notInitializedResponse(req.ID, req.Method)
+		}
 		return okResponse(req.ID, map[string]any{"tools": s.list})
 	case "tools/call":
+		if !s.initialized {
+			return notInitializedResponse(req.ID, req.Method)
+		}
 		return s.handleToolCall(ctx, req.ID, req.Params)
 	default:
 		return errorResponse(req.ID, &jsonRPCError{Code: codeMethodNotFound, Message: fmt.Sprintf("method not found: %s", req.Method)})
 	}
+}
+
+// notInitializedResponse builds the typed session-gate error for a tool
+// method invoked before the initialize handshake completed.
+func notInitializedResponse(id json.RawMessage, method string) *jsonRPCResponse {
+	return errorResponse(id, &jsonRPCError{
+		Code:    codeServerNotInitialized,
+		Message: fmt.Sprintf("server not initialized: send the initialize request before %s", method),
+	})
 }
 
 // handleToolCall unwraps params.arguments and dispatches to the named tool.

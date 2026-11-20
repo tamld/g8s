@@ -161,7 +161,11 @@ func TestCoordinatorMeshCLIAndMCPAllOperationsParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			server := mcp.NewServer(bytes.NewReader(append(request, '\n')), &out, nil, nil, nil)
+			// MCP conformance gate (#976): initialize + initialized notification
+			// must precede tools/call; the notification produces no output line.
+			handshake := []byte(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}` + "\n" +
+				`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n")
+			server := mcp.NewServer(bytes.NewReader(append(handshake, append(request, '\n')...)), &out, nil, nil, nil)
 			if err := server.ServeStdio(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +175,11 @@ func TestCoordinatorMeshCLIAndMCPAllOperationsParity(t *testing.T) {
 					Content []struct{ Text string } `json:"content"`
 				} `json:"result"`
 			}
-			if err := json.Unmarshal(out.Bytes(), &response); err != nil || len(response.Error) != 0 || len(response.Result.Content) != 1 {
+			// The initialize response precedes the tools/call response —
+			// parse the LAST non-empty output line only.
+			lines := bytes.Split(bytes.TrimRight(out.Bytes(), "\n"), []byte("\n"))
+			lastLine := lines[len(lines)-1]
+			if err := json.Unmarshal(lastLine, &response); err != nil || len(response.Error) != 0 || len(response.Result.Content) != 1 {
 				t.Fatalf("MCP %s: %v %s", step.op, err, out.String())
 			}
 			for surface, raw := range map[string]json.RawMessage{"CLI": env.Data, "MCP": json.RawMessage(response.Result.Content[0].Text)} {
