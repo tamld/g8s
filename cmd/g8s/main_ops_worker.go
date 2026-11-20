@@ -716,6 +716,28 @@ func runWorker(args []string) {
 			Model:        *model,
 		})
 		if err != nil {
+			// #987 fail-before-consume: the claim was refused (task requires
+			// ephemeral worktree isolation but this worker's cwd is not a git
+			// repository). The task stays QUEUED and claimable by a worker
+			// launched inside a git checkout; the store defers re-claim
+			// visibility so this poller cannot hot-loop the same refusal.
+			if errors.Is(err, worker.ErrWorkerCwdNotGitRepo) {
+				if *jsonMode || *jsonl {
+					env := cli.NewEnvelope("worker_status", "worker", "", map[string]any{
+						"status": "claim_refused",
+						"code":   "E_WORKER_CWD_NOT_GIT_REPO",
+						"error":  err.Error(),
+					})
+					env.TraceID = *traceID
+					_ = cli.WriteResponse(os.Stdout, env, *jsonl)
+				} else {
+					fmt.Printf("claim refused: %v\n", err)
+				}
+				if *once {
+					return
+				}
+				continue
+			}
 			exitRuntime("worker", "", *traceID, cli.CodeRuntime, err, "", *jsonl)
 		}
 		if task == nil {
