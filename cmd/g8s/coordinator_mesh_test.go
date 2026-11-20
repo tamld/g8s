@@ -104,7 +104,12 @@ func TestCoordinatorMeshCLIMeshDirFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		env, err := meshCLI(t, "F0", "--mesh-dir", dir, "--op", "snapshot", "--json")
-		if err == nil || env.Error == nil || !strings.Contains(env.Error.Message, "init schema") {
+		// C-5 (#984): the schema gate moved into migrateLedger — on an
+		// unwritable directory the CLI must fail closed with SOME error
+		// (base-schema phase, migration-gate phase, or driver-level open
+		// failure: the exact message is OS/filesystem-dependent) and must
+		// not create ledger.db. Intent-level assertion: any error counts.
+		if err == nil || env.Error == nil {
 			t.Fatalf("unwritable directory accepted: %v %+v", err, env)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "ledger.db")); !os.IsNotExist(err) {
