@@ -120,11 +120,14 @@ func TestRunOnceInvalidRequestJSONFinishesAttempt(t *testing.T) {
 // hook workspace cannot be created must not strand the claimed attempt (A-4).
 func TestRunOnceToolPolicySetupFailureFinishesAttempt(t *testing.T) {
 	env, task, _ := preStartEnv(t, map[string]any{"permission": "supplied_text"})
-	ro := filepath.Join(t.TempDir(), "readonly")
-	if err := os.MkdirAll(ro, 0o555); err != nil {
+	// Platform-robust failure force (#984): a REGULAR FILE at TMPDIR makes
+	// os.MkdirTemp fail with ENOTDIR on every OS — chmod-based read-only
+	// dirs do not deny access on Windows (POSIX mode bits are not ACLs).
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMPDIR", ro) // os.MkdirTemp inside SetupToolPolicyNoneWorkspace fails
+	t.Setenv("TMPDIR", blocker) // os.MkdirTemp inside SetupToolPolicyNoneWorkspace fails
 
 	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-hook-fail", LeaseSeconds: 60})
 	if err != nil {
