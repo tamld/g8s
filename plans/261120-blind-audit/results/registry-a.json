@@ -1,0 +1,16 @@
+{"team":"A","lens":"correctness/concurrency","findings":[
+{"id":"A-1","sev":"high","loc":"internal/worker/worker_loop_export.go:573","sum":"reapOrphans SIGKILLs pgids from never-deleted stale child.pid with zero identity check; violates documented 'NEVER kill by heuristics' invariant"},
+{"id":"A-2","sev":"high","loc":"internal/worker/stream.go:57","sum":"PipeTee 64KB scanner limit deadlocks pipe on long stdout lines until supervisor timeout; evidence truncated"},
+{"id":"A-3","sev":"medium","loc":"internal/orchestrator/agy_worker.go:227","sum":"agyHandle.Wait not concurrency-safe (concurrent cmd.Wait race), violates Handle contract"},
+{"id":"A-4","sev":"medium","loc":"internal/worker/worker.go:462-621","sum":"pre-start error paths strand tasks LEASED, attempts silently drained, no diagnostics"},
+{"id":"A-5","sev":"medium","loc":"internal/controlplane/store_claims.go:674","sum":"signal-file rotation loses cross-process writes (per-Store mutex only)"},
+{"id":"A-6","sev":"medium","loc":"internal/controlplane/store_claims.go:453","sum":"ExecutionSignal/StartTask use context-free DB calls, uncancellable"},
+{"id":"A-7","sev":"medium","loc":"internal/orchestrator/worktree.go:126","sum":"Pool.Acquire holds mutex across context-less git subprocesses; one hung git blocks all"},
+{"id":"A-8","sev":"medium","loc":"internal/worker/worker_sweep_collect.go:766","sum":"collect exits without FinishAttempt on validation-persist failure; attempt stays RUNNING"},
+{"id":"A-9","sev":"low","loc":"internal/controlplane/retry.go:302","sum":"ResubmitTask non-transactional; hourly retry budget per-process (dup C-14)"},
+{"id":"A-10","sev":"low","loc":"internal/controlplane/supervisor_store.go:224","sum":"UpdateFalseEscalationRate lost-update without CAS/tx"},
+{"id":"A-11","sev":"low","loc":"internal/controlplane/store_claims.go:776","sum":"CheckSessionQuota declared but never invoked (dead surface)"},
+{"id":"A-12","sev":"low","loc":"internal/controlplane/lifecycle.go:610","sum":"CancelTask/RejectResult/RequestEdit/RequeueResult skip withBusyRetry"},
+{"id":"A-13","sev":"low","loc":"internal/worker/worker_runner.go:159","sum":"spawn deadline cancel func discarded (vet lostcancel); kills child not group"},
+{"id":"A-14","sev":"low","loc":"internal/orchestrator/agy_worker.go:357","sum":"agy Cancel kills direct child only, no Setpgid; contradicts FanOut doc"}],
+"verified_positives":["claim/finish lease-token CAS fencing sound","ConsumeWriteReceipt exactly-once","lockfile package clean","heartbeat/lease polling consistent"]}

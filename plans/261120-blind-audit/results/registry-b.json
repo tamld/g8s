@@ -1,0 +1,14 @@
+{"team":"B","lens":"security/validation","findings":[
+{"id":"B-1","sev":"high","loc":"internal/fsops/fsops.go:361","sum":".git/.g8s write-deny CASE-SENSITIVE on case-insensitive FS: g8s edit .GIT/hooks/pre-commit passes scope+deny => planted git hook = code execution"},
+{"id":"B-2","sev":"medium","loc":"internal/harness/trust_root.go:120","sum":"FileS0NonceStore cross-process race (BLIND REDISCOVERY of #972)"},
+{"id":"B-3","sev":"low","loc":"internal/harness/trust_root.go:701","sum":"nil NonceStore fail-open skip (blind confirm of #972 nil-guard half)"},
+{"id":"B-4","sev":"medium","loc":"internal/provider/agy.go:176","sum":"agy spawn uses raw os.Environ() BYPASSING ScrubEnv (only provider not scrubbing)"},
+{"id":"B-5","sev":"medium","loc":"internal/sandbox/env.go:59","sum":"ScrubEnv misses *_URL/*_URI/*_DSN secret shapes (DATABASE_URL etc.)"},
+{"id":"B-6","sev":"medium","loc":"internal/fsops/fsops.go:405","sum":"unbounded os.ReadFile before 2MiB cap (SHA-256 + split on full buffer); same pattern in Edit/ApplyBatchEdits/digest/contextpack"},
+{"id":"B-7","sev":"low","loc":"internal/mcp/tools_ext.go:342","sum":"MCP receipt verify/consume silently skipped when optional interface missing (HTTP server fails closed, MCP does not)"},
+{"id":"B-8","sev":"low","loc":"internal/fsops/fsops.go:274","sum":"DeniedPathFragments (.ssh/.env/.aws) enforced only at add-dirs, never inside fsops reads"},
+{"id":"B-9","sev":"low","loc":"cmd/g8s/fsops.go:418","sum":"runSelect io.ReadAll(os.Stdin) unbounded"},
+{"id":"B-10","sev":"low","loc":"internal/charter/charter.go:102","sum":"stratum authority from process env; same-user worker can unset and self-mint (documented boundary)"},
+{"id":"B-11","sev":"low","loc":"internal/receipt/receipt.go:1010","sum":"ListActiveReceipts/ListReceipts return unverified sig_tag rows (incl. HTTP GET)"},
+{"id":"B-12","sev":"low","loc":"internal/mcp/tools_ext.go:660","sum":"MCP charter/receipt tools lack worker-tier guard that mesh tool has; issuer from client args"}],
+"verified_positives":["evalCanonicalPath symlink+depth sound","receipt ValidateAndConsume CAS single-use cross-process (loser SQLITE_BUSY_SNAPSHOT)","TCB gate signs all fields, consumes nonce last fail-closed","MCP stdio 4MiB + HTTP 1MiB caps","secret redaction on outputs"]}

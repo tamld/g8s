@@ -1,0 +1,15 @@
+{
+  "team": "A",
+  "source": "zcode-subagent (g8s transport fallback, recorded justification)",
+  "completed_at": "2026-11-20",
+  "coverage": {"files_reviewed": 45, "files_skipped": 4, "notes": "Full read: lockfile (4), controlplane (10 files), orchestrator (14), worker (17, excl diff_firewall). Verified externally: modernc.org/sqlite v1.62 honors _txlock=immediate. Verified positives: claim/finish fencing sound (lease-token CAS, exactly-one); ConsumeWriteReceipt exactly-once; lockfile package clean; heartbeat/lease polling consistent."},
+  "summary": "14 findings: 2 high, 6 medium, 6 low",
+  "highlights": [
+    "A-1 HIGH worker_loop_export.go:573 - reapOrphans SIGKILLs pgids from stale child.pid with ZERO identity check (violates own documented 'NEVER kill by heuristics' invariant); child.pid never removed despite doc claim",
+    "A-2 HIGH stream.go:57 - PipeTee 64KB scanner limit: >64KB stdout line deadlocks pipe until supervisor timeout, evidence truncated",
+    "A-4 MED worker.go:462+ - stranded LEASED tasks on pre-start error paths (attempts silently drained, no diagnostics)",
+    "A-11 LOW store_claims.go:776 - CheckSessionQuota declared on interface but NEVER invoked (dead surface)",
+    "A-14 LOW agy_worker.go:357 - Cancel kills direct child only, no Setpgid (contradicts FanOut 'process group kill' doc)"
+  ],
+  "full_findings": "see notification log / agent output"
+}

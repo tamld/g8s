@@ -1,0 +1,17 @@
+{
+  "team": "D",
+  "source": "zcode-subagent (g8s transport fallback, recorded justification)",
+  "completed_at": "2026-11-20",
+  "coverage": {"files_reviewed": 37, "files_skipped": 28, "notes": "All 14 workflows, release/pre_tag/pre_push/ci_fetch/claims_check tools, installers, packaging, goreleaser, README claims. 58/58 actions SHA-pinned verified."},
+  "summary": "17 findings: 2 high (CI supply chain), 5 medium, 10 low",
+  "highlights": [
+    "D-1 HIGH release.yml:255 - Syft curl|sudo sh from unpinned @main in publish job holding id-token:write+attestations:write",
+    "D-2 HIGH site-deploy.yml:96 - npx wrangler@latest unpinned with CLOUDFLARE_API_TOKEN on push-to-main, --commit-dirty=true",
+    "D-3 MED quality.yml:172 - gitleaks binary no checksum, contents:write job",
+    "D-6 MED README:7 - '<20MB' headline claim has NO machine binding",
+    "D-8 MED install_test.sh/ci_fetch_test.sh/verify-sri.sh wired into NO CI",
+    "D-9 MED packaging checksum placeholders never filled/validated",
+    "D-15 LOW claims_check.sh:206 - in_unbound state never resets (accounting bug)"
+  ],
+  "full_findings": "see notification log / agent output"
+}
