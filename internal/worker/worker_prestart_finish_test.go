@@ -127,7 +127,11 @@ func TestRunOnceToolPolicySetupFailureFinishesAttempt(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMPDIR", blocker) // os.MkdirTemp inside SetupToolPolicyNoneWorkspace fails
+	// os.TempDir consults TMPDIR on unix but %TMP%/%TEMP% via GetTempPathW
+	// on Windows — set all three so the failure force is platform-stable.
+	t.Setenv("TMPDIR", blocker)
+	t.Setenv("TMP", blocker)
+	t.Setenv("TEMP", blocker)
 
 	final, err := env.sup.RunOnce(context.Background(), RunOptions{WorkerID: "w-hook-fail", LeaseSeconds: 60})
 	if err != nil {
