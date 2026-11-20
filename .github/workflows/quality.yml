@@ -40,6 +40,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Detect Changed Paths
         id: filter
@@ -89,6 +90,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Detect CI Lane
         shell: bash
@@ -483,6 +485,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Ratchet coverage baseline and push
         env:
@@ -535,6 +538,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Detect CI Lane
         shell: bash
@@ -593,6 +597,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Detect CI Lane
         shell: bash
