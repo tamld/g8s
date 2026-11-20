@@ -1003,6 +1003,71 @@ func TestVerifyWriteScope_ProtectedDirectories(t *testing.T) {
 	}
 }
 
+// TestVerifyWriteScope_ProtectedDirectoriesCaseInsensitive verifies that the
+// .git/** and .g8s/** write denials cannot be bypassed via case variants (#979).
+// On case-insensitive filesystems (macOS APFS, Windows NTFS) a requested path
+// such as ".GIT/hooks/pre-commit" resolves to the real ".git" directory at
+// write time, so the deny check must match protected names case-insensitively.
+func TestVerifyWriteScope_ProtectedDirectoriesCaseInsensitive(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Plant the real protected directories to mirror the attack scenario: a
+	// worker holding a wildcard receipt ("**") requests a case-variant path
+	// that resolves to the real protected directory when the write lands.
+	for _, dir := range []string{".git/hooks", ".g8s", "pkg", "docs"} {
+		if err := os.MkdirAll(filepath.Join(tempDir, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deniedCases := []string{
+		// Top-level prefix variants: direct bypass of a case-sensitive deny.
+		".GIT/hooks/pre-commit",
+		".Git/config",
+		// Canonical lowercase forms must stay denied as well.
+		".git/HEAD",
+		".G8S/trust-boundaries.yml",
+		".g8s/agent-models.yml",
+		// Embedded component and suffix variants.
+		"pkg/.GIT/config",
+		"pkg/.Git/config",
+		"pkg/.g8s/feature-map.yml",
+	}
+	for _, rel := range deniedCases {
+		target := filepath.Join(tempDir, filepath.FromSlash(rel))
+		if _, err := VerifyWriteScope(target, tempDir, []string{"**"}); err == nil {
+			t.Fatalf("expected wildcard-receipt write to protected path case variant %q to be denied, got nil error", rel)
+		}
+	}
+
+	// A legitimate in-scope path keeps working under the same wildcard receipt.
+	if _, err := VerifyWriteScope(filepath.Join(tempDir, "docs", "x.md"), tempDir, []string{"**"}); err != nil {
+		t.Fatalf("expected legitimate in-scope write to be allowed, got %v", err)
+	}
+}
+
+// TestHasExplicitPrefixGrantSemantics documents the grant unlock semantics that
+// complement the case-folded deny (#979): only an explicit lowercase ".git"/
+// ".g8s" pattern unlocks the protected directories; wildcards and case-variant
+// grants never match, keeping the grant check fail-closed.
+func TestHasExplicitPrefixGrantSemantics(t *testing.T) {
+	if !hasExplicitPrefixGrant(".git", []string{".git/**"}) {
+		t.Fatal("expected explicit .git/** grant to unlock .git writes")
+	}
+	if !hasExplicitPrefixGrant(".g8s", []string{".g8s", ".g8s/**"}) {
+		t.Fatal("expected explicit .g8s grants to unlock .g8s writes")
+	}
+	if hasExplicitPrefixGrant(".git", []string{"**"}) {
+		t.Fatal("expected generic wildcard '**' not to unlock .git writes")
+	}
+	if hasExplicitPrefixGrant(".git", []string{".GIT/**"}) {
+		t.Fatal("expected case-variant grant '.GIT/**' not to unlock .git writes (grant matching stays case-sensitive)")
+	}
+	if hasExplicitPrefixGrant(".g8s", []string{".G8S/**"}) {
+		t.Fatal("expected case-variant grant '.G8S/**' not to unlock .g8s writes (grant matching stays case-sensitive)")
+	}
+}
+
 func TestFSOPSEnforcesS1MutationFirewall(t *testing.T) {
 	tempDir := t.TempDir()
 	target := filepath.Join(tempDir, "pkg", "main.go")
