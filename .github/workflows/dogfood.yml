@@ -26,8 +26,7 @@ on:
       - 'docs/DOGFOODING.md'
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,6 +37,8 @@ jobs:
     name: Weekly Self-Dogfooding Audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -74,13 +75,30 @@ jobs:
           name: dogfood-audit-log
           path: /tmp/dogfood-audit.log
 
+  # [#983 / D-13] Least-privilege split: `issues: write` (and the tracking-issue
+  # bot) now live in this dedicated job, which is skipped entirely on
+  # pull_request events — PR runs hold only `contents: read`.
+  notify:
+    name: Create Tracking Issue on Failure
+    needs: [self-audit]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Download Dogfood Audit Log
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dogfood-audit-log
+          path: audit-log
+
       - name: Create Tracking Issue on Failure
-        if: failure() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
-          LOG_SNIPPET=$(tail -n 40 /tmp/dogfood-audit.log 2>/dev/null || echo "No log captured")
+          LOG_SNIPPET=$(tail -n 40 audit-log/dogfood-audit.log 2>/dev/null || echo "No log captured")
           cat << EOF > /tmp/issue-body.md
           ### Dogfood Failure Report
 

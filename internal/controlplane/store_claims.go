@@ -830,41 +830,6 @@ func (s *Store) SetSessionQuota(ctx context.Context, quota SessionQuota) error {
 	return nil
 }
 
-// CheckSessionQuota checks if a session can accept a new task.
-// Returns true if within quota, false if quota exceeded.
-func (s *Store) CheckSessionQuota(ctx context.Context, sessionID string) (bool, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		return true, nil // No session = no quota enforcement
-	}
-	quota, err := s.GetSessionQuota(ctx, sessionID)
-	if err != nil {
-		return false, err
-	}
-	// Check concurrent tasks
-	active, err := s.ActiveTaskCountInSession(ctx, sessionID)
-	if err != nil {
-		return false, err
-	}
-	if active >= quota.MaxConcurrentTasks {
-		return false, nil
-	}
-	if quota.MaxTasksPerHour > 0 {
-		now := float64(s.clock().UnixNano()) / 1e9
-		windowStart := now - 3600.0
-		var count int
-		err := s.db.QueryRowContext(ctx, `
-			SELECT COUNT(1) FROM tasks
-			WHERE session_id = ? AND created_at >= ?`, sessionID, windowStart).Scan(&count)
-		if err != nil {
-			return false, fmt.Errorf("check session hourly quota: %w", err)
-		}
-		if count >= quota.MaxTasksPerHour {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 // sqlitePathEscapeFor escapes a database file path for a SQLite file: URI on
 // the given GOOS (#336). On Windows url.PathEscape percent-encodes drive
 // colons (%3A) and separators (%5C) — the modernc driver does not decode

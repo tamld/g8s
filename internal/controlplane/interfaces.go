@@ -76,6 +76,9 @@ type EventLogRepository interface {
 }
 
 // SessionRepository defines supervisor session registration and quota tracking.
+// Quota enforcement has no caller-facing policy (A-11, #986): CheckSessionQuota
+// was removed as a dead surface — no ADR establishes enforcement defaults and
+// no CLI/HTTP path configures session quotas.
 type SessionRepository interface {
 	RegisterSession(ctx context.Context, sess Session) error
 	HeartbeatSession(ctx context.Context, sessionID string) error
@@ -84,7 +87,6 @@ type SessionRepository interface {
 	ListActiveSessions(ctx context.Context) ([]Session, error)
 	GetSessionQuota(ctx context.Context, sessionID string) (*SessionQuota, error)
 	SetSessionQuota(ctx context.Context, quota SessionQuota) error
-	CheckSessionQuota(ctx context.Context, sessionID string) (bool, error)
 }
 
 // ControlPlaneRepository aggregates the domain repositories implemented by *Store.

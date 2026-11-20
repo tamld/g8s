@@ -119,10 +119,6 @@ func TestSessionQuota_RoundTrip(t *testing.T) {
 	if err != nil || q2.MaxConcurrentTasks != 2 || q2.MaxTasksPerHour != 7 {
 		t.Fatalf("quota round-trip: %v %+v", err, q2)
 	}
-	ok, err := store.CheckSessionQuota(ctx, "gap-sess-q")
-	if err != nil || !ok {
-		t.Fatalf("CheckSessionQuota: %v %v", ok, err)
-	}
 }
 
 func TestSubmitRateLimit_ErrorIdentity(t *testing.T) {

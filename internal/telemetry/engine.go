@@ -36,6 +36,64 @@ type TelemetryEngine struct {
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
 	seq       atomic.Uint64
+
+	// persistFn performs the durable write of one batch; defaults to
+	// persistBatch. Injectable so tests can force persistence failures.
+	persistFn func(ctx context.Context, events []TraceEvent) error
+	// persistFailures counts flush attempts whose persist failed; the batch
+	// is retained for retry (issue #984 C-3).
+	persistFailures atomic.Uint64
+	// outboxSpilled counts events spilled to the JSONL outbox file to bound
+	// in-memory retention during a persistence outage.
+	outboxSpilled atomic.Uint64
+	// finalFlushErr is the last-chance flush error observed on shutdown; it
+	// is written by the batch processor before wg.Done and surfaced by Close.
+	finalFlushErr error
+}
+
+// outboxSuffix names the JSONL spill file kept next to the telemetry DB.
+const outboxSuffix = ".outbox.jsonl"
+
+// EngineMetrics is a point-in-time snapshot of engine durability counters.
+type EngineMetrics struct {
+	// PersistFailures is the number of batch flush attempts that failed to
+	// persist; failed batches are retained for a later retry.
+	PersistFailures uint64
+	// OutboxSpilledEvents is the number of events written to the JSONL
+	// outbox file to bound in-memory retention during an outage.
+	OutboxSpilledEvents uint64
+}
+
+// Metrics returns the current durability counters.
+func (e *TelemetryEngine) Metrics() EngineMetrics {
+	return EngineMetrics{
+		PersistFailures:     e.persistFailures.Load(),
+		OutboxSpilledEvents: e.outboxSpilled.Load(),
+	}
+}
+
+// setPersistFn swaps the batch persistence function (persistBatch by default).
+// Guarded by the engine mutex so injection is race-free against the batch
+// processor goroutine.
+func (e *TelemetryEngine) setPersistFn(fn func(ctx context.Context, events []TraceEvent) error) {
+	if fn == nil {
+		fn = e.persistBatch
+	}
+	e.mu.Lock()
+	e.persistFn = fn
+	e.mu.Unlock()
+}
+
+// callPersist invokes the active persistence function without holding the
+// engine mutex (the default implementation re-enters the clock lock).
+func (e *TelemetryEngine) callPersist(ctx context.Context, events []TraceEvent) error {
+	e.mu.RLock()
+	fn := e.persistFn
+	e.mu.RUnlock()
+	if fn == nil {
+		fn = e.persistBatch
+	}
+	return fn(ctx, events)
 }
 
 func NewTelemetryEngine(config *TelemetryConfig) (*TelemetryEngine, error) {
@@ -213,7 +271,13 @@ func (e *TelemetryEngine) getClock() time.Time {
 func (e *TelemetryEngine) Close() error {
 	close(e.stopChan)
 	e.wg.Wait()
-	return e.db.Close()
+	dbErr := e.db.Close()
+	// finalFlushErr is written by the batch processor goroutine strictly
+	// before wg.Done; wg.Wait re-establishes the happens-before edge, so the
+	// plain read below is race-free. A non-nil error means the final flush
+	// could not persist the drain and the remainder was spilled to the JSONL
+	// outbox for a future run to replay (issue #984 C-3).
+	return errors.Join(e.finalFlushErr, dbErr)
 }
 
 func (e *TelemetryEngine) IngestEvent(ctx context.Context, event TraceEvent) error {
@@ -241,6 +305,19 @@ func (e *TelemetryEngine) IngestEvents(ctx context.Context, events []TraceEvent)
 	return nil
 }
 
+// Durability constants for the batch flush path (issue #984 C-3).
+const (
+	// maxRetainedBatchFactor bounds in-memory retention of an un-persisted
+	// batch at 2×BatchSize; the oldest overflow spills to the JSONL outbox.
+	maxRetainedBatchFactor = 2
+	// maxPersistBackoff caps the exponential retry backoff after failures.
+	maxPersistBackoff = 30 * time.Second
+	// maxOutboxEvents bounds the JSONL outbox file; when a spill would push
+	// past the cap, the oldest buffered events are dropped (telemetry is
+	// observational: bounded retention beats unbounded growth).
+	maxOutboxEvents = 10000
+)
+
 func (e *TelemetryEngine) batchProcessor() {
 	defer e.wg.Done()
 	ticker := time.NewTicker(e.config.FlushInterval)
@@ -248,15 +325,72 @@ func (e *TelemetryEngine) batchProcessor() {
 
 	batch := make([]TraceEvent, 0, e.config.BatchSize)
 
-	flush := func() error {
-		if len(batch) == 0 {
-			return nil
+	var (
+		backoffUntil        time.Time
+		consecutiveFailures int
+	)
+
+	// flush attempts to durably persist the outbox (oldest, replayed first)
+	// plus the in-memory batch. On persist failure the batch is RETAINED —
+	// callers drop flush errors (`_ = flush()`), so clearing here would
+	// silently lose acknowledged events (issue #984 C-3). Retries are gated
+	// by an exponential backoff; in-memory retention is bounded at
+	// maxRetainedBatchFactor×BatchSize with the oldest overflow spilled to a
+	// JSONL outbox file next to the DB, replayed on the next successful
+	// persist (idempotent upsert makes re-replays harmless).
+	flush := func(now time.Time, force bool) error {
+		hasBatch := len(batch) > 0
+		if !hasBatch {
+			if _, statErr := os.Stat(e.outboxPath()); os.IsNotExist(statErr) {
+				return nil // nothing in memory and nothing spilled
+			}
+		}
+		if !force && now.Before(backoffUntil) {
+			return nil // still inside the retry backoff window; retain
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		err := e.persistBatch(ctx, batch)
+
+		// Replay the durable outbox ahead of the in-memory batch (oldest
+		// first). The file is only removed after a successful persist; a
+		// re-read while it still exists is safe (same IDs, upsert).
+		outbox, readErr := e.readOutbox()
+		toPersist := batch
+		if readErr == nil && len(outbox) > 0 {
+			combined := make([]TraceEvent, 0, len(outbox)+len(batch))
+			combined = append(combined, outbox...)
+			combined = append(combined, batch...)
+			toPersist = combined
+		}
+
+		if err := e.callPersist(ctx, toPersist); err != nil {
+			e.persistFailures.Add(1)
+			consecutiveFailures++
+			backoffUntil = now.Add(flushBackoff(e.config.FlushInterval, consecutiveFailures))
+			// Bound in-memory retention: spill the oldest overflow.
+			if over := len(batch) - e.config.BatchSize*maxRetainedBatchFactor; over > 0 {
+				spilled := make([]TraceEvent, over)
+				copy(spilled, batch[:over])
+				if spillErr := e.spillToOutbox(spilled); spillErr == nil {
+					e.outboxSpilled.Add(uint64(over))
+					batch = append(batch[:0], batch[over:]...)
+				}
+				// On spill failure keep everything in memory: losing the
+				// memory bound is preferable to losing events.
+			}
+			return err
+		}
+
+		// Success: outbox + batch are durably persisted; safe to clear both.
+		if readErr == nil && len(outbox) > 0 {
+			// If removal fails, the file replays again next flush; the
+			// idempotent upsert tolerates the duplicate write.
+			_ = e.clearOutbox()
+		}
 		batch = batch[:0]
-		return err
+		consecutiveFailures = 0
+		backoffUntil = time.Time{}
+		return nil
 	}
 
 	for {
@@ -266,28 +400,179 @@ func (e *TelemetryEngine) batchProcessor() {
 			if len(batch) >= e.config.BatchSize {
 				// Best-effort flush; failures surface via engine metrics
 				// rather than killing the ingest loop.
-				_ = flush()
+				_ = flush(e.getClock(), false)
 			}
 		case <-ticker.C:
-			_ = flush()
+			now := e.getClock()
+			_ = flush(now, false)
+			// Retention sweep (issue #984 C-4): RetentionPeriod is validated
+			// at construction; without this periodic DELETE the tables grow
+			// unboundedly. Indexed timestamp columns keep the sweep cheap,
+			// and a failed sweep only means rows survive until the next tick.
+			_ = e.enforceRetention(now)
 		case <-e.stopChan:
 			// Drain buffered events before the final flush: a bare flush()
 			// here races the event channel and silently loses everything
-			// still buffered (the #342 Windows batch-loss symptom).
+			// still buffered (the #342 Windows batch-loss symptom). Forced
+			// flushes bypass the backoff gate — this is the last chance.
 			for {
 				select {
 				case event := <-e.eventChan:
 					batch = append(batch, event)
 					if len(batch) >= e.config.BatchSize {
-						_ = flush()
+						_ = flush(e.getClock(), true)
 					}
 				default:
-					_ = flush()
+					if err := flush(e.getClock(), true); err != nil {
+						// Last-chance durability: spill whatever remains to
+						// the outbox so a future run replays it, and surface
+						// the failure through Close instead of dropping it.
+						if len(batch) > 0 {
+							if spillErr := e.spillToOutbox(batch); spillErr == nil {
+								e.outboxSpilled.Add(uint64(len(batch)))
+								batch = batch[:0]
+							}
+						}
+						e.finalFlushErr = fmt.Errorf("final telemetry flush failed: %w", err)
+					}
 					return
 				}
 			}
 		}
 	}
+}
+
+// flushBackoff doubles from the flush interval with each consecutive persist
+// failure, capped at maxPersistBackoff, so a down store is retried with
+// decreasing pressure instead of hammering every tick.
+func flushBackoff(base time.Duration, consecutiveFailures int) time.Duration {
+	if base <= 0 {
+		base = time.Second
+	}
+	d := base
+	for i := 1; i < consecutiveFailures; i++ {
+		d *= 2
+		if d >= maxPersistBackoff {
+			return maxPersistBackoff
+		}
+	}
+	if d > maxPersistBackoff {
+		d = maxPersistBackoff
+	}
+	return d
+}
+
+// outboxPath returns the JSONL spill file path next to the telemetry DB, or
+// "" for an in-memory DB where nothing durable can be spilled.
+func (e *TelemetryEngine) outboxPath() string {
+	p := e.config.DBPath
+	if p == "" || strings.Contains(p, ":memory:") {
+		return ""
+	}
+	return p + outboxSuffix
+}
+
+// spillToOutbox appends events as JSON lines to the durable outbox file,
+// bounded by maxOutboxEvents: when the file would grow past the cap, the
+// oldest buffered events are dropped first.
+func (e *TelemetryEngine) spillToOutbox(events []TraceEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	path := e.outboxPath()
+	if path == "" {
+		return fmt.Errorf("no outbox path for in-memory telemetry db")
+	}
+	// Tolerate an unreadable existing file: the new spill still lands, and
+	// dropped history is the documented bound under sustained outage.
+	existing, _ := e.readOutbox()
+	keepFrom := len(existing) + len(events) - maxOutboxEvents
+	if keepFrom < 0 {
+		keepFrom = 0
+	}
+	var sb strings.Builder
+	for _, ev := range existing[keepFrom:] {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		sb.Write(data)
+		sb.WriteByte('\n')
+	}
+	for _, ev := range events {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+		sb.Write(data)
+		sb.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(sb.String()), 0o600)
+}
+
+// readOutbox loads events previously spilled to the JSONL outbox. A missing
+// file yields (nil, nil); malformed lines (e.g. a torn final line after a
+// crash mid-append) are skipped rather than failing the whole replay.
+func (e *TelemetryEngine) readOutbox() ([]TraceEvent, error) {
+	path := e.outboxPath()
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var events []TraceEvent
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev TraceEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		events = append(events, ev)
+	}
+	return events, nil
+}
+
+// clearOutbox removes the outbox file after its contents were durably
+// persisted. Replays are idempotent (ON CONFLICT upsert), so a file that
+// survives a failed removal is re-replayed harmlessly.
+func (e *TelemetryEngine) clearOutbox() error {
+	path := e.outboxPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// enforceRetention deletes rows older than now-RetentionPeriod (issue #984
+// C-4): telemetry_events by event timestamp, negative_patterns by last_seen,
+// and hitl_feedback / k_yield_samples by created_at (all stored as UnixNano).
+// Distilled negative patterns are knowledge, but the schema carries last_seen
+// precisely so stale knowledge ages out; a recurring failure re-upserts its
+// pattern with a fresh occurrence on the next distillation pass.
+func (e *TelemetryEngine) enforceRetention(now time.Time) error {
+	cutoff := now.Add(-e.config.RetentionPeriod).UnixNano()
+	for _, stmt := range []string{
+		`DELETE FROM telemetry_events WHERE timestamp < ?`,
+		`DELETE FROM negative_patterns WHERE last_seen < ?`,
+		`DELETE FROM hitl_feedback WHERE created_at < ?`,
+		`DELETE FROM k_yield_samples WHERE created_at < ?`,
+	} {
+		if _, err := e.db.Exec(stmt, cutoff); err != nil {
+			return fmt.Errorf("retention sweep: %w", err)
+		}
+	}
+	return nil
 }
 
 func (e *TelemetryEngine) persistBatch(ctx context.Context, events []TraceEvent) error {

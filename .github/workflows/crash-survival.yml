@@ -17,6 +17,7 @@ jobs:
   lane-gate:
     name: Docs lane scope
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       ci_lane: ${{ steps.detect.outputs.ci_lane }}
     steps:
@@ -90,6 +91,7 @@ jobs:
     needs: [lane-gate, crash]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Aggregate Crash-Survival Status
         shell: bash

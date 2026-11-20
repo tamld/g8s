@@ -6,6 +6,7 @@
 #   (b) registry with a broken test name -> exit 1 + offending id printed
 #   (c) registry with a broken source path -> exit 1 + offending id printed
 #   (d) operational unbound claims with demo commands are counted without failing -> exit 0
+#   (d2) bound claim after an unbound section stays BOUND (D-15 flag-reset regression) -> exit 0
 #   (e) claims with neither test nor demo fail (no-ambiguity standard) -> exit 1 + offending id printed
 #   (f) committed docs/claims.yml registry passes cleanly
 #
@@ -118,6 +119,26 @@ unbound:
       source: docs/OPERATIONS.md
 EOF
 
+# Fixture (d2): unbound section followed by a bound claim (D-15: the in_unbound
+# flag must not leak into claims declared after the unbound section ends)
+cat > "$FIXTURE_ROOT/unbound_then_bound.yml" <<'EOF'
+unbound:
+  - id: claim-unbound-then-bound-unbound-item
+    claim: "Operational unbound claim with demo command"
+    evidence:
+      test: ""
+      eval: ""
+      demo: "bin/g8s worker --help"
+      source: docs/OPERATIONS.md
+
+- id: claim-unbound-then-bound-bound-item
+  claim: "Bound claim after the unbound section"
+  evidence:
+    test: TestReleasePreservesDirtyWorktree
+    eval: ""
+    source: docs/OPERATIONS.md
+EOF
+
 # Fixture (e): claim lacking both test and demo (fails no-ambiguity standard)
 cat > "$FIXTURE_ROOT/no_evidence.yml" <<'EOF'
 - id: claim-no-evidence-item
@@ -164,6 +185,13 @@ run_test_with_output \
     "(d) registry with operational unbound claims passes with correct counts" 0 \
     "SCORECARD: 1 bound, 1 unbound, 0 broken (total 2 claims)" \
     bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/with_unbound.yml" --root "$REPO_ROOT"
+
+# (d2) unbound section followed by a bound claim -> the later claim stays BOUND
+# (D-15: in_unbound must reset at each new claim, not leak across sections)
+run_test_with_output \
+    "(d2) bound claim after unbound section is not misclassified as unbound" 0 \
+    "SCORECARD: 1 bound, 1 unbound, 0 broken (total 2 claims)" \
+    bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/unbound_then_bound.yml" --root "$REPO_ROOT"
 
 # (e) claim with neither test nor demo -> exit 1 and prints offending id
 run_test_with_output \

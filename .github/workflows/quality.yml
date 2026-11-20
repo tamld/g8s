@@ -31,6 +31,7 @@ jobs:
   path-scope:
     name: Scope Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
@@ -78,8 +79,11 @@ jobs:
     needs: [path-scope]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
+    # [#983] contents:write removed from this job (D-14): it held write for the
+    # entire gate. The coverage-baseline bot push moved to the dedicated
+    # least-privilege `coverage-ratchet` job below.
+    outputs:
+      coverage_avg: ${{ steps.coverage-ratchet.outputs.avg }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -108,7 +112,7 @@ jobs:
         if: env.CI_LANE != 'docs'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: latest
+          version: v2.15.0
           args: --timeout=10m
 
       - name: gofumpt strict
@@ -169,7 +173,12 @@ jobs:
           source tools/ci_fetch.sh
           gitleaks_tgz="$(mktemp)"
           trap 'rm -f "$gitleaks_tgz"' EXIT
-          ci_fetch "https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz" "$gitleaks_tgz"
+          # [#983] SHA-256 verified (digest cross-checked against
+          # gitleaks_8.24.0_checksums.txt from the gitleaks v8.24.0 release):
+          # ci_fetch fails closed — the binary is removed and the scan aborts
+          # if the download does not match the pinned digest.
+          ci_fetch "https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz" "$gitleaks_tgz" \
+            "cb49b7de5ee986510fe8666ca0273a6cc15eb82571f2f14832c9e8920751f3a4"
           tar -xz -C /usr/local/bin -f "$gitleaks_tgz" gitleaks
           gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
 
@@ -222,6 +231,10 @@ jobs:
       - name: Link integrity check
         shell: bash
         run: bash tools/ci_link_integrity.sh
+
+      - name: Workflow supply-chain gate (#983)
+        shell: bash
+        run: bash tools/ci_workflow_supply_check.sh
 
       - name: Version sync check
         shell: bash
@@ -337,44 +350,18 @@ jobs:
           rm -f "$AUDIT_BIN"
 
       - name: Coverage Ratchet
+        id: coverage-ratchet
         if: env.CI_LANE != 'docs'
         shell: bash
         run: |
-          read avg count < /tmp/cov_result.txt
+          read -r avg _ < /tmp/cov_result.txt
           BASELINE_FILE=".g8s/coverage-baseline"
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            mkdir -p .g8s
-            should_write=0
-            if [ -f "$BASELINE_FILE" ]; then
-              baseline=$(awk '/^[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}' "$BASELINE_FILE")
-              if [ -n "$baseline" ]; then
-                if awk -v avg="$avg" -v base="$baseline" 'BEGIN { exit (avg + 0 > base + 0) ? 0 : 1 }'; then
-                  should_write=1
-                else
-                  echo "coverage ${avg}% <= baseline ${baseline}%; baseline kept"
-                fi
-              else
-                should_write=1
-              fi
-            else
-              should_write=1
-            fi
-            if [ "$should_write" -eq 1 ]; then
-              echo "$avg" > "$BASELINE_FILE"
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
-              # .g8s/ is the gitignored runtime dir; the baseline is a tracked
-              # artifact maintained by this bot, so force-add is required.
-              git add -f "$BASELINE_FILE"
-              if ! git diff --staged --quiet; then
-                # [skip ci] is intentional loop prevention: without it this bot
-                # commit triggers Quality again, the ratchet writes a new
-                # baseline, and commits forever. The skipped commit changes
-                # exactly one tracked file (.g8s/coverage-baseline) — no code.
-                git commit -m "chore: update coverage baseline to ${avg}% [skip ci]"
-                git push origin main || echo "::warning::Failed to push coverage baseline"
-              fi
-            fi
+            # [#983] This job no longer holds contents:write — forward the
+            # measured aggregate to the dedicated least-privilege
+            # `coverage-ratchet` job, which owns the baseline bot push.
+            echo "avg=${avg}" >> "$GITHUB_OUTPUT"
+            echo "coverage avg ${avg}% forwarded to coverage-ratchet job"
           else
             if [ -f "$BASELINE_FILE" ]; then
               bash tools/ci_coverage_ratchet.sh --baseline "$BASELINE_FILE" --current "$avg"
@@ -454,7 +441,9 @@ jobs:
 
       - name: Vulnerability scan (govulncheck)
         if: env.CI_LANE != 'docs'
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+        # [#983] pinned via `go run pkg@version` — an exact tool version without
+        # touching go.mod (replaces `go install ...@latest`).
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       - name: Native fuzzing (external-input parsers)
         if: env.CI_LANE != 'docs'
@@ -477,6 +466,62 @@ jobs:
         with:
           name: coverage-report
           path: coverage.out
+
+  coverage-ratchet:
+    # [#983 / D-14] Least-privilege bot push: the only job in this workflow
+    # holding contents:write. Receives the measured aggregate coverage from
+    # the `quality` job and ratchets .g8s/coverage-baseline on main.
+    name: Coverage Baseline Ratchet (bot push)
+    needs: [quality]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.quality.outputs.coverage_avg != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Ratchet coverage baseline and push
+        env:
+          AVG: ${{ needs.quality.outputs.coverage_avg }}
+        run: |
+          set -euo pipefail
+          BASELINE_FILE=".g8s/coverage-baseline"
+          mkdir -p .g8s
+          should_write=0
+          if [ -f "$BASELINE_FILE" ]; then
+            baseline=$(awk '/^[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}' "$BASELINE_FILE")
+            if [ -n "$baseline" ]; then
+              if awk -v avg="$AVG" -v base="$baseline" 'BEGIN { exit (avg + 0 > base + 0) ? 0 : 1 }'; then
+                should_write=1
+              else
+                echo "coverage ${AVG}% <= baseline ${baseline}%; baseline kept"
+              fi
+            else
+              should_write=1
+            fi
+          else
+            should_write=1
+          fi
+          if [ "$should_write" -eq 1 ]; then
+            echo "$AVG" > "$BASELINE_FILE"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            # .g8s/ is the gitignored runtime dir; the baseline is a tracked
+            # artifact maintained by this bot, so force-add is required.
+            git add -f "$BASELINE_FILE"
+            if ! git diff --staged --quiet; then
+              # [skip ci] is intentional loop prevention: without it this bot
+              # commit triggers Quality again, the ratchet writes a new
+              # baseline, and commits forever. The skipped commit changes
+              # exactly one tracked file (.g8s/coverage-baseline) — no code.
+              git commit -m "chore: update coverage baseline to ${AVG}% [skip ci]"
+              git push origin main || echo "::warning::Failed to push coverage baseline"
+            fi
+          fi
 
   quality-windows:
     # #336 / #955: full Windows go test ./... + -race runs in CI (ci.yml);
@@ -542,6 +587,7 @@ jobs:
     name: Cross-Platform Build
     needs: [path-scope]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -584,9 +630,10 @@ jobs:
 
   verify:
     name: Verify Gate
-    needs: [path-scope, quality, quality-windows, cross-platform]
+    needs: [path-scope, quality, quality-windows, cross-platform, coverage-ratchet]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Aggregate Status Verification
         shell: bash
@@ -595,11 +642,13 @@ jobs:
           QUALITY_RESULT="${{ needs.quality.result }}"
           QUALITY_WIN_RESULT="${{ needs.quality-windows.result }}"
           CROSS_RESULT="${{ needs.cross-platform.result }}"
+          RATCHET_RESULT="${{ needs.coverage-ratchet.result }}"
 
           echo "path-scope: $SCOPE_RESULT"
           echo "quality: $QUALITY_RESULT"
           echo "quality-windows: $QUALITY_WIN_RESULT"
           echo "cross-platform: $CROSS_RESULT"
+          echo "coverage-ratchet: $RATCHET_RESULT"
 
           if [ "$SCOPE_RESULT" != "success" ]; then
             echo "::error::Path scope job failed."
@@ -618,6 +667,11 @@ jobs:
 
           if [ "$CROSS_RESULT" != "success" ] && [ "$CROSS_RESULT" != "skipped" ]; then
             echo "::error::Cross-Platform Gate failed with state: $CROSS_RESULT"
+            exit 1
+          fi
+
+          if [ "$RATCHET_RESULT" != "success" ] && [ "$RATCHET_RESULT" != "skipped" ]; then
+            echo "::error::Coverage Ratchet bot push failed with state: $RATCHET_RESULT"
             exit 1
           fi
 

@@ -564,7 +564,9 @@ func TestRetryBackoff_AllCases(t *testing.T) {
 	}
 }
 
-// #481: TestSessionQuota_ExceededAndEdgeCases covers concurrent and hourly limits.
+// #481: TestSessionQuota_ExceededAndEdgeCases covers quota CRUD edge cases.
+// CheckSessionQuota was removed as a dead surface (A-11, #986): no ADR
+// establishes enforcement defaults and no operator path configures quotas.
 func TestSessionQuota_ExceededAndEdgeCases(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
@@ -585,46 +587,6 @@ func TestSessionQuota_ExceededAndEdgeCases(t *testing.T) {
 	qDef, err := store.GetSessionQuota(ctx, "sess-q-defaults")
 	if err != nil || qDef.MaxConcurrentTasks != 10 || qDef.MaxTasksPerHour != 100 {
 		t.Fatalf("unexpected defaults: %+v, err %v", qDef, err)
-	}
-
-	// Empty session on CheckSessionQuota
-	ok, err := store.CheckSessionQuota(ctx, "")
-	if err != nil || !ok {
-		t.Fatalf("CheckSessionQuota empty: ok=%v, err=%v", ok, err)
-	}
-
-	// Concurrent limit hit
-	sessConcurrent := "sess-q-conc"
-	if err := store.SetSessionQuota(ctx, SessionQuota{
-		SessionID:          sessConcurrent,
-		MaxConcurrentTasks: 1,
-		MaxTasksPerHour:    100,
-	}); err != nil {
-		t.Fatalf("SetSessionQuota: %v", err)
-	}
-	taskC := submitSessionTask(t, store, "sess-conc-task", sessConcurrent, nil)
-	if _, err := store.ClaimTaskInSession(ctx, "worker-1", sessConcurrent, 300); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	_ = taskC
-	ok, err = store.CheckSessionQuota(ctx, sessConcurrent)
-	if err != nil || ok {
-		t.Fatalf("expected CheckSessionQuota false for active count >= max concurrent, got ok=%v, err=%v", ok, err)
-	}
-
-	// Hourly limit hit
-	sessHourly := "sess-q-hour"
-	if err := store.SetSessionQuota(ctx, SessionQuota{
-		SessionID:          sessHourly,
-		MaxConcurrentTasks: 10,
-		MaxTasksPerHour:    1,
-	}); err != nil {
-		t.Fatalf("SetSessionQuota: %v", err)
-	}
-	_ = submitSessionTask(t, store, "sess-hour-task-1", sessHourly, nil)
-	ok, err = store.CheckSessionQuota(ctx, sessHourly)
-	if err != nil || ok {
-		t.Fatalf("expected CheckSessionQuota false for hourly count >= max hourly, got ok=%v, err=%v", ok, err)
 	}
 }
 
