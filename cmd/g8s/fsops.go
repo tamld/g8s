@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,41 @@ import (
 	"github.com/tamld/g8s/internal/fsops"
 	"github.com/tamld/g8s/internal/receipt"
 )
+
+// maxSelectInputBytes bounds worker-directed JSON input to g8s select (stdin and --file)
+// and to edit --batch at 64 MiB (#981): worker-directed input must never exhaust memory.
+const maxSelectInputBytes int64 = 64 << 20
+
+// errInputTooLarge is wrapped when command input exceeds maxSelectInputBytes;
+// detect it via errors.Is.
+var errInputTooLarge = errors.New("g8s: input exceeds maximum bounded size")
+
+// readSelectInput reads raw JSON input for g8s select from r (stdin or file-backed reader),
+// bounded at limit bytes (#981): worker-directed input must never exhaust memory.
+func readSelectInput(r io.Reader, limit int64) ([]byte, error) {
+	// Read limit+1 bytes so exactly-at-limit input passes while one byte past the
+	// budget is detectable.
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: input is %d bytes (limit %d)", errInputTooLarge, len(data), limit)
+	}
+	return data, nil
+}
+
+// readFileBounded stats then reads path, typed-rejecting files above limit (#981).
+func readFileBounded(path string, limit int64) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %s is %d bytes (limit %d)", errInputTooLarge, path, info.Size(), limit)
+	}
+	return os.ReadFile(path)
+}
 
 func hydrateTaskAddDirsEnv() {
 	if strings.TrimSpace(os.Getenv("G8S_ADD_DIRS")) != "" {
@@ -341,7 +377,7 @@ func runEdit(args []string) {
 }
 
 func executeBatchEditFromFile(batchFilePath, scopeRoot string, allowedPaths []string) ([]*fsops.EditResult, error) {
-	raw, err := os.ReadFile(strings.TrimSpace(batchFilePath))
+	raw, err := readFileBounded(strings.TrimSpace(batchFilePath), maxSelectInputBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read batch edit file: %w", err)
 	}
@@ -409,13 +445,13 @@ func runSelect(args []string) {
 
 	var raw []byte
 	if *fileFlag != "" {
-		data, err := os.ReadFile(*fileFlag)
+		data, err := readFileBounded(strings.TrimSpace(*fileFlag), maxSelectInputBytes)
 		if err != nil {
 			exitRuntime("select", "", "", cli.CodeIO, err, "Failed to read input JSON file", false)
 		}
 		raw = data
 	} else {
-		data, err := io.ReadAll(os.Stdin)
+		data, err := readSelectInput(os.Stdin, maxSelectInputBytes)
 		if err != nil {
 			exitRuntime("select", "", "", cli.CodeIO, err, "Failed to read JSON from standard input", false)
 		}
