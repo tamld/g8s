@@ -544,8 +544,73 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 	return 0
 }
 
-// reapOrphans kills process groups recorded by stale child.pid files left by
-// crashed predecessors; best-effort only, never fails the run.
+// reapDecision classifies what reapOrphans may do with a recorded attempt
+// pid (#980).
+type reapDecision int
+
+const (
+	reapKeep        reapDecision = iota // live attempt owned by a running worker — leave untouched
+	reapKill                            // identity verified — kill the recorded process group
+	reapCleanupOnly                     // nothing (verifiable) to kill — remove the stale files
+)
+
+// verifyReapCandidate decides whether the process group recorded by a stale
+// child.pid may be killed (#980). The invariant mirrors the Layer 2
+// hasRunMarker contract (worker_sweep_collect.go): NEVER kill by pid alone.
+//
+//   - No parseable identity record, record/pid-file disagreement, or live
+//     pid whose recorded start time cannot be re-verified → cleanup only.
+//     (Legacy pre-#980 pid files, corrupt markers, and pgid/pid reuse all
+//     land here — fail closed.)
+//   - The recorded spawning worker still alive with a matching start time →
+//     keep: this is a concurrently running worker's live attempt on the
+//     shared runRoot, never ours to kill.
+//   - Recorded leader dead but its process group still alive → kill: an
+//     unrelated group leader would need to own pid == pgid, i.e. a live pid
+//     excluded above, so every member is a fork-inherited survivor of the
+//     recorded attempt (#415 crash shape).
+//   - Recorded leader alive with a start time matching the record → kill:
+//     the process is the recorded orphaned child itself.
+func verifyReapCandidate(pid int, rec *childRunRecord) reapDecision {
+	if rec == nil || rec.PID != pid {
+		return reapCleanupOnly
+	}
+	if ownedByLiveWorker(rec) {
+		return reapKeep
+	}
+	if !pidAlive(pid) {
+		if groupAlive(pid) {
+			return reapKill
+		}
+		return reapCleanupOnly
+	}
+	if rec.StartTime != 0 {
+		if live, ok := processStartTime(pid); ok && live == rec.StartTime {
+			return reapKill
+		}
+	}
+	return reapCleanupOnly
+}
+
+// ownedByLiveWorker reports whether the recorded attempt still belongs to a
+// live worker: the spawning pid is alive AND its current start time matches
+// the recorded one (a reused pid fails the check and is treated as dead).
+func ownedByLiveWorker(rec *childRunRecord) bool {
+	if rec == nil || rec.PPID <= 0 || rec.PPIDStart == 0 {
+		return false
+	}
+	if !pidAlive(rec.PPID) {
+		return false
+	}
+	live, ok := processStartTime(rec.PPID)
+	return ok && live == rec.PPIDStart
+}
+
+// reapOrphans reaps process groups recorded by stale child.pid files left by
+// crashed predecessors; best-effort only, never fails the run. Every kill is
+// identity-gated first (#980): files without a verifiable identity record are
+// only removed, and a live attempt owned by a still-running worker is left
+// untouched.
 func (s *Supervisor) reapOrphans() {
 	if runtime.GOOS == "windows" {
 		return
@@ -563,16 +628,32 @@ func (s *Supervisor) reapOrphans() {
 			continue
 		}
 		for _, attempt := range attempts {
-			pidPath := filepath.Join(s.runRoot, taskDir.Name(), attempt.Name(), "child.pid")
+			attemptDir := filepath.Join(s.runRoot, taskDir.Name(), attempt.Name())
+			pidPath := filepath.Join(attemptDir, "child.pid")
 			raw, rerr := os.ReadFile(pidPath)
 			if rerr != nil {
 				continue
 			}
 			pid, perr := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if perr == nil && pid > 0 {
-				_ = killProcessGroup(pid, syscallSIGKILL)
+			if perr != nil || pid <= 0 {
+				_ = os.Remove(pidPath)
+				continue
 			}
-			_ = os.Remove(pidPath)
+			markerPath := filepath.Join(attemptDir, childRunMarkerName)
+			switch verifyReapCandidate(pid, readChildRunRecord(attemptDir)) {
+			case reapKeep:
+				continue // live attempt of a running worker — not ours to reap
+			case reapKill:
+				if kerr := s.killGroupFn(pid, syscallSIGKILL); kerr == nil && s != nil {
+					s.ingestTrace(telemetry.TraceEventOrphanKilled, taskDir.Name(), nil,
+						fmt.Sprintf("stale child.pid reaped after identity verification (attempt=%s, instance=%s)", attempt.Name(), GetInstanceID()))
+				}
+				_ = os.Remove(pidPath)
+				_ = os.Remove(markerPath)
+			default: // reapCleanupOnly
+				_ = os.Remove(pidPath)
+				_ = os.Remove(markerPath)
+			}
 		}
 	}
 }

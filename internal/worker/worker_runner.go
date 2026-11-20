@@ -22,6 +22,10 @@ type processChild struct {
 	cmd  *exec.Cmd
 	done chan struct{}
 	code int
+	// runDir is the attempt directory holding this child's child.pid and
+	// child.run.json identity record (#980) — the post-run sweep retires
+	// them from here.
+	runDir string
 	// job holds the Windows Job Object handle (KILL_ON_JOB_CLOSE, #415
 	// PR-2); 0 on POSIX where containment is the process group.
 	job             uintptr
@@ -33,10 +37,11 @@ type processChild struct {
 	cleanupOnce     sync.Once
 }
 
-func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend string, cleanup func()) *processChild {
+func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend, runDir string, cleanup func()) *processChild {
 	c := &processChild{
 		cmd:             cmd,
 		done:            make(chan struct{}),
+		runDir:          runDir,
 		job:             job,
 		containmentMode: containmentMode,
 		sandboxBackend:  sandboxBackend,
@@ -81,6 +86,10 @@ func exitCodeOf(err error) int {
 }
 
 func (c *processChild) PID() int { return c.cmd.Process.Pid }
+
+// RunDir exposes the attempt directory holding this child's child.pid and
+// child.run.json so the post-run sweep can retire them (#980).
+func (c *processChild) RunDir() string { return c.runDir }
 
 func (c *processChild) Done() <-chan struct{} { return c.done }
 
@@ -196,7 +205,11 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	if werr := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); werr != nil {
 		fmt.Fprintf(os.Stderr, "[warn] worker: write %s: %v\n", pidPath, werr)
 	}
-	child := newProcessChild(cmd, job, containmentMode, sandboxBackend, sandboxCleanup)
+	// #980: record the spawn-time identity (spawning worker pid + start
+	// times, attempt marker) beside child.pid so reapOrphans can verify the
+	// recorded group before ever signaling it.
+	writeChildRunRecord(opts.RunDir, cmd.Process.Pid, opts.Env)
+	child := newProcessChild(cmd, job, containmentMode, sandboxBackend, opts.RunDir, sandboxCleanup)
 	child.policyReport = policyReport
 	return child, nil
 }
