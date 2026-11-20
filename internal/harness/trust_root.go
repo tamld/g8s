@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tamld/g8s/internal/lockfile"
 	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/signing"
 )
@@ -39,6 +40,7 @@ const (
 	CodeTrustRootS0SignatureInvalid          = "E_TRUST_ROOT_S0_SIGNATURE_INVALID"
 	CodeTrustRootS0Expired                   = "E_TRUST_ROOT_S0_EXPIRED"
 	CodeTrustRootS0ReplayDetected            = "E_TRUST_ROOT_S0_REPLAY_DETECTED"
+	CodeTrustRootS0NonceStoreRequired        = "E_TRUST_ROOT_S0_NONCE_STORE_REQUIRED"
 	CodeTrustRootDigestMismatch              = "E_TRUST_ROOT_DIGEST_MISMATCH"
 	CodeTrustRootTargetPathsMismatch         = "E_TRUST_ROOT_TARGET_PATHS_MISMATCH"
 )
@@ -134,6 +136,21 @@ func (s *FileS0NonceStore) CheckAndConsume(nonce string, expiresAt time.Time, no
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// #972: the in-process mutex cannot serialize two coordinator processes
+	// sharing the same state dir. Hold a cross-process file lock across the
+	// read-check-commit window so concurrent S0 approval consumers serialize;
+	// without it, both processes can observe the nonce as unused and both
+	// consume the same approval (replay). Fail-closed on lock timeout.
+	nonceLock, lockErr := acquireNonceLock(s.path)
+	if lockErr != nil {
+		return fmt.Errorf("nonce store lock: %w", lockErr)
+	}
+	defer func() {
+		if relErr := nonceLock.Release(); relErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: release nonce registry lock %s: %v\n", s.path, relErr)
+		}
+	}()
+
 	entries := make(map[string]string)
 	// #nosec G304 -- s.path points to operator stateDir nonce registry file.
 	raw, err := os.ReadFile(s.path)
@@ -193,6 +210,24 @@ func (s *FileS0NonceStore) CheckAndConsume(nonce string, expiresAt time.Time, no
 		return fmt.Errorf("commit nonce store %q: %w", s.path, err)
 	}
 	return nil
+}
+
+// acquireNonceLock takes a cross-process lock on the nonce registry sibling
+// file (#972), retrying briefly so concurrent deliveries serialize instead of
+// failing. 100 x 50ms = 5s worst case: ample for a bounded read-modify-write
+// even on 2-core CI runners (windows-latest flake measured at PR #993).
+func acquireNonceLock(noncePath string) (*lockfile.Lock, error) {
+	lockPath := noncePath + ".lock"
+	var lastErr error
+	for i := 0; i < 100; i++ {
+		lock, err := lockfile.TryLock(lockPath)
+		if err == nil {
+			return lock, nil
+		}
+		lastErr = err
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("timed out acquiring nonce registry lock %q: %w", lockPath, lastErr)
 }
 
 // S0ApprovalAttestation carries signed non-LLM human principal sign-off bound to target paths, digests, nonce, and TTL.
@@ -781,11 +816,27 @@ func EvaluateTrustRootMutation(req TrustRootRequest) TrustRootDecision {
 	}
 
 	// 13. Single-use nonce anti-replay (checked/consumed ONLY after signature and digests pass).
-	if req.NonceStore != nil {
-		if err := req.NonceStore.CheckAndConsume(att.Nonce, expiresAt, now, !req.DryRun); err != nil {
-			return tierBDeny(matched, CodeTrustRootS0ReplayDetected,
-				fmt.Sprintf("S0 nonce check failed: %v", err))
+	// #972: the nonce store is REQUIRED for real (non-dry-run) application —
+	// replay protection is part of the Tier-B gate and cannot be omitted by a
+	// future caller. Dry-run planning decisions may proceed without a store
+	// because no authority is consumed; the reason records the skipped check.
+	if req.NonceStore == nil {
+		if req.DryRun {
+			return TrustRootDecision{
+				Allowed:         true,
+				EffectiveTier:   TierBS0HumanTCB,
+				TouchesTCB:      true,
+				MatchedTCBPaths: matched,
+				Reason:          "DRY-RUN planning decision: nonce store not configured — replay check SKIPPED; real Tier-B application requires a nonce store",
+				EpistemicClass:  sandbox.EpistemicMeasuredMetric,
+			}
 		}
+		return tierBDeny(matched, CodeTrustRootS0NonceStoreRequired,
+			"S0 nonce store is required for real Tier-B application — replay protection cannot be omitted")
+	}
+	if err := req.NonceStore.CheckAndConsume(att.Nonce, expiresAt, now, !req.DryRun); err != nil {
+		return tierBDeny(matched, CodeTrustRootS0ReplayDetected,
+			fmt.Sprintf("S0 nonce check failed: %v", err))
 	}
 
 	return TrustRootDecision{
