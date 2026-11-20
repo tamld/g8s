@@ -320,26 +320,29 @@ func TestSupervisorProviderExecution(t *testing.T) {
 			return &instantChild{done: done}
 		}
 
-		// Submit codex task and legacy task
-		submitTask(t, env, "t-codex", 1, map[string]any{
-			"provider": "codex",
-			"prompt":   "codex task",
+		// Submit agy task and legacy task. Provider "agy" (in-process
+		// enforcement) needs no ephemeral worktree isolation, so the claim
+		// executes normally (#987: a firewall provider like codex under
+		// read_only would now be claim-refused on an isolator-less worker).
+		submitTask(t, env, "t-agy", 1, map[string]any{
+			"provider": "agy",
+			"prompt":   "agy task",
 		})
 		submitTask(t, env, "t-other", 1, map[string]any{
 			"provider": "other",
 			"prompt":   "other task",
 		})
 
-		// Worker filtered on "codex" only claims t-codex
-		claimed, err := sup.RunOnce(ctx, RunOptions{WorkerID: "w-filter", LeaseSeconds: 10, Provider: "codex"})
+		// Worker filtered on "agy" only claims t-agy
+		claimed, err := sup.RunOnce(ctx, RunOptions{WorkerID: "w-filter", LeaseSeconds: 10, Provider: "agy"})
 		if err != nil {
 			t.Fatalf("RunOnce: %v", err)
 		}
 		if claimed == nil {
 			t.Fatal("expected to claim task, got nil")
 		}
-		if claimed.IdempotencyKey != "t-codex" {
-			t.Fatalf("expected t-codex, claimed %s", claimed.IdempotencyKey)
+		if claimed.IdempotencyKey != "t-agy" {
+			t.Fatalf("expected t-agy, claimed %s", claimed.IdempotencyKey)
 		}
 	})
 }

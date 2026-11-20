@@ -420,6 +420,19 @@ func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
 			Provider:     opts.Provider,
 			Model:        opts.Model,
 		})
+		if err != nil && errors.Is(err, ErrWorkerCwdNotGitRepo) {
+			// #987 fail-before-consume: the claim was refused (task needs
+			// ephemeral worktree isolation, worker cwd is not a git repo).
+			// The task stays QUEUED with a re-claim deferral, so the drain
+			// keeps going instead of tearing down on one unsuitable claim.
+			if opts.OnError != nil {
+				opts.OnError(err)
+			}
+			if opts.Once {
+				return 0
+			}
+			continue
+		}
 		if err != nil || task == nil {
 			if err != nil && opts.OnError != nil {
 				opts.OnError(err)
@@ -507,10 +520,16 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 					Model:        opts.Model,
 					Dir:          dir,
 				})
+				// #987 fail-before-consume: a refused claim (task needs
+				// ephemeral worktree isolation, worker cwd is not a git repo)
+				// is a claim-skip, not a drain failure — the task stays
+				// QUEUED with a re-claim deferral, so this worker keeps
+				// draining instead of parking on one unsuitable claim.
+				refused := errors.Is(err, ErrWorkerCwdNotGitRepo)
 
 				mu.Lock()
 				active--
-				if err != nil || task == nil {
+				if (err != nil && !refused) || task == nil {
 					if err != nil && opts.OnError != nil {
 						opts.OnError(err)
 					}
@@ -524,6 +543,13 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 					}
 					mu.Unlock()
 					return
+				}
+				if refused {
+					if opts.OnError != nil {
+						opts.OnError(err)
+					}
+					mu.Unlock()
+					continue
 				}
 				mu.Unlock()
 				if opts.OnTask != nil {

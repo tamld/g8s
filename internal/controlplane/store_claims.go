@@ -22,6 +22,65 @@ import (
 
 // Sentinel errors surfaced by query validation.
 
+// ErrClaimNotHeld reports that a lease mutation referenced a claim the store
+// no longer holds: the lease already expired and was reconciled, the task
+// finished, or another owner won the CAS (#987). Callers treat it as a benign
+// no-op — the task is back in the queue either way.
+var ErrClaimNotHeld = errors.New("E_CLAIM_NOT_HELD: claim not held")
+
+// RefuseClaim releases a LEASED task back to the QUEUED queue WITHOUT burning
+// the claim's attempt budget (#987 fail-before-consume). The caller claimed
+// the task but its execution context cannot honor a hard task requirement
+// (e.g. ephemeral read-only worktree isolation with a worker cwd that is not
+// a git repository); consuming the attempt would terminally kill the task, so
+// the claim is instead released and re-claim visibility is deferred by
+// deferSeconds via request_json $.not_before — the same backoff channel used
+// by resubmit — so an incapable poller cannot hot-loop the same claim.
+// code+reason are recorded verbatim in the task_claim_refused event and
+// last_error. Returns ErrClaimNotHeld when the lease is no longer ours; in
+// that case the task is already claimable and no refusal bookkeeping applies.
+func (s *Store) RefuseClaim(ctx context.Context, taskID, workerID, leaseToken, code, reason string, deferSeconds int) error {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(leaseToken) == "" {
+		return errors.New("task_id and lease_token are required")
+	}
+	now := float64(s.clock().UnixNano()) / 1e9
+	notBefore := float64(0)
+	if deferSeconds > 0 {
+		notBefore = now + float64(deferSeconds)
+	}
+	err := withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin refuse claim: %w", err)
+		}
+		defer tx.Rollback()
+		res, err := tx.ExecContext(ctx, `
+		UPDATE tasks
+		SET state = 'QUEUED', lease_owner = NULL, lease_token = NULL,
+		    lease_expires_at = NULL,
+		    attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE attempts END,
+		    updated_at = ?, last_error = ?,
+		    request_json = json_set(request_json, '$.not_before', ?)
+		WHERE task_id = ? AND lease_token = ? AND state = 'LEASED'`,
+			now, reason, notBefore, taskID, leaseToken)
+		if err != nil {
+			return fmt.Errorf("refuse claim task %s: %w", taskID, err)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return ErrClaimNotHeld
+		}
+		if err := insertTaskEvent(tx, taskID, "task_claim_refused", workerID, map[string]any{
+			"code":          code,
+			"reason":        reason,
+			"defer_seconds": deferSeconds,
+		}, now); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+	return err
+}
+
 func (s *Store) ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*Task, error) {
 	return s.ClaimTaskFiltered(ctx, workerID, leaseDurationSeconds, ClaimFilter{})
 }
