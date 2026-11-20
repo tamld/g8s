@@ -220,13 +220,16 @@ func (s *FileS0NonceStore) CheckAndConsume(nonce string, expiresAt time.Time, no
 func acquireNonceLock(noncePath string) (*lockfile.Lock, error) {
 	lockPath := noncePath + ".lock"
 	var lastErr error
-	for i := 0; i < 25; i++ {
+	// 100 x 50ms = 5s worst case: ample for a bounded read-modify-write even
+	// on 2-core CI runners where goroutine scheduling can starve a 500ms
+	// budget (measured windows-latest flake, PR #993 round 12).
+	for i := 0; i < 100; i++ {
 		lock, err := lockfile.TryLock(lockPath)
 		if err == nil {
 			return lock, nil
 		}
 		lastErr = err
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("timed out acquiring nonce registry lock %q: %w", lockPath, lastErr)
 }
