@@ -147,6 +147,7 @@ SUMMARY_JSON="$(jq -n \
       if . == "ENFORCED" then 3
       elif . == "MEDIATED_ONLY" then 2
       elif . == "UNVERIFIED" then 1
+      elif . == "CAPABILITY_DETECTED" then 1
       else 0 end;
 
     (([$ev.data.details[] | select(.probe_id == "as-001") | (.actual_outcome | fromjson)][0]) // {}) as $as1 |
@@ -190,8 +191,12 @@ SUMMARY_JSON="$(jq -n \
         .evidence_source = "os_sandbox_probe+assurance_probe:as-001" |
         .detail = "as-001 escape containment probe failed"
       else
+        # Issue #974: doctor fast mode classifies G1 as CAPABILITY_DETECTED (policy
+        # contract only). The live as-001 escape probe ran here and passed, so the
+        # adversarial evidence supersedes the capability-only classification.
+        (if .status == "CAPABILITY_DETECTED" then .status = "ENFORCED" else . end) |
         .evidence_source = "os_sandbox_probe+assurance_probe:as-001" |
-        .detail = (.detail + "; as-001 blocked=" + (($m1.vectors_blocked // 0) | tostring) + "/" + (($m1.vectors_tested // 0) | tostring))
+        .detail = ((.detail | sub(" \\(policy-contract capability; no live adversarial probe executed\\)"; "")) + "; as-001 blocked=" + (($m1.vectors_blocked // 0) | tostring) + "/" + (($m1.vectors_tested // 0) | tostring))
       end
     ) as $g1 |
 
@@ -320,7 +325,7 @@ SUMMARY_JSON="$(jq -n \
     (find_gate("TRUST-G6")) as $g6 |
 
     ([$g1, $g2, $g3, $g4, $g5, $g6]) as $gates |
-    ([ $gates[] | select(.status == "NOT_ENFORCED" or .status == "UNVERIFIED") | (.gate + ": " + .detail) ]) as $veto_reasons |
+    ([ $gates[] | select(.status == "NOT_ENFORCED" or .status == "UNVERIFIED" or .status == "CAPABILITY_DETECTED") | (.gate + ": " + .detail) ]) as $veto_reasons |
     ([ $gates[] | select(.status == "MEDIATED_ONLY") | .gate ]) as $mediated_gates |
     ([ $gates[] | .status | gate_rank ] | min) as $min_rank |
     (if $min_rank >= 3 then "ENFORCED"

@@ -200,7 +200,9 @@ func printTrustAssuranceHuman(ta *doctor.TrustAssuranceStatus) {
 		switch g.Status {
 		case doctor.TrustGateEnforced:
 			statusStr = pterm.Green(string(g.Status))
-		case doctor.TrustGateMediatedOnly:
+		case doctor.TrustGateMediatedOnly, doctor.TrustGateCapabilityDetected:
+			// Capability-detected gates are warning-tier: the mechanism is present but
+			// adversarially unproven (issue #974), not failed.
 			statusStr = pterm.Yellow(string(g.Status))
 		default:
 			statusStr = pterm.Red(string(g.Status))

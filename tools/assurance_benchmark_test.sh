@@ -54,7 +54,7 @@ printf '%s\n' "$JSON_OUT" | jq -e '
   ((.trust_assurance_status.overall_verdict == "ENFORCED") or (.trust_assurance_status.overall_verdict == "MEDIATED_ONLY")) and
   (.trust_assurance_status.gates | length == 6) and
   ([.trust_assurance_status.gates[].gate] == ["TRUST-G1","TRUST-G2","TRUST-G3","TRUST-G4","TRUST-G5","TRUST-G6"]) and
-  ([.trust_assurance_status.gates[].status | IN("ENFORCED","MEDIATED_ONLY","NOT_ENFORCED","UNVERIFIED")] | all)
+  ([.trust_assurance_status.gates[].status | IN("ENFORCED","MEDIATED_ONLY","NOT_ENFORCED","UNVERIFIED","CAPABILITY_DETECTED")] | all)
 ' >/dev/null || {
     echo "FAIL: --json output failed schema/score assertion:" >&2
     printf '%s\n' "$JSON_OUT" >&2

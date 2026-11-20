@@ -98,8 +98,10 @@ func TestCLI_DoctorEmitsStructuredNonCompensatoryTrustAssuranceStatus(t *testing
 	if runtime.GOOS == "windows" && byGate["TRUST-G1"].Status != doctor.TrustGateMediatedOnly {
 		t.Fatalf("Windows TRUST-G1 = %+v, want MEDIATED_ONLY", byGate["TRUST-G1"])
 	}
-	if runtime.GOOS == "darwin" && byGate["TRUST-G1"].Status != doctor.TrustGateEnforced {
-		t.Fatalf("macOS TRUST-G1 = %+v, want ENFORCED", byGate["TRUST-G1"])
+	// Issue #974: fast doctor mode has no live as-001 escape probe, so even a
+	// kernel-capable macOS sandbox policy is only CAPABILITY_DETECTED, never ENFORCED.
+	if runtime.GOOS == "darwin" && byGate["TRUST-G1"].Status != doctor.TrustGateCapabilityDetected {
+		t.Fatalf("macOS TRUST-G1 = %+v, want CAPABILITY_DETECTED in fast doctor mode", byGate["TRUST-G1"])
 	}
 
 	humanCmd := exec.Command(binPath, "doctor")

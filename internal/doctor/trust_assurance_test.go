@@ -332,6 +332,134 @@ func TestEvaluateTrustAssurance_S0KeyCustody(t *testing.T) {
 	})
 }
 
+// Issue #974: trust-gate status must distinguish "capability detected" (policy
+// contract only) from "adversarially verified" (live escape-probe evidence).
+func TestEvaluateTrustAssurance_G1CapabilityDetectedWithoutLiveProbe(t *testing.T) {
+	sha := strings.Repeat("d", 64)
+	commit := "0123456789abcdef0123456789abcdef01234567"
+
+	t.Run("kernel_capable_policy_without_probe_is_capability_detected", func(t *testing.T) {
+		st := EvaluateTrustAssurance(TrustProbeInput{
+			OS:             "darwin",
+			Arch:           "arm64",
+			BinaryCommit:   commit,
+			SourceCommit:   commit,
+			BinarySHA256:   sha,
+			StateDir:       t.TempDir(),
+			DBHealthy:      true,
+			PrepareSandbox: mockPrepareSandbox(sandbox.ModeKernelEnforced, "seatbelt", true),
+			ProbeMetrics:   nil, // fast doctor mode: no live as-001 escape probe
+		})
+		g1 := findGateStatus(t, st, "TRUST-G1")
+		if g1.Status != TrustGateCapabilityDetected {
+			t.Fatalf("TRUST-G1 = %s (%s), want CAPABILITY_DETECTED when only the sandbox policy contract was probed", g1.Status, g1.Detail)
+		}
+		if !strings.Contains(g1.Detail, "policy-contract capability; no live adversarial probe executed") {
+			t.Fatalf("TRUST-G1 detail must state policy-contract capability, got %q", g1.Detail)
+		}
+		if g1.EpistemicClass != sandbox.EpistemicMeasuredMetric {
+			t.Fatalf("epistemic_class = %s, want measured_metric (ADR-0042 G5 labeling intact)", g1.EpistemicClass)
+		}
+		if st.KernelEnforced != true {
+			t.Fatalf("kernel_enforced posture telemetry must stay true, got %t", st.KernelEnforced)
+		}
+	})
+
+	t.Run("live_escape_probe_pass_keeps_enforced", func(t *testing.T) {
+		st := EvaluateTrustAssurance(TrustProbeInput{
+			OS:             "darwin",
+			Arch:           "arm64",
+			BinaryCommit:   commit,
+			SourceCommit:   commit,
+			BinarySHA256:   sha,
+			StateDir:       t.TempDir(),
+			DBHealthy:      true,
+			PrepareSandbox: mockPrepareSandbox(sandbox.ModeKernelEnforced, "seatbelt", true),
+			ProbeMetrics:   &AssuranceProbeSummary{EscapePassed: true, EscapeDetail: "as-001 blocked=5/5"},
+		})
+		g1 := findGateStatus(t, st, "TRUST-G1")
+		if g1.Status != TrustGateEnforced {
+			t.Fatalf("TRUST-G1 = %s (%s), want ENFORCED when the live as-001 escape probe passed", g1.Status, g1.Detail)
+		}
+	})
+
+	t.Run("live_escape_probe_fail_stays_not_enforced", func(t *testing.T) {
+		st := EvaluateTrustAssurance(TrustProbeInput{
+			OS:             "darwin",
+			Arch:           "arm64",
+			BinaryCommit:   commit,
+			SourceCommit:   commit,
+			BinarySHA256:   sha,
+			StateDir:       t.TempDir(),
+			DBHealthy:      true,
+			PrepareSandbox: mockPrepareSandbox(sandbox.ModeKernelEnforced, "seatbelt", true),
+			ProbeMetrics:   &AssuranceProbeSummary{EscapePassed: false, EscapeDetail: "as-001 vector 3 escaped"},
+		})
+		g1 := findGateStatus(t, st, "TRUST-G1")
+		if g1.Status != TrustGateNotEnforced {
+			t.Fatalf("TRUST-G1 = %s, want NOT_ENFORCED when the live as-001 escape probe failed", g1.Status)
+		}
+	})
+
+	t.Run("capability_detected_degrades_overall_verdict_to_unverified_with_veto", func(t *testing.T) {
+		st := EvaluateTrustAssurance(TrustProbeInput{
+			OS:             "darwin",
+			Arch:           "arm64",
+			BinaryCommit:   commit,
+			SourceCommit:   commit,
+			BinarySHA256:   sha,
+			StateDir:       t.TempDir(),
+			DBHealthy:      true,
+			PrepareSandbox: mockPrepareSandbox(sandbox.ModeKernelEnforced, "seatbelt", true),
+			ProbeMetrics:   nil,
+		})
+		if st.OverallVerdict != TrustGateUnverified || !st.NonCompensatoryVeto {
+			t.Fatalf("overall verdict = %s veto=%t, want UNVERIFIED + veto when TRUST-G1 is only capability-detected", st.OverallVerdict, st.NonCompensatoryVeto)
+		}
+		vetoNamedG1 := false
+		for _, r := range st.VetoReasons {
+			if strings.Contains(r, "TRUST-G1") {
+				vetoNamedG1 = true
+				break
+			}
+		}
+		if !vetoNamedG1 {
+			t.Fatalf("veto reasons must mention TRUST-G1, got %v", st.VetoReasons)
+		}
+	})
+}
+
+func TestComputeNonCompensatoryVerdict_CapabilityDetectedIsNotEnforced(t *testing.T) {
+	gates := []TrustGateAssessment{
+		{Gate: "TRUST-G1", Status: TrustGateCapabilityDetected, Detail: "policy-contract capability; no live adversarial probe executed"},
+		{Gate: "TRUST-G2", Status: TrustGateEnforced, Detail: "ok"},
+		{Gate: "TRUST-G3", Status: TrustGateEnforced, Detail: "ok"},
+		{Gate: "TRUST-G4", Status: TrustGateEnforced, Detail: "ok"},
+		{Gate: "TRUST-G5", Status: TrustGateEnforced, Detail: "ok"},
+		{Gate: "TRUST-G6", Status: TrustGateEnforced, Detail: "ok"},
+	}
+	verdict, veto, reasons, mediated := ComputeNonCompensatoryVerdict(gates)
+	if verdict != TrustGateUnverified {
+		t.Fatalf("verdict = %s, want UNVERIFIED (a capability-detected gate must not count as enforced)", verdict)
+	}
+	if !veto || len(reasons) == 0 {
+		t.Fatalf("expected non-compensatory veto with reasons, got veto=%t reasons=%v", veto, reasons)
+	}
+	namedG1 := false
+	for _, r := range reasons {
+		if strings.Contains(r, "TRUST-G1") {
+			namedG1 = true
+			break
+		}
+	}
+	if !namedG1 {
+		t.Fatalf("veto reasons must mention TRUST-G1, got %v", reasons)
+	}
+	if len(mediated) != 0 {
+		t.Fatalf("capability-detected gate must not be reported as mediated, got %v", mediated)
+	}
+}
+
 func TestComputeNonCompensatoryVerdict_MissingGateFailsClosed(t *testing.T) {
 	incomplete := []TrustGateAssessment{
 		{Gate: "TRUST-G1", Status: TrustGateEnforced, Detail: "ok"},
