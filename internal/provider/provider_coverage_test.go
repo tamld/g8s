@@ -173,6 +173,68 @@ func TestAgyProvider_Extended(t *testing.T) {
 	}
 }
 
+// TestAgySpawn_ScrubsAmbientSecretEnv pins the uniform secret-scrub contract
+// (#985): the agy spawn path must route its child environment through
+// sandbox.ScrubEnv like every other CLI provider. Ambient secrets (GITHUB_TOKEN,
+// DATABASE_URL) must never reach the child, while spec.Env (the explicit
+// task/allowlist override path) still wins.
+func TestAgySpawn_ScrubsAmbientSecretEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock worker is a POSIX shell script — exec semantics differ on Windows")
+	}
+	tmpDir := t.TempDir()
+	mockBin := filepath.Join(tmpDir, "agy")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then echo 'mock agy v1.0.0'; exit 0; fi\n" +
+		"env\n" +
+		"exit 0\n"
+	if err := os.WriteFile(mockBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write mock agy script: %v", err)
+	}
+
+	t.Setenv("AGY_BIN", mockBin)
+	t.Setenv("GITHUB_TOKEN", "ghp-ambient-secret")
+	t.Setenv("DATABASE_URL", "postgres://user:ambient-secret@db.internal:5432/app")
+	p := NewAgyProvider()
+	if err := p.Available(context.Background()); err != nil {
+		t.Fatalf("Available failed: %v", err)
+	}
+
+	handle, err := p.Spawn(context.Background(), Spec{
+		Model: "gemini-test",
+		Brief: "dump child env",
+		Env: map[string]string{
+			"G8S_TASK_ID":    "task-985",
+			"GEMINI_API_KEY": "gemini-provider-key",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+	receipt, err := handle.Wait(context.Background())
+	if err != nil || receipt.Status != "COMPLETED" {
+		t.Fatalf("Wait: status=%s err=%v", receipt.Status, err)
+	}
+
+	childEnv := make(map[string]string)
+	for _, line := range strings.Split(receipt.Stdout, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k != "" {
+			childEnv[k] = v
+		}
+	}
+	for _, leaked := range []string{"GITHUB_TOKEN", "DATABASE_URL"} {
+		if v, exists := childEnv[leaked]; exists {
+			t.Fatalf("ambient secret %s leaked into agy child env (value %q)", leaked, v)
+		}
+	}
+	if childEnv["G8S_TASK_ID"] != "task-985" {
+		t.Fatalf("expected spec.Env overlay G8S_TASK_ID=task-985, got %q", childEnv["G8S_TASK_ID"])
+	}
+	if childEnv["GEMINI_API_KEY"] != "gemini-provider-key" {
+		t.Fatalf("expected allowlisted GEMINI_API_KEY to flow, got %q", childEnv["GEMINI_API_KEY"])
+	}
+}
+
 func TestCodexProvider_Extended(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("mock worker is a POSIX shell script — exec semantics differ on Windows")

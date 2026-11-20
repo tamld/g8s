@@ -107,6 +107,11 @@ func (c *ClaudeProvider) Spawn(ctx context.Context, spec Spec) (Handle, error) {
 	if spec.WorktreeDir != "" {
 		cmd.Dir = spec.WorktreeDir
 	}
+	// Uniform secret scrubbing (#985): claude previously inherited the FULL
+	// unscrubbed os.Environ() (nil cmd.Env). Route it through the same
+	// scrubProviderEnv path as every other CLI provider; spec.Env still wins
+	// and CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_* remain allowlisted.
+	cmd.Env = scrubProviderEnv("claude", spec.Env)
 	configureSysProcAttr(cmd)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
