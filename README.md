@@ -119,7 +119,7 @@ Both installers **fail closed** on SHA-256 verification against the release `che
 brew install tamld/g8s/g8s
 ```
 
-**Scoop (Windows):**
+**Scoop (Windows) — secondary channel (the bucket manifest is auto-updated hourly by a bot workflow in the bucket repo, deriving version and hashes from GitHub Releases `checksums.txt`; not CI-verified in this repository):**
 ```powershell
 scoop bucket add tamld https://github.com/tamld/scoop-bucket
 scoop install tamld/g8s

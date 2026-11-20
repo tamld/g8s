@@ -127,7 +127,7 @@ scoop bucket add tamld https://github.com/tamld/scoop-bucket
 scoop install tamld/g8s
 ```
 
-[Bucket Scoop tamld](https://github.com/tamld/scoop-bucket) cung cấp binary Windows amd64/arm64 với hash từ `checksums.txt` của bản phát hành và cùng nhịp tự động cập nhật hàng giờ.
+[Bucket Scoop tamld](https://github.com/tamld/scoop-bucket) cung cấp binary Windows amd64/arm64 với hash từ `checksums.txt` của bản phát hành và cùng nhịp tự động cập nhật hàng giờ (workflow bot trong repo bucket; không được CI của repo này xác thực).
 
 **Gói Linux (từ trang phát hành):** chưa có kho `apt`/`yum`/`apk` chính thức — tải gói cho kiến trúc của bạn từ [trang phát hành](https://github.com/tamld/g8s/releases) và cài đặt cục bộ:
 

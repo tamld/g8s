@@ -182,7 +182,11 @@ while IFS= read -r line || [ -n "$line" ]; do
             current_eval=""
             current_demo=""
             current_source=""
+            # D-15 (#986): capture this claim's unbound classification, then
+            # reset the sticky section flag so claims declared after the
+            # `unbound:` section ends are not misclassified as unbound.
             current_unbound="$in_unbound"
+            in_unbound=0
             ;;
         "claim:"*)
             current_claim=$(clean_val "${trimmed#claim:}")

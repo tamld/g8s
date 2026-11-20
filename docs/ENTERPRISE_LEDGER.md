@@ -21,7 +21,7 @@ Last updated: 2026-10-30 (v0.21.0 release + Orthogonal Stratum Federation, Spec-
 
 | Claim | Status | Evidence artifact | Notes |
 | :--- | :--- | :--- | :--- |
-| 7 containment layers live (attempt, receipt, session, lane, trust-zone, surface, cleanup) | PROVEN | docs/decisions/0021-standard-operating-model.md (docs/claims.yml `claim-containment-layers`) | |
+| Containment guarantees tracked per layer in docs/claims.yml (`claim-containment-*` rows); umbrella row bound to `TestReleasePreservesDirtyWorktree` (dirty worktree survives `Release(keep=true)`) | PROVEN | docs/claims.yml `claim-containment-layers` | Reworded (#986 D-16): the "7 layers" enumeration had no deterministic source in code or docs |
 | Per-attempt worktree isolation for workspace_write | PROVEN | `TestWorkspaceWriteAttemptGetsWorktreeIsolation` (#427) | Concurrent attempts clobbering each other fixed |
 | Dirty worktrees survive `Release(keep=true)` | PROVEN | `TestReleasePreservesDirtyWorktree` (#443-f2, fix #450) | Preserved-until-reaped contract |
 | Worker sessions tracked in SQLite registry with exclusive locking | PROVEN | `TestSessionsRegistryLifecycle` (#393) | |

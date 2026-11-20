@@ -1179,6 +1179,88 @@ func TestListActiveReceiptsReportsTamperedJSON(t *testing.T) {
 	}
 }
 
+// B-11 (#986): list surfaces must verify sig_tag during hydration and mark
+// rows whose stored payload no longer matches the signature, instead of
+// silently exposing tampered authorization data. Tampered rows stay visible
+// for audit with signature_valid=false.
+func TestListReceiptsMarksTamperedRowsSignatureInvalid(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sig-tamper.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	rc := mustIssue(t, m, validIssuer, []string{"x/**"}, time.Minute)
+	if err := m.Close(); err != nil {
+		t.Fatalf("close before tamper: %v", err)
+	}
+
+	// Tamper allowed_paths to a *valid* JSON payload different from the
+	// signed one; the stored signature no longer covers the row contents.
+	raw := openRawDB(t, dbPath)
+	if _, err := raw.Exec(
+		"UPDATE write_receipts SET allowed_paths_json = ? WHERE receipt_id = ?",
+		`["tampered/**"]`, rc.ReceiptID,
+	); err != nil {
+		t.Fatalf("tamper exec: %v", err)
+	}
+	_ = raw.Close()
+
+	m2, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen tampered db: %v", err)
+	}
+	defer m2.Close()
+
+	active, err := m2.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("ListActiveReceipts: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("tampered row must stay visible, got %d rows", len(active))
+	}
+	if active[0].SignatureValid == nil || *active[0].SignatureValid {
+		t.Fatalf("tampered active receipt must be marked signature_valid=false, got %+v", active[0].SignatureValid)
+	}
+
+	listed, err := m2.ListReceipts("", time.Time{}, "")
+	if err != nil {
+		t.Fatalf("ListReceipts: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("tampered row must stay visible in ListReceipts, got %d rows", len(listed))
+	}
+	if listed[0].SignatureValid == nil || *listed[0].SignatureValid {
+		t.Fatalf("tampered receipt must be marked signature_valid=false, got %+v", listed[0].SignatureValid)
+	}
+}
+
+// B-11 (#986) positive control: untampered rows hydrate with signature_valid=true.
+func TestListReceiptsMarksUntamperedRowsSignatureValid(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sig-valid.sqlite3")
+	m, err := NewReceiptManager(dbPath, nil)
+	if err != nil {
+		t.Fatalf("NewReceiptManager: %v", err)
+	}
+	defer m.Close()
+	mustIssue(t, m, validIssuer, []string{"x/**"}, time.Minute)
+
+	active, err := m.ListActiveReceipts()
+	if err != nil {
+		t.Fatalf("ListActiveReceipts: %v", err)
+	}
+	if len(active) != 1 || active[0].SignatureValid == nil || !*active[0].SignatureValid {
+		t.Fatalf("untampered receipt must be marked signature_valid=true, got %+v", active)
+	}
+
+	listed, err := m.ListReceipts("", time.Time{}, "")
+	if err != nil {
+		t.Fatalf("ListReceipts: %v", err)
+	}
+	if len(listed) != 1 || listed[0].SignatureValid == nil || !*listed[0].SignatureValid {
+		t.Fatalf("untampered receipt must be marked signature_valid=true in ListReceipts, got %+v", listed)
+	}
+}
+
 func TestValidateAndConsumeReportsTamperedJSON(t *testing.T) {
 	// Same tamper trick drives the json.Unmarshal error branch inside
 	// ValidateAndConsume. The path executes after a successful commit, so
