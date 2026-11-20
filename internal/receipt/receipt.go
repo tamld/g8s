@@ -278,7 +278,13 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	if err != nil {
 		return nil, fmt.Errorf("load F0 verifier for %q: %w", dbPath, err)
 	}
-	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)")
+	// synchronous(FULL) is required here (issue #984 C-2): the receipts ledger
+	// is the single-use authorization authority. Under WAL + synchronous(NORMAL)
+	// a consume acknowledged to the caller is not fsynced and can roll back on
+	// OS crash / power loss, turning an already-used receipt replayable. This
+	// matches the durability posture of controlplane (store.go) and mesh
+	// (store.go).
+	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=synchronous(FULL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open receipt database %q: %w", dbPath, err)
