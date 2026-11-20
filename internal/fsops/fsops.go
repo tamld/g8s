@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -28,6 +29,26 @@ import (
 )
 
 var editMu sync.Mutex
+
+// maxReadFileBytes caps the raw os.ReadFile buffer used by Read/Edit/ApplyBatchEdits
+// at 64 MiB (#981): SHA-256, binary sniffing and line slicing operate on the full buffer
+// even though the returned content is further bounded by MaxBytes, so an unbounded read
+// would let a single oversized file exhaust worker memory.
+const maxReadFileBytes int64 = 64 << 20
+
+// ErrFileTooLarge is wrapped in the error returned when a file targeted by
+// Read/Edit/ApplyBatchEdits exceeds maxReadFileBytes; callers detect it via errors.Is.
+var ErrFileTooLarge = errors.New("fsops: file exceeds maximum readable size")
+
+// guardReadFileBytes rejects files above maxReadFileBytes before their bytes are
+// buffered (#981): SHA-256, binary sniffing and line slicing operate on the full
+// buffer, so returning bounded content alone would not bound memory.
+func guardReadFileBytes(canonTarget string, info os.FileInfo) error {
+	if info.Size() > maxReadFileBytes {
+		return fmt.Errorf("%w: %s is %d bytes (limit %d)", ErrFileTooLarge, canonTarget, info.Size(), maxReadFileBytes)
+	}
+	return nil
+}
 
 // ReadOptions configures a bounded file read operation.
 type ReadOptions struct {
@@ -415,6 +436,14 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 		return nil, fmt.Errorf("path %q escapes scope root %q", opts.Path, opts.ScopeRoot)
 	}
 
+	info, err := os.Stat(canonTarget)
+	if err != nil {
+		return nil, err
+	}
+	if err := guardReadFileBytes(canonTarget, info); err != nil {
+		return nil, err
+	}
+
 	raw, err := os.ReadFile(canonTarget)
 	if err != nil {
 		return nil, err
@@ -571,6 +600,9 @@ func Edit(ctx context.Context, opts EditOptions) (*EditResult, error) {
 
 	info, err := os.Stat(canonTarget)
 	if err != nil {
+		return nil, err
+	}
+	if err := guardReadFileBytes(canonTarget, info); err != nil {
 		return nil, err
 	}
 
@@ -833,6 +865,9 @@ func ApplyBatchEdits(ctx context.Context, edits []EditOptions) ([]*EditResult, e
 		if !exists {
 			info, err := os.Stat(canonTarget)
 			if err != nil {
+				return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
+			}
+			if err := guardReadFileBytes(canonTarget, info); err != nil {
 				return nil, fmt.Errorf("batch edit[%d] (%s): %w", idx, opts.Path, err)
 			}
 			raw, err := os.ReadFile(canonTarget)

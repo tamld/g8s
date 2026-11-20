@@ -386,6 +386,12 @@ type candidateFile struct {
 	tierTokens     map[Tier]int
 }
 
+// maxPackFileBytes is the per-file size budget for context pack candidates (512 KiB):
+// collectCandidateFiles skips larger files at stat time, and the Pack read loop
+// re-checks before buffering (#981) so a file that grows between collection and read
+// cannot exhaust memory.
+const maxPackFileBytes int64 = 512 * 1024
+
 // Pack executes the 5-stage ContextCraft pipeline (Pre-AST Sanitizer, 4-Tier AST Elision,
 // Personalized PageRank + BM25F, and Multiple-Choice Knapsack Optimizer) in pure Go.
 func Pack(req PackRequest) (*PackResult, error) {
@@ -416,6 +422,12 @@ func Pack(req PackRequest) (*PackResult, error) {
 	totalRedacted := 0
 
 	for _, absPath := range rawPaths {
+		// #981: re-check the per-file budget at read time — the file may have grown
+		// (or been replaced) since collectCandidateFiles stat'ed it. Skipped like any
+		// other unreadable candidate, consistent with collection-time behavior.
+		if info, err := os.Stat(absPath); err != nil || info.IsDir() || info.Size() > maxPackFileBytes {
+			continue
+		}
 		data, err := os.ReadFile(absPath)
 		if err != nil {
 			continue
@@ -891,7 +903,7 @@ func collectCandidateFiles(absRoot string, explicitPaths []string, maxFiles int)
 			return
 		}
 		info, err := os.Stat(p)
-		if err != nil || info.IsDir() || info.Size() == 0 || info.Size() > 512*1024 {
+		if err != nil || info.IsDir() || info.Size() == 0 || info.Size() > maxPackFileBytes {
 			return
 		}
 		seen[p] = true
