@@ -3,11 +3,11 @@
 # Verified by tools/claims_check.sh
 
 - id: claim-containment-layers
-  claim: "Blast radius containment: 7 layers live (per-attempt, per-receipt, per-session, per-lane, per-trust-zone, per-surface, per-cleanup)"
+  claim: "Worktree containment release: Release(keep=true) preserves dirty worktrees (directory, modifications, branch) and cleans lease bookkeeping; layer-specific containment guarantees are bound separately by the claim-containment-* rows"
   evidence:
     test: TestReleasePreservesDirtyWorktree
     eval: ""
-    source: docs/decisions/0021-standard-operating-model.md
+    source: docs/ENTERPRISE_LEDGER.md
 
 - id: claim-containment-attempt-isolation
   claim: "Worker attempts run in isolated per-attempt worktrees preventing cross-attempt bleed"

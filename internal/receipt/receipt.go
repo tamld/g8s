@@ -158,6 +158,11 @@ type WriteReceipt struct {
 	RuleGraphSnapshot *RuleGraphSnapshot `json:"rule_graph_snapshot,omitempty"`
 	ProvenanceLineage *ProvenanceLineage `json:"provenance_lineage,omitempty"`
 	Signature         string             `json:"signature,omitempty"`
+	// SignatureValid reports whether the stored sig_tag verified against the
+	// stored row contents during list hydration (B-11, #986). Nil on paths
+	// that do not perform row verification (issue/consume responses); false
+	// means the row is tampered or unsigned and must not be trusted.
+	SignatureValid *bool `json:"signature_valid,omitempty"`
 }
 
 // IssueOption configures optional receipt issuance attributes.
@@ -744,6 +749,21 @@ func (m *Manager) checkReceiptSignature(receiptID, issuer, pathsJSON string, exp
 	return VerifyMonotoneReceiptSig(m.pubKey, sigTag, receiptID, issuer, pathsJSON, expiresAt, createdAt, claimJSON)
 }
 
+// applyListSignatureCheck verifies the stored sig_tag against the row
+// contents during list hydration (B-11, #986). Rows that fail verification
+// stay visible for audit with signature_valid=false rather than being
+// dropped or silently exposed as valid.
+func (m *Manager) applyListSignatureCheck(r *WriteReceipt, receiptID, issuer, pathsJSON string, expiresAt, createdAt float64, sigTag string, claimBindingJSON sql.NullString) {
+	if err := m.checkReceiptSignature(receiptID, issuer, pathsJSON, expiresAt, createdAt, sigTag, claimBindingJSON); err != nil {
+		invalid := false
+		r.SignatureValid = &invalid
+		fmt.Fprintf(os.Stderr, "[warn] receipt: signature verification failed for %q during list hydration: %v\n", receiptID, err)
+		return
+	}
+	valid := true
+	r.SignatureValid = &valid
+}
+
 // IssueReceipt mints a single-use receipt scoped to allowedPaths with the
 // given TTL. Optional supervisor metadata can be attached via WithSupervisorMeta.
 // The caller identity is recorded verbatim; the engine performs no internal
@@ -1164,6 +1184,7 @@ func (m *Manager) ListActiveReceipts() ([]*WriteReceipt, error) {
 		}
 		r.Issuer = issuer
 		r.Signature = sigTag
+		m.applyListSignatureCheck(r, receiptID, issuer, pathsJSON, expiresAt, createdAt, sigTag, claimBindingJSON)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -1251,6 +1272,7 @@ func (m *Manager) ListReceipts(taskID string, since time.Time, verdict string) (
 		}
 		r.Issuer = issuer
 		r.Signature = sigTag
+		m.applyListSignatureCheck(r, receiptID, issuer, pathsJSON, expiresAt, createdAt, sigTag, claimBindingJSON)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
