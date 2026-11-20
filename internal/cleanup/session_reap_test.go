@@ -3,6 +3,8 @@ package cleanup
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,6 +260,281 @@ func TestOrphanSessionDryRun(t *testing.T) {
 	if !sessionRowExists(t, raw, "d1") {
 		t.Fatal("dry-run deleted the row")
 	}
+}
+
+// #982 red test: reaping a session whose worktree carries UNCOMMITTED work
+// must never destroy that work. git worktree remove (no --force) refuses a
+// dirty worktree, and the old fallback was a blind os.RemoveAll — the reap
+// must instead capture the uncommitted diff + status + untracked file
+// contents into the evidence dir before the force-removal, and the registry
+// row must still be cleaned per the existing semantics.
+func TestOrphanSessionReapDirtyWorktreePreservesUncommitted(t *testing.T) {
+	repoDir, _, raw := setupSessionWorld(t)
+	now := time.Now()
+
+	if _, err := exec.Command("git", "-C", repoDir, "worktree", "add", "-b", "sess/dirty", repoDir+"-wt-dirty").CombinedOutput(); err != nil {
+		t.Fatalf("seed worktree: %v", err)
+	}
+	wtDir := repoDir + "-wt-dirty"
+	t.Cleanup(func() { _ = os.RemoveAll(wtDir) })
+	// Uncommitted work in the session worktree: a tracked modification plus
+	// untracked files (flat and nested) that no diff would ever contain.
+	if err := os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("seed\n\ndirty edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const note = "precious uncommitted notes\n"
+	if err := os.WriteFile(filepath.Join(wtDir, "notes.txt"), []byte(note), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wtDir, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const deep = "nested untracked content\n"
+	if err := os.WriteFile(filepath.Join(wtDir, "src", "deep.txt"), []byte(deep), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	insertSessionRow(t, raw, sessionFixture{
+		ID: "dirty", Status: "dead", Mode: "worktree", WorktreePath: wtDir, HeartbeatAge: 2 * time.Minute,
+	}, now)
+
+	evidenceRoot := filepath.Join(t.TempDir(), "evidence")
+	report, err := RunCleanupSweep(context.Background(), CleanupConfig{
+		RepoDir:            repoDir,
+		DBPath:             filepath.Join(repoDir, "g8s.db"),
+		Targets:            []string{TargetOrphanSession},
+		SessionGracePeriod: 30 * time.Second,
+		EvidenceDir:        evidenceRoot,
+		Clock:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var item *CleanupItem
+	for i := range report.Items {
+		if report.Items[i].ID == "dirty" {
+			item = &report.Items[i]
+		}
+	}
+	if item == nil {
+		t.Fatalf("session dirty not reported: %+v", report.Items)
+	}
+	if item.Action != "deleted" {
+		t.Fatalf("action = %q (%s), want deleted", item.Action, item.Detail)
+	}
+
+	// Cleanup still happens: worktree gone, branch gone, row gone.
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Fatalf("worktree still present: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "sess/dirty").CombinedOutput(); err == nil {
+		t.Fatalf("branch sess/dirty still exists: %s", out)
+	}
+	if sessionRowExists(t, raw, "dirty") {
+		t.Fatal("registry row still present after reap")
+	}
+
+	// Nothing is lost: the uncommitted state was captured to the evidence dir.
+	evDir := filepath.Join(evidenceRoot, "session-reap-dirty")
+	if _, err := os.Stat(evDir); err != nil {
+		t.Fatalf("evidence dir missing: %v (item detail: %s)", err, item.Detail)
+	}
+	if !strings.Contains(item.Detail, "evidence") {
+		t.Fatalf("detail = %q, want evidence capture note", item.Detail)
+	}
+	diff, err := os.ReadFile(filepath.Join(evDir, "worktree.diff"))
+	if err != nil {
+		t.Fatalf("read worktree.diff: %v", err)
+	}
+	if !strings.Contains(string(diff), "+dirty edit") {
+		t.Fatalf("worktree.diff does not contain the tracked modification:\n%s", diff)
+	}
+	status, err := os.ReadFile(filepath.Join(evDir, "status.txt"))
+	if err != nil {
+		t.Fatalf("read status.txt: %v", err)
+	}
+	for _, want := range []string{"README.md", "notes.txt", "src/"} {
+		if !strings.Contains(string(status), want) {
+			t.Fatalf("status.txt missing %q:\n%s", want, status)
+		}
+	}
+	gotNote, err := os.ReadFile(filepath.Join(evDir, "untracked", "notes.txt"))
+	if err != nil {
+		t.Fatalf("untracked notes.txt not preserved: %v", err)
+	}
+	if string(gotNote) != note {
+		t.Fatalf("untracked notes.txt content = %q, want %q", gotNote, note)
+	}
+	gotDeep, err := os.ReadFile(filepath.Join(evDir, "untracked", "src", "deep.txt"))
+	if err != nil {
+		t.Fatalf("nested untracked deep.txt not preserved: %v", err)
+	}
+	if string(gotDeep) != deep {
+		t.Fatalf("nested untracked deep.txt content = %q, want %q", gotDeep, deep)
+	}
+}
+
+// seedSessionWorktreeWithUncommitted creates a registered worktree on branch
+// sess/<id> carrying uncommitted work (tracked modification + untracked
+// file) — the fixture every #982 guard test destroys NOTHING of.
+func seedSessionWorktreeWithUncommitted(t *testing.T, repoDir, id string) string {
+	t.Helper()
+	wtDir := repoDir + "-wt-" + id
+	if out, err := exec.Command("git", "-C", repoDir, "worktree", "add", "-b", "sess/"+id, wtDir).CombinedOutput(); err != nil {
+		t.Fatalf("seed worktree: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(wtDir) })
+	if err := os.WriteFile(filepath.Join(wtDir, "README.md"), []byte("seed\n\ndirty edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "notes.txt"), []byte("precious uncommitted notes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return wtDir
+}
+
+// reapOneSession needs a fully populated config when called directly.
+func directReapConfig(repoDir string) CleanupConfig {
+	return CleanupConfig{
+		RepoDir:   repoDir,
+		GitRunner: &DefaultCleanupGitRunner{},
+		Writer:    io.Discard,
+		DryRun:    false,
+	}
+}
+
+func assertSessionUntouched(t *testing.T, db *sql.DB, repoDir, id, wtDir string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(wtDir, "notes.txt")); err != nil {
+		t.Fatalf("uncommitted notes.txt destroyed — worktree must be untouched: %v", err)
+	}
+	if out, err := os.ReadFile(filepath.Join(wtDir, "notes.txt")); err != nil || string(out) != "precious uncommitted notes\n" {
+		t.Fatalf("notes.txt content changed: %q (%v)", out, err)
+	}
+	if !sessionRowExists(t, db, id) {
+		t.Fatalf("registry row for %s was deleted — abort must keep the row", id)
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "sess/"+id).CombinedOutput(); err != nil {
+		t.Fatalf("branch sess/%s was deleted — abort must keep the branch: %v (%s)", id, err, out)
+	}
+}
+
+// #982 (b): a session revived between the tick listing and the reap (status
+// flipped back to active) must abort the reap — no removal of any resource.
+func TestReapOneSessionAbortsWhenSessionRevived(t *testing.T) {
+	repoDir, _, raw := setupSessionWorld(t)
+	now := time.Now()
+	wtDir := seedSessionWorktreeWithUncommitted(t, repoDir, "revived")
+	insertSessionRow(t, raw, sessionFixture{
+		ID: "revived", Status: "dead", Mode: "worktree", WorktreePath: wtDir, HeartbeatAge: time.Hour,
+	}, now)
+	// Simulate revival: flip the row back to active after the listing.
+	if _, err := raw.Exec(`UPDATE sessions SET status = 'active' WHERE id = 'revived'`); err != nil {
+		t.Fatal(err)
+	}
+
+	item, prune := reapOneSession(context.Background(), directReapConfig(repoDir), raw,
+		reapableSession{id: "revived", worktreePath: wtDir},
+		float64(now.Add(-30*time.Second).Unix()))
+	if item.Action != "skipped" {
+		t.Fatalf("action = %q (%s), want skipped", item.Action, item.Detail)
+	}
+	if !strings.Contains(item.Detail, "came back") {
+		t.Fatalf("detail = %q, want revival reason", item.Detail)
+	}
+	if prune {
+		t.Fatal("aborted reap must not schedule a prune")
+	}
+	assertSessionUntouched(t, raw, repoDir, "revived", wtDir)
+}
+
+// #982 (b) variant: the row still reads dead but its heartbeat was refreshed
+// past the cutoff — the row changed, so the reap aborts.
+func TestReapOneSessionAbortsOnHeartbeatRefresh(t *testing.T) {
+	repoDir, _, raw := setupSessionWorld(t)
+	now := time.Now()
+	wtDir := seedSessionWorktreeWithUncommitted(t, repoDir, "refreshed")
+	insertSessionRow(t, raw, sessionFixture{
+		ID: "refreshed", Status: "dead", Mode: "worktree", WorktreePath: wtDir, HeartbeatAge: time.Hour,
+	}, now)
+	if _, err := raw.Exec(`UPDATE sessions SET heartbeat_at = ? WHERE id = 'refreshed'`, float64(now.Unix())); err != nil {
+		t.Fatal(err)
+	}
+
+	item, _ := reapOneSession(context.Background(), directReapConfig(repoDir), raw,
+		reapableSession{id: "refreshed", worktreePath: wtDir},
+		float64(now.Add(-30*time.Second).Unix()))
+	if item.Action != "skipped" {
+		t.Fatalf("action = %q (%s), want skipped", item.Action, item.Detail)
+	}
+	if !strings.Contains(item.Detail, "cutoff") {
+		t.Fatalf("detail = %q, want heartbeat-cutoff reason", item.Detail)
+	}
+	assertSessionUntouched(t, raw, repoDir, "refreshed", wtDir)
+}
+
+// #982 (b) variant: the row vanished between listing and reap (a concurrent
+// actor owns the reap) — abort, touch nothing.
+func TestReapOneSessionAbortsWhenRowVanished(t *testing.T) {
+	repoDir, _, raw := setupSessionWorld(t)
+	now := time.Now()
+	wtDir := seedSessionWorktreeWithUncommitted(t, repoDir, "vanished")
+	insertSessionRow(t, raw, sessionFixture{
+		ID: "vanished", Status: "dead", Mode: "worktree", WorktreePath: wtDir, HeartbeatAge: time.Hour,
+	}, now)
+	if _, err := raw.Exec(`DELETE FROM sessions WHERE id = 'vanished'`); err != nil {
+		t.Fatal(err)
+	}
+
+	item, _ := reapOneSession(context.Background(), directReapConfig(repoDir), raw,
+		reapableSession{id: "vanished", worktreePath: wtDir},
+		float64(now.Add(-30*time.Second).Unix()))
+	if item.Action != "skipped" {
+		t.Fatalf("action = %q (%s), want skipped", item.Action, item.Detail)
+	}
+	if !strings.Contains(item.Detail, "vanished") {
+		t.Fatalf("detail = %q, want vanished-row reason", item.Detail)
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "notes.txt")); err != nil {
+		t.Fatalf("worktree touched despite vanished row: %v", err)
+	}
+}
+
+// #982 fail-safe: a GitRunner without the SessionWorktreeEvidence capability
+// can never prove the uncommitted state was captured — the dirty-worktree
+// force-removal must be refused and the worktree left in place.
+func TestReapOneSessionRefusesDirtyForceRemoveWithoutEvidenceCapability(t *testing.T) {
+	repoDir, _, raw := setupSessionWorld(t)
+	now := time.Now()
+	wtDir := seedSessionWorktreeWithUncommitted(t, repoDir, "nocap")
+	insertSessionRow(t, raw, sessionFixture{
+		ID: "nocap", Status: "dead", Mode: "worktree", WorktreePath: wtDir, HeartbeatAge: 2 * time.Minute,
+	}, now)
+
+	cfg := directReapConfig(repoDir)
+	cfg.GitRunner = &dirtyRemoveRunner{}
+	item, prune := reapOneSession(context.Background(), cfg, raw,
+		reapableSession{id: "nocap", worktreePath: wtDir},
+		float64(now.Add(-30*time.Second).Unix()))
+	if item.Action != "skipped" {
+		t.Fatalf("action = %q (%s), want skipped", item.Action, item.Detail)
+	}
+	if !strings.Contains(item.Detail, "left in place") {
+		t.Fatalf("detail = %q, want refusal reason", item.Detail)
+	}
+	if prune {
+		t.Fatal("refused reap must not schedule a prune")
+	}
+	assertSessionUntouched(t, raw, repoDir, "nocap", wtDir)
+}
+
+// dirtyRemoveRunner simulates a dirty worktree (git worktree remove refuses)
+// while carrying no SessionWorktreeEvidence capability.
+type dirtyRemoveRunner struct {
+	MockCleanupGitRunner
+}
+
+func (f *dirtyRemoveRunner) WorktreeRemove(ctx context.Context, repoDir, wtPath string) error {
+	return fmt.Errorf("git worktree remove: dirty worktree")
 }
 
 // A pre-v11 database without a sessions table sweeps as a no-op, not an error.

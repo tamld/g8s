@@ -132,6 +132,26 @@ type CleanupGitRunner interface {
 	CreateTag(ctx context.Context, repoDir, tag, commit string) error
 }
 
+// SessionWorktreeEvidence is an optional CleanupGitRunner capability (#982):
+// captures the uncommitted state of a session worktree before the orphan-
+// session reap force-removes it. Runners without it can never have their
+// dirty-worktree fallback exercised — the reap refuses the force-removal and
+// leaves the worktree in place instead of destroying uncaptured work.
+type SessionWorktreeEvidence interface {
+	// WorktreeDiffHead returns `git diff HEAD` output for the worktree at
+	// wtPath (tracked changes, staged and unstaged, vs the tip).
+	WorktreeDiffHead(ctx context.Context, wtPath string) (string, error)
+	// WorktreeDiff returns `git diff` (index vs working tree) — the
+	// unborn-HEAD fallback for WorktreeDiffHead.
+	WorktreeDiff(ctx context.Context, wtPath string) (string, error)
+	// WorktreeStatusPorcelain returns `git status --porcelain` output for the
+	// worktree at wtPath.
+	WorktreeStatusPorcelain(ctx context.Context, wtPath string) (string, error)
+	// WorktreeUntrackedFiles lists untracked, non-ignored file paths relative
+	// to the worktree root (forward-slash separated, git semantics).
+	WorktreeUntrackedFiles(ctx context.Context, wtPath string) ([]string, error)
+}
+
 // DefaultProcessManager is the production implementation of ProcessManager using OS primitives and ProcessLister.
 type DefaultProcessManager struct {
 	RepoDir string
@@ -501,6 +521,55 @@ func (g *DefaultCleanupGitRunner) WorktreeRemove(ctx context.Context, repoDir, w
 		return fmt.Errorf("git worktree remove: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// WorktreeDiffHead implements SessionWorktreeEvidence (#982).
+func (g *DefaultCleanupGitRunner) WorktreeDiffHead(ctx context.Context, wtPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", wtPath, "diff", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff HEAD: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+// WorktreeDiff implements SessionWorktreeEvidence (#982): the unborn-HEAD
+// fallback for WorktreeDiffHead.
+func (g *DefaultCleanupGitRunner) WorktreeDiff(ctx context.Context, wtPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", wtPath, "diff")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+// WorktreeStatusPorcelain implements SessionWorktreeEvidence (#982).
+func (g *DefaultCleanupGitRunner) WorktreeStatusPorcelain(ctx context.Context, wtPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", wtPath, "status", "--porcelain")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git status --porcelain: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+// WorktreeUntrackedFiles implements SessionWorktreeEvidence (#982):
+// `git ls-files --others --exclude-standard -z` — NUL-delimited so exotic
+// filenames (spaces, newlines) survive intact.
+func (g *DefaultCleanupGitRunner) WorktreeUntrackedFiles(ctx context.Context, wtPath string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", wtPath, "ls-files", "--others", "--exclude-standard", "-z")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files --others: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	var files []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			files = append(files, p)
+		}
+	}
+	return files, nil
 }
 
 func (g *DefaultCleanupGitRunner) MergedBranches(ctx context.Context, repoDir string) ([]string, error) {
