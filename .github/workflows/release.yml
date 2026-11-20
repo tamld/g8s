@@ -17,7 +17,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +27,9 @@ jobs:
   verify:
     name: Verify tag and run full test suite
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -114,6 +117,9 @@ jobs:
     name: Build darwin/amd64 + darwin/arm64 archives
     runs-on: macos-latest
     needs: verify
+    timeout-minutes: 30
+    permissions:
+      contents: read
     env:
       CGO_ENABLED: '0'
     steps:
@@ -172,6 +178,9 @@ jobs:
     name: Build windows/amd64 + windows/arm64 archives
     runs-on: windows-latest
     needs: verify
+    timeout-minutes: 30
+    permissions:
+      contents: read
     env:
       CGO_ENABLED: '0'
     steps:
@@ -235,6 +244,7 @@ jobs:
     name: Publish GitHub Release with Linux archives
     runs-on: ubuntu-latest
     needs: [verify, build-darwin, build-windows]
+    timeout-minutes: 40
     permissions:
       contents: write
       id-token: write
@@ -250,10 +260,25 @@ jobs:
         with:
           go-version: '1.26.11'
 
-      - name: Install Syft for SBOM generation
+      - name: Install Syft for SBOM generation (pinned + SHA-256 verified, #983)
+        env:
+          SYFT_VERSION: '1.57.2'
+          SYFT_SHA256: 'ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b'
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
-          syft --version
+          set -euo pipefail
+          # Pinned release tarball + embedded SHA-256 (cross-checked against
+          # syft_1.57.2_checksums.txt from the anchore/syft v1.57.2 release).
+          # Replaces the former `curl | sudo sh` of the unpinned @main install
+          # script; installs into the runner temp dir — no root, no pipe-to-shell.
+          # shellcheck source=tools/ci_fetch.sh
+          source tools/ci_fetch.sh
+          SYFT_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          SYFT_TGZ="${RUNNER_TEMP}/syft_${SYFT_VERSION}.tar.gz"
+          ci_fetch "$SYFT_URL" "$SYFT_TGZ" "$SYFT_SHA256"
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf "$SYFT_TGZ" -C "${RUNNER_TEMP}/bin" syft
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/bin/syft" version
 
       - name: Install Cosign for keyless checksum signing
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
@@ -262,7 +287,7 @@ jobs:
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
-          version: '~> v2.10'
+          version: v2.20.3
           args: release --clean --skip=homebrew
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -282,6 +307,9 @@ jobs:
     runs-on: macos-latest
     needs: build-darwin
     if: false
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Download darwin artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

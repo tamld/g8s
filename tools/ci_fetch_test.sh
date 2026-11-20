@@ -137,6 +137,79 @@ if [ "$calls" -ne 3 ]; then
 fi
 echo "  [PASS]"
 
+echo "Testing: sha256 verification passes with correct digest (#983)"
+export CI_FETCH_RETRY_DELAY=0
+hash_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+: >"$CALLS_FILE"
+export CURL_SHIM_MODE=ok
+GOOD_SHA="$(hash_file "$PAYLOAD_FILE")"
+dest="${TMP_DIR}/t4.tar"
+ci_fetch "$TEST_URL" "$dest" "$GOOD_SHA"
+calls=$(cat "$CALLS_FILE")
+if [ "$calls" -ne 1 ]; then
+    echo "  [FAIL] expected 1 curl call with correct hash, got $calls"
+    exit 1
+fi
+if ! cmp -s "$dest" "$PAYLOAD_FILE"; then
+    echo "  [FAIL] dest content mismatch after verified fetch"
+    exit 1
+fi
+echo "  [PASS]"
+
+echo "Testing: sha256 mismatch fails closed after retries, dest removed (#983)"
+: >"$CALLS_FILE"
+WRONG_SHA="$(printf '%064d' 0 | tr '0' 'a')"
+dest="${TMP_DIR}/t5.tar"
+exit_code=0
+set +e
+ci_fetch "$TEST_URL" "$dest" "$WRONG_SHA" 2>/dev/null
+exit_code=$?
+set -e
+if [ "$exit_code" -eq 0 ]; then
+    echo "  [FAIL] expected non-zero exit on checksum mismatch"
+    exit 1
+fi
+if [ -e "$dest" ]; then
+    echo "  [FAIL] unverified artifact must not remain at dest"
+    exit 1
+fi
+calls=$(cat "$CALLS_FILE")
+if [ "$calls" -ne 3 ]; then
+    echo "  [FAIL] expected 3 curl calls (retries on mismatch), got $calls"
+    exit 1
+fi
+echo "  [PASS]"
+
+echo "Testing: malformed expected-sha256 fails closed before any download (#983)"
+: >"$CALLS_FILE"
+dest="${TMP_DIR}/t6.tar"
+exit_code=0
+set +e
+ci_fetch "$TEST_URL" "$dest" "deadbeef" 2>/dev/null
+exit_code=$?
+set -e
+if [ "$exit_code" -eq 0 ]; then
+    echo "  [FAIL] expected non-zero exit on malformed digest"
+    exit 1
+fi
+calls=$(cat "$CALLS_FILE" 2>/dev/null || true)
+[ -n "$calls" ] || calls=0
+if [ "$calls" -ne 0 ]; then
+    echo "  [FAIL] expected 0 curl calls for malformed digest, got $calls"
+    exit 1
+fi
+if [ -e "$dest" ]; then
+    echo "  [FAIL] no artifact should exist for malformed digest"
+    exit 1
+fi
+echo "  [PASS]"
+
 echo ""
 echo "[ALL CI_FETCH TESTS PASSED]"
 exit 0

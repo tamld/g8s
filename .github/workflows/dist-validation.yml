@@ -17,6 +17,7 @@ jobs:
   goreleaser-check:
     name: GoReleaser Check & Snapshot
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -54,18 +55,34 @@ jobs:
         if: env.CI_LANE != 'docs'
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
-          version: latest
+          version: v2.20.3
           args: check
 
-      - name: Install Syft
+      - name: Install Syft (pinned + SHA-256 verified, #983)
         if: env.CI_LANE != 'docs'
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        env:
+          SYFT_VERSION: '1.57.2'
+          SYFT_SHA256: 'ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b'
+        run: |
+          set -euo pipefail
+          # Pinned release tarball + embedded SHA-256 (cross-checked against
+          # syft_1.57.2_checksums.txt from the anchore/syft v1.57.2 release).
+          # Replaces the former `curl | sh` of the unpinned @main install script.
+          # shellcheck source=tools/ci_fetch.sh
+          source tools/ci_fetch.sh
+          SYFT_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          SYFT_TGZ="${RUNNER_TEMP}/syft_${SYFT_VERSION}.tar.gz"
+          ci_fetch "$SYFT_URL" "$SYFT_TGZ" "$SYFT_SHA256"
+          mkdir -p "${RUNNER_TEMP}/bin"
+          tar -xzf "$SYFT_TGZ" -C "${RUNNER_TEMP}/bin" syft
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/bin/syft" version
 
       - name: Run GoReleaser Snapshot Build
         if: env.CI_LANE != 'docs'
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
-          version: latest
+          version: v2.20.3
           args: release --snapshot --clean --skip=publish,sign,nfpm
 
       - name: Validate Release Matrix
