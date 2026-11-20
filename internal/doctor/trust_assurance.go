@@ -30,10 +30,15 @@ const TrustAssuranceSchema = "g8s.trust-assurance/v1"
 type TrustGateStatus string
 
 const (
-	TrustGateEnforced     TrustGateStatus = "ENFORCED"
-	TrustGateMediatedOnly TrustGateStatus = "MEDIATED_ONLY"
-	TrustGateNotEnforced  TrustGateStatus = "NOT_ENFORCED"
-	TrustGateUnverified   TrustGateStatus = "UNVERIFIED"
+	TrustGateEnforced TrustGateStatus = "ENFORCED"
+	// TrustGateCapabilityDetected marks a gate whose enforcement evidence comes from the
+	// sandbox policy contract only (e.g., PrepareSandbox reports kernel-enforced mode)
+	// without a live adversarial probe result. It must never count as ENFORCED for the
+	// overall non-compensatory verdict (issue #974).
+	TrustGateCapabilityDetected TrustGateStatus = "CAPABILITY_DETECTED"
+	TrustGateMediatedOnly       TrustGateStatus = "MEDIATED_ONLY"
+	TrustGateNotEnforced        TrustGateStatus = "NOT_ENFORCED"
+	TrustGateUnverified         TrustGateStatus = "UNVERIFIED"
 )
 
 var canonicalTrustGateOrder = []string{
@@ -127,13 +132,26 @@ func gateStatusRank(s TrustGateStatus) int {
 		return 3
 	case TrustGateMediatedOnly:
 		return 2
-	case TrustGateUnverified:
+	case TrustGateUnverified, TrustGateCapabilityDetected:
+		// CAPABILITY_DETECTED is adversarially unproven, so it degrades exactly like
+		// UNVERIFIED in the non-compensatory ranking (issue #974).
 		return 1
 	case TrustGateNotEnforced:
 		return 0
 	default:
 		return 0
 	}
+}
+
+// overallVerdictFor maps a gate status onto the honest overall verdict label. A
+// capability-detected gate degrades to UNVERIFIED at the overall level: the
+// verdict self-declares that adversarial verification is outstanding instead of
+// leaking the internal capability/probe distinction into the public verdict enum.
+func overallVerdictFor(s TrustGateStatus) TrustGateStatus {
+	if s == TrustGateCapabilityDetected {
+		return TrustGateUnverified
+	}
+	return s
 }
 
 // ComputeNonCompensatoryVerdict applies the ADR-0042 non-compensatory rule across all 6 TRUST gates.
@@ -163,13 +181,15 @@ func ComputeNonCompensatoryVerdict(gates []TrustGateAssessment) (verdict TrustGa
 		rank := gateStatusRank(g.Status)
 		if rank < minRank {
 			minRank = rank
-			verdict = g.Status
+			verdict = overallVerdictFor(g.Status)
 		}
 		switch g.Status {
 		case TrustGateEnforced:
 		case TrustGateMediatedOnly:
 			mediated = append(mediated, g.Gate)
-		case TrustGateUnverified:
+		case TrustGateUnverified, TrustGateCapabilityDetected:
+			// Capability-detected gates veto like unverified ones: policy-contract
+			// capability alone must not produce a clean overall verdict (#974).
 			veto = true
 			vetoReasons = append(vetoReasons, fmt.Sprintf("%s: %s", g.Gate, g.Detail))
 		default:
@@ -196,10 +216,10 @@ func ComputeNonCompensatoryVerdict(gates []TrustGateAssessment) (verdict TrustGa
 		rank := gateStatusRank(g.Status)
 		if rank < minRank {
 			minRank = rank
-			verdict = g.Status
+			verdict = overallVerdictFor(g.Status)
 		}
 		switch g.Status {
-		case TrustGateNotEnforced, TrustGateUnverified:
+		case TrustGateNotEnforced, TrustGateUnverified, TrustGateCapabilityDetected:
 			veto = true
 			vetoReasons = append(vetoReasons, fmt.Sprintf("%s: %s", g.Gate, g.Detail))
 		case TrustGateMediatedOnly:
@@ -341,6 +361,12 @@ func evaluateTrustG1(in TrustProbeInput) (gate TrustGateAssessment, mode, backen
 		} else if strings.TrimSpace(in.ProbeMetrics.EscapeDetail) != "" {
 			detail = fmt.Sprintf("%s; %s", detail, in.ProbeMetrics.EscapeDetail)
 		}
+	} else if st == TrustGateEnforced {
+		// Issue #974: kernel+network enforcement read from the sandbox policy contract
+		// is a capability signal, not adversarial proof. Without the live as-001
+		// escape probe the gate must not claim ENFORCED.
+		st = TrustGateCapabilityDetected
+		detail = fmt.Sprintf("%s (policy-contract capability; no live adversarial probe executed)", detail)
 	}
 
 	return TrustGateAssessment{
@@ -523,6 +549,9 @@ func evaluateTrustG2(in TrustProbeInput) (gate TrustGateAssessment, s0Provisione
 	}, s0Provisioned
 }
 
+// evaluateTrustG3 audit (#974): G3 already degrades honestly — with ProbeMetrics == nil
+// it reports UNVERIFIED (no capability is claimed), and ENFORCED only when the live
+// as-002 mutant-canary probe passed. No policy-contract-only ENFORCED path exists.
 func evaluateTrustG3(in TrustProbeInput) TrustGateAssessment {
 	if in.ProbeMetrics == nil {
 		return TrustGateAssessment{
@@ -561,6 +590,8 @@ func evaluateTrustG3(in TrustProbeInput) TrustGateAssessment {
 	}
 }
 
+// evaluateTrustG4 audit (#974): G4 already reports UNVERIFIED with ProbeMetrics == nil
+// (SQLite health alone is never claimed as enforcement) and NOT_ENFORCED on DB failure.
 func evaluateTrustG4(in TrustProbeInput) TrustGateAssessment {
 	if !in.DBHealthy {
 		return TrustGateAssessment{
@@ -694,6 +725,11 @@ func shortHexPrefix(s string) string {
 	return s[:12]
 }
 
+// evaluateTrustG6 audit (#974): G6's ENFORCED does not come from a policy contract read;
+// it is a behavioral self-check that actually executes the enforcement code paths
+// (EvolutionGuard token-cap and anti-oscillation halts, PromotionGate contract) and
+// asserts the halts fire. It is independent of ProbeMetrics by design (ADR-0042 G6 has
+// no external adversarial probe), so CAPABILITY_DETECTED does not apply here.
 func evaluateTrustG6() TrustGateAssessment {
 	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
 	fixedNow := func() time.Time { return now }
