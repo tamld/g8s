@@ -238,6 +238,13 @@ jobs:
             # warning-only, not blocking — but visible in PR
           fi
 
+      - name: Doc-to-Code SSoT & CLI Claim Parity (all lanes)
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go test -count=1 ./internal/mcp -run TestMCPAndRolesSSoTParity
+          go test -count=1 ./internal/cli -run TestScanRepoCoreMarkdownFilesBound
+
       - name: Early exit for docs lane
         shell: bash
         run: |
