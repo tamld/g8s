@@ -37,6 +37,19 @@ const (
 	maxTTL = 3600 * time.Second
 )
 
+// SQLite PRAGMA synchronous modes for the receipt handles (issue #984 C-2).
+const (
+	// synchronousModeNormal defers WAL fsyncs to checkpoint time: fast per
+	// commit, but the last commits before an OS crash / power loss can roll
+	// back. Correct for the issue hot path — a lost issue commit fails
+	// closed (the receipt never validates), so no replay window opens.
+	synchronousModeNormal = 1
+	// synchronousModeFull fsyncs the WAL on every commit. Required for
+	// consume paths: a rolled-back acknowledged consume (or revoke) turns an
+	// already-used / revoked receipt back into a replayable one.
+	synchronousModeFull = 2
+)
+
 // SchemaVersion defines the current SQLite database schema generation for write receipts.
 // Version 1: original write receipts schema.
 // Version 2: additive supervisor metadata columns (approach_idx, attempt_idx, rca_confidence, adr_path).
@@ -224,11 +237,21 @@ type ReceiptManager interface {
 
 // Manager is the SQLite-backed ReceiptManager implementation.
 type Manager struct {
-	db       *sql.DB
-	mu       sync.Mutex
-	clock    func() time.Time
-	stateDir string
-	pubKey   ed25519.PublicKey
+	db *sql.DB
+	// consumeDB is the dedicated durability handle for consume paths (issue
+	// #984 C-2): ValidateAndConsume and RevokeReceipt destroy single-use
+	// authorization state, and an acknowledged consume/revoke that rolls
+	// back on OS crash / power loss makes an already-used or revoked receipt
+	// replayable. Its DSN pins synchronous(FULL) so every consume-path
+	// commit fsyncs. Consume and revoke are rare, so the per-commit fsync
+	// cost is acceptable there; the issue hot path (bulk dispatch
+	// throughput) stays on the NORMAL pool. For in-memory databases a second
+	// handle would be a separate empty database, so the handle aliases db.
+	consumeDB *sql.DB
+	mu        sync.Mutex
+	clock     func() time.Time
+	stateDir  string
+	pubKey    ed25519.PublicKey
 }
 
 const schema = `
@@ -278,6 +301,11 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	if err != nil {
 		return nil, fmt.Errorf("load F0 verifier for %q: %w", dbPath, err)
 	}
+	// Issue hot path stays on synchronous(NORMAL): per-commit fsyncs here
+	// blew the 1000-issue dispatch budget on windows-latest (~52ms each),
+	// and a lost issue commit fails closed (the receipt never validates).
+	// Consume-path durability is carried by the dedicated consumeDB handle
+	// below, whose DSN pins synchronous(FULL) (issue #984 C-2).
 	dsn := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -292,6 +320,33 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 		db.Close()
 		return nil, fmt.Errorf("initialize receipt schema in %q: %w", dbPath, err)
 	}
+	// Dedicated durability handle for consume paths (issue #984 C-2). Opened
+	// after the schema gate so it never participates in migrations; two
+	// handles on one WAL file are safe (busy_timeout is set on both DSNs).
+	if signing.IsInMemorySQLitePath(dbPath) {
+		// A second handle on an in-memory database would be a separate empty
+		// database; alias the main pool (power-loss durability is moot for a
+		// RAM-backed DB anyway).
+		m.consumeDB = db
+	} else {
+		consumeDSN := pathutil.SQLiteURI(dbPath, "_txlock=immediate&_pragma=busy_timeout(30000)&_pragma=synchronous(FULL)")
+		consumeDB, cerr := sql.Open("sqlite", consumeDSN)
+		if cerr != nil {
+			db.Close()
+			return nil, fmt.Errorf("open receipt consume handle %q: %w", dbPath, cerr)
+		}
+		// Consume/revoke calls are serialized by m.mu, so a single pooled
+		// connection suffices and keeps every consume transaction on a
+		// connection whose DSN pragma is verified below.
+		consumeDB.SetMaxOpenConns(1)
+		consumeDB.SetMaxIdleConns(1)
+		if verr := verifyConsumeSyncPragma(consumeDB); verr != nil {
+			consumeDB.Close()
+			db.Close()
+			return nil, fmt.Errorf("verify consume handle durability in %q: %w", dbPath, verr)
+		}
+		m.consumeDB = consumeDB
+	}
 	if err := pathutil.HardenSQLiteFiles(dbPath); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("harden receipt database %q: %w", dbPath, err)
@@ -299,8 +354,39 @@ func NewReceiptManager(dbPath string, clock func() time.Time) (*Manager, error) 
 	return m, nil
 }
 
-// Close releases the underlying database handle.
+// verifyConsumeSyncPragma fails construction when the consume handle's DSN
+// pragma did not land: a silently-NORMAL consume commit would reintroduce the
+// #984 C-2 replay window (acknowledged consume lost on power loss) that this
+// handle exists to close.
+func verifyConsumeSyncPragma(db *sql.DB) error {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("pin consume handle connection: %w", err)
+	}
+	defer func() {
+		if cErr := conn.Close(); cErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: close consume pragma check connection: %v\n", cErr)
+		}
+	}()
+	var mode int
+	if err := conn.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&mode); err != nil {
+		return fmt.Errorf("read PRAGMA synchronous: %w", err)
+	}
+	if mode != synchronousModeFull {
+		return fmt.Errorf("consume handle PRAGMA synchronous = %d, want %d (FULL)", mode, synchronousModeFull)
+	}
+	return nil
+}
+
+// Close releases both database handles, consume handle first so no consume
+// transaction outlives the main pool shutdown.
 func (m *Manager) Close() error {
+	if m.consumeDB != nil && m.consumeDB != m.db {
+		if err := m.consumeDB.Close(); err != nil {
+			return errors.Join(err, m.db.Close())
+		}
+	}
 	return m.db.Close()
 }
 
@@ -871,6 +957,11 @@ func validateCanonicalEnvelope(env *CanonicalEnvelope) error {
 // ValidateAndConsume atomically validates receiptID and marks it consumed.
 // Exactly one caller ever succeeds for a given receipt; every subsequent
 // call fails with AlreadyConsumedError even across independent processes.
+//
+// The transaction runs on the dedicated consumeDB handle whose DSN pins
+// synchronous(FULL): the consume commit is the exact write whose loss would
+// make an already-used receipt replayable (issue #984 C-2), so it is fsynced
+// before the acknowledgment returns to the caller.
 func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*WriteReceipt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -878,7 +969,7 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 	var tx *sql.Tx
 	if err := withReceiptBusyRetry(func() error {
 		var beginErr error
-		tx, beginErr = m.db.Begin()
+		tx, beginErr = m.consumeDB.Begin()
 		return beginErr
 	}); err != nil {
 		return nil, fmt.Errorf("begin consume transaction: %w", err)
@@ -990,11 +1081,16 @@ func (m *Manager) ValidateAndConsume(receiptID string, consumerTaskID string) (*
 
 // RevokeReceipt deletes an unconsumed receipt, returning true when a live
 // receipt was revoked. Missing or already-consumed receipts report false.
+//
+// The DELETE runs on the dedicated consumeDB handle (synchronous(FULL)): an
+// acknowledged revoke that rolls back on crash / power loss would leave a
+// receipt the authority considered dead still live and consumable — the same
+// ack-loss replay hazard as ValidateAndConsume (issue #984 C-2).
 func (m *Manager) RevokeReceipt(receiptID string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	res, err := m.db.Exec(`DELETE FROM write_receipts WHERE receipt_id = ? AND consumed = 0`, receiptID)
+	res, err := m.consumeDB.Exec(`DELETE FROM write_receipts WHERE receipt_id = ? AND consumed = 0`, receiptID)
 	if err != nil {
 		return false, fmt.Errorf("revoke receipt %q: %w", receiptID, err)
 	}
@@ -1369,6 +1465,11 @@ func scanIntoReceipt(
 // PurgeExpired deletes receipts whose (a) TTL has elapsed AND (b) age exceeds
 // maxAge, OR which are consumed, bounded by maxRows per call to avoid long DB
 // locks under load. Returns the count of rows deleted.
+//
+// It deliberately runs on the NORMAL-sync main pool: it only removes rows
+// that are already consumed or expired, so a lost purge commit is harmless
+// (the next sweep retries), and fsync-per-batch would tax the janitor path
+// for no durability gain (issue #984 C-2 scoping).
 func (m *Manager) PurgeExpired(maxAge time.Duration, maxRows int) (int64, error) {
 	if maxRows <= 0 {
 		return 0, fmt.Errorf("maxRows must be > 0, got %d", maxRows)
