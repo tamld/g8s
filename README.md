@@ -177,6 +177,8 @@ Quantitative claims in [`docs/claims.yml`](docs/claims.yml) are bound via `tools
 <details>
 <summary>All 23 Registered MCP Tools (22 active + g8s_run stub — click to expand)</summary>
 
+#### Complete MCP Tool Inventory
+
 | Category | Tools | Reference |
 | :--- | :--- | :--- |
 | **Tasks & Containment** | `g8s_submit`, `g8s_dispatch`, `g8s_get`, `g8s_list_tasks`, `g8s_cancel_task`, `g8s_receipt_issue`, `g8s_run` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
@@ -185,6 +187,8 @@ Quantitative claims in [`docs/claims.yml`](docs/claims.yml) are bound via `tools
 | **Federation, Skills & Mesh** | `g8s_charter_issue`, `g8s_charter_verify`, `g8s_portfolio_status`, `g8s_skills_list`, `g8s_skills_read`, `g8s_coordinator_mesh` | [MCP Tools Reference](docs/user-guide/mcp-tools.md) |
 
 </details>
+
+### Agent Skills & Documentation
 
 > [!NOTE]
 > **AI Agents & Sibling Repos**: Autonomous coordinators should read [`AGENTS.md`](AGENTS.md), [`manifest.json`](manifest.json), and [`skills/g8s-supervisor/SKILL.md`](skills/g8s-supervisor/SKILL.md). External repos can adopt `g8s` via the pull-based [`offer/` Bundle](offer/README.md).

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ADR-0042 Verifiable Zero-Trust Execution & Evolution Infrastructure (`#944`)**:
+  - Ratified `TRUST-G1..G6`, Trust Root strictly outside LLM inference, the non-compensatory security veto rule, and the Tier A (bounded autonomous) / Tier B (`S0` Human TCB) evolution split ([`docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md`](docs/decisions/0042-verifiable-zero-trust-evolution-infrastructure.md)).
+- **Dedicated `S0` Human Ed25519 Key Custody & Live `deliver` Verification (`#953`, `#956`, `#964`)**:
+  - Added `internal/signing/s0_keys.go` (`s0-human.pub`, disjoint F0/S0 key verification), `internal/harness/trust_root.go` (`FileS0NonceStore` single-use replay guard, 24h TTL / 5m clock-skew checks, real SHA-256 diff and checks digest binding), wired live into `cmd/g8s/deliver.go` with adversarial E2E coverage (`cmd/g8s/deliver_trust_root_test.go`).
+- **Unforgeable `sandbox.EnforcementProof`, OS Outbound Socket Isolation & Hostile-Worker E2E (`#957`, `#965`)**:
+  - Sealed `sandbox.EnforcementProof` inside `internal/sandbox/policy_contract.go` so external callers cannot spoof `NetworkEnforced`, wired macOS Seatbelt `(deny network-outbound)` and Linux `bwrap --unshare-net` (`probeBwrapNet()`), reported honest `windows_job_object` posture, added `s0-human.key` to `SensitiveDenySpec`, and added real-OS hostile-worker E2E tests (`internal/sandbox/hostile_worker_e2e_test.go`).
+- **Non-Compensatory Per-OS `TRUST Assurance Status` Telemetry (`#959`, `#967`)**:
+  - Added `g8s.trust-assurance/v1` across `internal/doctor/trust_assurance.go`, `cmd/g8s/doctor.go`, `tools/assurance_benchmark.sh` (`--verify-binary-commit`, `--require-binary-match`, `--require-clean-vcs`), `Quality Gate` (Linux/Windows), and pre-publish multi-OS binary verification in `.github/workflows/release.yml`.
+- **Provider Transport Split, Async Cancel & Offline Conformance (`#950`, `#951`)**:
+  - Split `ProcessTransport` vs. `RequestTransport`, added async HTTP SSE streaming and `Handle.Cancel()`, enforced `agent-models.v2` capability gates, and added offline 8-CLI + HTTP adapter conformance tests.
+- **Process, Provenance & CI Hardening (`#954`, `#955`, `#962`, `#963`)**:
+  - Added pure-Go `tools/provenance_check`, `tools/safe_merge.sh`, and local `tools/pre_push.sh` parity checks.
+  - Wired `docs-lane` CI aggregators (`Crash-Survival Gate`, `Windows E2E Gate`) and PR-scoped `.github/workflows/block-bypass.yml` while deduplicating Windows test/lint runs.
+
+### Changed
+
+- **Live `EvolutionGuard` & Universal `PASS`/`FAIL` `PromotionGate` Wiring (`#953`, `#958`, `#966`)**:
+  - Wired `TRUST-G6` token, wall-clock, retry, and anti-oscillation caps into `internal/supervisor/evaluation_loop.go`, `internal/autopilot`, and `cmd/g8s/llm_call.go`; wired universal `PASS`/`FAIL` `PromotionGate` (`ProposeKnowledgeArtifact`, `VerifyAndPromoteArtifact`, `RevokeAndRollbackArtifact`, `VerifyPromotionGateContract`) into `internal/memory`, `cmd/g8s/memory.go`, and `cmd/g8s/f0_scorecard.go`.
+- **Human-First `README.md` Progressive Disclosure (`#960`, `#968`)**:
+  - Condensed `README.md` for human readers with collapsible sections while preserving 100% of CI, platform matrix, MCP tool parity, quantitative claims, and auto-synced tree contracts.
+
+### Fixed
+
+- **Unified NUL `-z` Diff Firewall, Strict Sandbox CLI & ToS Hygiene (`#945`, `#946`, `#947`, `#948`)**:
+  - Removed `.g8s` exemption from `VerifyWorktreeDiffScope`, enforced `.gitignore` delta and fail-closed `read_only`, wired `--require-kernel-sandbox`, narrowed env allowlists, hardened `scripts/install.sh` (`darwin_all`, fail-closed checksum and optional Cosign verification), and enforced vendor-neutral Layer 1/Layer 2 separation across tracked public files.
+- **POSIX `SIGKILL` Orphan Recovery, WAL Fencing & Runtime-Proven Claims (`#949`, `#952`)**:
+  - Automated POSIX orphan process sweeping, hardened single-host multi-coordinator SQLite WAL `deliver` fencing, added runtime `--test-report` binding to `tools/claims_check.sh`, and synced release `manifest.json` metadata.
+- **Release Clean-Tree Check Guard**:
+  - Updated `tools/release.sh` to ignore untracked local workspace scratch files via `git status --porcelain -uno`.
+
+### Verification
+
+- **Multi-OS CI, AppSec & Assurance**:
+  - Zero-CGO `go test ./...`, `-race` detector suite, `golangci-lint` (`0` issues), Semgrep (`0` findings), `gitleaks` (`0` leaks), `g8s eval run --category self-audit` (`5/5`), `g8s eval run --category assurance` (`5/5`, `TRUST-G1..G6` non-compensatory), `claims_check.sh` (`59/59`), `ci_doc_contract_check.sh` (`19/19`), and `ci_surface_inventory.sh` (`0` stale/broken/orphan).
+
 ## [0.25.0] - 2026-11-18
 
 ### Added

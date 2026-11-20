@@ -266,6 +266,8 @@ g8s mcp
 <details>
 <summary>Danh mục 23 công cụ MCP đã đăng ký (22 hoạt động + g8s_run dự trữ — nhấn để mở rộng)</summary>
 
+#### Danh mục 23 công cụ MCP đã đăng ký
+
 | Tên công cụ | Mục đích & Thao tác |
 | :--- | :--- |
 | `g8s_run` | Stub thực thi đồng bộ dự trữ hậu MVP (trả lỗi JSON-RPC `-32603`; dùng `g8s_submit`). |

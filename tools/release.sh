@@ -151,9 +151,9 @@ if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
     fi
 fi
 
-# Check for uncommitted changes (excluding release-managed files)
+# Check for uncommitted tracked changes (excluding release-managed files; preserve untracked local scratch)
 RELEASE_FILE_PATTERNS="cmd/g8s/version\.go|CHANGELOG\.md|manifest\.json|internal/mcp/server\.go|packaging/windows/g8s\.nsi|packaging/windows/g8s\.wxs|packaging/chocolatey/tools/chocolateyinstall\.ps1|packaging/winget/manifest\.yaml|packaging/chocolatey/g8s\.nuspec"
-UNCOMMITTED=$(git status --porcelain | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
+UNCOMMITTED=$(git status --porcelain -uno | grep -v -E "^(M|M | M) (${RELEASE_FILE_PATTERNS})$" || true)
 if [ -n "$UNCOMMITTED" ] && [ "$DRY_RUN" -eq 0 ]; then
     echo -e "${RED}Error: Uncommitted changes detected. Commit or stash first.${NC}" >&2
     git status --short
