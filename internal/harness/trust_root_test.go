@@ -3,8 +3,11 @@ package harness
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -495,5 +498,83 @@ func TestComputeDeliverableArtifactDigestDeterministicAndSensitive(t *testing.T)
 	}
 	if d4 == d3 {
 		t.Fatal("expected deleted file removal to alter deliverable artifact digest")
+	}
+}
+
+// TestFileS0NonceStore_CrossProcessConsumeExactlyOnce is the #972 red-test:
+// two independent store instances (each with its own in-process mutex, like
+// two coordinator processes sharing one state dir) consuming the same nonce
+// concurrently must serialize — exactly one consume succeeds, the other gets
+// ErrS0NonceReplayed. Before the cross-process file lock both could observe
+// the nonce as unused and both consume it.
+func TestFileS0NonceStore_CrossProcessConsumeExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s0-used-nonces.json")
+	expires := time.Date(2026, 12, 20, 1, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 11, 20, 1, 0, 0, 0, time.UTC)
+
+	for round := 0; round < 20; round++ {
+		nonce := "nonce-972-round-" + strconv.Itoa(round)
+		storeA := NewFileS0NonceStore(path)
+		storeB := NewFileS0NonceStore(path)
+
+		errCh := make(chan error, 2)
+		go func() { errCh <- storeA.CheckAndConsume(nonce, expires, now, true) }()
+		go func() { errCh <- storeB.CheckAndConsume(nonce, expires, now, true) }()
+
+		errA, errB := <-errCh, <-errCh
+		consumed := 0
+		for _, err := range []error{errA, errB} {
+			if err == nil {
+				consumed++
+				continue
+			}
+			if !errors.Is(err, ErrS0NonceReplayed) {
+				t.Fatalf("round %d: unexpected consume error %v", round, err)
+			}
+		}
+		if consumed != 1 {
+			t.Fatalf("round %d: exactly-one consume violated — got %d successes (A=%v B=%v)", round, consumed, errA, errB)
+		}
+	}
+}
+
+// TestEvaluateTrustRootMutation_NilStoreGuard is the #972 nil-store invariant:
+// a real (non-dry-run) Tier-B application without a nonce store must deny with
+// a typed code instead of silently skipping replay protection; a dry-run
+// planning decision may proceed but records the skipped check.
+func TestEvaluateTrustRootMutation_NilStoreGuard(t *testing.T) {
+	fx := newTestS0Fixture(t)
+	paths := []string{".g8s/trust-boundaries.yml"}
+
+	base := TrustRootRequest{
+		ActorStratum:              "F0",
+		ActorID:                   "f0-supervisor",
+		TargetPaths:               paths,
+		DeterministicChecksPassed: true,
+		S0PublicKey:               fx.s0Pub,
+		F0PublicKey:               fx.f0Pub,
+		Now:                       fx.now,
+		ObservedChecksDigest:      fx.checksDigest,
+		ObservedArtifactDigest:    fx.artDigest,
+	}
+
+	real := base
+	real.DryRun = false
+	real.S0Approval = fx.signedAttestation(t, paths, "nonce-nil-guard-real")
+	dec := EvaluateTrustRootMutation(real)
+	if dec.Allowed || dec.Code != CodeTrustRootS0NonceStoreRequired {
+		t.Fatalf("real Tier-B application with nil NonceStore must deny with %s, got %+v", CodeTrustRootS0NonceStoreRequired, dec)
+	}
+
+	dry := base
+	dry.DryRun = true
+	dry.S0Approval = fx.signedAttestation(t, paths, "nonce-nil-guard-dry")
+	decDry := EvaluateTrustRootMutation(dry)
+	if !decDry.Allowed {
+		t.Fatalf("dry-run planning decision with nil NonceStore should proceed, got %+v", decDry)
+	}
+	if !strings.Contains(decDry.Reason, "SKIPPED") {
+		t.Fatalf("dry-run reason must record the skipped replay check, got %q", decDry.Reason)
 	}
 }
