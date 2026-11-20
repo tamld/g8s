@@ -434,10 +434,42 @@ func ComputeChecksDigest(raw []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// ComputeDeliverableArtifactDigest deterministically hashes all staged additions/modifications and deletions.
+// maxDeliverableFileBytes caps per-file disk reads of deliverable artifacts at 512 MiB
+// (#981). Deliverables are trusted-size, so the cap is deliberately far above the fsops
+// 64 MiB text-tool cap to avoid false positives on legitimately large artifacts; it only
+// stops a pathological file from exhausting memory during digest/evidence capture.
+const maxDeliverableFileBytes int64 = 512 << 20
+
+// ErrDeliverableArtifactTooLarge is wrapped in the error returned when a deliverable
+// artifact on disk exceeds maxDeliverableFileBytes; detect it via errors.Is.
+var ErrDeliverableArtifactTooLarge = errors.New("trust-root: deliverable artifact exceeds maximum readable size")
+
+// checkDeliverableSize rejects a deliverable artifact above maxDeliverableFileBytes (#981).
+func checkDeliverableSize(path string, size int64) error {
+	if size > maxDeliverableFileBytes {
+		return fmt.Errorf("%w: %s is %d bytes (limit %d)", ErrDeliverableArtifactTooLarge, path, size, maxDeliverableFileBytes)
+	}
+	return nil
+}
+
+// readDeliverableFile is the bounded disk read shared by the deliverable digest
+// variants (#981): stat-guarded at 512 MiB before the bytes are buffered.
+func readDeliverableFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkDeliverableSize(path, info.Size()); err != nil {
+		return nil, err
+	}
+	// #nosec G304 -- rel has already been normalized and checked against traversal above.
+	return os.ReadFile(path)
+}
+
 // deliverableDigest is the single source of framing truth for the deliverable
 // artifact digest (#973): every variant — disk-backed or content-backed — must
 // produce byte-identical digests for identical (applyPaths, deletePaths, contents).
+// It deterministically hashes all staged additions/modifications and deletions.
 func deliverableDigest(applyPaths, deletePaths []string, read func(rel string) ([]byte, error)) (string, error) {
 	normApply := CanonicalizeTCBPaths(applyPaths)
 	normDelete := CanonicalizeTCBPaths(deletePaths)
@@ -473,8 +505,7 @@ func ComputeDeliverableArtifactDigest(worktreeDir string, applyPaths, deletePath
 	}
 	return deliverableDigest(applyPaths, deletePaths, func(rel string) ([]byte, error) {
 		fullPath := filepath.Join(worktreeDir, filepath.FromSlash(rel))
-		// #nosec G304 -- rel has already been normalized and checked against traversal above.
-		return os.ReadFile(fullPath)
+		return readDeliverableFile(fullPath)
 	})
 }
 
@@ -489,8 +520,7 @@ func ComputeDeliverableArtifactDigestWithContents(worktreeDir string, applyPaths
 	contents := make(map[string][]byte, len(applyPaths))
 	digest, err := deliverableDigest(applyPaths, deletePaths, func(rel string) ([]byte, error) {
 		fullPath := filepath.Join(worktreeDir, filepath.FromSlash(rel))
-		// #nosec G304 -- rel has already been normalized and checked against traversal above.
-		data, err := os.ReadFile(fullPath)
+		data, err := readDeliverableFile(fullPath)
 		if err != nil {
 			return nil, err
 		}
