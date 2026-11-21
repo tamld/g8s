@@ -28,6 +28,14 @@ const (
 // ErrNetworkEnforcementRequired is returned when enforced OS socket blocking is requested but unavailable.
 var ErrNetworkEnforcementRequired = errors.New("E_NETWORK_ENFORCEMENT_REQUIRED")
 
+// ErrDegradedSandboxNotAllowed is returned (#971 WP1) when a workspace_write
+// attempt cannot achieve kernel-enforced containment on this host and the
+// operator has not explicitly opted in via --allow-degraded-sandbox /
+// G8S_ALLOW_DEGRADED_SANDBOX=1. Fail-closed, mirroring the #972-era posture:
+// degraded execution is never silent — it is either refused with this typed
+// error or proceeds with sandbox_degraded recorded in the attempt envelope.
+var ErrDegradedSandboxNotAllowed = errors.New("E_SANDBOX_DEGRADED_NOT_ALLOWED")
+
 // RequestedPolicy declares pre-spawn intent from permission, receipt, and sandbox flags.
 type RequestedPolicy struct {
 	Permission             string   `json:"permission,omitempty"`
@@ -38,7 +46,12 @@ type RequestedPolicy struct {
 	RequireKernelEnforced  bool     `json:"require_kernel_enforced"`
 	NoSandbox              bool     `json:"no_sandbox,omitempty"`
 	RequireNetworkEnforced bool     `json:"require_network_enforced,omitempty"`
-	TransportKind          string   `json:"transport_kind,omitempty"`
+	// AllowDegradedSandbox is the explicit operator opt-in (#971 WP1) that lets
+	// a workspace_write attempt proceed below kernel_enforced containment with
+	// sandbox_degraded recorded in the envelope. Without it the attempt is
+	// refused (E_SANDBOX_DEGRADED_NOT_ALLOWED).
+	AllowDegradedSandbox bool   `json:"allow_degraded_sandbox,omitempty"`
+	TransportKind        string `json:"transport_kind,omitempty"`
 }
 
 // EvaluatedPolicy captures deterministic pre-spawn admission decisions.
@@ -61,6 +74,12 @@ type EffectiveEnforcement struct {
 	HoldoutDenied      bool               `json:"holdout_denied"`
 	DiffFirewallActive bool               `json:"diff_firewall_active"`
 	EpistemicClass     EpistemicClass     `json:"epistemic_class"`
+	// SandboxDegraded (#971 WP1) is true whenever the achieved containment is
+	// below ModeKernelEnforced while a sandbox was requested — including the
+	// Windows job_object_env_scrubbed baseline (recorded, never a lockout) and
+	// explicit --no-sandbox operator opt-outs. Machine-readable, never silent.
+	SandboxDegraded       bool   `json:"sandbox_degraded"`
+	SandboxDegradedReason string `json:"sandbox_degraded_reason,omitempty"`
 }
 
 // EnforcementProof is an unforgeable capability value minted by enforcement probes.
@@ -228,6 +247,21 @@ func EvaluatePolicyContract(req RequestedPolicy, proof EnforcementProof) PolicyE
 		reqMode = "policy_only"
 	}
 
+	// #971 WP1: honest degraded-containment recording. Whenever the achieved
+	// containment is below kernel_enforced while a sandbox was requested, the
+	// report says so explicitly — including the Windows job_object_env_scrubbed
+	// platform baseline (recorded, never a false lockout) and explicit
+	// --no-sandbox operator opt-outs.
+	degraded := mode != ModeKernelEnforced
+	degradedReason := ""
+	if degraded {
+		if req.NoSandbox {
+			degradedReason = "sandbox disabled by operator (--no-sandbox); no OS containment applied"
+		} else {
+			degradedReason = sandboxDegradedReason(mode, backend)
+		}
+	}
+
 	allowed := true
 	rejected := false
 	rejCode := ""
@@ -243,6 +277,18 @@ func EvaluatePolicyContract(req RequestedPolicy, proof EnforcementProof) PolicyE
 		rejected = true
 		rejCode = ErrNetworkEnforcementRequired.Error()
 		rejReason = fmt.Sprintf("network enforcement is %s backend=%s (enforced OS socket isolation required)", netEnf, backend)
+	// #971 WP1 capability-probed preflight: workspace_write over a local process
+	// transport must not silently degrade to policy_only on hosts without a
+	// kernel sandbox backend (restricted Linux/Docker CI). Fail closed unless the
+	// operator explicitly allowed degradation; Windows job_object_env_scrubbed
+	// and kernel_enforced hosts are never gated.
+	case isProcessTransport(req.TransportKind) && !req.NoSandbox &&
+		strings.EqualFold(strings.TrimSpace(req.Permission), "workspace_write") &&
+		mode == ModePolicyOnly && !req.AllowDegradedSandbox:
+		allowed = false
+		rejected = true
+		rejCode = ErrDegradedSandboxNotAllowed.Error()
+		rejReason = fmt.Sprintf("workspace_write cannot achieve kernel-enforced containment on this host (mode=%s backend=%s); re-run with --allow-degraded-sandbox (submit) or G8S_ALLOW_DEGRADED_SANDBOX=1 (worker) to proceed with sandbox_degraded recorded in the envelope", mode, backend)
 	}
 
 	denyDirs := MergeDenyDirs(nil, req.HoldoutDenyDirs)
@@ -255,6 +301,13 @@ func EvaluatePolicyContract(req RequestedPolicy, proof EnforcementProof) PolicyE
 	perm := strings.ToLower(strings.TrimSpace(req.Permission))
 	diffFirewallActive := perm == "workspace_write" || perm == "read_only"
 
+	// A refused attempt did not proceed degraded; the rejection reason carries
+	// the explanation instead (SandboxDegraded stays false).
+	if rejected {
+		degraded = false
+		degradedReason = ""
+	}
+
 	return PolicyEnforcementReport{
 		Requested: req,
 		Evaluated: EvaluatedPolicy{
@@ -266,17 +319,40 @@ func EvaluatePolicyContract(req RequestedPolicy, proof EnforcementProof) PolicyE
 			EnforcedDenyDirs:    enforcedDenyDirs,
 		},
 		Effective: EffectiveEnforcement{
-			ContainmentMode:    mode,
-			SandboxBackend:     backend,
-			NetworkEnforcement: netEnf,
-			NetworkDetail:      netDetail,
-			ProofSource:        proofSource,
-			HoldoutDenied:      holdoutDenied,
-			DiffFirewallActive: diffFirewallActive,
-			EpistemicClass:     EpistemicMeasuredMetric,
+			ContainmentMode:       mode,
+			SandboxBackend:        backend,
+			NetworkEnforcement:    netEnf,
+			NetworkDetail:         netDetail,
+			ProofSource:           proofSource,
+			HoldoutDenied:         holdoutDenied,
+			DiffFirewallActive:    diffFirewallActive,
+			EpistemicClass:        EpistemicMeasuredMetric,
+			SandboxDegraded:       degraded,
+			SandboxDegradedReason: degradedReason,
 		},
 		NetworkEnforcement:  netEnf,
 		RejectedBeforeSpawn: rejected,
 		EpistemicClass:      EpistemicMeasuredMetric,
+	}
+}
+
+// isProcessTransport reports whether the policy request targets a locally
+// spawned process. Mediated HTTP/API transports have no local process to
+// sandbox, so the workspace_write degraded gate does not apply to them.
+func isProcessTransport(transport string) bool {
+	t := strings.ToLower(strings.TrimSpace(transport))
+	return t == "" || t == "process"
+}
+
+// sandboxDegradedReason explains, per containment mode, why the achieved
+// containment sits below kernel_enforced (#971 WP1).
+func sandboxDegradedReason(mode ContainmentMode, backend string) string {
+	switch mode {
+	case ModeJobObjectEnvScrubbed:
+		return fmt.Sprintf("windows job_object_env_scrubbed baseline (backend=%s): process-tree termination and environment scrubbing only; no kernel filesystem ACLs or outbound socket isolation", backend)
+	case ModePolicyOnly:
+		return fmt.Sprintf("host lacks kernel sandbox enforcement (backend=%s): policy-only fallback has no OS filesystem or socket isolation", backend)
+	default:
+		return fmt.Sprintf("containment mode=%s backend=%s below kernel_enforced", mode, backend)
 	}
 }

@@ -18,10 +18,13 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 	if err != nil {
 		const fallback = "/usr/bin/sandbox-exec"
 		if st, statErr := os.Stat(fallback); statErr != nil || st.IsDir() {
-			if ownTmp {
-				removeAllLogged(tmpDir)
-			}
-			return nil, fmt.Errorf("sandbox: locate sandbox-exec: %w", err)
+			// #971 WP1 capability-probed preflight: this host has no Seatbelt.
+			// Return the honest policy-only launch instead of a hard error; the
+			// central policy gate in Prepare decides — workspace_write without
+			// --allow-degraded-sandbox is refused (E_SANDBOX_DEGRADED_NOT_ALLOWED),
+			// otherwise the attempt proceeds with sandbox_degraded recorded
+			// (never silent).
+			return buildDarwinPolicyOnlyLaunch(cfg, env, tmpDir, sandboxID, ownTmp), nil
 		}
 		sbBin = fallback
 	}
@@ -56,6 +59,23 @@ func prepareOS(cfg Config, env []string, tmpDir, gocacheDir, sandboxID string, o
 		Cleanup:   makeDarwinCleanup(sandboxID, tmpDir, ownTmp),
 		proof:     newSandboxKernelProof(ModeKernelEnforced, "seatbelt", cfg.RequireNetworkEnforced, netDetail),
 	}, nil
+}
+
+// buildDarwinPolicyOnlyLaunch returns the honest #971 WP1 fallback for hosts
+// without sandbox-exec: unwrapped argv under ModePolicyOnly so the central
+// policy gate (not the OS layer) owns the degraded decision.
+func buildDarwinPolicyOnlyLaunch(cfg Config, env []string, tmpDir, sandboxID string, ownTmp bool) *PreparedLaunch {
+	return &PreparedLaunch{
+		Argv:      append([]string{}, cfg.Argv...),
+		Env:       env,
+		Mode:      ModePolicyOnly,
+		Backend:   "macos_policy_only",
+		TempDir:   tmpDir,
+		SandboxID: sandboxID,
+		Cleanup:   makeDarwinCleanup(sandboxID, tmpDir, ownTmp),
+		proof: newSandboxKernelProof(ModePolicyOnly, "macos_policy_only", false,
+			"macOS policy_only fallback: sandbox-exec unavailable; no kernel filesystem or socket isolation"),
+	}
 }
 
 func makeDarwinCleanup(sandboxID, tmpDir string, ownTmp bool) func() {

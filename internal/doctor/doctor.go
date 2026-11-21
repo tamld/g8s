@@ -58,20 +58,22 @@ type CapabilityEntry struct {
 
 // DoctorReport contains all executed health and sanity checks.
 type DoctorReport struct {
-	OverallStatus    string                `json:"overall_status"`              // HEALTHY, DEGRADED, UNHEALTHY
-	CapabilityStatus string                `json:"capability_status,omitempty"` // FULL, PARTIAL, MINIMAL (#645)
-	Capabilities     []CapabilityEntry     `json:"capabilities,omitempty"`      // Optional capability matrix (#645)
-	TrustAssurance   *TrustAssuranceStatus `json:"trust_assurance_status,omitempty"`
-	Platform         string                `json:"platform"`
-	GoRuntime        string                `json:"go_runtime"`
-	ZeroCGO          bool                  `json:"zero_cgo"`
-	Scope            string                `json:"scope,omitempty"`
-	ConfigDir        string                `json:"config_dir,omitempty"`
-	DataDir          string                `json:"data_dir,omitempty"`
-	CacheDir         string                `json:"cache_dir,omitempty"`
-	DatabasePath     string                `json:"database_path,omitempty"`
-	Checks           []DiagnosticResult    `json:"checks"`
-	AppliedFixes     []string              `json:"applied_fixes,omitempty"`
+	OverallStatus     string                     `json:"overall_status"`              // HEALTHY, DEGRADED, UNHEALTHY
+	CapabilityStatus  string                     `json:"capability_status,omitempty"` // FULL, PARTIAL, MINIMAL (#645)
+	Capabilities      []CapabilityEntry          `json:"capabilities,omitempty"`      // Optional capability matrix (#645)
+	TrustAssurance    *TrustAssuranceStatus      `json:"trust_assurance_status,omitempty"`
+	SandboxCapability *sandbox.SandboxCapability `json:"sandbox_capability,omitempty"` // Capability-probed sandbox preflight (#971 WP1)
+	OperatingModes    *OperatingModesStatus      `json:"operating_modes,omitempty"`    // Mode 1 / Mode 2 readiness (#971 WP1)
+	Platform          string                     `json:"platform"`
+	GoRuntime         string                     `json:"go_runtime"`
+	ZeroCGO           bool                       `json:"zero_cgo"`
+	Scope             string                     `json:"scope,omitempty"`
+	ConfigDir         string                     `json:"config_dir,omitempty"`
+	DataDir           string                     `json:"data_dir,omitempty"`
+	CacheDir          string                     `json:"cache_dir,omitempty"`
+	DatabasePath      string                     `json:"database_path,omitempty"`
+	Checks            []DiagnosticResult         `json:"checks"`
+	AppliedFixes      []string                   `json:"applied_fixes,omitempty"`
 }
 
 // Doctor provides diagnostic health and environment checks.
@@ -355,6 +357,10 @@ func (d *Doctor) RunDiagnosticsWithFix(ctx context.Context, dbPath string, autoF
 
 	report.CapabilityStatus, report.Capabilities = EvaluateCapabilities(report.Checks)
 	report.TrustAssurance = d.evaluateTrustAssurance(dbPath, report.Checks)
+	// #971 WP1: capability-probed sandbox preflight + honest Mode 1/2 readiness.
+	report.SandboxCapability = new(sandbox.SandboxCapability)
+	*report.SandboxCapability = sandbox.ProbeCapability()
+	report.OperatingModes = evaluateOperatingModesFromChecks(report, report.SandboxCapability)
 
 	return report
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/tamld/g8s/internal/dispatch"
 
 	"github.com/tamld/g8s/internal/reflex"
+	"github.com/tamld/g8s/internal/sandbox"
 	"github.com/tamld/g8s/internal/telemetry"
 )
 
@@ -767,6 +768,22 @@ func outcomeEnvelope(ok bool, status, stdout, stderr string) map[string]any {
 		env["altered_fields"] = altered
 	}
 	return env
+}
+
+// attachSandboxDegraded records honest machine-readable degraded containment on
+// an attempt envelope (#971 WP1): sandbox_degraded=true plus a readable reason
+// whenever the achieved containment is below kernel_enforced while a sandbox
+// was requested — Windows job_object_env_scrubbed included (recorded, never a
+// false lockout). Refused attempts report the rejection through
+// policy_enforcement.evaluated_policy instead and stay sandbox_degraded=false.
+func attachSandboxDegraded(env map[string]any, policyReport *sandbox.PolicyEnforcementReport) {
+	if env == nil || policyReport == nil || !policyReport.Effective.SandboxDegraded {
+		return
+	}
+	env["sandbox_degraded"] = true
+	if reason := strings.TrimSpace(policyReport.Effective.SandboxDegradedReason); reason != "" {
+		env["sandbox_degraded_reason"] = reason
+	}
 }
 
 // needsInterpreterIdentityCheck reports whether path names an interpreter

@@ -46,6 +46,11 @@ type Config struct {
 	NoSandbox              bool
 	RequireKernelEnforced  bool
 	RequireNetworkEnforced bool
+	// AllowDegradedSandbox (#971 WP1): explicit operator opt-in that lets a
+	// workspace_write attempt proceed below kernel_enforced containment with
+	// sandbox_degraded recorded in the attempt envelope. Without it, hosts
+	// lacking a kernel sandbox backend refuse workspace_write (fail-closed).
+	AllowDegradedSandbox bool
 }
 
 // PreparedLaunch holds the wrapped command vector, scrubbed environment, containment
@@ -59,7 +64,11 @@ type PreparedLaunch struct {
 	SandboxID    string
 	PolicyReport *PolicyEnforcementReport
 	Cleanup      func()
-	proof        EnforcementProof
+	// Degraded (#971 WP1) mirrors PolicyReport.Effective.SandboxDegraded: true
+	// when containment is below kernel_enforced with the sandbox requested.
+	Degraded       bool
+	DegradedReason string
+	proof          EnforcementProof
 }
 
 // CanonicalPath cleans p and resolves symlinks on the longest existing prefix,
@@ -183,11 +192,13 @@ func Prepare(cfg Config) (*PreparedLaunch, error) {
 				}
 			},
 		}
+		launch.Degraded = report.Effective.SandboxDegraded
+		launch.DegradedReason = report.Effective.SandboxDegradedReason
 		attachSandboxMarker(cfg.StateDir, cfg, launch)
 		return launch, nil
 	}
 
-	launch, osErr := prepareOS(cfg, env, tmpDir, gocacheDir, sandboxID, ownTmp)
+	launch, osErr := prepareOSFn(cfg, env, tmpDir, gocacheDir, sandboxID, ownTmp)
 	if osErr != nil {
 		return nil, osErr
 	}
@@ -209,9 +220,14 @@ func requestedPolicyFromConfig(cfg Config) RequestedPolicy {
 		RequireKernelEnforced:  cfg.RequireKernelEnforced,
 		NoSandbox:              cfg.NoSandbox,
 		RequireNetworkEnforced: cfg.RequireNetworkEnforced,
+		AllowDegradedSandbox:   cfg.AllowDegradedSandbox,
 		TransportKind:          "process",
 	}
 }
+
+// prepareOSFn is the per-OS launch-builder seam (build-tag selected); tests
+// stub it to exercise the central degraded-sandbox gate on any host (#971 WP1).
+var prepareOSFn = prepareOS
 
 func attachSandboxMarker(stateDir string, cfg Config, launch *PreparedLaunch) {
 	if launch == nil || strings.TrimSpace(stateDir) == "" || strings.TrimSpace(launch.SandboxID) == "" {
@@ -257,12 +273,17 @@ func enforcePolicyRequirement(launch *PreparedLaunch, reqPolicy RequestedPolicy)
 			launch.Cleanup()
 		}
 		sentinel := ErrKernelSandboxRequired
-		if report.Evaluated.RejectionCode == ErrNetworkEnforcementRequired.Error() {
+		switch report.Evaluated.RejectionCode {
+		case ErrNetworkEnforcementRequired.Error():
 			sentinel = ErrNetworkEnforcementRequired
+		case ErrDegradedSandboxNotAllowed.Error():
+			sentinel = ErrDegradedSandboxNotAllowed
 		}
 		return nil, &PolicyRejectionError{Err: sentinel, Report: report}
 	}
 	launch.PolicyReport = &report
+	launch.Degraded = report.Effective.SandboxDegraded
+	launch.DegradedReason = report.Effective.SandboxDegradedReason
 	return launch, nil
 }
 

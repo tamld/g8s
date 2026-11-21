@@ -398,6 +398,7 @@ func (s *Supervisor) collect(
 			HoldoutDenyDirs:       holdoutDeny,
 			RequireKernelEnforced: s.requireKernelSandbox,
 			NoSandbox:             req.NoSandbox,
+			AllowDegradedSandbox:  req.AllowDegradedSandbox || s.allowDegradedSandbox,
 			TransportKind:         "process",
 		}, sandbox.NewUnrestrictedProcessProof(sandbox.ContainmentMode(containmentMode), sandboxBackend))
 		policyReport = &rep
@@ -441,6 +442,7 @@ func (s *Supervisor) collect(
 		if policyReport != nil {
 			env["policy_enforcement"] = policyReport
 		}
+		attachSandboxDegraded(env, policyReport)
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
 		}
@@ -476,6 +478,7 @@ func (s *Supervisor) collect(
 		if policyReport != nil {
 			env["policy_enforcement"] = policyReport
 		}
+		attachSandboxDegraded(env, policyReport)
 		if u := extractAGYUsage(stdoutText); u != nil {
 			env["usage"] = u
 		}
@@ -874,6 +877,7 @@ func (s *Supervisor) collect(
 			if policyReport != nil {
 				m["policy_enforcement"] = policyReport
 			}
+			attachSandboxDegraded(m, policyReport)
 			if wr.ProviderDurationSeconds > 0 {
 				m["provider_duration_seconds"] = wr.ProviderDurationSeconds
 			}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamld/g8s/internal/dogfood"
 	"github.com/tamld/g8s/internal/pathutil"
 	_ "modernc.org/sqlite"
 )
@@ -333,6 +334,7 @@ func renderMetricsSections(ref string, baseline bool, gitFn func(...string) (str
 		fmt.Fprintf(&b, "YIELD: database unavailable — %v\n", openErr)
 		fmt.Fprint(&b, "LANES: database unavailable\n")
 		fmt.Fprint(&b, "JEV: database unavailable\n")
+		fmt.Fprint(&b, "SANDBOX ENFORCEMENT (workspace_write): database unavailable\n")
 		return b.String(), nil
 	}
 	defer func() {
@@ -344,6 +346,7 @@ func renderMetricsSections(ref string, baseline bool, gitFn func(...string) (str
 		fmt.Fprint(&b, "YIELD: tasks table absent — zero-row section\n")
 		fmt.Fprint(&b, "LANES: tasks table absent — zero-row section\n")
 		fmt.Fprint(&b, "JEV: tasks table absent — zero-row section\n")
+		fmt.Fprint(&b, "SANDBOX ENFORCEMENT (workspace_write): tasks table absent — zero-row section\n")
 		return b.String(), nil
 	}
 
@@ -415,6 +418,22 @@ func renderMetricsSections(ref string, baseline bool, gitFn func(...string) (str
 			}
 			fmt.Fprint(&b, "\n")
 		}
+	}
+
+	// SANDBOX ENFORCEMENT (workspace_write) — #971 WP2: attempts counted by
+	// enforcement outcome from the attempt envelopes.
+	summary, sErr := dogfood.LoadSandboxEnforcement(ctx, db, since)
+	if sErr != nil {
+		fmt.Fprintf(&b, "### SANDBOX ENFORCEMENT (workspace_write)\n\nquery error: %v\n\n", sErr)
+	} else {
+		fmt.Fprintf(&b, "### SANDBOX ENFORCEMENT (workspace_write)\n\n")
+		fmt.Fprintf(&b, "workspace_write attempts counted by enforcement outcome (refused = fail-closed E_SANDBOX_DEGRADED_NOT_ALLOWED / kernel-required rejection).\n\n")
+		fmt.Fprintf(&b, "| Outcome | Count |\n| --- | ---: |\n")
+		fmt.Fprintf(&b, "| workspace_write_attempts | %d |\n", summary.WorkspaceWriteAttempts)
+		fmt.Fprintf(&b, "| kernel_enforced | %d |\n", summary.KernelEnforced)
+		fmt.Fprintf(&b, "| degraded_allowed | %d |\n", summary.DegradedAllowed)
+		fmt.Fprintf(&b, "| refused | %d |\n", summary.Refused)
+		fmt.Fprintf(&b, "| unclassified | %d |\n\n", summary.Unclassified)
 	}
 
 	return b.String(), nil

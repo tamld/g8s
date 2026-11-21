@@ -27,11 +27,14 @@ func git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func collect(ref string, baseline bool) ([]dogfood.Provenance, string, error) {
+func collect(ref string, baseline bool) ([]dogfood.CommitRecord, string, error) {
 	return collectFrom(ref, baseline, git)
 }
 
-func collectFrom(ref string, baseline bool, git func(...string) (string, error)) ([]dogfood.Provenance, string, error) {
+// collectFrom gathers the window's landings with subject, body, and touched
+// paths so the aggregate ledger, the lane-split ledger (#971 WP2), and the
+// cohort metrics all see one commit set.
+func collectFrom(ref string, baseline bool, git func(...string) (string, error)) ([]dogfood.CommitRecord, string, error) {
 	if _, err := git("rev-parse", "--verify", ref+"^{commit}"); err != nil {
 		return nil, "", err
 	}
@@ -60,22 +63,21 @@ func collectFrom(ref string, baseline bool, git func(...string) (string, error))
 		rangeRef = anchor + ".." + ref
 		label = "Main landings after convention anchor `" + anchor + "`"
 	}
-	// NUL framing preserves multiline messages. Count all commits reaching main,
-	// including merged branch commits, as in the ordinary last-200 git log.
-	out, err := git("log", fmt.Sprintf("-%d", windowSize), "--format=%B%x00", rangeRef)
+	// NUL framing preserves multiline messages; the \x01 subject and \x04
+	// body/file-list terminators feed dogfood.ParseCommitRecords so the
+	// lane-split ledger can route each landing by its touched paths (#971 WP2).
+	out, err := git("log", fmt.Sprintf("-%d", windowSize), "--name-only", "--format=%x00%s%x01%B%x04", rangeRef)
 	if err != nil {
 		return nil, "", err
 	}
-	var report []dogfood.Provenance
-	for _, msg := range strings.Split(out, "\x00") {
-		if strings.TrimSpace(msg) != "" {
-			report = append(report, dogfood.ClassifyCommit(msg))
-		}
-	}
-	return report, label, nil
+	return dogfood.ParseCommitRecords(out), label, nil
 }
 
-func render(report []dogfood.Provenance, label string, baseline bool) (string, bool) {
+func render(records []dogfood.CommitRecord, label string, baseline bool) (string, bool) {
+	var report []dogfood.Provenance
+	for _, rec := range records {
+		report = append(report, rec.Provenance)
+	}
 	r, f, u, n, ratio := dogfood.Ratio(report)
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Dogfooding provenance ledger\n\n%s\n\n| Kind | Count |\n| --- | ---: |\n| Receipt | %d |\n| F0-direct | %d |\n| Unclassified | %d |\n| Total | %d |\n\n", label, r, f, u, n)
@@ -100,15 +102,49 @@ func render(report []dogfood.Provenance, label string, baseline bool) (string, b
 	return b.String(), failed
 }
 
+// renderLaneSplitSections emits the #971 WP2 lane-split ledger, provenance
+// cohort comparison, and per-lane escape rates. Lane D (prose) is auditable —
+// only its ALDC review depth differs.
+func renderLaneSplitSections(records []dogfood.CommitRecord) string {
+	var b strings.Builder
+	b.WriteString("\n## Lane-split honesty ledger (issue #971 WP2)\n\n")
+	b.WriteString(dogfood.FormatLaneLedger(dogfood.BuildLaneLedger(records)))
+
+	b.WriteString("### Provenance cohort quality\n\n")
+	b.WriteString("Revert/fixup rate by provenance cohort; cohorts under n=")
+	fmt.Fprintf(&b, "%d carry the insufficient_sample label (current ledger state).\n\n", dogfood.DefaultCohortMinSample)
+	b.WriteString("| Cohort | Commits | Revert/fixup | Rate | Label |\n| --- | ---: | ---: | ---: | --- |\n")
+	for _, m := range dogfood.BuildCohortMetrics(records, minWindow) {
+		rate := "—"
+		if m.RateLabel == dogfood.RateLabelMeasured {
+			rate = fmt.Sprintf("%.2f%%", m.RevertFixupRate*100)
+		}
+		fmt.Fprintf(&b, "| %s | %d | %d | %s | %s |\n", m.Cohort, m.Commits, m.RevertFixupCommits, rate, m.RateLabel)
+	}
+
+	b.WriteString("\n### Escape rate by lane\n\n")
+	b.WriteString("| Lane | Name | Landings | Revert/fixup | Escape rate | Label |\n| --- | --- | ---: | ---: | ---: | --- |\n")
+	for _, e := range dogfood.BuildEscapeRateByLane(records, minWindow) {
+		rate := "—"
+		if e.RateLabel == dogfood.RateLabelMeasured {
+			rate = fmt.Sprintf("%.2f%%", e.EscapeRate*100)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %d | %d | %s | %s |\n", e.Lane, e.LaneName, e.Total, e.RevertFixup, rate, e.RateLabel)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 func run() error {
 	ref := flag.String("ref", "origin/main", "main ref to inspect")
 	baseline := flag.Bool("baseline", false, "diagnostic last-200 baseline including pre-convention history; never enforce")
 	flag.Parse()
-	report, label, err := collect(*ref, *baseline)
+	records, label, err := collect(*ref, *baseline)
 	if err != nil {
 		return err
 	}
-	text, failed := render(report, label, *baseline)
+	text, failed := render(records, label, *baseline)
+	text += renderLaneSplitSections(records)
 	metrics, metricsErr := renderMetricsSections(*ref, *baseline, git)
 	if metricsErr != nil {
 		return metricsErr
