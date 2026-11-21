@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-21
+
 ### Fixed
 
 - **Envelope honesty invariant (#988)**: every `ok=false` attempt envelope mechanically carries `{code, error}` (sealFailureEnvelope + exported ValidateResultEnvelope invariant + single funnel over all 19 FinishAttempt sites; spawn path typed `E_PROVIDER_EXEC_FAILED`/`E_PROVIDER_SPAWN_FAILED`) — the measured silent ok=false violation (3x on the 9router lane) is structurally closed.
