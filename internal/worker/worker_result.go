@@ -795,11 +795,21 @@ func (s *Supervisor) buildArgv(req taskRequest, promptPath, resultPath string) [
 }
 
 // snapshot removes leftover artifacts, exports the sealed receipt, and
-// returns the freshest task view.
+// returns the freshest task view. Post-run it also re-checks the #988
+// envelope invariant on the stored result — a terminal ok=false envelope
+// without a typed {code, error} pair leaves a loud stderr breadcrumb (the
+// mechanical guarantee lives in (*Supervisor).finishAttempt; this is the
+// probe-style backstop so a leaky call site can never fail silently).
 func (s *Supervisor) snapshot(ctx context.Context, taskID, runDir string, leftovers ...string) (*controlplane.Task, error) {
 	for _, path := range leftovers {
 		os.Remove(path)
 	}
 	s.ExportReceipt(ctx, taskID, runDir)
-	return s.cp.GetTask(ctx, taskID)
+	task, err := s.cp.GetTask(ctx, taskID)
+	if err == nil && task != nil && len(task.Result) > 0 {
+		if verr := ValidateResultEnvelope(task.Result); verr != nil {
+			fmt.Fprintf(os.Stderr, "[warn] worker: post-run envelope invariant check failed for %s: %v\n", taskID, verr)
+		}
+	}
+	return task, err
 }

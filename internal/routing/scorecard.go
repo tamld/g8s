@@ -87,7 +87,14 @@ type ModelOutcomeRecord struct {
 	TotalTokens      int         `json:"total_tokens,omitempty"`
 	ErrorReason      string      `json:"error_reason,omitempty"`
 	FailureDiagnosis FailureType `json:"failure_diagnosis,omitempty"`
-	RecordedAt       string      `json:"recorded_at"`
+	// SuspectFastCompletion carries the #989 phantom-success suspect flag:
+	// the attempt self-reported success but the brief's declared output
+	// contract is missing from the result (conservative flag-never-fail
+	// heuristic — see worker.suspectFastCompletion). Routing can down-weight
+	// models whose ledger shows a high suspect rate even at nominally perfect
+	// success rates.
+	SuspectFastCompletion bool   `json:"suspect_fast_completion,omitempty"`
+	RecordedAt            string `json:"recorded_at"`
 }
 
 // ModelQualityScore summarizes the rolling quality metrics and routing recommendation for a model.
