@@ -473,3 +473,42 @@ func TestComputeNonCompensatoryVerdict_MissingGateFailsClosed(t *testing.T) {
 		t.Fatalf("expected UNVERIFIED + veto on missing TRUST-G5, got verdict=%s veto=%t reasons=%v", verdict, veto, reasons)
 	}
 }
+
+// TestTrustAssuranceRemediations (#975): the status carries actionable
+// remediation hints — a missing S0 key maps to the custody runbook, and a
+// capability-detected gate maps to the live-probe upgrade path.
+func TestTrustAssuranceRemediations(t *testing.T) {
+	in := TrustProbeInput{
+		BinaryVersion:     "0.27.1",
+		BinaryCommit:      "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+		BinaryBuildSource: "release",
+		SourceCommit:      "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	}
+	st := EvaluateTrustAssurance(in)
+	found := false
+	for _, r := range st.Remediations {
+		if strings.Contains(r, "s0-custody-runbook") {
+			found = true
+		}
+	}
+	if !st.S0KeyProvisioned && !found {
+		t.Fatalf("s0 key unprovisioned but no runbook remediation emitted: %+v", st.Remediations)
+	}
+	capDetected := false
+	for _, g := range st.Gates {
+		if g.Status == TrustGateCapabilityDetected {
+			capDetected = true
+		}
+	}
+	if capDetected {
+		upgraded := false
+		for _, r := range st.Remediations {
+			if strings.Contains(r, "CAPABILITY_DETECTED") {
+				upgraded = true
+			}
+		}
+		if !upgraded {
+			t.Fatalf("CAPABILITY_DETECTED gate present but no upgrade remediation: %+v", st.Remediations)
+		}
+	}
+}

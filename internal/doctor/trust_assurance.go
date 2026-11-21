@@ -104,6 +104,7 @@ type TrustAssuranceStatus struct {
 	OverallVerdict      TrustGateStatus        `json:"overall_verdict"`
 	NonCompensatoryVeto bool                   `json:"non_compensatory_veto"`
 	VetoReasons         []string               `json:"veto_reasons,omitempty"`
+	Remediations        []string               `json:"remediations,omitempty"`
 	MediatedGates       []string               `json:"mediated_gates,omitempty"`
 	Gates               []TrustGateAssessment  `json:"gates"`
 }
@@ -864,6 +865,21 @@ func EvaluateTrustAssurance(in TrustProbeInput) *TrustAssuranceStatus {
 	gates := []TrustGateAssessment{g1, g2, g3, g4, g5, g6}
 	verdict, veto, vetoReasons, mediated := ComputeNonCompensatoryVerdict(gates)
 
+	// #975: actionable remediation hints — the operator should not have to
+	// reverse-engineer the veto reasons into next actions.
+	var remediations []string
+	if !s0Provisioned {
+		remediations = append(remediations,
+			"S0 human key not provisioned — follow docs/security/s0-custody-runbook.md section 2 to provision <stateDir>/s0-human.key (hex ed25519, 0600)")
+	}
+	for _, g := range gates {
+		if g.Status == TrustGateCapabilityDetected {
+			remediations = append(remediations,
+				"gate "+g.Gate+" is CAPABILITY_DETECTED — run the live assurance probes (g8s eval run --category assurance, or tools/assurance_benchmark.sh) to upgrade it to ENFORCED with adversarial evidence")
+			break
+		}
+	}
+
 	return &TrustAssuranceStatus{
 		Schema:              TrustAssuranceSchema,
 		EpistemicClass:      sandbox.EpistemicMeasuredMetric,
@@ -886,6 +902,7 @@ func EvaluateTrustAssurance(in TrustProbeInput) *TrustAssuranceStatus {
 		OverallVerdict:      verdict,
 		NonCompensatoryVeto: veto,
 		VetoReasons:         vetoReasons,
+		Remediations:        remediations,
 		MediatedGates:       mediated,
 		Gates:               gates,
 	}
