@@ -211,32 +211,55 @@ func (s *Store) SaveMetrics(ctx context.Context, supervisorTaskID string, m Metr
 // Called when a human operator indicates an escalation was false (the task
 // should have succeeded without escalation). The rate is computed as
 // (number of false escalations) / (total escalations).
+//
+// The read (current rate), recompute, and write run inside a single
+// BEGIN IMMEDIATE transaction (A-10, #986): the Store DSN opens every
+// sql.Tx with _txlock=immediate, so concurrent false-escalation reports
+// serialize instead of read-modify-writing from the same stale rate and
+// losing increments.
 func (s *Store) UpdateFalseEscalationRate(ctx context.Context, supervisorTaskID string, isFalseEscalation bool) error {
 	if strings.TrimSpace(supervisorTaskID) == "" {
 		return errors.New("controlplane: metrics supervisor_task_id is required")
 	}
 
-	m, err := s.GetMetrics(ctx, supervisorTaskID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("controlplane: begin update false escalation rate: %w", err)
+	}
+	defer tx.Rollback()
+
+	var escalationCount int
+	var currentRate float64
+	err = tx.QueryRowContext(ctx,
+		`SELECT escalation_count, false_escalation_rate FROM supervisor_metrics WHERE supervisor_task_id = ?`,
+		supervisorTaskID,
+	).Scan(&escalationCount, &currentRate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", ErrUnknownSupervisorTask, supervisorTaskID)
+	}
+	if err != nil {
+		return fmt.Errorf("controlplane: get supervisor metrics: %w", err)
 	}
 
-	falseEscalationCount := m.FalseEscalationRate * float64(m.EscalationCount)
+	falseEscalationCount := currentRate * float64(escalationCount)
 	if isFalseEscalation {
 		falseEscalationCount++
 	}
 
 	var newRate float64
-	if m.EscalationCount > 0 {
-		newRate = falseEscalationCount / float64(m.EscalationCount)
+	if escalationCount > 0 {
+		newRate = falseEscalationCount / float64(escalationCount)
 	}
 
-	_, err = s.db.ExecContext(ctx,
+	if _, uerr := tx.ExecContext(ctx,
 		`UPDATE supervisor_metrics SET false_escalation_rate = ? WHERE supervisor_task_id = ?`,
 		newRate, supervisorTaskID,
-	)
-	if err != nil {
-		return fmt.Errorf("controlplane: update false escalation rate: %w", err)
+	); uerr != nil {
+		return fmt.Errorf("controlplane: update false escalation rate: %w", uerr)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("controlplane: commit update false escalation rate: %w", err)
 	}
 
 	return nil

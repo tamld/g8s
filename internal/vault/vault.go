@@ -86,6 +86,21 @@ type VaultFilter struct {
 
 var schemaInitMu sync.Mutex
 
+// addColumnToleratingDuplicate applies one additive-column migration,
+// tolerating ONLY the duplicate-column error that re-running the migration on
+// an already-migrated database produces (mirrors the controlplane pattern in
+// internal/controlplane/lifecycle.go). Every other failure propagates
+// instead of being silently skipped (C-7, #986).
+func addColumnToleratingDuplicate(db *sql.DB, ddl string) error {
+	if _, err := db.Exec(ddl); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return nil
+		}
+		return fmt.Errorf("vault: migration %q: %w", ddl, err)
+	}
+	return nil
+}
+
 // Vault manages the persistence and full-text search indexing of knowledge records.
 type Vault struct {
 	db    *sql.DB
@@ -191,10 +206,21 @@ func (v *Vault) initSchema() error {
 	if _, err := v.db.Exec(schema); err != nil {
 		return err
 	}
-	// Additive migration for pre-v0.20.1 databases (#661)
-	_, _ = v.db.Exec(`ALTER TABLE vault_records ADD COLUMN repo_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = v.db.Exec(`ALTER TABLE vault_records ADD COLUMN scope_tier TEXT NOT NULL DEFAULT 'global'`)
-	_, _ = v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_vault_repo_scope ON vault_records(repo_id, scope_tier)`)
+	// Additive migration for pre-v0.20.1 databases (#661). Only the
+	// duplicate-column error of re-running a migration is tolerated; every
+	// other failure propagates (C-7, #986) — a silently skipped migration
+	// would brick later inserts.
+	for _, ddl := range []string{
+		`ALTER TABLE vault_records ADD COLUMN repo_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vault_records ADD COLUMN scope_tier TEXT NOT NULL DEFAULT 'global'`,
+	} {
+		if err := addColumnToleratingDuplicate(v.db, ddl); err != nil {
+			return err
+		}
+	}
+	if _, err := v.db.Exec(`CREATE INDEX IF NOT EXISTS idx_vault_repo_scope ON vault_records(repo_id, scope_tier)`); err != nil {
+		return fmt.Errorf("create idx_vault_repo_scope: %w", err)
+	}
 
 	ftsSchema := `
 	CREATE VIRTUAL TABLE IF NOT EXISTS vault_fts USING fts5(

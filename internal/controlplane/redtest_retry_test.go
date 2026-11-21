@@ -21,7 +21,7 @@ func TestRed_Guarantee1_MaxPerTask_ThirdResubmitRefused(t *testing.T) {
 	// Guarantee 1(a): Retry budget cannot be exceeded on 3rd resubmit of same original task.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	origReq := SubmitTaskRequest{
 		IdempotencyKey: "red-budget-orig-task",
@@ -117,7 +117,7 @@ func TestRed_Guarantee1_MaxPerHour_EleventhResubmitRefused(t *testing.T) {
 	// Guarantee 1(b): Hourly retry budget cannot exceed 10 resubmits per hour across different original tasks.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	opts := ResubmitOpts{
 		Enabled:    true,
@@ -187,7 +187,7 @@ func TestRed_Guarantee1_LineageVsForgedMetadata(t *testing.T) {
 	// Guarantee 1(c): Retry budget counting follows real parent_task_id lineage, resisting forged retry_of metadata.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	opts := ResubmitOpts{
 		Enabled:    true,
@@ -329,7 +329,7 @@ func TestRed_Guarantee2_NonRetryableNeverResubmit(t *testing.T) {
 	// Guarantee 2: Non-retryable classes never resubmit even when payloads embed naive match triggers.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	adversarialCases := []struct {
 		name       string
@@ -573,7 +573,7 @@ func TestRed_Guarantee3_ConcurrentResubmitIdempotency(t *testing.T) {
 	// Guarantee 3(a): Concurrent resubmits of task A produce exactly one new task without collisions.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	origReq := SubmitTaskRequest{
 		IdempotencyKey: "concurrent-resubmit-orig",
@@ -642,12 +642,15 @@ func TestRed_Guarantee3_ConcurrentResubmitIdempotency(t *testing.T) {
 		t.Errorf("childCount in DB = %d, want exactly 1 (double-fire deduplication failed)", childCount)
 	}
 
-	// Verify hourly tracker recorded exactly 1 retry (deduplicated calls do not consume budget)
-	globalRetryTracker.mu.Lock()
-	entryCount := len(globalRetryTracker.entries[store.dbPath])
-	globalRetryTracker.mu.Unlock()
-	if entryCount != 1 {
-		t.Errorf("hourly retry entries recorded = %d, want exactly 1", entryCount)
+	// Verify the durable hourly budget recorded exactly 1 retry (deduplicated calls do not consume budget)
+	var budgetCount int
+	err = store.db.QueryRowContext(context.Background(),
+		`SELECT count FROM retry_budgets WHERE scope = ?`, retryBudgetScopeHourly).Scan(&budgetCount)
+	if err != nil {
+		t.Fatalf("read retry_budgets: %v", err)
+	}
+	if budgetCount != 1 {
+		t.Errorf("hourly retry budget count = %d, want exactly 1", budgetCount)
 	}
 }
 
@@ -659,7 +662,7 @@ func TestRed_Guarantee3_DerivedKeyResistsHashR1Collision(t *testing.T) {
 	// Guarantee 3(b): Derived idempotency keys resist collision even when task IDs or keys contain '#r1'.
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	opts := ResubmitOpts{
 		Enabled:    true,

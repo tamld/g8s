@@ -731,26 +731,8 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 	}
 
 	// Rate limit check per actor inside submit transaction (#485)
-	limit := GetSubmitRateLimitPerHour()
-	if limit > 0 {
-		actor := extractActorFromReq(req, requestJSON)
-		windowStart := now - 3600.0
-		var count int
-		err := tx.QueryRowContext(ctx, `
-			SELECT COUNT(1) FROM tasks
-			WHERE coalesce(json_extract(request_json, '$.actor'), orchestrator_id, worker_name, session_id, 'operator') = ?
-			  AND created_at >= ?`, actor, windowStart).Scan(&count)
-		if err != nil {
-			return nil, fmt.Errorf("check submit rate limit: %w", err)
-		}
-		if count >= limit {
-			fmt.Fprintf(os.Stderr, "submit rate limit exceeded: actor=%s limit=%d window=%s\n", actor, limit, time.Hour)
-			return nil, &ErrSubmitRateLimited{
-				Actor:  actor,
-				Limit:  limit,
-				Window: time.Hour,
-			}
-		}
+	if err := enforceSubmitRateLimitTx(ctx, tx, req, requestJSON, now); err != nil {
+		return nil, err
 	}
 
 	inserted, err := insertNewTask(ctx, tx, req, requestJSON, requestHash, now)
@@ -758,6 +740,35 @@ func (s *Store) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Task, e
 		return nil, err
 	}
 	return inserted, tx.Commit()
+}
+
+// enforceSubmitRateLimitTx applies the per-actor hourly submission rate limit
+// (#485) inside an open submit transaction. Shared by SubmitTask and the
+// ResubmitTask transactional path so auto-retries honor the same budget.
+func enforceSubmitRateLimitTx(ctx context.Context, tx *sql.Tx, req SubmitTaskRequest, requestJSON string, now float64) error {
+	limit := GetSubmitRateLimitPerHour()
+	if limit <= 0 {
+		return nil
+	}
+	actor := extractActorFromReq(req, requestJSON)
+	windowStart := now - 3600.0
+	var count int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM tasks
+		WHERE coalesce(json_extract(request_json, '$.actor'), orchestrator_id, worker_name, session_id, 'operator') = ?
+		  AND created_at >= ?`, actor, windowStart).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("check submit rate limit: %w", err)
+	}
+	if count >= limit {
+		fmt.Fprintf(os.Stderr, "submit rate limit exceeded: actor=%s limit=%d window=%s\n", actor, limit, time.Hour)
+		return &ErrSubmitRateLimited{
+			Actor:  actor,
+			Limit:  limit,
+			Window: time.Hour,
+		}
+	}
+	return nil
 }
 
 func parentKeyOf(t *Task) string {

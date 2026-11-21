@@ -301,6 +301,15 @@ func applyBaseSchema(conn *sql.Conn) error {
 			status_json TEXT NOT NULL,
 			updated_at REAL NOT NULL
 		)`,
+		// v12 (#986 A-9/C-14): durable hourly retry budget. One row per scope
+		// (scope='hourly_retries'); enforced inside the resubmit transaction so
+		// the budget survives coordinator restarts and is shared by every
+		// process against this state directory.
+		`CREATE TABLE IF NOT EXISTS retry_budgets (
+			scope        TEXT PRIMARY KEY,
+			window_start REAL NOT NULL,
+			count        INTEGER NOT NULL DEFAULT 0
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(context.Background(), stmt); err != nil {

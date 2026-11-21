@@ -216,17 +216,6 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 	}
 	hash := payloadHash(e.Payload)
 
-	// G1: tombstones are keyed by payload hash — a revoked payload cannot
-	// re-enter under a fresh ID.
-	var tombstoned int
-	if err := a.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memory_tombstones WHERE payload_hash = ?`, hash).Scan(&tombstoned); err != nil {
-		return fmt.Errorf("memory: tombstone lookup: %w", err)
-	}
-	if tombstoned > 0 {
-		return ErrTombstoned
-	}
-
 	// G4: no meta-entries.
 	meta, err := a.metaEntryRef(e.Payload)
 	if err != nil {
@@ -264,6 +253,36 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 		}
 	}
 
+	// Test-only seam (C-12): interleave a concurrent revocation between the
+	// gate checks and the promotion write transaction.
+	if a.proposeSeam != nil {
+		a.proposeSeam()
+	}
+
+	// --- Atomic promotion write (C-12, #986): the G1 tombstone check, the
+	// promotion-target resolution, and the promote/insert share one BEGIN
+	// IMMEDIATE transaction (the DSN opens every sql.Tx with
+	// _txlock=immediate) so a concurrent cross-process RevokeBySession cannot
+	// slip between check and write and be bypassed by a resurrecting insert.
+	// Gate/sensor work above stays outside the tx on purpose: the sensor may
+	// do I/O and must not hold the write lock.
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("memory: begin propose: %w", err)
+	}
+	defer tx.Rollback()
+
+	// G1: tombstones are keyed by payload hash — a revoked payload cannot
+	// re-enter under a fresh ID. Checked inside the write transaction.
+	var tombstoned int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM memory_tombstones WHERE payload_hash = ?`, hash).Scan(&tombstoned); err != nil {
+		return fmt.Errorf("memory: tombstone lookup: %w", err)
+	}
+	if tombstoned > 0 {
+		return ErrTombstoned
+	}
+
 	now := float64(time.Now().UnixNano()) / 1e9
 	e.Lifecycle = LifecycleActive
 	e.Trust = trust
@@ -272,10 +291,10 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 	// an already-captured scratch row with the same payload in the same
 	// session (capture → promote, ADR §4), else a fresh insert.
 	var rowID string
-	if err := a.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT id FROM memory_entries WHERE id = ? AND lifecycle IN ('scratch', 'working')`,
 		e.ID).Scan(&rowID); errors.Is(err, sql.ErrNoRows) {
-		err = a.db.QueryRowContext(ctx,
+		err = tx.QueryRowContext(ctx,
 			`SELECT id FROM memory_entries WHERE payload_hash = ? AND session_id = ? AND lifecycle IN ('scratch', 'working')`,
 			hash, e.SessionID).Scan(&rowID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -287,7 +306,7 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 
 	if rowID != "" {
 		precondJSON := marshalPreconditions(e.Preconditions)
-		if _, err := a.db.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			UPDATE memory_entries
 			SET lifecycle = ?, trust = ?, payload_hash = ?, promoted_by = ?, preconditions = ?, superseded_by = ?, valid_until = ?, updated_at = ?
 			WHERE id = ?`,
@@ -297,7 +316,7 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 		e.ID = rowID
 	} else {
 		precondJSON := marshalPreconditions(e.Preconditions)
-		if _, err := a.db.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO memory_entries
 				(id, kind, lifecycle, trust, salience, last_used_at, scope,
 				 session_id, task_id, promoted_by, payload, payload_hash, preconditions, superseded_by, valid_until, created_at, updated_at)
@@ -306,6 +325,10 @@ func (a *LocalSQLiteMemoryAdapter) ProposeEntry(ctx context.Context, e *MemoryEn
 			e.SessionID, e.TaskID, e.PromotedBy, e.Payload, hash, precondJSON, e.SupersededBy, e.ValidUntil, now, now); err != nil {
 			return fmt.Errorf("memory: insert entry: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: commit propose: %w", err)
 	}
 	e.CreatedAt = now
 	e.UpdatedAt = now
