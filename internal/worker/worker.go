@@ -495,7 +495,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "task_request_invalid",
 				"code": "E_TASK_REQUEST_INVALID", "error": uerr.Error(), "reason": uerr.Error(),
@@ -518,7 +518,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "claim_refused_read_only",
 				"code": "E_READ_ONLY_UNENFORCEABLE", "error": err.Error(), "reason": err.Error(),
@@ -538,7 +538,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.cp.GetTask(ctx, task.TaskID)
 			}
-			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 				Result:  mustJSON(map[string]any{"ok": false, "status": "claim_refused_fence", "code": "E_CLAIM_FENCE_STALE", "error": err.Error(), "reason": err.Error()}),
 				Success: false, Retryable: false, Err: err.Error(),
 			})
@@ -554,7 +554,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.cp.GetTask(ctx, task.TaskID)
 			}
-			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 				Result: mustJSON(map[string]any{
 					"ok": false, "status": "tool_policy_setup_failed",
 					"code": "E_TOOL_POLICY_SETUP_FAILED", "error": hErr.Error(), "reason": hErr.Error(),
@@ -572,8 +572,8 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(map[string]any{"ok": false, "status": "skill_hydration_failed", "reason": hydrateErr.Error(), "error": hydrateErr.Error()}),
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			Result:    mustJSON(map[string]any{"ok": false, "status": "skill_hydration_failed", "code": "E_SKILL_HYDRATION_FAILED", "reason": hydrateErr.Error(), "error": hydrateErr.Error()}),
 			Success:   false,
 			Retryable: false,
 			Err:       hydrateErr.Error(),
@@ -595,7 +595,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "run_dir_unavailable",
 				"code": "E_RUN_DIR_UNAVAILABLE", "error": mkErr.Error(), "reason": mkErr.Error(),
@@ -613,7 +613,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "prompt_write_failed",
 				"code": "E_PROMPT_WRITE_FAILED", "error": werr.Error(), "reason": werr.Error(),
@@ -629,7 +629,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "stdout_capture_unavailable",
 				"code": "E_STDOUT_CAPTURE_FAILED", "error": oerr.Error(), "reason": oerr.Error(),
@@ -646,7 +646,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
-		return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result: mustJSON(map[string]any{
 				"ok": false, "status": "stderr_capture_unavailable",
 				"code": "E_STDERR_CAPTURE_FAILED", "error": eerr.Error(), "reason": eerr.Error(),
@@ -666,8 +666,8 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
-			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
-				Result:    mustJSON(map[string]any{"ok": false, "status": "resolution_failed", "reason": firstNonEmpty(errMsg, "E_PROVIDER_RESOLUTION: provider resolution failed")}),
+			_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				Result:    mustJSON(map[string]any{"ok": false, "status": "resolution_failed", "code": "E_PROVIDER_RESOLUTION", "reason": firstNonEmpty(errMsg, "E_PROVIDER_RESOLUTION: provider resolution failed"), "error": firstNonEmpty(errMsg, "provider resolution failed")}),
 				Success:   false,
 				Retryable: false,
 				Err:       errMsg,
@@ -719,10 +719,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
-			return s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 				Result: mustJSON(map[string]any{
 					"ok":     false,
 					"status": "worktree_cleanup_failed",
+					"code":   "E_WORKTREE_CLEANUP_FAILED",
 					"error":  err.Error(),
 					"reason": err.Error(),
 				}),
@@ -748,10 +749,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 				if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 					return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 				}
-				_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+				_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 					Result: mustJSON(map[string]any{
 						"ok":     false,
 						"status": "isolation_unavailable",
+						"code":   "E_ISOLATION_UNAVAILABLE",
 						"error":  errMsg,
 						"reason": errMsg,
 					}),
@@ -807,10 +809,11 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
-			_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+			_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 				Result: mustJSON(map[string]any{
 					"ok":     false,
 					"status": "isolation_unavailable",
+					"code":   "E_ISOLATION_UNAVAILABLE",
 					"error":  errMsg,
 					"reason": errMsg,
 				}),
@@ -938,37 +941,51 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		errMsg := dispatch.SanitizeOutput(spawnErr.Error())
 
 		// Detect permission denied or fail-closed sandbox policy rejection - not retryable
+		// #988: every branch below attaches a typed E_* code and a readable
+		// error detail — the measured 9router-lane defect ended ok=false with
+		// policy_enforcement populated but NO error and NO code, because the
+		// pre-exec transport failure reached the envelope only as an untyped
+		// reason.
 		retryable := true
 		status := "spawn_failed"
+		code := "E_PROVIDER_SPAWN_FAILED"
 		resMap := map[string]any{
 			"ok":     false,
 			"status": status,
+			"code":   code,
 			"reason": firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed"),
+			"error":  firstNonEmpty(errMsg, "worker spawn failed"),
 		}
 		var policyRej *sandbox.PolicyRejectionError
 		if errors.As(spawnErr, &policyRej) {
 			retryable = false
 			status = "sandbox_policy_rejected"
+			code = "E_PROVIDER_EXEC_FAILED"
 			resMap["status"] = status
+			resMap["code"] = code
 			resMap["rejected_before_spawn"] = true
 			resMap["policy_enforcement"] = policyRej.Report
 		} else if errors.Is(spawnErr, sandbox.ErrKernelSandboxRequired) {
 			retryable = false
 			status = "sandbox_policy_rejected"
+			code = "E_PROVIDER_EXEC_FAILED"
 			resMap["status"] = status
+			resMap["code"] = code
 			resMap["rejected_before_spawn"] = true
 		} else if strings.Contains(strings.ToLower(errMsg), "permission denied") {
 			retryable = false
 			status = "permission_denied"
 			errMsg = fmt.Sprintf("executable permission denied: %s (intent: worker lacks execute permission on binary)", errMsg)
 			resMap["status"] = status
+			resMap["code"] = code
 			resMap["reason"] = firstNonEmpty(errMsg, "E_WORKER_SPAWN: worker spawn failed")
+			resMap["error"] = errMsg
 		}
 
 		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
-		_, _ = s.cp.FinishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
+		_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(resMap),
 			Success:   false,
 			Retryable: retryable,

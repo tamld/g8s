@@ -323,7 +323,7 @@ func (s *Supervisor) scorecardStateDir() string {
 	return pathutil.DefaultStateDir()
 }
 
-func (s *Supervisor) recordAttemptModelOutcome(taskID string, req taskRequest, success bool, durationSec float64, totalTokens int, errReason string) {
+func (s *Supervisor) recordAttemptModelOutcome(taskID string, req taskRequest, success bool, durationSec float64, totalTokens int, errReason string, suspect bool) {
 	prov := firstNonEmpty(strings.TrimSpace(req.Provider), "default")
 	mod := firstNonEmpty(strings.TrimSpace(req.Model), prov)
 	durMs := int64(durationSec * 1000)
@@ -331,14 +331,15 @@ func (s *Supervisor) recordAttemptModelOutcome(taskID string, req taskRequest, s
 		durMs = 0
 	}
 	_ = routing.RecordModelOutcome(s.scorecardStateDir(), routing.ModelOutcomeRecord{
-		TaskID:         taskID,
-		Provider:       prov,
-		ModelRequested: mod,
-		Success:        success,
-		DurationMs:     durMs,
-		TotalTokens:    totalTokens,
-		ErrorReason:    errReason,
-		RecordedAt:     s.clock().UTC().Format(time.RFC3339),
+		TaskID:                taskID,
+		Provider:              prov,
+		ModelRequested:        mod,
+		Success:               success,
+		DurationMs:            durMs,
+		TotalTokens:           totalTokens,
+		ErrorReason:           errReason,
+		SuspectFastCompletion: suspect,
+		RecordedAt:            s.clock().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -427,6 +428,10 @@ func (s *Supervisor) collect(
 		return s.snapshot(ctx, taskID, runDir, promptPath)
 	case reason == "cancelled":
 		env := outcomeEnvelope(false, "cancelled", stdoutText, stderrText)
+		// #988: cancelled is a terminal ok=false outcome — carry the typed
+		// failure pair so downstream consumers can route on it.
+		env["code"] = "E_TASK_CANCELLED"
+		env["error"] = "cancelled by orchestrator"
 		env["duration"] = durationSec
 		env["duration_seconds"] = durationSec
 		env["containment_mode"] = containmentMode
@@ -446,7 +451,7 @@ func (s *Supervisor) collect(
 			env["invoked_count"] = toolPolicyEvidence.InvokedCount
 		}
 		s.ingestTrace(telemetry.TraceEventTaskCancelled, taskID, nil, "cancelled by orchestrator")
-		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+		_, ferr := s.finishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(env),
 			Success:   false,
 			Retryable: false,
@@ -455,9 +460,13 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish cancelled attempt: %w", ferr)
 		}
-		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "cancelled by orchestrator")
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "cancelled by orchestrator", false)
 	case reason == "timeout":
 		env := outcomeEnvelope(false, "timeout", stdoutText, stderrText)
+		// #988: timeout is a terminal ok=false outcome — carry the typed
+		// failure pair so downstream consumers can route on it.
+		env["code"] = "E_TASK_TIMEOUT"
+		env["error"] = "execution deadline exceeded"
 		env["duration"] = durationSec
 		env["duration_seconds"] = durationSec
 		env["containment_mode"] = containmentMode
@@ -477,7 +486,7 @@ func (s *Supervisor) collect(
 			env["invoked_count"] = toolPolicyEvidence.InvokedCount
 		}
 		s.ingestTrace(telemetry.TraceEventTaskTimeout, taskID, nil, "execution deadline exceeded")
-		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+		_, ferr := s.finishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    mustJSON(env),
 			Success:   false,
 			Retryable: true,
@@ -486,10 +495,14 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish timed-out attempt: %w", ferr)
 		}
-		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "execution deadline exceeded")
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "execution deadline exceeded", false)
 	case reason == "invalid_timeout":
-		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
-			Result:    mustJSON(outcomeEnvelope(false, "invalid_result", stdoutText, stderrText)),
+		env := outcomeEnvelope(false, "invalid_result", stdoutText, stderrText)
+		// #988: typed failure pair for the invalid-timeout terminal outcome.
+		env["code"] = "E_TASK_INVALID_TIMEOUT"
+		env["error"] = "task requested an invalid execution timeout"
+		_, ferr := s.finishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+			Result:    mustJSON(env),
 			Success:   false,
 			Retryable: false,
 			Err:       "task requested an invalid execution timeout",
@@ -497,7 +510,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish invalid-timeout attempt: %w", ferr)
 		}
-		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "task requested an invalid execution timeout")
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, "task requested an invalid execution timeout", false)
 	case reason == "claim_refused_fence" || strings.HasPrefix(reason, "claim_refused_fence:"):
 		fenceErr := strings.TrimSpace(strings.TrimPrefix(reason, "claim_refused_fence:"))
 		if fenceErr == "" {
@@ -513,7 +526,7 @@ func (s *Supervisor) collect(
 		s.ingestTrace(telemetry.TraceEventTaskFailed, taskID, &code, fenceErr, map[string]any{
 			"code": "E_CLAIM_FENCE_STALE",
 		})
-		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+		_, ferr := s.finishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    result,
 			Success:   false,
 			Retryable: false,
@@ -522,7 +535,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish claim_refused_fence attempt: %w", ferr)
 		}
-		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, fenceErr)
+		s.recordAttemptModelOutcome(taskID, req, false, durationSec, 0, fenceErr, false)
 		return s.snapshot(ctx, taskID, runDir, promptPath)
 	default:
 		rawResult, oversize := readResultFile(resultPath)
@@ -660,6 +673,13 @@ func (s *Supervisor) collect(
 			inTokens = wr.Usage.InputTokens
 			outTokens = wr.Usage.OutputTokens
 		}
+		// #989 phantom-success suspect flag: keyed on DECLARED WORK (the
+		// brief's declared output contract), never on absolute time alone —
+		// conservative, flag-never-fail. The flag lands in the attempt result
+		// envelope below and in the worker-completion telemetry event payload
+		// here so downstream supervisors can treat a fast ok=true with
+		// suspicion instead of accepting it silently.
+		suspect, suspectReason := suspectFastCompletion(req.Prompt, wr.Response+"\n"+stdoutText, durationSec)
 		telemetryPayload := map[string]any{
 			"class":            firstNonEmpty(req.EffortClass, "unregistered"),
 			"effort_class":     firstNonEmpty(req.EffortClass, "unregistered"),
@@ -669,6 +689,10 @@ func (s *Supervisor) collect(
 			"output_tokens":    outTokens,
 			"duration_seconds": durationSec,
 			"containment_mode": containmentMode,
+		}
+		if suspect {
+			telemetryPayload["suspect_fast_completion"] = true
+			telemetryPayload["suspect_reason"] = suspectReason
 		}
 		if sandboxBackend != "" {
 			telemetryPayload["sandbox_backend"] = sandboxBackend
@@ -853,6 +877,10 @@ func (s *Supervisor) collect(
 			if wr.ProviderDurationSeconds > 0 {
 				m["provider_duration_seconds"] = wr.ProviderDurationSeconds
 			}
+			if suspect {
+				m["suspect_fast_completion"] = true
+				m["suspect_reason"] = suspectReason
+			}
 			if wr.Usage != nil && m["usage"] == nil {
 				m["usage"] = wr.Usage
 			}
@@ -870,7 +898,7 @@ func (s *Supervisor) collect(
 			}
 			resultJSON = mustJSON(m)
 		}
-		_, ferr := s.cp.FinishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
+		_, ferr := s.finishAttempt(taskID, workerID, token, controlplane.FinishAttemptParams{
 			Result:    resultJSON,
 			Success:   success,
 			Retryable: !hasContractViolation && validation.Valid,
@@ -879,7 +907,7 @@ func (s *Supervisor) collect(
 		if ferr != nil {
 			return nil, fmt.Errorf("finish attempt: %w", ferr)
 		}
-		s.recordAttemptModelOutcome(taskID, req, success, durationSec, inTokens+outTokens, finishErr)
+		s.recordAttemptModelOutcome(taskID, req, success, durationSec, inTokens+outTokens, finishErr, suspect)
 	}
 	return s.snapshot(ctx, taskID, runDir, promptPath)
 }
