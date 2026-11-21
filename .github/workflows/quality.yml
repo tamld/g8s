@@ -521,7 +521,7 @@ jobs:
               # commit triggers Quality again, the ratchet writes a new
               # baseline, and commits forever. The skipped commit changes
               # exactly one tracked file (.g8s/coverage-baseline) — no code.
-              git commit -m "chore: update coverage baseline to ${AVG}% [skip ci]"
+              git commit -m "chore: update coverage baseline to ${AVG}% [skip ci]" -m "Provenance: F0-direct — coverage-ratchet bot (quality.yml)"
               git push origin main || echo "::warning::Failed to push coverage baseline"
             fi
           fi
