@@ -36,6 +36,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # H-02 (audit): a release tag must point at a commit that is part of
+      # the approved main history — a tag pushed from a side branch or an
+      # ad-hoc commit must never reach verify/build/publish.
+      - name: Verify release commit is on main
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Release commit ${GITHUB_SHA} is not an ancestor of origin/main — release refuses (audit H-02)"
+            exit 1
+          fi
+          echo "release commit ${GITHUB_SHA} is on main: verified"
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
