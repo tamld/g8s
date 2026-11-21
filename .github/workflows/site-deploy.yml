@@ -20,6 +20,9 @@ concurrency:
 
 jobs:
   deploy:
+    # H-01 (audit residual): production deploys ONLY from main — a
+    # workflow_dispatch from any other ref must never reach production.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # TODO(#983 follow-up, requires repo settings): scope CLOUDFLARE_API_TOKEN
