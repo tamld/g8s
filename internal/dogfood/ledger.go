@@ -149,15 +149,40 @@ func ClassifyCommit(msg string) Provenance {
 	unknown := Provenance{Kind: "unclassified"}
 	msg = strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", "\n"))
 	lines := strings.Split(msg, "\n")
-	start := len(lines) - 1
-	for start > 0 && strings.TrimSpace(lines[start-1]) != "" {
-		start--
+	// #926: squash-merge bodies place Receipt:/Provenance: trailers mid-body
+	// with a Closes/Part-of footer as the last paragraph, so assuming the
+	// final paragraph is the trailer block classified 67.5% of recent
+	// squashes unclassified. Select the bottom-most paragraph that actually
+	// carries a receipt/provenance key instead; all per-line fail-closed
+	// validation below is unchanged.
+	start, end := -1, -1
+	for i := len(lines) - 1; i > 0; i-- {
+		key, _, ok := strings.Cut(lines[i], ":")
+		if !ok || !isValidTrailerKey(key) {
+			continue
+		}
+		k := strings.ToLower(strings.TrimSpace(key))
+		if k != "receipt" && !strings.HasPrefix(k, "provenance") {
+			continue
+		}
+		top := i
+		for top > 0 && strings.TrimSpace(lines[top-1]) != "" {
+			top--
+		}
+		if top == 0 {
+			continue // a subject line is not a trailer paragraph
+		}
+		bot := i
+		for bot+1 < len(lines) && strings.TrimSpace(lines[bot+1]) != "" {
+			bot++
+		}
+		start, end = top, bot+1
+		break
 	}
-	// A subject alone is not a trailer paragraph.
-	if start == 0 {
+	if start < 0 {
 		return unknown
 	}
-	trailer, ok := unfoldTrailerLines(lines[start:])
+	trailer, ok := unfoldTrailerLines(lines[start:end])
 	if !ok {
 		return unknown
 	}
