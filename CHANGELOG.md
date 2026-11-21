@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Envelope honesty invariant (#988)**: every `ok=false` attempt envelope mechanically carries `{code, error}` (sealFailureEnvelope + exported ValidateResultEnvelope invariant + single funnel over all 19 FinishAttempt sites; spawn path typed `E_PROVIDER_EXEC_FAILED`/`E_PROVIDER_SPAWN_FAILED`) — the measured silent ok=false violation (3x on the 9router lane) is structurally closed.
+- **Suspect-fast-completion flag (#989)**: attempt envelopes flag implausible completions keyed on declared work (contract-declared prompts lacking the contract block; duration only qualifies, flag-never-fail); wired into worker-completion telemetry + model-outcome ledger (routing-eval dataset).
+- **Dogfood provenance trailer parsing (#926)**: ClassifyCommit selects the bottom-most paragraph carrying a receipt/provenance key (squash-merge bodies place trailers mid-body with a Closes footer last — 67.5% unclassified misparse-era, 40.34% post-fix on the enforced window; recorded waiver for v0.27.1, burn-down as trailer-carrying commits land); coverage-ratchet bot commits carry a Provenance trailer.
+
+### Changed
+
+- Mesh-parity + DAST-probe clients perform the MCP initialize handshake (#976 follow-through).
+
+
 ## [0.27.0] - 2026-11-21
 
 ### Added
