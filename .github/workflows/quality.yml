@@ -159,13 +159,14 @@ jobs:
         shell: bash
         run: bash tools/ci_semgrep_check_test.sh
 
+      # M-01 (#1020): SAST policy gate on every lane.
       - name: Semgrep SAST policy gate (.semgrep/g8s-rules.yml)
-        if: env.CI_LANE != 'docs'
         shell: bash
         run: bash tools/ci_semgrep_check.sh
 
+      # M-01 (#1020): secret scanning runs on EVERY lane — docs-only PRs
+      # can carry secrets in markdown/YAML/config content.
       - name: Secret scan (gitleaks)
-        if: env.CI_LANE != 'docs'
         shell: bash
         run: |
           # shellcheck source=tools/ci_fetch.sh
