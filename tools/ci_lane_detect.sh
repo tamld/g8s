@@ -63,15 +63,20 @@ is_prose_path() {
             ;;
     esac
 
+    # M-01 (#1020): agent-behavior surfaces are SECURITY-SENSITIVE —
+    # a markdown/skill change can alter agent behavior; never docs-lane.
+    case "$p" in
+        skills/*|skills|SKILLS/*|SKILLS|.g8s/*)
+            return 1
+            ;;
+    esac
+
     # Allowed prose/asset locations per ADR-0031
     case "$p" in
         *.md|*.markdown|*.MD|*.MARKDOWN)
             return 0
             ;;
         plans/*|plans|PLANS/*|PLANS)
-            return 0
-            ;;
-        skills/*|skills|SKILLS/*|SKILLS)
             return 0
             ;;
         assets/*|assets|ASSETS/*|ASSETS)

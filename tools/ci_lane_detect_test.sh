@@ -94,22 +94,31 @@ assert_lane "case 1: docs-only diff -> docs" "lane=docs" "$FIXTURE_REPO" "main"
 )
 assert_lane "case 2: one .go file -> build" "lane=build" "$FIXTURE_REPO" "main"
 
-# Case 4: nested docs path -> docs
+# Case 4: nested docs/asset paths (plans/assets/offer) -> docs
 (
     cd "$FIXTURE_REPO"
     git checkout -q -b branch-nested main
     mkdir -p plans/261002-factory
     echo "plan" > plans/261002-factory/plan.txt
-    mkdir -p skills/supervisor/references
-    echo "ref" > skills/supervisor/references/manual.txt
     mkdir -p assets/diagrams
     echo "svg" > assets/diagrams/arch.svg
     mkdir -p offer/pricing
     echo "pdf" > offer/pricing/tier.txt
-    git add plans skills assets offer
+    git add plans assets offer
     git commit -q -m "add nested docs/asset paths"
 )
 assert_lane "case 4: nested docs path -> docs" "lane=docs" "$FIXTURE_REPO" "main"
+
+# Case 4b (M-01 #1020): skills/* is an agent-behavior surface -> build
+(
+    cd "$FIXTURE_REPO"
+    git checkout -q -b branch-skills main
+    mkdir -p skills/supervisor/references
+    echo "ref" > skills/supervisor/references/manual.txt
+    git add skills
+    git commit -q -m "add skill reference"
+)
+assert_lane "case 4b: skills/* -> build (M-01 security-sensitive)" "lane=build" "$FIXTURE_REPO" "main"
 
 # Case 5: mixed md+go -> build
 (
@@ -285,7 +294,20 @@ assert_lane "case 17: main push with all-zeros before-SHA falls back -> docs" "l
 
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
-    echo "ci_lane_detect_test: $FAILURES test(s) failed."
+    # M-01 (#1020): agent-behavior surfaces are security-sensitive.
+m01_out=$(printf '%s\n' "skills/x/SKILL.md" | bash "$DETECT_SCRIPT" classify 2>/dev/null || true)
+if echo "$m01_out" | grep -q "docs"; then
+    echo "FAIL: skills/* classified docs — agent-behavior surface must route security-sensitive (M-01)"
+    FAILURES=$((FAILS+1))
+fi
+m01b_path=".g8s/trust-boundaries.yml"
+m01b_out=$(printf '%s\n' "$m01b_path" | bash "$DETECT_SCRIPT" classify 2>/dev/null || true)
+if echo "$m01b_out" | grep -q "docs"; then
+    echo "FAIL: governance surface classified docs — must route security-sensitive (M-01)"
+    FAILURES=$((FAILS+1))
+fi
+
+echo "ci_lane_detect_test: $FAILURES test(s) failed."
     exit 1
 fi
 
