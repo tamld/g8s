@@ -1525,3 +1525,31 @@ func (m *Manager) PurgeExpired(maxAge time.Duration, maxRows int) (int64, error)
 	}
 	return affected, nil
 }
+
+// CountPurgeable reports how many receipts PurgeExpired(maxAge, ...) would
+// delete right now, using the same predicate. Dry-run support for the
+// cleanup sweep (C-9, #986); deliberately NOT part of the ReceiptManager
+// interface.
+func (m *Manager) CountPurgeable(maxAge time.Duration) (int64, error) {
+	if maxAge < 0 {
+		return 0, fmt.Errorf("maxAge must be >= 0, got %s", maxAge)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := m.clock()
+	cutoff := timeToUnix(now.Add(-maxAge))
+	nowUnix := timeToUnix(now)
+
+	var n int64
+	err := m.db.QueryRow(
+		`SELECT COUNT(1) FROM write_receipts
+		 WHERE (consumed = 1 OR expires_at < ?)
+		   AND created_at < ?`,
+		nowUnix, cutoff,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count purgeable receipts: %w", err)
+	}
+	return n, nil
+}

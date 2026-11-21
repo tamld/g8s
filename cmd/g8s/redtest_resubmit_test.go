@@ -45,7 +45,7 @@ func setupRedCLITestStore(t *testing.T) (*controlplane.Store, string, *sql.DB, s
 	}
 	t.Cleanup(func() { _ = rcMgr.Close() })
 
-	controlplane.ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 	t.Setenv("G8S_DB", dbPath)
 	t.Setenv("G8S_AUTO_RETRY_ENABLED", "true")
 
@@ -409,7 +409,7 @@ func TestRedRC2_CLI_Guarantee3_TickNeverRetriesSoonerThanBackoff(t *testing.T) {
 	_ = detailMap2
 
 	// 2. Hourly limit test: seed 10 tasks and verify 11th is skipped with hourly budget exceeded
-	controlplane.ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 	for i := 1; i <= 10; i++ {
 		tid := seedCLIFailedTask(t, store, rawDB, fmt.Sprintf("hourly-task-%02d", i), "read_only", "context deadline exceeded", "", t0)
 		_, err := store.ResubmitTask(ctx, tid, controlplane.ResubmitOpts{Enabled: true, MaxPerTask: 2, MaxPerHour: 10})

@@ -340,7 +340,7 @@ func TestResubmitTask_Budget(t *testing.T) {
 	clock := newFakeClock()
 	store, _ := newTestStoreWithClock(t, clock)
 	ctx := context.Background()
-	ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 
 	opts := ResubmitOpts{
 		Enabled:    true,
@@ -394,7 +394,7 @@ func TestResubmitTask_Budget(t *testing.T) {
 
 	// Part B: 11th in an hour refused (inject clock)
 	t.Run("max_per_hour_refused_on_11th", func(t *testing.T) {
-		ResetHourlyRetryTracker()
+		_ = store.ResetHourlyRetryBudget()
 
 		// Resubmit 10 distinct tasks
 		for i := 1; i <= 10; i++ {

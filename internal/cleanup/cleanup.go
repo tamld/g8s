@@ -21,6 +21,7 @@ import (
 
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/process"
+	"github.com/tamld/g8s/internal/receipt"
 	"github.com/tamld/g8s/internal/sandbox"
 	_ "modernc.org/sqlite"
 )
@@ -854,7 +855,23 @@ type CleanupConfig struct {
 	// Empty/zero means unlimited (no deletion).
 	EvidenceDir           string
 	EvidenceRetentionDays int
+	// Receipt-ledger retention (C-9, #986): consumed/expired receipts in the
+	// receipts.db ledger (sibling of DBPath) are pruned via
+	// receipt.Manager.PurgeExpired during the stale-receipt sweep, bounded
+	// per sweep so the single-use authorization ledger does not grow
+	// forever. Zero values mean the defaults (DefaultReceiptPurgeMaxAge /
+	// DefaultReceiptPurgeMaxRows).
+	ReceiptPurgeMaxAge  time.Duration
+	ReceiptPurgeMaxRows int
 }
+
+// Receipt-ledger retention defaults (C-9, #986): consumed receipts are kept
+// for one day (audit window) and each sweep prunes at most 500 rows to avoid
+// long DB locks under load.
+const (
+	DefaultReceiptPurgeMaxAge  = 24 * time.Hour
+	DefaultReceiptPurgeMaxRows = 500
+)
 
 // RunCleanupSweep executes the lifecycle cleanup sweep across all selected targets.
 func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport, error) {
@@ -946,6 +963,17 @@ func RunCleanupSweep(ctx context.Context, cfg CleanupConfig) (*FullCleanupReport
 		} else {
 			report.Items = append(report.Items, items...)
 			report.Summary[TargetStaleReceipt] = len(items)
+		}
+
+		// 5a. Receipt-ledger retention (C-9, #986): prune consumed/expired
+		// receipts from the receipts.db ledger via PurgeExpired so the
+		// single-use authorization ledger does not grow forever.
+		items, err = sweepReceiptLedgerRetention(ctx, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(cfg.Writer, "[warn] receipt-ledger retention error: %v\n", err)
+		} else if len(items) > 0 {
+			report.Items = append(report.Items, items...)
+			report.Summary[TargetStaleReceipt] += len(items)
 		}
 	}
 
@@ -1648,6 +1676,68 @@ func sweepStaleReceipts(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, 
 	}
 
 	return items, nil
+}
+
+// sweepReceiptLedgerRetention prunes consumed/expired receipts from the
+// receipts.db ledger (the sibling of cfg.DBPath) through
+// receipt.Manager.PurgeExpired (C-9, #986): without a production caller the
+// single-use authorization ledger grew forever. Each sweep is bounded by
+// maxRows; dry-run counts the purgeable rows without deleting. No-op when no
+// ledger exists next to DBPath (worker-only state dirs).
+func sweepReceiptLedgerRetention(ctx context.Context, cfg CleanupConfig) ([]CleanupItem, error) {
+	if cfg.DBPath == "" {
+		return nil, nil
+	}
+	ledgerPath := filepath.Join(filepath.Dir(cfg.DBPath), "receipts.db")
+	if _, err := os.Stat(ledgerPath); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+
+	maxAge := cfg.ReceiptPurgeMaxAge
+	if maxAge <= 0 {
+		maxAge = DefaultReceiptPurgeMaxAge
+	}
+	maxRows := cfg.ReceiptPurgeMaxRows
+	if maxRows <= 0 {
+		maxRows = DefaultReceiptPurgeMaxRows
+	}
+
+	mgr, err := receipt.NewReceiptManager(ledgerPath, cfg.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("open receipt ledger for retention sweep: %w", err)
+	}
+	defer mgr.Close()
+
+	detail := fmt.Sprintf("receipt ledger retention (age > %s, bounded %d rows/sweep)", maxAge, maxRows)
+	if cfg.DryRun {
+		purgeable, cerr := mgr.CountPurgeable(maxAge)
+		if cerr != nil {
+			return nil, fmt.Errorf("count purgeable receipts: %w", cerr)
+		}
+		if purgeable == 0 {
+			return nil, nil
+		}
+		return []CleanupItem{{
+			Target: TargetStaleReceipt,
+			ID:     "ledger-retention",
+			Detail: fmt.Sprintf("%d purgeable — %s", purgeable, detail),
+			Action: "would_delete",
+		}}, nil
+	}
+
+	purged, perr := mgr.PurgeExpired(maxAge, maxRows)
+	if perr != nil {
+		return nil, fmt.Errorf("purge expired receipts: %w", perr)
+	}
+	if purged == 0 {
+		return nil, nil
+	}
+	return []CleanupItem{{
+		Target: TargetStaleReceipt,
+		ID:     "ledger-retention",
+		Detail: fmt.Sprintf("pruned %d — %s", purged, detail),
+		Action: "deleted",
+	}}, nil
 }
 
 // 6. Closed PR branches sweep

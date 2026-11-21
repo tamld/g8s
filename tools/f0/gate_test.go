@@ -29,6 +29,15 @@ func setupTestGitRepo(t *testing.T) (repoDir string, baseSHA string, headSHA str
 	runGit("checkout", "-b", "main")
 	runGit("config", "user.email", "tester@example.com")
 	runGit("config", "user.name", "Tester")
+	// #896: neutralize every git side-channel that can outlive a test —
+	// `git commit` runs `gc --auto`, which DETACHES into a background
+	// process when triggered (gc.autoDetach defaults true) and keeps writing
+	// pack files into .git/ while t.Cleanup RemoveAll iterates the repo —
+	// the leading hypothesis for the transient "directory not empty" writer
+	// behind the T2Merge TempDir cleanup flake.
+	runGit("config", "gc.auto", "0")
+	runGit("config", "gc.autoDetach", "false")
+	runGit("config", "core.fsmonitor", "false")
 
 	// Commit 1: base
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Hello\n"), 0o644); err != nil {

@@ -15,11 +15,11 @@ package controlplane
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tamld/g8s/internal/config"
@@ -293,64 +293,70 @@ func ClassifyRetryable(resultJSON string, lastError string) RetryClass {
 	return RetryClassNotRetryable
 }
 
-// In-memory hourly retry tracker per state directory / database path.
-type hourlyRetryTracker struct {
-	mu      sync.Mutex
-	entries map[string][]time.Time
-}
+// Durable hourly retry budget (A-9/C-14, #986). The former per-process
+// in-memory tracker reset on every coordinator restart and gave each
+// concurrent process a fresh MaxPerHour budget; the budget now lives in the
+// retry_budgets table (schema v12) and is enforced inside the resubmit
+// transaction.
+const (
+	// Scope key of the durable hourly retry-budget row. One row per store DB:
+	// the budget is per state directory, and each state directory has exactly
+	// one control-plane database.
+	retryBudgetScopeHourly = "hourly_retries"
+	// retryBudgetWindowSeconds is the fixed budget-window length (1 hour,
+	// mirroring the per-actor submit limiter window).
+	retryBudgetWindowSeconds = 3600.0
+)
 
-var globalRetryTracker = &hourlyRetryTracker{
-	entries: make(map[string][]time.Time),
-}
-
-// ResetHourlyRetryTracker clears all in-memory hourly retry counters.
-// Useful for test isolation.
-func ResetHourlyRetryTracker() {
-	globalRetryTracker.mu.Lock()
-	defer globalRetryTracker.mu.Unlock()
-	globalRetryTracker.entries = make(map[string][]time.Time)
-}
-
-func (s *Store) checkHourlyRetryLimit(maxPerHour int) error {
+// reserveHourlyRetryBudgetTx checks and increments the hourly retry budget
+// inside the caller's write transaction. Window semantics are a fixed
+// one-hour bucket: the first retry after the bucket expires opens a fresh
+// window. Must be called on a tx opened against a DSN with _txlock=immediate
+// (all Store transactions) so concurrent resubmits serialize on the budget
+// row instead of racing a per-process counter.
+func (s *Store) reserveHourlyRetryBudgetTx(ctx context.Context, tx *sql.Tx, maxPerHour int, now float64) error {
 	if maxPerHour <= 0 {
 		return nil
 	}
-	globalRetryTracker.mu.Lock()
-	defer globalRetryTracker.mu.Unlock()
-
-	now := s.clock()
-	cutoff := now.Add(-1 * time.Hour)
-
-	key := s.dbPath
-	if key == "" {
-		key = "default"
+	var windowStart float64
+	var count int
+	err := tx.QueryRowContext(ctx,
+		`SELECT window_start, count FROM retry_budgets WHERE scope = ?`,
+		retryBudgetScopeHourly).Scan(&windowStart, &count)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// First retry ever: open a fresh window below.
+	case err != nil:
+		return fmt.Errorf("read hourly retry budget: %w", err)
+	case now-windowStart >= retryBudgetWindowSeconds:
+		count = 0 // window expired: the next increment opens a fresh bucket
 	}
-
-	timestamps := globalRetryTracker.entries[key]
-	valid := timestamps[:0]
-	for _, t := range timestamps {
-		if t.After(cutoff) {
-			valid = append(valid, t)
+	if count >= maxPerHour {
+		return fmt.Errorf("hourly retry budget exceeded: limit %d per hour reached (window started at %.0f)", maxPerHour, windowStart)
+	}
+	if count == 0 {
+		if _, uerr := tx.ExecContext(ctx, `
+			INSERT INTO retry_budgets (scope, window_start, count) VALUES (?, ?, 1)
+			ON CONFLICT(scope) DO UPDATE SET window_start = excluded.window_start, count = 1`,
+			retryBudgetScopeHourly, now); uerr != nil {
+			return fmt.Errorf("open hourly retry budget window: %w", uerr)
 		}
+		return nil
 	}
-	globalRetryTracker.entries[key] = valid
-
-	if len(valid) >= maxPerHour {
-		return fmt.Errorf("hourly retry budget exceeded: limit %d per hour reached for %s", maxPerHour, key)
+	if _, uerr := tx.ExecContext(ctx, `
+		INSERT INTO retry_budgets (scope, window_start, count) VALUES (?, ?, 1)
+		ON CONFLICT(scope) DO UPDATE SET count = retry_budgets.count + 1`,
+		retryBudgetScopeHourly, now); uerr != nil {
+		return fmt.Errorf("record hourly retry budget: %w", uerr)
 	}
 	return nil
 }
 
-func (s *Store) recordHourlyRetry() {
-	globalRetryTracker.mu.Lock()
-	defer globalRetryTracker.mu.Unlock()
-
-	key := s.dbPath
-	if key == "" {
-		key = "default"
-	}
-	now := s.clock()
-	globalRetryTracker.entries[key] = append(globalRetryTracker.entries[key], now)
+// ResetHourlyRetryBudget clears the durable hourly retry budget for this
+// store (test isolation and operator recovery).
+func (s *Store) ResetHourlyRetryBudget() error {
+	_, err := s.db.Exec(`DELETE FROM retry_budgets WHERE scope = ?`, retryBudgetScopeHourly)
+	return err
 }
 
 // ResubmitTask executes an out-of-band auto-retry of a terminal-failed task (ADR-0029).
@@ -462,95 +468,9 @@ func (s *Store) ResubmitTask(ctx context.Context, origTaskID string, opts Resubm
 	rootTask := curr
 	rootTaskID := rootTask.TaskID
 
-	// Query ALL retry descendants of rootTaskID using recursive CTE.
-	query := `
-WITH RECURSIVE descendants(task_id, parent_task_id, idempotency_key, state, request_json, created_at, depth) AS (
-    SELECT task_id, parent_task_id, idempotency_key, state, request_json, created_at, 0
-    FROM tasks
-    WHERE parent_task_id = ?
-    UNION ALL
-    SELECT t.task_id, t.parent_task_id, t.idempotency_key, t.state, t.request_json, t.created_at, d.depth + 1
-    FROM tasks t
-    JOIN descendants d ON t.parent_task_id = d.task_id
-    WHERE d.depth < 1000
-)
-SELECT task_id, idempotency_key, state, request_json, created_at
-FROM descendants
-ORDER BY created_at ASC;`
-
-	rows, err := s.db.QueryContext(ctx, query, rootTaskID)
-	if err != nil {
-		return "", fmt.Errorf("query lineage descendants: %w", err)
-	}
-	defer rows.Close()
-
-	type childInfo struct {
-		taskID         string
-		idempotencyKey string
-		state          string
-	}
-	var retryChildren []childInfo
-	seenTasks := make(map[string]bool)
-	for rows.Next() {
-		var c childInfo
-		var reqJSON string
-		var createdAt float64
-		if err := rows.Scan(&c.taskID, &c.idempotencyKey, &c.state, &reqJSON, &createdAt); err != nil {
-			return "", fmt.Errorf("scan descendant task: %w", err)
-		}
-		if seenTasks[c.taskID] {
-			continue
-		}
-		seenTasks[c.taskID] = true
-		retryChildren = append(retryChildren, c)
-	}
-	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("iterate descendant tasks: %w", err)
-	}
-
-	// Check for idempotent double-fire: if latest retry descendant is not FAILED, return it.
-	for i := len(retryChildren) - 1; i >= 0; i-- {
-		if retryChildren[i].state != StateFailed {
-			return retryChildren[i].taskID, nil
-		}
-	}
-
-	if len(retryChildren) >= maxPerTask {
-		return "", fmt.Errorf("%w: task %s lineage has already used %d retries (max %d)",
-			ErrRetryBudgetExceeded, rootTaskID, len(retryChildren), maxPerTask)
-	}
-
-	if err := s.checkHourlyRetryLimit(maxPerHour); err != nil {
-		return "", err
-	}
-
-	// Calculate backoff: completed_at + backoff (5m -> 20m -> 60m).
-	// Base is completed_at when present and positive; otherwise NOW (never stale updated_at).
-	attemptCount := len(retryChildren) + 1
-	backoff := RetryBackoff(attemptCount)
-	now := float64(s.clock().UnixNano()) / 1e9
-	baseTime := now
-	if orig.CompletedAt != nil && *orig.CompletedAt > 0 {
-		baseTime = *orig.CompletedAt
-	}
-	notBefore := baseTime + backoff.Seconds()
-
-	payloadMap["retry_of"] = origTaskID
-	payloadMap["retry_attempt"] = attemptCount
-	payloadMap["not_before"] = notBefore
-
-	// Preserve prompt if redacted
-	if p, ok := payloadMap["prompt"].(string); !ok || strings.TrimSpace(p) == "" {
-		if h, ok := payloadMap["prompt_hash"].(string); ok && h != "" {
-			payloadMap["prompt"] = fmt.Sprintf("[redacted-prompt-hash:%s]", h)
-		}
-	}
-
-	newPayloadBytes, err := json.Marshal(payloadMap)
-	if err != nil {
-		return "", fmt.Errorf("marshal resubmit payload: %w", err)
-	}
-
+	// Pre-compute every request field that does NOT depend on the live
+	// descendant count outside the transaction, so the write lock below is
+	// held only for the budget decision and the insert.
 	role := "collector"
 	if r, ok := payloadMap["role"].(string); ok && r != "" {
 		role = r
@@ -593,11 +513,9 @@ ORDER BY created_at ASC;`
 	}
 
 	newReq := SubmitTaskRequest{
-		IdempotencyKey:  fmt.Sprintf("%s#r%d", origTaskID, attemptCount),
 		Priority:        orig.Priority,
 		MaxAttempts:     orig.MaxAttempts,
 		ParentTaskID:    &origTaskID,
-		Payload:         newPayloadBytes,
 		Role:            role,
 		Permission:      perm,
 		Model:           model,
@@ -611,7 +529,6 @@ ORDER BY created_at ASC;`
 		Iter:            orig.Iter,
 		SessionID:       orig.SessionID,
 	}
-
 	if ap, ok := payloadMap["allowed_paths"].([]any); ok {
 		for _, p := range ap {
 			if ps, ok := p.(string); ok {
@@ -635,14 +552,146 @@ ORDER BY created_at ASC;`
 		}
 	}
 
-	newTask, err := s.SubmitTask(ctx, newReq)
+	// ---- Atomic retry transaction (A-9/C-14, #986) ----
+	// Descendant counting, idempotency resolution, budget accounting, and the
+	// task insert share one BEGIN IMMEDIATE transaction (the Store DSN opens
+	// every sql.Tx with _txlock=immediate). Concurrent resubmits serialize
+	// here: the loser observes the winner's freshly inserted retry child in
+	// the lineage CTE and takes the dedup path, instead of racing to submit
+	// the same derived idempotency key with a different not_before payload and
+	// hitting a raw unique-key collision.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin resubmit transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Query ALL retry descendants of rootTaskID using recursive CTE (inside
+	// the transaction so the count is stable under concurrency).
+	query := `
+WITH RECURSIVE descendants(task_id, parent_task_id, idempotency_key, state, request_json, created_at, depth) AS (
+    SELECT task_id, parent_task_id, idempotency_key, state, request_json, created_at, 0
+    FROM tasks
+    WHERE parent_task_id = ?
+    UNION ALL
+    SELECT t.task_id, t.parent_task_id, t.idempotency_key, t.state, t.request_json, t.created_at, d.depth + 1
+    FROM tasks t
+    JOIN descendants d ON t.parent_task_id = d.task_id
+    WHERE d.depth < 1000
+)
+SELECT task_id, idempotency_key, state, request_json, created_at
+FROM descendants
+ORDER BY created_at ASC;`
+
+	rows, err := tx.QueryContext(ctx, query, rootTaskID)
+	if err != nil {
+		return "", fmt.Errorf("query lineage descendants: %w", err)
+	}
+
+	type childInfo struct {
+		taskID         string
+		idempotencyKey string
+		state          string
+	}
+	var retryChildren []childInfo
+	seenTasks := make(map[string]bool)
+	for rows.Next() {
+		var c childInfo
+		var reqJSON string
+		var createdAt float64
+		if err := rows.Scan(&c.taskID, &c.idempotencyKey, &c.state, &reqJSON, &createdAt); err != nil {
+			rows.Close()
+			return "", fmt.Errorf("scan descendant task: %w", err)
+		}
+		if seenTasks[c.taskID] {
+			continue
+		}
+		seenTasks[c.taskID] = true
+		retryChildren = append(retryChildren, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return "", fmt.Errorf("iterate descendant tasks: %w", err)
+	}
+	rows.Close()
+
+	// Check for idempotent double-fire: if latest retry descendant is not FAILED, return it.
+	for i := len(retryChildren) - 1; i >= 0; i-- {
+		if retryChildren[i].state != StateFailed {
+			return retryChildren[i].taskID, tx.Commit()
+		}
+	}
+
+	if len(retryChildren) >= maxPerTask {
+		return "", fmt.Errorf("%w: task %s lineage has already used %d retries (max %d)",
+			ErrRetryBudgetExceeded, rootTaskID, len(retryChildren), maxPerTask)
+	}
+
+	// Calculate backoff: completed_at + backoff (5m -> 20m -> 60m).
+	// Base is completed_at when present and positive; otherwise NOW (never stale updated_at).
+	attemptCount := len(retryChildren) + 1
+	backoff := RetryBackoff(attemptCount)
+	now := float64(s.clock().UnixNano()) / 1e9
+	baseTime := now
+	if orig.CompletedAt != nil && *orig.CompletedAt > 0 {
+		baseTime = *orig.CompletedAt
+	}
+	notBefore := baseTime + backoff.Seconds()
+
+	payloadMap["retry_of"] = origTaskID
+	payloadMap["retry_attempt"] = attemptCount
+	payloadMap["not_before"] = notBefore
+
+	// Preserve prompt if redacted
+	if p, ok := payloadMap["prompt"].(string); !ok || strings.TrimSpace(p) == "" {
+		if h, ok := payloadMap["prompt_hash"].(string); ok && h != "" {
+			payloadMap["prompt"] = fmt.Sprintf("[redacted-prompt-hash:%s]", h)
+		}
+	}
+
+	newPayloadBytes, err := json.Marshal(payloadMap)
+	if err != nil {
+		return "", fmt.Errorf("marshal resubmit payload: %w", err)
+	}
+	newReq.IdempotencyKey = fmt.Sprintf("%s#r%d", origTaskID, attemptCount)
+	newReq.Payload = newPayloadBytes
+
+	req, requestJSON, requestHash, err := prepareSubmitRequest(newReq)
+	if err != nil {
+		return "", fmt.Errorf("prepare retry request: %w", err)
+	}
+
+	if err := checkParentTask(ctx, tx, req.ParentTaskID); err != nil {
+		return "", err
+	}
+
+	// Idempotent double-fire at the key level (same derived key + same hash
+	// means an identical retry already exists): take the dedup path WITHOUT
+	// consuming the hourly budget.
+	if existing, derr := checkExistingTask(ctx, tx, req, requestHash); derr != nil {
+		return "", derr
+	} else if existing != nil {
+		return existing.TaskID, tx.Commit()
+	}
+
+	// Per-actor submit rate limit, same policy as SubmitTask (#485).
+	if err := enforceSubmitRateLimitTx(ctx, tx, req, requestJSON, now); err != nil {
+		return "", err
+	}
+
+	// Durable hourly budget: checked and incremented inside this transaction
+	// (A-9/C-14) — survives restarts and is shared across processes.
+	if err := s.reserveHourlyRetryBudgetTx(ctx, tx, maxPerHour, now); err != nil {
+		return "", err
+	}
+
+	inserted, err := insertNewTask(ctx, tx, req, requestJSON, requestHash, now)
 	if err != nil {
 		return "", fmt.Errorf("submit retry task: %w", err)
 	}
 
-	if !newTask.Deduplicated {
-		s.recordHourlyRetry()
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit resubmit transaction: %w", err)
 	}
-
-	return newTask.TaskID, nil
+	return inserted.TaskID, nil
 }

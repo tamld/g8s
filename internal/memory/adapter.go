@@ -41,6 +41,11 @@ type LocalSQLiteMemoryAdapter struct {
 	gateSensor     GateSensor
 	sinkFn         GateEventSink
 	mu             sync.RWMutex
+
+	// proposeSeam is a test-only scheduling seam (C-12, #986): tests set it
+	// to interleave a concurrent revocation while a ProposeEntry is in
+	// flight. Production leaves it nil — the call is a no-op.
+	proposeSeam func()
 }
 
 // NewLocalSQLiteMemoryAdapter creates and initializes a LocalSQLiteMemoryAdapter.
@@ -165,8 +170,6 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_memory_entries_session ON memory_entries(session_id);
 	CREATE INDEX IF NOT EXISTS idx_memory_entries_lifecycle ON memory_entries(lifecycle);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_payload ON memory_entries(payload_hash, session_id)
-		WHERE lifecycle NOT IN ('scratch', 'working');
 
 	CREATE TABLE IF NOT EXISTS memory_tombstones (
 		payload_hash TEXT PRIMARY KEY,
@@ -177,21 +180,96 @@ func (a *LocalSQLiteMemoryAdapter) initSchema() error {
 	if _, err := a.db.Exec(schema); err != nil {
 		return err
 	}
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN preconditions TEXT NOT NULL DEFAULT '{}'`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN valid_until REAL NOT NULL DEFAULT 0`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN applied_count INTEGER NOT NULL DEFAULT 0`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN first_pass_success_count INTEGER NOT NULL DEFAULT 0`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN failure_after_recall_count INTEGER NOT NULL DEFAULT 0`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN corroborating_sessions TEXT NOT NULL DEFAULT '[]'`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN review_flag TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN outcome_path TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN confidence REAL NOT NULL DEFAULT 0`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN confidence_class TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN applicability_scope TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN promotion_status TEXT NOT NULL DEFAULT ''`)
-	_, _ = a.db.Exec(`ALTER TABLE memory_entries ADD COLUMN revocable INTEGER NOT NULL DEFAULT 1`)
+	for _, ddl := range []string{
+		`ALTER TABLE memory_entries ADD COLUMN preconditions TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE memory_entries ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN valid_until REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory_entries ADD COLUMN applied_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory_entries ADD COLUMN first_pass_success_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory_entries ADD COLUMN failure_after_recall_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory_entries ADD COLUMN corroborating_sessions TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE memory_entries ADD COLUMN review_flag TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN outcome_path TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'`,
+		`ALTER TABLE memory_entries ADD COLUMN confidence REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE memory_entries ADD COLUMN confidence_class TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN applicability_scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN promotion_status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE memory_entries ADD COLUMN revocable INTEGER NOT NULL DEFAULT 1`,
+	} {
+		if err := addColumnToleratingDuplicate(a.db, ddl); err != nil {
+			return err
+		}
+	}
+	// The unique (payload_hash, session_id) index is created last, after the
+	// legacy rows have been pre-deduped (C-11): creating it earlier bricks
+	// databases that accumulated duplicate active rows before the index
+	// existed.
+	if err := a.applyUniquePayloadIndex(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applyUniquePayloadIndex pre-dedups memory_entries and creates the
+// (payload_hash, session_id) unique index inside one immediate transaction
+// (C-11, #986): legacy databases that already contain duplicate non-scratch
+// rows would otherwise fail index creation permanently and become unreadable.
+// The newest row per (payload_hash, session_id) is kept; older duplicates are
+// demoted to 'scratch' and flagged for review — the partial index covers every
+// lifecycle except scratch/working (including 'archived'), so demotion is the
+// only state change that removes a row from the index without deleting it.
+// Scratch/working rows themselves are exempt and untouched.
+func (a *LocalSQLiteMemoryAdapter) applyUniquePayloadIndex() error {
+	tx, err := a.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("memory: begin unique-index migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		UPDATE memory_entries
+		SET lifecycle = 'scratch',
+		    review_flag = 'duplicate_demoted_on_migration'
+		WHERE lifecycle NOT IN ('scratch', 'working')
+		  AND id NOT IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY payload_hash, session_id
+					ORDER BY updated_at DESC, created_at DESC, id DESC
+				) AS rn
+				FROM memory_entries
+				WHERE lifecycle NOT IN ('scratch', 'working')
+			)
+			WHERE rn = 1
+		)`); err != nil {
+		return fmt.Errorf("memory: pre-dedup for unique payload index: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_payload ON memory_entries(payload_hash, session_id)
+			WHERE lifecycle NOT IN ('scratch', 'working')`); err != nil {
+		return fmt.Errorf("memory: create unique payload index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("memory: commit unique-index migration: %w", err)
+	}
+	return nil
+}
+
+// addColumnToleratingDuplicate applies one additive-column migration,
+// tolerating ONLY the duplicate-column error that re-running the migration on
+// an already-migrated database produces (mirrors the controlplane pattern in
+// lifecycle.go). Every other failure — locked database, corrupted schema,
+// readonly file — propagates instead of being silently skipped (C-7, #986).
+func addColumnToleratingDuplicate(db *sql.DB, ddl string) error {
+	if _, err := db.Exec(ddl); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return nil
+		}
+		return fmt.Errorf("memory: migration %q: %w", ddl, err)
+	}
 	return nil
 }
 

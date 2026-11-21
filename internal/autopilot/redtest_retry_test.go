@@ -32,7 +32,7 @@ func setupRedTestControlPlane(t *testing.T) (*controlplane.Store, string, *sql.D
 	}
 	t.Cleanup(func() { _ = rawDB.Close() })
 
-	controlplane.ResetHourlyRetryTracker()
+	_ = store.ResetHourlyRetryBudget()
 	return store, dbPath, rawDB
 }
 

@@ -46,7 +46,11 @@ import (
 //	v11 (Issue #393): adds sessions registry table (live-vs-zombie truth via
 //	    status + heartbeat), active-session partial index, and session_id
 //	    provenance column on the worker-side write_receipts mirror.
-const SchemaVersion = 11
+//	v12 (Issue #986 A-9/C-14): adds retry_budgets table — the hourly auto-retry
+//	    budget becomes a durable per-window counter enforced inside the
+//	    resubmit transaction (was a per-process in-memory map that every
+//	    coordinator restart reset).
+const SchemaVersion = 12
 
 // ErrUnknownSupervisorTask is returned when GetSupervisorTask / UpdateSupervisorTask /
 // GetMetrics address a supervisor task id that does not exist.
