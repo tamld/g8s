@@ -40,11 +40,23 @@ import (
 // never flag on its own, so a fast but contract-compliant result — the happy
 // path — is never flagged.
 
-// envelopeCodePattern matches the typed E_* error-code vocabulary.
-var envelopeCodePattern = regexp.MustCompile(`E_[A-Z0-9_]+`)
+// envelopeCodeHeadPattern matches a typed E_* code only at the HEAD of a
+// failure string, optionally after leading whitespace (redcell D-01 F8.1):
+// the harness convention places the code at the start of the reason
+// ("E_PROVIDER_SPAWN_FAILED: exec failed"). The previous unanchored leftmost
+// scan let model-controlled prose mint spoofed codes from any embedded E_*
+// fragment ("…do not fabricate E_TRUST_ROOT_S0_APPROVAL_REQUIRED codes…"
+// sealed E_TRUST_ROOT_*), which the validator then blessed.
+var envelopeCodeHeadPattern = regexp.MustCompile(`^\s*E_[A-Z0-9_]+`)
 
-// fallbackFailureCode is attached by sealFailureEnvelope when neither the
-// envelope nor its reason carries any E_* token (#988).
+// envelopeCodeFullPattern requires the WHOLE string to be one typed E_* token
+// (redcell D-01 F8.1 companion): a code field like "garbage E_SPOOFED_CODE
+// tail" must not validate as a typed code.
+var envelopeCodeFullPattern = regexp.MustCompile(`^E_[A-Z0-9_]+$`)
+
+// fallbackFailureCode is the NEUTRAL code attached by sealFailureEnvelope
+// when the reason does not START with a typed E_* token (#988; anchored
+// derivation per redcell D-01 F8.1 — embedded fragments never derive codes).
 const fallbackFailureCode = "E_WORKER_FAILURE_CODE_MISSING"
 
 // envelopeInvariantViolationCode is reported by validateResultEnvelope when a
@@ -53,13 +65,16 @@ const fallbackFailureCode = "E_WORKER_FAILURE_CODE_MISSING"
 // (*Supervisor).finishAttempt.
 const envelopeInvariantViolationCode = "E_ENVELOPE_INVARIANT_VIOLATED"
 
-// extractEnvelopeCode pulls the first typed E_* token out of the candidate
-// failure strings (reason first — the harness convention places the code at
-// the head of the reason).
+// extractEnvelopeCode pulls the typed E_* code out of the candidate failure
+// strings. HEAD-ANCHORED (redcell D-01 F8.1): a candidate only contributes a
+// code when the string STARTS with the E_* token — an embedded fragment
+// mid-sentence or inside a larger identifier ("SEE_E_TIMEOUT …") never
+// derives a code, so the caller falls back to the neutral
+// fallbackFailureCode instead of sealing a spoofed vocabulary token.
 func extractEnvelopeCode(candidates ...string) string {
 	for _, c := range candidates {
-		if m := envelopeCodePattern.FindString(c); m != "" {
-			return m
+		if m := envelopeCodeHeadPattern.FindString(c); m != "" {
+			return strings.TrimSpace(m)
 		}
 	}
 	return ""
@@ -95,7 +110,12 @@ func sealFailureEnvelope(resultJSON json.RawMessage) json.RawMessage {
 	status := envelopeString(env, "status")
 
 	if envelopeString(env, "code") == "" {
-		code := extractEnvelopeCode(reason, errDetail, summary)
+		// redcell D-01 F8.1: derivation fills ONLY the fallback path and
+		// derives ONLY from the reason's head-anchored E_* token — reason,
+		// summary and stdout are model/provider-controlled prose on the
+		// dynamic result path, so any other candidate would mint a spoofable
+		// vocabulary token. Everything else seals the neutral fallback code.
+		code := extractEnvelopeCode(reason)
 		if code == "" {
 			code = fallbackFailureCode
 		}
@@ -124,7 +144,10 @@ func ValidateResultEnvelope(resultJSON json.RawMessage) error {
 	}
 	code := envelopeString(env, "code")
 	detail := firstNonEmpty(envelopeString(env, "error"), envelopeString(env, "reason"))
-	if envelopeCodePattern.FindString(code) == "" || strings.TrimSpace(detail) == "" {
+	// redcell D-01 F8.1 companion: the code FIELD itself must be one full
+	// typed token — an embedded E_* fragment inside larger prose ("garbage
+	// E_SPOOFED_CODE tail") must not validate as a typed code.
+	if !envelopeCodeFullPattern.MatchString(code) || strings.TrimSpace(detail) == "" {
 		return fmt.Errorf("%s: ok=false envelope missing typed failure code or detail (code=%q, error=%q, reason=%q, status=%q)",
 			envelopeInvariantViolationCode, code, envelopeString(env, "error"), envelopeString(env, "reason"), envelopeString(env, "status"))
 	}
@@ -163,10 +186,21 @@ func promptDeclaresOutputContract(prompt string) bool {
 }
 
 // resultCarriesJSONBlock reports whether the result payload contains a fenced
-// JSON block the harness itself could extract (same fence pattern the result
-// parser uses, so "contract satisfied" and "result parseable" agree).
+// JSON block the harness itself could extract: the same fence pattern the
+// result parser uses (so "contract satisfied" and "result parseable" agree),
+// with a MINIMAL-CONTENT floor (redcell D-01 F8.2) — the extracted body must
+// parse as a JSON object carrying at least one key. The bare pattern accepted
+// a single backtick + optional json tag + an empty `{}` body, so a 1-second
+// phantom result carrying inline `{}` satisfied the check and suppressed the
+// #989 phantom-success flag; content-free blocks no longer count.
 func resultCarriesJSONBlock(resultPayload string) bool {
-	return fencedJSONPattern.MatchString(resultPayload)
+	for _, m := range fencedJSONPattern.FindAllStringSubmatch(resultPayload, -1) {
+		var obj map[string]any
+		if json.Unmarshal([]byte(m[1]), &obj) == nil && len(obj) >= 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // suspectFastCompletion evaluates the #989 phantom-success heuristic.

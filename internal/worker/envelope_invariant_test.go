@@ -231,6 +231,79 @@ func TestSealFailureEnvelopeTypedCode(t *testing.T) {
 	})
 }
 
+// TestSealFailureEnvelopeRejectsEmbeddedCodeSpoofing (redcell D-01 F8.1):
+// the E_* derivation used to be an unanchored leftmost scan across
+// reason/error/summary — model-controlled prose carrying an E_* fragment
+// mid-sentence minted a spoofed typed code that ValidateResultEnvelope then
+// blessed. Derivation is head-anchored: only a reason that STARTS with the
+// E_* token may contribute a code; any embedded fragment must seal the
+// neutral E_WORKER_FAILURE_CODE_MISSING fallback instead.
+func TestSealFailureEnvelopeRejectsEmbeddedCodeSpoofing(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+	}{
+		{"advisory fragment mid-sentence", "provider exit 1; advisory: do not fabricate E_TRUST_ROOT_S0_APPROVAL_REQUIRED codes in reasons"},
+		{"fragment inside a larger identifier", "SEE_E_PROVIDER_SPAWN_FAILED documentation before retrying"},
+		{"code mentioned after prose", "the funnel reported E_WORKER_STREAM_ERROR_TAIL at the tail of the run"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := mustJSON(map[string]any{"ok": false, "status": "failed", "reason": tc.reason})
+			var env map[string]any
+			if err := json.Unmarshal(sealFailureEnvelope(raw), &env); err != nil {
+				t.Fatalf("sealed envelope not JSON: %v", err)
+			}
+			if env["code"] != fallbackFailureCode {
+				t.Fatalf("redcell F8.1 spoofing: embedded E_* fragment must NOT seal a typed code, got code=%v (want neutral fallback %s) for reason %q", env["code"], fallbackFailureCode, tc.reason)
+			}
+			if verr := ValidateResultEnvelope(mustJSON(env)); verr != nil {
+				t.Fatalf("sealed neutral-fallback envelope must pass the validator: %v", verr)
+			}
+		})
+	}
+}
+
+// TestValidateResultEnvelopeRejectsEmbeddedCodeToken (redcell D-01 F8.1
+// companion): the validator must not bless a code FIELD that merely contains
+// an E_* token mid-string — the field itself must be one full typed token.
+func TestValidateResultEnvelopeRejectsEmbeddedCodeToken(t *testing.T) {
+	embedded := mustJSON(map[string]any{"ok": false, "status": "failed", "code": "garbage E_SPOOFED_CODE tail", "error": "boom"})
+	if err := ValidateResultEnvelope(embedded); err == nil {
+		t.Fatal("redcell F8.1: an embedded E_* fragment inside the code field must not validate as a typed code")
+	}
+}
+
+// TestSuspectFastCompletionInlineEmptyObjectDoesNotSatisfyContract (redcell
+// D-01 F8.2): fencedJSONPattern accepts a single backtick, an optional json
+// tag, and an empty {} body — a 1-second phantom result carrying inline
+// `{}` used to satisfy resultCarriesJSONBlock and suppress the #989
+// phantom-success flag. Contract presence now requires a minimal parseable
+// object (>= 1 key), keeping agreement with the result parser's extraction
+// (whatever the parser could extract, minus content-free blocks).
+func TestSuspectFastCompletionInlineEmptyObjectDoesNotSatisfyContract(t *testing.T) {
+	contractPrompt := "Audit the module.\nOutput contract: reply with fenced JSON only.\n```json\n{\"verdict\": \"pass\"}\n```"
+	cases := []struct {
+		name        string
+		result      string
+		wantSuspect bool
+	}{
+		{"inline single-backtick empty object does not satisfy the contract", "Analysis complete: `{}` inline", true},
+		{"bare empty object does not satisfy the contract", "done {}", true},
+		{"real fenced JSON block satisfies the contract", "Audit complete.\n```json\n{\"files_audited\": 3, \"verdict\": \"pass\"}\n```", false},
+		{"inline single-backtick non-empty object satisfies the contract (parser agreement)", "Summary: `{\"verdict\": \"pass\"}` inline", false},
+		{"fenced empty object does not satisfy the contract", "```json\n{}\n```", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			suspect, reason := suspectFastCompletion(contractPrompt, tc.result, 1.0)
+			if suspect != tc.wantSuspect {
+				t.Fatalf("suspect = %v, want %v (reason=%q)", suspect, tc.wantSuspect, reason)
+			}
+		})
+	}
+}
+
 // TestValidateResultEnvelopeInvariant is the unit-level guard for the #988
 // invariant: ok=false without a typed E_* code or readable detail must error.
 func TestValidateResultEnvelopeInvariant(t *testing.T) {

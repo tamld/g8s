@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -269,5 +271,115 @@ func TestReadOnlyClaimRefusalRestoresClaimability(t *testing.T) {
 	}
 	if got.Attempts != 1 {
 		t.Fatalf("task must be consumed exactly once, got attempts=%d", got.Attempts)
+	}
+}
+
+// --- redcell D-01 F1.1/F6.1: bounded claim/refuse churn per drain cycle ---
+
+// rotatingRefusalDrainEnv builds an isolation-incapable drain (no worktree
+// isolator) against a small rotating pool of ALWAYS-CLAIMABLE read_only
+// tasks: claimRefusalDeferSeconds=0 neutralizes the per-task $.not_before
+// deferral, which is exactly the hostile-rotation shape from redcell D-01
+// F1.1 — fresh task IDs defeat the per-task re-claim deferral, so only a
+// loop-level refusal park can bound the claim/refuse churn (F6.1).
+func rotatingRefusalDrainEnv(t *testing.T) *workerEnv {
+	t.Helper()
+	prevDefer := claimRefusalDeferSeconds
+	claimRefusalDeferSeconds = 0
+	t.Cleanup(func() { claimRefusalDeferSeconds = prevDefer })
+
+	env := newWorkerEnv(t, nil)
+	env.sup = NewSupervisor(env.store, env.runDir,
+		WithRunner(env.runner),
+		WithPollInterval(2*time.Millisecond),
+		WithProviderCommandResolver(NewProviderCommandResolver(ProviderResolverOptions{
+			PlatformDispatchNames: []string{"cursor"},
+		})),
+	)
+	for i := 0; i < 4; i++ {
+		submitTask(t, env, fmt.Sprintf("ro-rotate-%d", i), 1, map[string]any{
+			"provider":    "cursor",
+			"permission":  "read_only",
+			"result_mode": "stdout",
+		})
+	}
+	return env
+}
+
+// runRefusalChurnWindow drives the drain for a bounded window with a
+// ctx-cancellable RunLoop and returns the number of claim refusals observed
+// via OnError. With 4 rotating tasks and <=2 drain workers, the queue can
+// never go empty (max 2 concurrent leases vs 4 claimable tasks), so the
+// refusal count is a deterministic measure of loop-level backoff.
+func runRefusalChurnWindow(t *testing.T, env *workerEnv, concurrency int) int {
+	t.Helper()
+	prevPark := claimRefusalParkWindow
+	claimRefusalParkWindow = 400 * time.Millisecond
+	t.Cleanup(func() { claimRefusalParkWindow = prevPark })
+
+	var mu sync.Mutex
+	refusals := 0
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- env.sup.RunLoop(ctx, LoopOptions{
+			WorkerID:     "w-rotate",
+			LeaseSeconds: 60,
+			Concurrency:  concurrency,
+			OnError: func(err error) {
+				if !errors.Is(err, ErrWorkerCwdNotGitRepo) {
+					return
+				}
+				mu.Lock()
+				refusals++
+				mu.Unlock()
+			},
+		})
+	}()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	return refusals
+}
+
+// TestRunLoopSerialParksAfterConsecutiveClaimRefusals (redcell D-01 F1.1):
+// an incapable serial drain against a rotating always-claimable task set
+// must park after maxConsecutiveClaimRefusals consecutive refusals instead
+// of hot-looping claim->refuse at DB speed. Pre-fix the drain churned
+// unboundedly (the $.not_before deferral is per-task, so rotating task IDs
+// never defer).
+func TestRunLoopSerialParksAfterConsecutiveClaimRefusals(t *testing.T) {
+	env := rotatingRefusalDrainEnv(t)
+	refusals := runRefusalChurnWindow(t, env, 1)
+	t.Logf("serial drain: %d claim refusals in the 1s window (park window %v, cap %d)", refusals, claimRefusalParkWindow, maxConsecutiveClaimRefusals)
+
+	// Parked drain: bursts of maxConsecutiveClaimRefusals refusals separated
+	// by claimRefusalParkWindow — well under 15 in the 1s window.
+	if max := maxConsecutiveClaimRefusals * 5; refusals > max {
+		t.Fatalf("redcell F1.1 unbounded refusal loop: %d claim/refuse cycles in the 1s window against a rotating always-claimable task set (drain must park after %d consecutive refusals, bound %d)", refusals, maxConsecutiveClaimRefusals, max)
+	}
+}
+
+// TestRunLoopConcurrentParksAfterConsecutiveClaimRefusals (redcell D-01
+// F1.1): the concurrent drain applies the same per-worker refusal cap —
+// each drain worker parks independently after its own consecutive refusals.
+// Pre-fix the claim-skip branch was unreachable (a refusal returns nil task,
+// which the park condition swallowed): one refusal per worker parked the
+// whole loop while tasks stayed claimable — exactly 2 refusals, then exit.
+func TestRunLoopConcurrentParksAfterConsecutiveClaimRefusals(t *testing.T) {
+	env := rotatingRefusalDrainEnv(t)
+	refusals := runRefusalChurnWindow(t, env, 2)
+	t.Logf("concurrent drain (2 workers): %d claim refusals in the 1s window (park window %v, cap %d)", refusals, claimRefusalParkWindow, maxConsecutiveClaimRefusals)
+
+	// The drain must KEEP draining (pre-fix it exited after the first
+	// refusal per worker: 2 refusals total)...
+	if min := maxConsecutiveClaimRefusals * 2; refusals < min {
+		t.Fatalf("redcell F1.1 concurrent drain liveness: only %d refusals in the 1s window against a rotating always-claimable task set — the drain parked/exited instead of continuing claim-skip cycles (want >= %d)", refusals, min)
+	}
+	// ...while staying bounded: 2 workers, each capped at bursts of
+	// maxConsecutiveClaimRefusals refusals per park window.
+	if max := maxConsecutiveClaimRefusals * 10; refusals > max {
+		t.Fatalf("redcell F1.1 unbounded refusal loop (concurrent): %d claim/refuse cycles in the 1s window against a rotating always-claimable task set (per-worker park bound %d)", refusals, max)
 	}
 }
