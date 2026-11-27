@@ -88,3 +88,19 @@ jobs:
       - name: Validate Release Matrix
         if: env.CI_LANE != 'docs'
         run: bash tools/release_matrix_check.sh
+
+      # #1022 / audit M-02: run the artifact validation gate test suite
+      # (fixture dist trees, negative acceptance) and then the gate itself
+      # against the REAL GoReleaser snapshot dist — the full platform matrix
+      # (archive set, checksums, embedded versions) is validated on every PR.
+      - name: Run artifact validation gate test suite (#1022)
+        if: env.CI_LANE != 'docs'
+        run: bash tools/artifact_validate_test.sh
+
+      - name: Validate snapshot dist with artifact gate (#1022)
+        if: env.CI_LANE != 'docs'
+        run: |
+          set -euo pipefail
+          SNAPSHOT_VERSION="$(grep -oE '"version":"[^"]+"' dist/metadata.json | head -n1 | cut -d'"' -f4)"
+          echo "snapshot version: ${SNAPSHOT_VERSION}"
+          bash tools/artifact_validate.sh --dist dist --tag "v${SNAPSHOT_VERSION}" --config .goreleaser.yaml

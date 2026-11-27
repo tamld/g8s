@@ -296,15 +296,61 @@ jobs:
       - name: Install Cosign for keyless checksum signing
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
-      - name: Publish release via GoReleaser
+      # M-02 (external audit) / #1022: GoReleaser creates the release as a
+      # DRAFT — nothing is user-visible yet. The artifact validation gate runs
+      # BEFORE the draft is flipped public, so a tampered/missing/corrupted
+      # dist artifact fails the job and the release stays unpublished
+      # (fail-closed). The cosign bundle signs checksums.txt, whose entries the
+      # gate re-verifies against the actual dist/, and the SLSA attestation
+      # step below covers the same validated checksums.txt.
+      - name: Prepare release via GoReleaser as draft (#1022 gate boundary)
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
           version: v2.20.3
-          args: release --clean --skip=homebrew
+          args: release --clean --skip=homebrew --draft
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # M-02 / #1022: post-build artifact validation gate — binds the artifacts
+      # that are about to be published to the verified build:
+      #   1. dist/ contains the exact platform-matrix archive set derived from
+      #      .goreleaser.yaml (darwin_all universal, linux amd64/arm64,
+      #      windows amd64/arm64 zips) — and nothing unexpected,
+      #   2. every checksums.txt entry matches a freshly re-computed SHA-256,
+      #   3. every archived binary embeds main.Version == the release tag
+      #      (ldflags read via `go version -m`; the linux/amd64 binary is also
+      #      executed on this runner).
+      # Any mismatch/absence exits non-zero with a typed [E_*] error — the
+      # draft release is never flipped public.
+      - name: Validate dist artifacts before publish (#1022)
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          bash tools/artifact_validate.sh --dist dist --tag "${TAG_NAME}" --config .goreleaser.yaml
+
+      # Only reached when the gate passed: flip the validated draft release
+      # public. Its assets were uploaded by GoReleaser from the exact dist/
+      # the gate just validated.
+      - name: Publish validated draft release (#1022)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "${TAG_NAME}" --json isDraft >/dev/null 2>&1; then
+            echo "::error::[E_RELEASE_MISSING] draft release ${TAG_NAME} not found — GoReleaser prepare step failed"
+            exit 1
+          fi
+          ASSET_COUNT="$(gh release view "${TAG_NAME}" --json assets --jq '.assets | length')"
+          if [ "${ASSET_COUNT}" -eq 0 ]; then
+            echo "::error::[E_RELEASE_NO_ASSETS] draft release ${TAG_NAME} has no assets — refusing to publish"
+            exit 1
+          fi
+          echo "draft release ${TAG_NAME} validated with ${ASSET_COUNT} assets — publishing"
+          gh release edit "${TAG_NAME}" --draft=false
 
       - name: Attest release checksums (SLSA Build L2 provenance)
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
