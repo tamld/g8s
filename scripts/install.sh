@@ -44,6 +44,16 @@ error() {
     exit 1
 }
 
+# Typed fail-closed error (issue #1023 / audit M-04): artifact-set integrity
+# failures exit with a stable E_INSTALL_* code so callers and CI can match the
+# failure class instead of parsing prose.
+fail_typed() {
+    local code="$1"
+    shift
+    printf "${RED}Error:${NC} [%s] %s\n" "$code" "$*" >&2
+    exit 1
+}
+
 resolve_release_asset_id() {
     local version="$1"
     local filename="$2"
@@ -168,6 +178,66 @@ verify_release_signature() {
     error "G8S_VERIFY_SIGNATURE=1 requires either cosign or gh CLI to verify release signatures"
 }
 
+# Assert the FULL required artifact set for the detected platform arrived
+# intact before anything is unpacked or installed (issue #1023 / audit M-04).
+# A truncated or partially-uploaded release (empty checksums.txt, missing
+# archive, hash drift) must fail closed here instead of silently installing
+# a broken subset.
+assert_required_artifacts() {
+    local tmp_dir="$1"
+    local asset_name="$2"
+
+    # (a) checksums.txt present and non-empty
+    if [ ! -s "${tmp_dir}/checksums.txt" ]; then
+        fail_typed "E_INSTALL_MISSING_ARTIFACT" \
+            "required release artifact 'checksums.txt' missing or empty; refusing partial installation"
+    fi
+
+    # (b) platform archive present and non-empty
+    if [ ! -s "${tmp_dir}/${asset_name}" ]; then
+        fail_typed "E_INSTALL_MISSING_ARTIFACT" \
+            "required release artifact '${asset_name}' missing or empty; refusing partial installation"
+    fi
+
+    # (c) archive sha256 matches its checksums.txt entry (fail-closed on a
+    # missing entry, a missing hasher, or hash drift)
+    info "Verifying SHA-256 checksum..."
+    (
+        cd "$tmp_dir"
+        if ! grep -qE "[[:space:]]${asset_name}\$" checksums.txt; then
+            fail_typed "E_INSTALL_MISSING_ARTIFACT" \
+                "required release artifact '${asset_name}' not listed in checksums.txt; refusing partial installation"
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+            grep -E "[[:space:]]${asset_name}\$" checksums.txt | sha256sum -c - >/dev/null 2>&1 \
+                || fail_typed "E_INSTALL_CHECKSUM_MISMATCH" \
+                    "SHA-256 checksum verification failed for ${asset_name}; release artifact is corrupt or truncated"
+        elif command -v shasum >/dev/null 2>&1; then
+            grep -E "[[:space:]]${asset_name}\$" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 \
+                || fail_typed "E_INSTALL_CHECKSUM_MISMATCH" \
+                    "SHA-256 checksum verification failed for ${asset_name}; release artifact is corrupt or truncated"
+        else
+            fail_typed "E_INSTALL_NO_HASHER" \
+                "Neither sha256sum nor shasum is installed; cannot verify binary integrity"
+        fi
+    )
+}
+
+# Assert the binary inside the release archive survived extraction intact and
+# is executable, as the last gate before it is moved into the install dir
+# (issue #1023 / audit M-04).
+assert_extracted_binary() {
+    local tmp_dir="$1"
+    if [ ! -f "${tmp_dir}/g8s" ] || [ ! -s "${tmp_dir}/g8s" ]; then
+        fail_typed "E_INSTALL_MISSING_ARTIFACT" \
+            "Binary 'g8s' not found or empty inside downloaded package; refusing partial installation"
+    fi
+    if [ ! -x "${tmp_dir}/g8s" ]; then
+        fail_typed "E_INSTALL_BINARY_NOT_EXECUTABLE" \
+            "Binary 'g8s' inside downloaded package is not executable; archive is corrupt or mispackaged"
+    fi
+}
+
 main() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -207,34 +277,26 @@ main() {
     trap 'rm -rf "$tmp_dir"' EXIT
 
     info "Downloading ${asset_name}..."
-    fetch_asset "$version" "$asset_name" "${tmp_dir}/${asset_name}" "Failed to download ${download_url}"
+    fetch_asset "$version" "$asset_name" "${tmp_dir}/${asset_name}" \
+        "[E_INSTALL_MISSING_ARTIFACT] Failed to download ${download_url}; required release artifact absent; refusing partial installation"
 
     # Verify Checksum (Fail-Closed Supply Chain Enforcement - Issue #639)
     fetch_asset "$version" "checksums.txt" "${tmp_dir}/checksums.txt" \
-        "Failed to download ${checksum_url}; refusing unverified binary installation"
+        "[E_INSTALL_MISSING_ARTIFACT] Failed to download ${checksum_url}; refusing unverified binary installation"
+
+    # Assert the FULL required artifact set for this platform arrived intact
+    # before anything is unpacked or installed (issue #1023 / audit M-04):
+    # checksums.txt + archive present and non-empty, sha256 matching.
+    assert_required_artifacts "$tmp_dir" "$asset_name"
     verify_release_signature "$version" "$tmp_dir" "$asset_name"
-    info "Verifying SHA-256 checksum..."
-    (
-        cd "$tmp_dir"
-        if ! grep -qE "[[:space:]]${asset_name}\$" checksums.txt; then
-            error "Asset ${asset_name} not found in checksums.txt"
-        fi
-        if command -v sha256sum >/dev/null 2>&1; then
-            grep -E "[[:space:]]${asset_name}\$" checksums.txt | sha256sum -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
-        elif command -v shasum >/dev/null 2>&1; then
-            grep -E "[[:space:]]${asset_name}\$" checksums.txt | shasum -a 256 -c - >/dev/null 2>&1 || error "SHA-256 checksum verification failed for ${asset_name}"
-        else
-            error "Neither sha256sum nor shasum is installed; cannot verify binary integrity"
-        fi
-    )
 
     # Unpack binary
     info "Unpacking binary..."
     tar -xzf "${tmp_dir}/${asset_name}" -C "$tmp_dir"
 
-    if [ ! -f "${tmp_dir}/g8s" ]; then
-        error "Binary 'g8s' not found inside downloaded package"
-    fi
+    # Last integrity gate before install (issue #1023 / audit M-04): the
+    # binary inside the archive must exist, be non-empty and executable.
+    assert_extracted_binary "$tmp_dir"
 
     # Determine install destination
     local install_dir

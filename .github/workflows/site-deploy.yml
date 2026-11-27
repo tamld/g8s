@@ -4,6 +4,12 @@ name: Site Deploy (g8s.flowaxon.com)
 # main-landing that touches it. The claim-check gate is ADR-0040 applied to
 # the site itself: numbers baked into the page must match the live sources
 # at deploy time, or the deploy fails loudly.
+#
+# Production rollback (issue #1023 / audit M-05): the currently-serving
+# production deployment is captured BEFORE the new deploy; if the post-deploy
+# health probe exhausts its bounded retries, the job rolls production back to
+# that known-good deployment via the Cloudflare Pages rollback API and then
+# fails loudly.
 
 on:
   push:
@@ -98,7 +104,30 @@ jobs:
             > .deploy-stage/_headers
           echo "stage: $(du -sh .deploy-stage | cut -f1)"
 
+      - name: Record previous production deployment (rollback target)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # M-05 (#1023): capture the currently-serving production deployment
+          # BEFORE the new deploy, so a failed health probe can roll back to
+          # it. The capture itself is fail-closed (curl -f + jq .success gate);
+          # an empty target is only legitimate for a first-ever deploy, which
+          # is allowed with a warning — the rollback step below fails loudly
+          # if it ever fires with no target recorded.
+          RESP="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/g8s-flowaxon/deployments?per_page=25")"
+          printf '%s' "${RESP}" | jq -e '.success == true' > /dev/null
+          PREV="$(printf '%s' "${RESP}" | jq -r '[.result[] | select(.environment == "production" and .latest_stage.status == "success")] | sort_by(.created_on) | reverse | .[0].id // empty')"
+          if [ -z "${PREV}" ]; then
+            echo "::warning::no prior successful production deployment found — rollback will be unavailable for this deploy"
+          fi
+          echo "PREV_PROD_DEPLOYMENT_ID=${PREV}" >> "${GITHUB_ENV}"
+          echo "rollback target: ${PREV:-<none>}"
+
       - name: Deploy to Cloudflare Pages
+        id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -110,7 +139,12 @@ jobs:
           npx --yes wrangler@4.166.0 pages deploy .deploy-stage \
             --project-name g8s-flowaxon --branch main
 
+      # M-05 (#1023): this probe is the health gate for the rollback below —
+      # bounded retries (5 attempts, 20s apart) tolerate CDN propagation
+      # delay, but exhaustion is NEVER skipped: it fails the step and trips
+      # the rollback.
       - name: Post-deploy smoke
+        id: smoke
         run: |
           set -euo pipefail
           sleep 20
@@ -143,7 +177,47 @@ jobs:
               echo "smoke PASS: self-hosted font + three assets OK"
               exit 0
             fi
-            echo "smoke attempt ${i}: code=${CODE} — retrying"; sleep 15
+            echo "smoke attempt ${i}: code=${CODE} — retrying"; sleep 20
           done
-          echo "::error::smoke FAILED after 5 attempts"
+          echo "::error::smoke FAILED after 5 attempts — tripping production rollback"
+          exit 1
+
+      # M-05 (#1023): production rollback on failed health probe. Only fires
+      # when the deploy itself succeeded and the smoke probe failed — a
+      # failed claim-check or failed deploy means nothing new went live.
+      # The job fails loudly either way (the smoke step already failed).
+      - name: Roll back production to previous deployment
+        if: failure() && steps.deploy.outcome == 'success' && steps.smoke.outcome == 'failure'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PREV_PROD_DEPLOYMENT_ID:-}" ]; then
+            echo "::error::health probe FAILED and no previous production deployment was recorded — cannot roll back; production remains on the broken deploy"
+            exit 1
+          fi
+          echo "::error::production health probe FAILED — rolling back to deployment ${PREV_PROD_DEPLOYMENT_ID}"
+          RESP="$(curl -sS -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/g8s-flowaxon/deployments/${PREV_PROD_DEPLOYMENT_ID}/rollback")"
+          printf '%s' "${RESP}" | jq -e '.success == true' > /dev/null \
+            || { echo "::error::rollback API call FAILED: $(printf '%s' "${RESP}" | jq -c '.errors // .')"; exit 1; }
+          echo "rollback accepted — re-probing apex for restoration confirmation..."
+          sleep 20
+          RESTORED=0
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /tmp/rollback.html -w '%{http_code}' https://g8s.flowaxon.com/ || echo 000)
+            if [ "${CODE}" = "200" ] && grep -q "the gatekeepers" /tmp/rollback.html; then
+              echo "rollback CONFIRMED: apex 200 + brand marker restored"
+              RESTORED=1
+              break
+            fi
+            echo "rollback probe attempt ${i}: code=${CODE} — retrying"; sleep 20
+          done
+          if [ "${RESTORED}" = "1" ]; then
+            echo "::error::production rolled back to ${PREV_PROD_DEPLOYMENT_ID} (service restored), but the NEW deploy failed health checks — fix before re-deploying"
+          else
+            echo "::error::production rolled back to ${PREV_PROD_DEPLOYMENT_ID} but apex re-probe is STILL unhealthy — check Cloudflare status immediately"
+          fi
           exit 1

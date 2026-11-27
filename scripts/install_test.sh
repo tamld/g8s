@@ -248,4 +248,151 @@ if [ "$sig_miss_rc" -eq 0 ]; then
 fi
 echo "  [PASS] verify_release_signature checks passed"
 
+echo "Testing: M04 assert_required_artifacts + assert_extracted_binary fail-closed matrix (issue #1023)"
+# Fixture-based, no network: each case builds a local artifact set in
+# TEST_ROOT/m04 and asserts the typed E_INSTALL_* gate outcome.
+setup_shim "web_ok"
+M04_ROOT="${TEST_ROOT}/m04"
+mkdir -p "$M04_ROOT"
+ART_ASSET="g8s_0.25.0_linux_amd64.tar.gz"
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+mk_artifact_fixture() {
+    rm -rf "${M04_ROOT}/art"
+    mkdir -p "${M04_ROOT}/art"
+    printf 'archive-payload-bytes' > "${M04_ROOT}/art/${ART_ASSET}"
+    printf '%s  %s\n' "$(sha256_of "${M04_ROOT}/art/${ART_ASSET}")" "${ART_ASSET}" > "${M04_ROOT}/art/checksums.txt"
+    printf 'fake-g8s-binary-payload' > "${M04_ROOT}/art/g8s"
+    chmod 755 "${M04_ROOT}/art/g8s"
+}
+
+run_artifact_case() {
+    local desc="$1"
+    local expect_ok="$2"
+    local expected_code="$3"
+    local output="" rc=0
+    output="$(INSTALL_SH="${INSTALL_SH}" ART_ROOT="${M04_ROOT}/art" ART_ASSET="${ART_ASSET}" bash -c '
+        # shellcheck disable=SC1091
+        source "${INSTALL_SH}"
+        assert_required_artifacts "${ART_ROOT}" "${ART_ASSET}"
+    ' 2>&1)" || rc=$?
+    if [ "$expect_ok" = "true" ]; then
+        if [ "$rc" -ne 0 ]; then
+            echo "  [FAIL] $desc: expected success, got rc=$rc" >&2
+            echo "  Output: $output" >&2
+            exit 1
+        fi
+        echo "  [PASS] $desc"
+    else
+        if [ "$rc" -eq 0 ]; then
+            echo "  [FAIL] $desc: expected typed failure, got rc=0" >&2
+            exit 1
+        fi
+        if ! echo "$output" | grep -qF "$expected_code"; then
+            echo "  [FAIL] $desc: expected output to contain [$expected_code]" >&2
+            echo "  Output: $output" >&2
+            exit 1
+        fi
+        echo "  [PASS] $desc (${expected_code})"
+    fi
+}
+
+mk_artifact_fixture
+run_artifact_case "complete artifact set passes (hash + entries valid)" "true" ""
+
+mk_artifact_fixture
+rm -f "${M04_ROOT}/art/checksums.txt"
+run_artifact_case "checksums.txt absent" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+: > "${M04_ROOT}/art/checksums.txt"
+run_artifact_case "checksums.txt empty (0 bytes)" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+rm -f "${M04_ROOT}/art/${ART_ASSET}"
+run_artifact_case "platform archive absent" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+: > "${M04_ROOT}/art/${ART_ASSET}"
+run_artifact_case "platform archive empty (0 bytes)" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+printf 'truncated-garbage' > "${M04_ROOT}/art/${ART_ASSET}"
+run_artifact_case "archive hash drift vs checksums.txt" "false" "E_INSTALL_CHECKSUM_MISMATCH"
+
+mk_artifact_fixture
+printf 'deadbeef  some-other-asset.tar.gz\n' > "${M04_ROOT}/art/checksums.txt"
+run_artifact_case "platform archive not listed in checksums.txt" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+# E_INSTALL_NO_HASHER: curated PATH with bash+grep only — no sha256sum/shasum.
+HASHLESS_BIN="${M04_ROOT}/hashless-bin"
+mkdir -p "$HASHLESS_BIN"
+ln -sf "$(command -v bash)" "${HASHLESS_BIN}/bash"
+ln -sf "$(command -v grep)" "${HASHLESS_BIN}/grep"
+mk_artifact_fixture
+nohash_rc=0
+nohash_out="$(INSTALL_SH="${INSTALL_SH}" ART_ROOT="${M04_ROOT}/art" ART_ASSET="${ART_ASSET}" PATH="${HASHLESS_BIN}" bash -c '
+    # shellcheck disable=SC1091
+    source "${INSTALL_SH}"
+    assert_required_artifacts "${ART_ROOT}" "${ART_ASSET}"
+' 2>&1)" || nohash_rc=$?
+if [ "$nohash_rc" -eq 0 ] || ! echo "$nohash_out" | grep -qF "E_INSTALL_NO_HASHER"; then
+    echo "  [FAIL] missing hasher: expected E_INSTALL_NO_HASHER, rc=$nohash_rc out=$nohash_out" >&2
+    exit 1
+fi
+echo "  [PASS] no sha256sum/shasum on PATH (E_INSTALL_NO_HASHER)"
+
+run_binary_case() {
+    local desc="$1"
+    local expect_ok="$2"
+    local expected_code="$3"
+    local output="" rc=0
+    output="$(INSTALL_SH="${INSTALL_SH}" ART_ROOT="${M04_ROOT}/art" bash -c '
+        # shellcheck disable=SC1091
+        source "${INSTALL_SH}"
+        assert_extracted_binary "${ART_ROOT}"
+    ' 2>&1)" || rc=$?
+    if [ "$expect_ok" = "true" ]; then
+        if [ "$rc" -ne 0 ]; then
+            echo "  [FAIL] $desc: expected success, got rc=$rc" >&2
+            echo "  Output: $output" >&2
+            exit 1
+        fi
+        echo "  [PASS] $desc"
+    else
+        if [ "$rc" -eq 0 ]; then
+            echo "  [FAIL] $desc: expected typed failure, got rc=0" >&2
+            exit 1
+        fi
+        if ! echo "$output" | grep -qF "$expected_code"; then
+            echo "  [FAIL] $desc: expected output to contain [$expected_code]" >&2
+            echo "  Output: $output" >&2
+            exit 1
+        fi
+        echo "  [PASS] $desc (${expected_code})"
+    fi
+}
+
+mk_artifact_fixture
+run_binary_case "extracted executable binary passes" "true" ""
+
+mk_artifact_fixture
+rm -f "${M04_ROOT}/art/g8s"
+run_binary_case "binary absent after extraction" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+: > "${M04_ROOT}/art/g8s"
+run_binary_case "binary empty after extraction" "false" "E_INSTALL_MISSING_ARTIFACT"
+
+mk_artifact_fixture
+chmod 644 "${M04_ROOT}/art/g8s"
+run_binary_case "binary not executable inside package" "false" "E_INSTALL_BINARY_NOT_EXECUTABLE"
+
 echo "==> All install.sh tests passed."
