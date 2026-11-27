@@ -46,7 +46,7 @@ func TestReceiptExportCLI_SuccessAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTask: %v", err)
 	}
-	if !store.StartTask(claimed.TaskID, "worker-1", *claimed.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "worker-1", *claimed.LeaseToken) {
 		t.Fatal("StartTask failed")
 	}
 	_, err = store.FinishAttempt(claimed.TaskID, "worker-1", *claimed.LeaseToken, controlplane.FinishAttemptParams{
@@ -176,7 +176,7 @@ func TestReceiptExportCLI_RepairWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTask: %v", err)
 	}
-	if !store.StartTask(claimed.TaskID, "worker-1", *claimed.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "worker-1", *claimed.LeaseToken) {
 		t.Fatal("StartTask failed")
 	}
 	_, err = store.FinishAttempt(claimed.TaskID, "worker-1", *claimed.LeaseToken, controlplane.FinishAttemptParams{
