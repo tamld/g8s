@@ -178,7 +178,7 @@ func TestAdapter_GetLineageTree_ExitCodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim parent task failed: %v", err)
 	}
-	if !adapter.controlPlane.StartTask(claimedP.TaskID, *claimedP.LeaseOwner, *claimedP.LeaseToken) {
+	if !adapter.controlPlane.StartTaskContext(context.Background(), claimedP.TaskID, *claimedP.LeaseOwner, *claimedP.LeaseToken) {
 		t.Fatalf("StartTask parent failed")
 	}
 	_, err = adapter.controlPlane.FinishAttempt(claimedP.TaskID, *claimedP.LeaseOwner, *claimedP.LeaseToken, controlplane.FinishAttemptParams{
@@ -194,7 +194,7 @@ func TestAdapter_GetLineageTree_ExitCodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim child task failed: %v", err)
 	}
-	if !adapter.controlPlane.StartTask(claimedC.TaskID, *claimedC.LeaseOwner, *claimedC.LeaseToken) {
+	if !adapter.controlPlane.StartTaskContext(context.Background(), claimedC.TaskID, *claimedC.LeaseOwner, *claimedC.LeaseToken) {
 		t.Fatalf("StartTask child failed")
 	}
 	_, err = adapter.controlPlane.FinishAttempt(claimedC.TaskID, *claimedC.LeaseOwner, *claimedC.LeaseToken, controlplane.FinishAttemptParams{
