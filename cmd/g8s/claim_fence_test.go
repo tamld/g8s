@@ -41,7 +41,7 @@ func TestReceiptExportRecoversClaimVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !store.StartTask(claimed.TaskID, "worker", *claimed.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "worker", *claimed.LeaseToken) {
 		t.Fatal("start failed")
 	}
 	v := &controlplane.ClaimFenceVerdict{TaskID: task.TaskID, ClaimTaskID: "claim-task", ReceiptID: "receipt", Verdict: "rejected", Code: "E_CLAIM_FENCE_OUT_OF_SCOPE"}

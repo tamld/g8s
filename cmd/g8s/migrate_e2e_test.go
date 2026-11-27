@@ -188,7 +188,7 @@ func TestMigrateE2E_OldDBToNewBinary(t *testing.T) {
 	if claimed.LeaseToken != nil {
 		token = *claimed.LeaseToken
 	}
-	if !store.StartTask(claimed.TaskID, "worker-migrate-e2e", token) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "worker-migrate-e2e", token) {
 		t.Fatalf("StartTask failed on migrated DB")
 	}
 
