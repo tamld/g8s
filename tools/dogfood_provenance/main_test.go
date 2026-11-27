@@ -41,9 +41,10 @@ func TestCollectEpoch(t *testing.T) {
 					return tc.anchor, nil
 				case strings.HasPrefix(call, "cat-file"):
 					return "", fmt.Errorf("ADR not present")
-				case strings.HasPrefix(call, "log -200 --format=%B%x00 "):
+				case strings.HasPrefix(call, "log -200 --name-only --format=%x00%s%x01%B%x04 "):
 					logRange = args[len(args)-1]
-					return "subject\n\nReceipt: task-1\n\x00\nsubject\n\nProvenance: F0-direct — wiring\n\x00", nil
+					// %B renders the full raw message: subject + blank + trailers.
+					return "subject\x01subject\n\nReceipt: task-1\n\x04\npath/a.go\n\x00subject\x01subject\n\nProvenance: F0-direct — wiring\n\x04\ndocs/b.md\n", nil
 				default:
 					t.Fatalf("unexpected Git args %v", args)
 					return "", nil
@@ -53,10 +54,34 @@ func TestCollectEpoch(t *testing.T) {
 			if (err != nil) != tc.fail || logRange != tc.wantRange || len(report) != tc.wantCount {
 				t.Fatalf("range=%q count=%d err=%v", logRange, len(report), err)
 			}
-			if len(report) > 0 && (report[0].Kind != "receipt" || report[1].Kind != "f0_direct") {
+			if len(report) > 0 && (report[0].Provenance.Kind != "receipt" || report[1].Provenance.Kind != "f0_direct") {
 				t.Fatalf("multiline framing lost provenance: %+v", report)
 			}
+			if len(report) == 2 && (report[0].Lane != "F" || report[1].Lane != "D") {
+				t.Fatalf("lane routing lost: %+v", report)
+			}
 		})
+	}
+}
+
+// TestRenderLaneSplitSections asserts the #971 WP2 sections render with the
+// Lane D auditability note and the insufficient_sample cohort label.
+func TestRenderLaneSplitSections(t *testing.T) {
+	records := []dogfood.CommitRecord{
+		dogfood.NewCommitRecord("docs: guide", []string{"docs/guide.md"}, dogfood.Provenance{Kind: "receipt", Ref: "task-1"}),
+		dogfood.NewCommitRecord("feat: lanes", []string{"internal/dogfood/lanes.go"}, dogfood.Provenance{Kind: "f0_direct", Ref: "wiring"}),
+	}
+	text := renderLaneSplitSections(records)
+	for _, want := range []string{
+		"Lane-split honesty ledger",
+		"Lane D (prose) is auditable",
+		"Provenance cohort quality",
+		"insufficient_sample",
+		"Escape rate by lane",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("lane-split sections missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -80,7 +105,11 @@ func TestHonestyBudget(t *testing.T) {
 					report[i].Kind = "unclassified"
 				}
 			}
-			text, failed := render(report, "test", tc.baseline)
+			records := make([]dogfood.CommitRecord, len(report))
+			for i := range report {
+				records[i] = dogfood.CommitRecord{Subject: "change", Provenance: report[i], Lane: "F"}
+			}
+			text, failed := render(records, "test", tc.baseline)
 			if failed != tc.fail || !strings.Contains(text, "| Total |") {
 				t.Fatalf("failed=%v, want %v; report=%s", failed, tc.fail, text)
 			}

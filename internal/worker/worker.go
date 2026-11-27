@@ -108,6 +108,12 @@ type taskRequest struct {
 	// AllowedPaths and HoldoutDir feed the unified RequestedPolicy -> EffectiveEnforcement contract (#943).
 	AllowedPaths []string `json:"allowed_paths,omitempty"`
 	HoldoutDir   string   `json:"holdout_dir,omitempty"`
+
+	// AllowDegradedSandbox (#971 WP1) is the per-task operator opt-in recorded
+	// by `g8s submit --allow-degraded-sandbox`: when the host lacks kernel
+	// sandbox enforcement the attempt proceeds with sandbox_degraded recorded
+	// in the envelope instead of being refused.
+	AllowDegradedSandbox bool `json:"allow_degraded_sandbox,omitempty"`
 }
 
 // Child is one spawned worker process observed by the supervisor.
@@ -244,6 +250,15 @@ func WithRequireKernelSandbox(require bool) Option {
 	return func(s *Supervisor) { s.requireKernelSandbox = require }
 }
 
+// WithAllowDegradedSandbox permits (#971 WP1) attempts to proceed below
+// kernel_enforced containment when the host lacks a kernel sandbox backend:
+// the attempt envelope records sandbox_degraded=true with a machine-readable
+// reason instead of refusing (the default fail-closed posture for
+// workspace_write). Never silent.
+func WithAllowDegradedSandbox(allow bool) Option {
+	return func(s *Supervisor) { s.allowDegradedSandbox = allow }
+}
+
 // SubstituteTemplate replaces {prompt}, {model} and {timeout} placeholders
 // verbatim in an operator-defined invocation template (DELTA-10 R6).
 func SubstituteTemplate(tmpl []string, prompt, model, timeout string) []string {
@@ -345,6 +360,13 @@ type Supervisor struct {
 	// sandbox.ModeKernelEnforced (#936 / ADR-0042 TRUST-G1).
 	requireKernelSandbox bool
 
+	// allowDegradedSandbox (#971 WP1): when the host lacks kernel sandbox
+	// enforcement, workspace_write attempts proceed recorded-degraded
+	// (sandbox_degraded in the envelope) instead of being refused. Opt-in via
+	// G8S_ALLOW_DEGRADED_SANDBOX=1, the worker --allow-degraded-sandbox flag,
+	// or the task request's allow_degraded_sandbox field.
+	allowDegradedSandbox bool
+
 	// killGroup is the injectable process-group kill seam used by reapOrphans
 	// and the post-run sweep; tests install a spy to assert kill decisions
 	// without real signals (#980). Nil = the platform killProcessGroup.
@@ -386,6 +408,7 @@ func NewSupervisor(cp WorkerControlPlane, runRoot string, opts ...Option) *Super
 		providers:            config.BuiltinPlatformProviders(),
 		evidenceDir:          evidenceDir,
 		requireKernelSandbox: strings.TrimSpace(os.Getenv("G8S_REQUIRE_KERNEL_SANDBOX")) == "1",
+		allowDegradedSandbox: strings.TrimSpace(os.Getenv("G8S_ALLOW_DEGRADED_SANDBOX")) == "1",
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -917,6 +940,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		DenyDirs:              denyDirs,
 		NoSandbox:             req.NoSandbox,
 		RequireKernelEnforced: s.requireKernelSandbox,
+		AllowDegradedSandbox:  req.AllowDegradedSandbox || s.allowDegradedSandbox,
 	}
 	var baselineIgnored map[string]IgnoredFileStamp
 	if isolatedWorktreeDir != "" {
