@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-11-28
+
+### Added
+
+- **Compliance Mode 1/2 readiness (#971)**: capability-probed sandbox preflight + degraded-sandbox opt-in gate (submit `--allow-degraded-sandbox` persists `request_json`; worker flag + `G8S_ALLOW_DEGRADED_SANDBOX=1`; policy gate refuses `E_SANDBOX_DEGRADED_NOT_ALLOWED` unless both ends opt in); doctor renders `SandboxCapability` + Mode1/Mode2 readiness matrix; f0 scorecard gains `axes.compliance_vs_quality` (lane ledger, cohort metrics, escape rate by lane, sandbox enforcement — sub-probes degrade explicitly); tools/dogfood_burnin verification harness (14 stable invariants over the cohort metrics, N-run pass criterion, JSON report CI-gateable, live probe 3/3 invariant-clean).
+- **Context Authority Firewall PR-2/PR-3 (#977)**: tool-tier authority sink guards + `internal/provenance` ProvenanceClass labels wired into ContextPacket + `.g8s/authority-sinks.yml` registry with reality tests; provenance consumption at the receipt-grant sink — `MayDriveSink` deterministic gate (unestablished-origin contexts escalate to HITL with `E_EXTERNAL_CONTENT_DRIVE_FORBIDDEN`; registry statuses consumed fail-closed); V8 corpus scenario verified flipped to hard-refusal by PR-2 (no `t.Skip` remains).
+- **Post-goreleaser artifact validation gate (#1022)**: `tools/artifact_validate.sh` (expected-archive set equality from .goreleaser.yaml, SHA-256 re-verification of every checksums.txt entry, embedded-version binding via `go version -m`, native binary execution check; typed `[E_*]` failures) — draft-gate-flip boundary in release.yml (goreleaser `--draft` → validate → `gh release edit --draft=false`); tamper E2E verified fail-closed; dist-validation workflow runs the gate against a real snapshot on every PR.
+- **Installer artifact assertions + production deploy rollback (#1023)**: typed fail-closed checks before verify-before-unpack ordering (`E_INSTALL_MISSING_ARTIFACT` / `E_INSTALL_CHECKSUM_MISMATCH` / `E_INSTALL_NO_HASHER` / `E_INSTALL_BINARY_NOT_EXECUTABLE`; 18/18 fixture tests); Cloudflare REST-API rollback to the previous production deployment on bounded smoke-probe failure (wrangler 4.x has no pages rollback command — verified), always fails the job loudly.
+
+### Fixed
+
+- **Batch1 blind-audit concurrency/ctx cluster (#986, 6/6)**:
+  - A-3 `agyHandle.Wait` concurrent-call deadlock + data race → single wait goroutine + single-flight receipt epilogue (#1048; measured: divergent waiter errors/receipts pre-fix).
+  - A-6 ctx discipline → `StartTaskContext`/`ExecutionSignalContext` + busy-retry-wrapped transitions (#1043) with legacy shims (zero signature ripple), 15 worker production sites + interface + stub (#1046), memory/cmd/supervisor test tails (#1051/#1050/#1049), `Deprecated:` markers restored (#pending-markers-PR).
+  - A-7 Pool git subprocesses outside the mutex + per-taskID single-flight + 60s timeout bounds on all git helpers (#1045; red probes: wedged git blocked other Acquires 3.37s; 4× worktree-add stampede).
+  - A-12 CancelTask/RejectResult/RequestEdit/RequeueResult wrapped in `withBusyRetry` (#1043; red: external `BEGIN IMMEDIATE` broke all four).
+  - A-13 spawn-deadline group kill + timer release (#1047; red behavioral: a forked grandchild SURVIVED the deadline pre-fix; Windows-oracle catch folded in).
+  - A-14 agy Setpgid at spawn + `killProcessTree` on Cancel with direct-kill fallback (#1048; red: orphaned grandchild held the stdout pipe so `cmd.Wait` blocked indefinitely after Cancel — the FanOut doc violation).
+- **Red Cell mediums (#986)**: refusal-loop park after 3 consecutive claim refusals (measured 1916 claim/refuse cycles/s under rotating task IDs; concurrent-park dead-code branch restored to the documented #987/#999 intent); E_* code derivation head-anchored (model-controlled reasons can no longer seal spoofed codes; neutral `E_WORKER_FAILURE_CODE_MISSING` fallback; validator requires full-token codes); inline/fenced `{}` no longer satisfies the contract-presence check (suspect-fast-completion flag restored).
+- **Signal-file stale-handle detection (#984 residual, A-5/C-10)**: cross-process rotation race closed (#1034).
+- **doctor TDD-trap checker order-dependence (#1041)**: methods for receiver types declared in alphabetically-later files were silently lost (30+ Store methods; false-positive generator) — two-pass symbol registration; real-world probe returns zero fabricated findings.
+
+### Changed
+
+- `actions/setup-go` 7.0.0 → 7.1.0 (#1031).
+- Secret scanning + SAST unconditioned on every lane; skills/.g8s route build-lane (#1030/#1020).
+- Release workflow ancestry gate (`git merge-base --is-ancestor`) (#1029); site-deploy restricted to main + schedule (#1027); gofumpt fail-closed via pinned tool (#1026).
+
 ## [0.27.1] - 2026-11-21
 
 ### Fixed
