@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tamld/g8s/internal/cli"
 	"github.com/tamld/g8s/internal/controlplane"
+	"github.com/tamld/g8s/internal/dogfood"
 	"github.com/tamld/g8s/internal/memory"
 	"github.com/tamld/g8s/internal/pathutil"
 	"github.com/tamld/g8s/internal/receipt"
@@ -734,6 +736,10 @@ func runScorecard(args []string) {
 				"l1_predictions_checked":  verifyCheckedSum,
 				"l1_vs_l3_agreement_rate": l1L3AgreementRate,
 			},
+			// #971 WP2 additive section: lane-split honesty ledger, provenance
+			// cohort revert/fixup comparison, per-lane escape rates, and the
+			// sandbox enforcement (workspace_write) outcome metric.
+			"compliance_vs_quality": buildComplianceVsQualitySection(context.Background()),
 		},
 		"kaizen_recommendations": kaizen,
 		"generated_at":           time.Now().UTC().Format(time.RFC3339),
@@ -748,4 +754,92 @@ func runScorecard(args []string) {
 
 	b, _ := json.MarshalIndent(payload, "", "  ")
 	fmt.Println(string(b))
+}
+
+// buildComplianceVsQualitySection assembles the additive
+// axes.compliance_vs_quality telemetry (issue #971 WP2) consuming the merged
+// internal/dogfood lane-split honesty ledger:
+//
+//   - lane_ledger: per-ALDC-lane provenance rows (dogfood.BuildLaneLedger);
+//     Lane D (prose) is auditable and counted like every other lane.
+//   - cohort_metrics: receipt-backed vs F0-direct vs unclassified
+//     revert/fixup comparison (dogfood.BuildCohortMetrics) with honest
+//     insufficient_sample labeling under min-sample landings.
+//   - escape_rate_by_lane: per-lane revert/fixup escape rates
+//     (dogfood.BuildEscapeRateByLane).
+//   - sandbox_enforcement: workspace_write attempts bucketed by enforcement
+//     outcome (kernel_enforced / degraded_allowed / refused) via the merged
+//     dogfood.LoadSandboxEnforcement tasks-DB loader, which folds the
+//     per-attempt envelopes through dogfood.SummarizeSandboxEnforcement.
+//
+// Every sub-probe degrades to an explicit *_error field instead of failing the
+// whole scorecard: telemetry must never block the supervisor.
+func buildComplianceVsQualitySection(ctx context.Context) map[string]any {
+	section := map[string]any{
+		"issue":      "#971 WP2",
+		"min_sample": dogfood.DefaultCohortMinSample,
+	}
+
+	records, gitErr := collectScorecardCommitRecords()
+	if gitErr != nil {
+		section["git_log_error"] = gitErr.Error()
+		section["lane_ledger"] = []dogfood.LaneLedgerRow{}
+		section["cohort_metrics"] = []dogfood.CohortMetric{}
+		section["escape_rate_by_lane"] = []dogfood.LaneEscapeRate{}
+	} else {
+		section["lane_ledger"] = dogfood.BuildLaneLedger(records)
+		section["cohort_metrics"] = dogfood.BuildCohortMetrics(records, dogfood.DefaultCohortMinSample)
+		section["escape_rate_by_lane"] = dogfood.BuildEscapeRateByLane(records, dogfood.DefaultCohortMinSample)
+	}
+
+	summary, sbxErr := loadScorecardSandboxEnforcement(ctx)
+	if sbxErr != nil {
+		section["sandbox_enforcement_error"] = sbxErr.Error()
+	} else {
+		section["sandbox_enforcement"] = summary
+	}
+	return section
+}
+
+// scorecardProvenanceWindow mirrors tools/dogfood_provenance windowSize.
+const scorecardProvenanceWindow = 200
+
+// collectScorecardCommitRecords reads the provenance window from the current
+// repository HEAD with the same NUL framing the provenance tooling feeds
+// dogfood.ParseCommitRecords:
+//
+//	git log -200 --name-only --format=%x00%s%x01%B%x04 HEAD
+//
+// records separated by \x00; per record: subject \x01 body \x04 \n file list.
+func collectScorecardCommitRecords() ([]dogfood.CommitRecord, error) {
+	out, err := exec.Command("git", "log",
+		fmt.Sprintf("-%d", scorecardProvenanceWindow),
+		"--name-only",
+		"--format=%x00%s%x01%B%x04",
+		"HEAD",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git log provenance window: %w", err)
+	}
+	return dogfood.ParseCommitRecords(string(out)), nil
+}
+
+// loadScorecardSandboxEnforcement opens the durable tasks database read-only
+// (zero-CGO modernc.org/sqlite, driver registered by the controlplane import)
+// and counts workspace_write attempts by enforcement outcome.
+func loadScorecardSandboxEnforcement(ctx context.Context) (dogfood.SandboxEnforcementSummary, error) {
+	dbPath, err := databasePath()
+	if err != nil {
+		return dogfood.SandboxEnforcementSummary{}, err
+	}
+	if st, statErr := os.Stat(dbPath); statErr != nil || st.IsDir() {
+		return dogfood.SandboxEnforcementSummary{}, fmt.Errorf("tasks database missing at %s", dbPath)
+	}
+	db, err := sql.Open("sqlite", pathutil.SQLiteURI(dbPath, "mode=ro"))
+	if err != nil {
+		return dogfood.SandboxEnforcementSummary{}, err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	return dogfood.LoadSandboxEnforcement(ctx, db, 0)
 }

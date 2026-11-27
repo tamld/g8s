@@ -181,8 +181,47 @@ func runDoctor(args []string) {
 		printTrustAssuranceHuman(report.TrustAssurance)
 	}
 
+	printSandboxOperatingModesHuman(report)
+
 	if report.OverallStatus == "UNHEALTHY" {
 		os.Exit(1)
+	}
+}
+
+// printSandboxOperatingModesHuman renders the #971 WP1 capability-probed
+// sandbox preflight (DoctorReport.SandboxCapability) and the honest Mode 1 /
+// Mode 2 operating-modes readiness matrix (DoctorReport.OperatingModes) in
+// human output. Additive and nil-guarded: reports produced by older binaries
+// without these fields render nothing.
+func printSandboxOperatingModesHuman(report *doctor.DoctorReport) {
+	if report == nil {
+		return
+	}
+	if sbxCap := report.SandboxCapability; sbxCap != nil {
+		fmt.Println()
+		fmt.Printf("SANDBOX Capability (issue #971 WP1): mode=%s backend=%s\n  %s\n", sbxCap.Mode, sbxCap.Backend, sbxCap.Reason)
+	}
+	if om := report.OperatingModes; om != nil {
+		fmt.Println()
+		fmt.Println("Operating Modes Readiness (issue #971 WP1):")
+		for _, mode := range []doctor.OperatingModeReadiness{om.Mode1, om.Mode2} {
+			statusStr := pterm.Red("NOT READY")
+			if mode.Ready {
+				statusStr = pterm.Green("READY")
+			}
+			fmt.Printf("  [%s] %s (%s): %s\n", statusStr, mode.Mode, mode.Name, mode.Reason)
+			for _, req := range mode.Requirements {
+				reqStr := pterm.Red("UNMET")
+				if req.Met {
+					reqStr = pterm.Green("MET")
+				}
+				detail := strings.TrimSpace(req.Detail)
+				if detail == "" {
+					detail = "-"
+				}
+				fmt.Printf("    • %s [%s]: %s\n", req.ID, reqStr, detail)
+			}
+		}
 	}
 }
 

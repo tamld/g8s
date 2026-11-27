@@ -46,6 +46,7 @@ func runSubmit(args []string) {
 	permission := fs.String("permission", "read_only", "permission profile (read_only, automation_read, workspace_write, supplied_text; use --allow-workspace-write to opt in)")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
 	allowWorkerCommit := fs.Bool("allow-worker-commit", false, "opt in to the ADR-0041 worker git-commit proxy for this task (commit-only; git fetch/push stay supervisor-owned; requires --permission workspace_write)")
+	allowDegradedSandbox := fs.Bool("allow-degraded-sandbox", false, "explicit operator opt-in (issue #971 WP1): let this task run below kernel_enforced containment when the host lacks a sandbox backend — the attempt envelope records sandbox_degraded instead of being refused (E_SANDBOX_DEGRADED_NOT_ALLOWED); relevant to workspace_write")
 	toolPolicy := fs.String("tool-policy", "", "model tool policy (default|none)")
 	timeout := fs.String("timeout", "30s", "execution window for the worker (e.g. 900s, 15m; bare integer is treated as seconds)")
 	receiptID := fs.String("receipt-id", "", "write receipt ID (required for workspace_write)")
@@ -810,6 +811,11 @@ func runSubmit(args []string) {
 	}
 	if *allowWorkerCommit {
 		payloadMap["allow_worker_commit"] = true
+	}
+	// #971 WP1: persisted into request_json so the W-layer sandbox gate reads
+	// taskRequest.AllowDegradedSandbox for this task (fail-closed by default).
+	if *allowDegradedSandbox {
+		payloadMap["allow_degraded_sandbox"] = true
 	}
 	if routeDecision != nil {
 		payloadMap["provider"] = routeDecision.Provider
