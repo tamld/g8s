@@ -163,6 +163,9 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 		Home:            "",
 	})
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// A-14 (#986): place the child in its own process group so Cancel can
+	// kill the whole subtree, matching FanOut's documented group kill.
+	configureSysProcAttr(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -184,6 +187,13 @@ func (w *AgyWorker) Spawn(ctx context.Context, t Task) (Handle, error) {
 
 // agyHandle wraps a live agy subprocess. Wait blocks until the process
 // exits or ctx fires; Cancel kills the process group.
+//
+// Concurrency contract (A-3, #986): exactly ONE goroutine ever calls
+// cmd.Wait (guarded by procOnce — spawned lazily by the first Wait).
+// All Wait callers select on the shared procCh, and exactly one of them
+// (finishOnce) runs the receipt synthesis / PostWait hooks / receipt-file
+// write; concurrent callers block on finishCh and return the same stored
+// result.
 type agyHandle struct {
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -198,6 +208,36 @@ type agyHandle struct {
 	done      bool
 	cancelled bool
 	waitErr   error
+
+	// proc-wait: the single cmd.Wait goroutine's completion signal.
+	procOnce sync.Once
+	procCh   chan struct{} // closed exactly once after cmd.Wait returns
+	procErr  error         // written before procCh closes; read after
+
+	// post-processing: single-flight completion of Wait's epilogue.
+	finishOnce sync.Once
+	finishCh   chan struct{} // closed exactly once after epilogue
+	result     Receipt
+	resultErr  error
+}
+
+// startWait lazily spawns the single cmd.Wait goroutine. Duplicate Wait
+// callers share procCh instead of spawning competing cmd.Wait goroutines:
+// concurrent cmd.Wait calls race on exec.Cmd internals and deadlock in
+// awaitGoroutines (A-3, #986).
+func (h *agyHandle) startWait() {
+	h.procOnce.Do(func() {
+		h.procCh = make(chan struct{})
+		cmd := h.cmd
+		if cmd == nil {
+			close(h.procCh)
+			return
+		}
+		go func() {
+			h.procErr = cmd.Wait()
+			close(h.procCh)
+		}()
+	})
 }
 
 func (h *agyHandle) PID() int {
@@ -214,6 +254,10 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 		h.mu.Unlock()
 		return h.synthesize(err), err
 	}
+	if h.finishCh == nil {
+		h.finishCh = make(chan struct{})
+	}
+	finishCh := h.finishCh
 	h.mu.Unlock()
 
 	var cancel context.CancelFunc
@@ -222,20 +266,16 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 		defer cancel()
 	}
 
-	var waitErr error
-	waitCh := make(chan struct{})
-	go func() {
-		waitErr = h.cmd.Wait()
-		close(waitCh)
-	}()
+	h.startWait()
 
 	var runErr error
 	select {
-	case <-waitCh:
-		runErr = waitErr
+	case <-h.procCh:
+		runErr = h.procErr
 	case <-ctx.Done():
 		_ = h.Cancel(context.Background())
-		<-waitCh
+		<-h.procCh
+		runErr = h.procErr
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			runErr = ErrWorkerTimeout
 		} else {
@@ -243,6 +283,21 @@ func (h *agyHandle) Wait(ctx context.Context) (Receipt, error) {
 		}
 	}
 
+	// Single-flight epilogue: the first caller past the proc-wait performs
+	// synthesis, verification, hooks, and the receipt write exactly once;
+	// concurrent callers block on finishCh and observe the same result.
+	h.finishOnce.Do(func() {
+		h.result, h.resultErr = h.finishWait(ctx, runErr)
+		close(h.finishCh)
+	})
+
+	<-finishCh
+	return h.result, h.resultErr
+}
+
+// finishWait records the terminal wait state and runs Wait's epilogue
+// exactly once per handle (see the agyHandle concurrency contract).
+func (h *agyHandle) finishWait(ctx context.Context, runErr error) (Receipt, error) {
 	h.mu.Lock()
 	h.done = true
 	switch {
@@ -354,7 +409,15 @@ func (h *agyHandle) Cancel(_ context.Context) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return cmd.Process.Kill()
+	// A-14 (#986): the child runs in its own process group (Setpgid at
+	// spawn), so cancel the whole subtree — matching FanOut's documented
+	// process-group kill — and fall back to the direct child when group
+	// signaling is unavailable (e.g. a struct-literal handle whose cmd was
+	// started without Setpgid).
+	if err := killProcessTree(cmd.Process.Pid); err != nil {
+		return cmd.Process.Kill()
+	}
+	return nil
 }
 
 func (h *agyHandle) StdoutStream() interface {
