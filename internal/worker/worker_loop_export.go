@@ -391,6 +391,42 @@ type LoopOptions struct {
 // absurd Concurrency cannot fork itself before the isolation gate applies.
 const maxLoopConcurrency = 64
 
+// maxConsecutiveClaimRefusals bounds how many consecutive claim refusals one
+// drain worker tolerates before it parks (redcell D-01 F1.1, #987 follow-up).
+const maxConsecutiveClaimRefusals = 3
+
+// claimRefusalParkWindow is how long a drain parks after
+// maxConsecutiveClaimRefusals consecutive claim refusals. The store defers
+// re-claim visibility per task (request_json $.not_before), which cannot
+// bound a hostile or oversized task set that keeps rotating fresh task IDs
+// at an incapable worker — the loop-level park is the actual backoff
+// (redcell D-01 F1.1/F6.1).
+var claimRefusalParkWindow = time.Duration(claimRefusalDeferSeconds) * time.Second
+
+// parkAfterConsecutiveClaimRefusals is the loop-level backoff shared by the
+// serial and concurrent drains (redcell D-01 F1.1): count consecutive refused
+// claims per drain worker; after maxConsecutiveClaimRefusals in a row, park
+// for claimRefusalParkWindow before claiming again. The counter resets on
+// every park (and on any non-refusal cycle, via the caller). Parking is
+// context-aware: cancellation ends the park early and the loop's own ctx/stop
+// checks unwind the drain.
+func parkAfterConsecutiveClaimRefusals(ctx context.Context, consecutive *int) {
+	*consecutive++
+	if *consecutive < maxConsecutiveClaimRefusals {
+		return
+	}
+	*consecutive = 0
+	if claimRefusalParkWindow <= 0 {
+		return
+	}
+	timer := time.NewTimer(claimRefusalParkWindow)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
 // RunLoop drains claimable tasks until none remain, the context ends, or
 // once-mode completes a single attempt. It returns a process-style exit code.
 func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
@@ -411,6 +447,7 @@ func (s *Supervisor) RunLoop(ctx context.Context, opts LoopOptions) int {
 
 // runSerialLoop is the historical drain: claim, run, repeat until empty.
 func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
+	var consecutiveRefusals int
 	for {
 		if ctx.Err() != nil {
 			return ExitCodeForSignal(15)
@@ -432,6 +469,12 @@ func (s *Supervisor) runSerialLoop(ctx context.Context, opts LoopOptions) int {
 			if opts.Once {
 				return 0
 			}
+			// redcell D-01 F1.1: the store's $.not_before deferral is
+			// per-task, so a hostile or oversized task set rotating fresh
+			// task IDs keeps this drain hot-looping claim->refuse at DB
+			// speed (measured: 1916 cycles/s). Park for the defer window
+			// after maxConsecutiveClaimRefusals consecutive refusals.
+			parkAfterConsecutiveClaimRefusals(ctx, &consecutiveRefusals)
 			continue
 		}
 		if err != nil || task == nil {
@@ -505,6 +548,7 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 				dir, release = d, rel
 				defer release()
 			}
+			var consecutiveRefusals int
 			for {
 				mu.Lock()
 				if stop {
@@ -530,7 +574,14 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 
 				mu.Lock()
 				active--
-				if (err != nil && !refused) || task == nil {
+				// redcell D-01 F1.1: a refused claim returns (nil, err), so
+				// the historical `|| task == nil` term swallowed every
+				// refusal into the park path and the claim-skip branch below
+				// was unreachable — one refusal per worker parked the whole
+				// drain while tasks stayed claimable. Only an empty claim
+				// (err == nil) is a drain-end signal here; refusals fall
+				// through to the claim-skip branch.
+				if (err != nil && !refused) || (task == nil && err == nil) {
 					if err != nil && opts.OnError != nil {
 						opts.OnError(err)
 					}
@@ -550,6 +601,11 @@ func (s *Supervisor) runConcurrentLoop(ctx context.Context, opts LoopOptions, n 
 						opts.OnError(err)
 					}
 					mu.Unlock()
+					// redcell D-01 F1.1: per-worker refusal cap — park for
+					// the defer window after maxConsecutiveClaimRefusals
+					// consecutive refusals instead of hot-looping the
+					// claim->refuse churn across rotating task IDs.
+					parkAfterConsecutiveClaimRefusals(ctx, &consecutiveRefusals)
 					continue
 				}
 				mu.Unlock()
