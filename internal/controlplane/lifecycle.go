@@ -607,88 +607,94 @@ func (s *Store) FailTask(ctx context.Context, taskID, reason string, exitCode in
 // non-running state) transitions terminally to CANCELLED; RUNNING tasks stay
 // running with cancel_requested set so workers observe ExecutionSignal and
 // stop cooperatively.
-func (s *Store) CancelTask(_ context.Context, taskID, reason string) error {
-	tx, err := s.db.BeginTx(context.Background(), nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
-	task, err := scanTask(row)
-	if err != nil {
-		return err
-	}
-	if task == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
-	}
-	switch task.State {
-	case StateSucceeded, StateFailed, StateCancelled:
-		return tx.Commit()
-	}
-
-	now := float64(s.clock().UnixNano()) / 1e9
-	nextState := StateRunning
-	if task.State != StateRunning {
-		nextState = StateCancelled
-	}
-
-	requestJSON := marshalStoredRequest(task.Request)
-	if nextState == StateCancelled {
-		if err := redactPayload(&requestJSON); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE tasks SET request_json = ? WHERE task_id = ?`, requestJSON, taskID); err != nil {
-			return err
-		}
-	}
-
-	if nextState == StateCancelled {
-		if _, err := tx.Exec(
-			`UPDATE tasks SET state = 'CANCELLED', cancel_requested = 1, updated_at = ?,
-			 completed_at = ?, last_error = ?, lease_owner = NULL, lease_token = NULL,
-			 lease_expires_at = NULL WHERE task_id = ?`,
-			now, now, reason, taskID); err != nil {
-			return err
-		}
-	} else {
-		if _, err := tx.Exec(
-			`UPDATE tasks SET cancel_requested = 1, updated_at = ? WHERE task_id = ?`,
-			now, taskID); err != nil {
-			return err
-		}
-	}
-
-	fresh := *task
-	fresh.State = nextState
-	fresh.CancelRequested = true
-	if nextState == StateCancelled {
-		fresh.CompletedAt = &now
-	}
-	if err := insertTaskEvent(tx, taskID, "cancel_requested", "brain", map[string]any{
-		"reason":     reason,
-		"next_state": nextState,
-	}, now); err != nil {
-		return err
-	}
-
-	if nextState == StateCancelled {
-		_, receiptHash, err := buildReceiptTx(tx, &fresh)
+func (s *Store) CancelTask(ctx context.Context, taskID, reason string) error {
+	// A-12 (#986): wrapped in withBusyRetry like AcceptResult — CancelTask
+	// runs a multi-statement transaction that must survive transient
+	// SQLITE_BUSY from concurrent coordinators instead of surfacing
+	// "database is locked".
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE tasks SET receipt_hash = ? WHERE task_id = ?`, receiptHash, taskID); err != nil {
+		defer tx.Rollback()
+
+		row := tx.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE task_id = ?`, taskID)
+		task, err := scanTask(row)
+		if err != nil {
 			return err
 		}
-	}
+		if task == nil {
+			return fmt.Errorf("%w: %s", ErrUnknownTask, taskID)
+		}
+		switch task.State {
+		case StateSucceeded, StateFailed, StateCancelled:
+			return tx.Commit()
+		}
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	if nextState == StateCancelled {
-		s.appendTaskSignal(taskID, task.State, nextState, s.clock())
-	}
-	return nil
+		now := float64(s.clock().UnixNano()) / 1e9
+		nextState := StateRunning
+		if task.State != StateRunning {
+			nextState = StateCancelled
+		}
+
+		requestJSON := marshalStoredRequest(task.Request)
+		if nextState == StateCancelled {
+			if err := redactPayload(&requestJSON); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET request_json = ? WHERE task_id = ?`, requestJSON, taskID); err != nil {
+				return err
+			}
+		}
+
+		if nextState == StateCancelled {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tasks SET state = 'CANCELLED', cancel_requested = 1, updated_at = ?,
+				 completed_at = ?, last_error = ?, lease_owner = NULL, lease_token = NULL,
+				 lease_expires_at = NULL WHERE task_id = ?`,
+				now, now, reason, taskID); err != nil {
+				return err
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tasks SET cancel_requested = 1, updated_at = ? WHERE task_id = ?`,
+				now, taskID); err != nil {
+				return err
+			}
+		}
+
+		fresh := *task
+		fresh.State = nextState
+		fresh.CancelRequested = true
+		if nextState == StateCancelled {
+			fresh.CompletedAt = &now
+		}
+		if err := insertTaskEvent(tx, taskID, "cancel_requested", "brain", map[string]any{
+			"reason":     reason,
+			"next_state": nextState,
+		}, now); err != nil {
+			return err
+		}
+
+		if nextState == StateCancelled {
+			_, receiptHash, err := buildReceiptTx(tx, &fresh)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET receipt_hash = ? WHERE task_id = ?`, receiptHash, taskID); err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if nextState == StateCancelled {
+			s.appendTaskSignal(taskID, task.State, nextState, s.clock())
+		}
+		return nil
+	})
 }
 
 // PauseTask moves a RUNNING lease into NEEDS_INFO, BLOCKED, or CHECKPOINTED, always redacting
@@ -1140,143 +1146,152 @@ func (s *Store) ReleaseDeliveryClaim(ctx context.Context, taskID string) {
 }
 
 // RejectResult transitions a WORKER_COMPLETED task to SUPERVISOR_REJECTED.
+// A-12 (#986): wrapped in withBusyRetry like AcceptResult.
 func (s *Store) RejectResult(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
-	var state string
-	if err := row.Scan(&state); err != nil {
-		return err
-	}
-	if state != StateWorkerCompleted {
-		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
-	}
+		row := tx.QueryRowContext(ctx, `SELECT state FROM tasks WHERE task_id = ?`, taskID)
+		var state string
+		if err := row.Scan(&state); err != nil {
+			return err
+		}
+		if state != StateWorkerCompleted {
+			return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+		}
 
-	now := float64(s.clock().UnixNano()) / 1e9
-	feedback := SupervisorFeedback{
-		Action:        "reject",
-		Reason:        reason,
-		AdditionalCtx: additionalCtx,
-		Timestamp:     now,
-		SupervisorID:  supervisorID,
-	}
-	feedbackJSON, _ := json.Marshal(feedback)
+		now := float64(s.clock().UnixNano()) / 1e9
+		feedback := SupervisorFeedback{
+			Action:        "reject",
+			Reason:        reason,
+			AdditionalCtx: additionalCtx,
+			Timestamp:     now,
+			SupervisorID:  supervisorID,
+		}
+		feedbackJSON, _ := json.Marshal(feedback)
 
-	_, err = tx.Exec(
-		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
-		StateSupervisorRejected, string(feedbackJSON), now, taskID)
-	if err != nil {
-		return err
-	}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+			StateSupervisorRejected, string(feedbackJSON), now, taskID)
+		if err != nil {
+			return err
+		}
 
-	if err := insertTaskEvent(tx, taskID, "result_rejected", supervisorID, map[string]any{
-		"previous_state":     state,
-		"reason":             reason,
-		"additional_context": additionalCtx,
-	}, now); err != nil {
-		return err
-	}
+		if err := insertTaskEvent(tx, taskID, "result_rejected", supervisorID, map[string]any{
+			"previous_state":     state,
+			"reason":             reason,
+			"additional_context": additionalCtx,
+		}, now); err != nil {
+			return err
+		}
 
-	return tx.Commit()
+		return tx.Commit()
+	})
 }
 
 // RequestEdit transitions a WORKER_COMPLETED task to SUPERVISOR_REJECTED with edit request.
+// A-12 (#986): wrapped in withBusyRetry like AcceptResult.
 func (s *Store) RequestEdit(ctx context.Context, taskID string, supervisorID string, reason string, additionalCtx string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
-	var state string
-	if err := row.Scan(&state); err != nil {
-		return err
-	}
-	if state != StateWorkerCompleted {
-		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
-	}
+		row := tx.QueryRowContext(ctx, `SELECT state FROM tasks WHERE task_id = ?`, taskID)
+		var state string
+		if err := row.Scan(&state); err != nil {
+			return err
+		}
+		if state != StateWorkerCompleted {
+			return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+		}
 
-	now := float64(s.clock().UnixNano()) / 1e9
-	feedback := SupervisorFeedback{
-		Action:        "request_edit",
-		Reason:        reason,
-		AdditionalCtx: additionalCtx,
-		Timestamp:     now,
-		SupervisorID:  supervisorID,
-	}
-	feedbackJSON, _ := json.Marshal(feedback)
+		now := float64(s.clock().UnixNano()) / 1e9
+		feedback := SupervisorFeedback{
+			Action:        "request_edit",
+			Reason:        reason,
+			AdditionalCtx: additionalCtx,
+			Timestamp:     now,
+			SupervisorID:  supervisorID,
+		}
+		feedbackJSON, _ := json.Marshal(feedback)
 
-	// Transition back to NEEDS_INFO so worker can retry with new context
-	_, err = tx.Exec(
-		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
-		StateNeedsInfo, string(feedbackJSON), now, taskID)
-	if err != nil {
-		return err
-	}
+		// Transition back to NEEDS_INFO so worker can retry with new context
+		_, err = tx.ExecContext(ctx,
+			`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+			StateNeedsInfo, string(feedbackJSON), now, taskID)
+		if err != nil {
+			return err
+		}
 
-	if err := insertTaskEvent(tx, taskID, "edit_requested", supervisorID, map[string]any{
-		"previous_state":     state,
-		"reason":             reason,
-		"additional_context": additionalCtx,
-	}, now); err != nil {
-		return err
-	}
+		if err := insertTaskEvent(tx, taskID, "edit_requested", supervisorID, map[string]any{
+			"previous_state":     state,
+			"reason":             reason,
+			"additional_context": additionalCtx,
+		}, now); err != nil {
+			return err
+		}
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.appendTaskSignal(taskID, state, StateNeedsInfo, s.clock())
-	return nil
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		s.appendTaskSignal(taskID, state, StateNeedsInfo, s.clock())
+		return nil
+	})
 }
 
 // RequeueResult transitions a WORKER_COMPLETED task back to QUEUED for retry.
 // This is used for automatic retries of retryable failures (timeout, spawn failure).
+// A-12 (#986): wrapped in withBusyRetry like AcceptResult.
 func (s *Store) RequeueResult(ctx context.Context, taskID string, supervisorID string, reason string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return withBusyRetry(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	row := tx.QueryRow(`SELECT state FROM tasks WHERE task_id = ?`, taskID)
-	var state string
-	if err := row.Scan(&state); err != nil {
-		return err
-	}
-	if state != StateWorkerCompleted {
-		return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
-	}
+		row := tx.QueryRowContext(ctx, `SELECT state FROM tasks WHERE task_id = ?`, taskID)
+		var state string
+		if err := row.Scan(&state); err != nil {
+			return err
+		}
+		if state != StateWorkerCompleted {
+			return fmt.Errorf("task %s is not in WORKER_COMPLETED state (current: %s)", taskID, state)
+		}
 
-	now := float64(s.clock().UnixNano()) / 1e9
-	feedback := SupervisorFeedback{
-		Action:       "requeue",
-		Reason:       reason,
-		Timestamp:    now,
-		SupervisorID: supervisorID,
-	}
-	feedbackJSON, _ := json.Marshal(feedback)
+		now := float64(s.clock().UnixNano()) / 1e9
+		feedback := SupervisorFeedback{
+			Action:       "requeue",
+			Reason:       reason,
+			Timestamp:    now,
+			SupervisorID: supervisorID,
+		}
+		feedbackJSON, _ := json.Marshal(feedback)
 
-	// Transition back to QUEUED for automatic retry
-	_, err = tx.Exec(
-		`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
-		StateQueued, string(feedbackJSON), now, taskID)
-	if err != nil {
-		return err
-	}
+		// Transition back to QUEUED for automatic retry
+		_, err = tx.ExecContext(ctx,
+			`UPDATE tasks SET state = ?, supervisor_feedback = ?, updated_at = ? WHERE task_id = ?`,
+			StateQueued, string(feedbackJSON), now, taskID)
+		if err != nil {
+			return err
+		}
 
-	if err := insertTaskEvent(tx, taskID, "requeued", supervisorID, map[string]any{
-		"previous_state": state,
-		"reason":         reason,
-	}, now); err != nil {
-		return err
-	}
+		if err := insertTaskEvent(tx, taskID, "requeued", supervisorID, map[string]any{
+			"previous_state": state,
+			"reason":         reason,
+		}, now); err != nil {
+			return err
+		}
 
-	return tx.Commit()
+		return tx.Commit()
+	})
 }
 
 // AddErrorCall appends an error call record to the task's error history.
