@@ -48,7 +48,7 @@ func TestReleasePreservesGitignoredProtectedDeliverable(t *testing.T) {
 	}
 
 	// Verify git status --porcelain is clean (dirty == false) because .g8s/ is gitignored
-	dirty, err := worktreeDirty(wt.Path)
+	dirty, err := worktreeDirty(context.Background(), wt.Path)
 	if err != nil {
 		t.Fatalf("worktreeDirty: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestReleaseGitDirtyPreservesRegardlessOfProtected(t *testing.T) {
 		t.Fatalf("write untracked file: %v", err)
 	}
 
-	dirty, err := worktreeDirty(wt.Path)
+	dirty, err := worktreeDirty(context.Background(), wt.Path)
 	if err != nil {
 		t.Fatalf("worktreeDirty: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestReleaseProtectedAbsentAndCleanRemoves(t *testing.T) {
 		t.Fatalf("acquire: %v", err)
 	}
 
-	dirty, err := worktreeDirty(wt.Path)
+	dirty, err := worktreeDirty(context.Background(), wt.Path)
 	if err != nil {
 		t.Fatalf("worktreeDirty: %v", err)
 	}
