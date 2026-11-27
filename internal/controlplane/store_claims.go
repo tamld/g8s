@@ -312,19 +312,22 @@ func (s *Store) ClaimTaskInSession(ctx context.Context, workerID, sessionID stri
 	return task, err
 }
 
-// StartTask promotes a LEASED task to RUNNING when the caller presents the
-// matching worker and lease token; it reports false on any mismatch.
-func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
+// StartTaskContext promotes a LEASED task to RUNNING when the caller presents
+// the matching worker and lease token; it reports false on any mismatch.
+// A-6 (#986): ctx is threaded into BeginTx and the Exec so a cancelled or
+// expiring caller context aborts the promotion instead of hanging on the
+// connection.
+func (s *Store) StartTaskContext(ctx context.Context, taskID, workerID, leaseToken string) bool {
 	started := false
 	err := withBusyRetry(func() error {
 		started = false
-		tx, err := s.db.Begin()
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 		now := float64(s.clock().UnixNano()) / 1e9
-		res, err := tx.Exec(`
+		res, err := tx.ExecContext(ctx, `
 		UPDATE tasks SET state = 'RUNNING', updated_at = ?
 		WHERE task_id = ? AND state = 'LEASED'
 		  AND lease_owner = ? AND lease_token = ? AND cancel_requested = 0`,
@@ -348,6 +351,22 @@ func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
 		return false
 	}
 	return started
+}
+
+// StartTask is the non-contextual legacy shim over StartTaskContext
+// (A-6, #986): kept so existing worker/orchestrator call sites keep
+// compiling while they migrate.
+//
+// The staticcheck Deprecated marker is deliberately withheld in this
+// slice: the remaining call sites are worker-package TEST fixtures
+// (worker_sweep_collect_test.go, worker_test.go), and migrating them
+// belongs to the #986 batch1 worker slice (DEBT-34 keeps this PR
+// controlplane-only). That slice migrates the call sites and restores
+// the marker. This wrapper runs with context.Background(), so a
+// cancelled caller context cannot abort the promotion and the call may
+// block on the connection.
+func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
+	return s.StartTaskContext(context.Background(), taskID, workerID, leaseToken)
 }
 
 // RenewHeartbeat extends the lease of a LEASED or RUNNING task held by
@@ -500,16 +519,20 @@ func (s *Store) extendLease(ctx context.Context, taskID, workerID, leaseToken st
 	return nil
 }
 
-// ExecutionSignal tells a RUNNING worker whether to continue ("active"),
-// stop ("cancel_requested"), or treat its lease as gone ("lease_lost").
-func (s *Store) ExecutionSignal(taskID, workerID, leaseToken string) string {
+// ExecutionSignalContext tells a RUNNING worker whether to continue
+// ("active"), stop ("cancel_requested"), or treat its lease as gone
+// ("lease_lost").
+// A-6 (#986): ctx is threaded into the query so a cancelled caller context
+// surfaces instead of blocking on the connection; a ctx error reports
+// "lease_lost" (fail-safe: the worker stops).
+func (s *Store) ExecutionSignalContext(ctx context.Context, taskID, workerID, leaseToken string) string {
 	var (
 		state           string
 		cancelRequested int
 		leaseOwner      sql.NullString
 		storedToken     sql.NullString
 	)
-	err := s.db.QueryRow(`
+	err := s.db.QueryRowContext(ctx, `
 		SELECT state, cancel_requested, lease_owner, lease_token
 		FROM tasks WHERE task_id = ?`, taskID,
 	).Scan(&state, &cancelRequested, &leaseOwner, &storedToken)
@@ -521,6 +544,15 @@ func (s *Store) ExecutionSignal(taskID, workerID, leaseToken string) string {
 		return "cancel_requested"
 	}
 	return "active"
+}
+
+// ExecutionSignal is the non-contextual legacy shim over
+// ExecutionSignalContext (A-6, #986): kept so existing worker/orchestrator
+// call sites keep compiling while they migrate. Same withheld-marker
+// rationale as StartTask above — the marker lands with the #986 batch1
+// worker call-site migration.
+func (s *Store) ExecutionSignal(taskID, workerID, leaseToken string) string {
+	return s.ExecutionSignalContext(context.Background(), taskID, workerID, leaseToken)
 }
 
 // pendingSignal captures a committed terminal transition waiting to be appended to tasks.jsonl.

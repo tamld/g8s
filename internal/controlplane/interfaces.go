@@ -34,10 +34,23 @@ type TaskLeaseStore interface {
 	ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*Task, error)
 	ClaimTaskFiltered(ctx context.Context, workerID string, leaseDurationSeconds int, filter ClaimFilter) (*Task, error)
 	ClaimTaskInSession(ctx context.Context, workerID, sessionID string, leaseDurationSeconds int) (*Task, error)
+	// StartTask is the deprecated non-contextual shim (A-6, #986); new code
+	// must call StartTaskContext so a cancelled caller context aborts the
+	// promotion instead of blocking on the connection.
 	StartTask(taskID, workerID, leaseToken string) bool
+	// StartTaskContext promotes a LEASED task to RUNNING, threading ctx into
+	// BeginTx/Exec (A-6, #986).
+	StartTaskContext(ctx context.Context, taskID, workerID, leaseToken string) bool
 	RenewHeartbeat(ctx context.Context, taskID, workerID string, extensionSeconds int) error
 	Heartbeat(ctx context.Context, taskID, workerID, leaseToken string, extensionSeconds int) error
+	// ExecutionSignal is the deprecated non-contextual shim (A-6, #986); new
+	// code must call ExecutionSignalContext so a cancelled caller context
+	// surfaces (fail-safe "lease_lost") instead of blocking on the
+	// connection.
 	ExecutionSignal(taskID, workerID, leaseToken string) string
+	// ExecutionSignalContext polls the cooperative-cancel signal, threading
+	// ctx into the query (A-6, #986); a ctx error yields "lease_lost".
+	ExecutionSignalContext(ctx context.Context, taskID, workerID, leaseToken string) string
 	FinishAttempt(taskID, workerID, leaseToken string, params FinishAttemptParams) (*Task, error)
 	PauseTask(taskID, workerID, leaseToken, pauseState string, result json.RawMessage, reason string) (*Task, error)
 	CheckpointTask(ctx context.Context, taskID, workerID, leaseToken string, checkpoint *CheckpointData) (*Task, error)
