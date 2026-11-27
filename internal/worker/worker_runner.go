@@ -35,9 +35,16 @@ type processChild struct {
 	policyReport    *sandbox.PolicyEnforcementReport
 	sandboxCleanup  func()
 	cleanupOnce     sync.Once
+	// spawnCtx/cancel carry the spawn deadline (#986 A-13): cancel releases
+	// the deadline timer when the child exits before opts.Timeout (collect
+	// path and Terminate). Safe to call after cmd.Wait returns — the exec
+	// ctx watcher has already exited by then, so it cannot trigger a
+	// spurious Cmd.Cancel group kill on a normally-exited child.
+	spawnCtx context.Context
+	cancel   context.CancelFunc
 }
 
-func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend, runDir string, cleanup func()) *processChild {
+func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend, runDir string, cleanup func(), spawnCtx context.Context, cancel context.CancelFunc) *processChild {
 	c := &processChild{
 		cmd:             cmd,
 		done:            make(chan struct{}),
@@ -46,10 +53,15 @@ func newProcessChild(cmd *exec.Cmd, job uintptr, containmentMode, sandboxBackend
 		containmentMode: containmentMode,
 		sandboxBackend:  sandboxBackend,
 		sandboxCleanup:  cleanup,
+		spawnCtx:        spawnCtx,
+		cancel:          cancel,
 	}
 	go func() {
 		err := cmd.Wait()
 		c.code = exitCodeOf(err)
+		if c.cancel != nil {
+			c.cancel() // release the spawn-deadline timer on early exit (A-13, #986)
+		}
 		c.closeSandbox()
 		close(c.done)
 	}()
@@ -115,6 +127,13 @@ func (c *processChild) Terminate(grace time.Duration) {
 	case <-c.done:
 	case <-time.After(grace + time.Second):
 	}
+	// Release the spawn-deadline timer even if the process outlived grace
+	// (A-13, #986). The exec ctx watcher has already exited by the time
+	// cmd.Wait returned, so this cannot trigger a spurious group kill; if
+	// Wait has not returned, cancel also arms the deadline kill path.
+	if c.cancel != nil {
+		c.cancel()
+	}
 	// #415 PR-2 (Windows): closing the Job Object handle hard-terminates
 	// every process still in the job (KILL_ON_JOB_CLOSE) — the belt to the
 	// taskkill suspenders. POSIX no-op.
@@ -163,10 +182,21 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	}
 
 	var cmd *exec.Cmd
+	var spawnCtx context.Context
+	var spawnCancel context.CancelFunc
 	if opts.Timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
-		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
-		_ = cancel
+		spawnCtx, spawnCancel = context.WithTimeout(context.Background(), opts.Timeout)
+		cmd = exec.CommandContext(spawnCtx, argv[0], argv[1:]...)
+		// A-13 (#986): the deadline kill must take down the whole process
+		// group. The exec default (os.Process.Kill) only signals the direct
+		// child, leaving grandchildren running past the deadline — mirror
+		// Terminate's group-kill contract through the deadline path.
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return os.ErrProcessDone
+			}
+			return killProcessGroup(cmd.Process.Pid, syscallSIGKILL)
+		}
 	} else {
 		cmd = exec.Command(argv[0], argv[1:]...)
 	}
@@ -178,6 +208,9 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	if err := cmd.Start(); err != nil {
+		if spawnCancel != nil {
+			spawnCancel() // release the deadline timer on the failed-spawn path (A-13)
+		}
 		if sandboxCleanup != nil {
 			sandboxCleanup()
 		}
@@ -196,6 +229,9 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 		if werr := cmd.Wait(); werr != nil {
 			fmt.Fprintf(os.Stderr, "[warn] worker: wait uncontained child: %v\n", werr)
 		}
+		if spawnCancel != nil {
+			spawnCancel() // release the deadline timer on the containment-failure path (A-13)
+		}
 		if sandboxCleanup != nil {
 			sandboxCleanup()
 		}
@@ -209,7 +245,7 @@ func (processRunner) Spawn(opts SpawnOptions) (Child, error) {
 	// times, attempt marker) beside child.pid so reapOrphans can verify the
 	// recorded group before ever signaling it.
 	writeChildRunRecord(opts.RunDir, cmd.Process.Pid, opts.Env)
-	child := newProcessChild(cmd, job, containmentMode, sandboxBackend, opts.RunDir, sandboxCleanup)
+	child := newProcessChild(cmd, job, containmentMode, sandboxBackend, opts.RunDir, sandboxCleanup, spawnCtx, spawnCancel)
 	child.policyReport = policyReport
 	return child, nil
 }
