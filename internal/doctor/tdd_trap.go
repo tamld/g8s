@@ -92,13 +92,31 @@ func CheckTDDPitfalls(repoPath string) ([]TDDPitfall, error) {
 			VarsConst: make(map[string]bool),
 		}
 
+		type parsedFile struct {
+			path string
+			file *ast.File
+		}
+		parsed := make([]parsedFile, 0, len(prodFiles))
 		for _, prodPath := range prodFiles {
 			fileAst, parseErr := parser.ParseFile(fset, prodPath, nil, parser.ParseComments)
 			if parseErr != nil {
 				continue
 			}
 			pDef.Name = fileAst.Name.Name
-			collectProdSymbols(fileAst, pDef)
+			parsed = append(parsed, parsedFile{path: prodPath, file: fileAst})
+		}
+		// Two-pass registration (#1041): pass 1 registers every type
+		// declaration, pass 2 registers methods/functions. filepath.Walk
+		// yields files in lexical order, so a receiver type declared in an
+		// alphabetically-later file of the same package (e.g. type Store in
+		// store.go vs its lifecycle.go methods) must be collected before any
+		// method lookup, or the methods are silently lost and every test
+		// referencing them is flagged as fabricated.
+		for _, pf := range parsed {
+			collectProdTypeSymbols(pf.file, pDef)
+		}
+		for _, pf := range parsed {
+			collectProdFuncSymbols(pf.file, pDef)
 		}
 		packages[dir] = pDef
 	}
@@ -135,7 +153,7 @@ func CheckTDDPitfalls(repoPath string) ([]TDDPitfall, error) {
 	return pitfalls, nil
 }
 
-func collectProdSymbols(file *ast.File, pDef *pkgDef) {
+func collectProdTypeSymbols(file *ast.File, pDef *pkgDef) {
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
@@ -177,7 +195,17 @@ func collectProdSymbols(file *ast.File, pDef *pkgDef) {
 					}
 				}
 			}
+		}
+	}
+}
 
+// collectProdFuncSymbols registers method and package-level function
+// declarations. Runs strictly after collectProdTypeSymbols for the whole
+// package directory (#1041) so receiver-type lookup never depends on file
+// iteration order.
+func collectProdFuncSymbols(file *ast.File, pDef *pkgDef) {
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			fnName := d.Name.Name
 			if d.Recv != nil && len(d.Recv.List) > 0 {
