@@ -736,6 +736,28 @@ func (s *Store) appendTaskSignal(taskID, from, to string, ts time.Time) {
 		}
 	}
 
+	// A-5/C-10 (#984): verify the cached handle still points at the LIVE
+	// path before appending. A sibling process rotating the file (rename)
+	// moves the inode — a cached O_APPEND handle would keep writing into
+	// the rotated tasks.jsonl.1. Compare identities when both are
+	// statable; reopen by path when they diverge or the path is gone.
+	if s.signalFile != nil {
+		liveFi, liveErr := os.Stat(s.signalPath)
+		cachedFi, cachedErr := s.signalFile.Stat()
+		stale := false
+		if liveErr != nil {
+			stale = true // path gone: rotated (or removed) under us
+		} else if cachedErr == nil && !os.SameFile(liveFi, cachedFi) {
+			stale = true // different inode: renamed under us
+		}
+		if stale {
+			if closeErr := s.signalFile.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "[warn] controlplane: close stale signals handle: %v\n", closeErr)
+			}
+			s.signalFile = nil
+		}
+	}
+
 	if s.signalFile == nil {
 		dir := filepath.Dir(s.signalPath)
 		if err := pathutil.EnsureStateDir(dir); err != nil {
