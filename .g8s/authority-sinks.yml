@@ -129,3 +129,14 @@ sinks:
     status: gated
     defects: []
     threat_model_ref: "threat model §2: GATED; corpus V2 asserts router determinism"
+
+  # --- Supervisor grant fast-path (PR-3 provenance consumption) -----------------
+  - id: triage_grant_receipt
+    surface: "reflex triage grant fast-path (supervisor policy engine receipt grant)"
+    tool: ""
+    ref: "internal/reflex/jev.go"
+    gate_symbol: "MayDriveSink"
+    gate: "Authority Sink Gate provenance consumption (internal/reflex/provenance_gate.go): unestablished-origin sections in the decision ContextPacket (EXTERNAL_CONTENT, stripped or forged labels, unknown channels) escalate the grant to HITL; registry-table status consumed fail-closed; nil packet = legacy v1 compat"
+    status: gated
+    defects: []
+    threat_model_ref: "issue #977 PR-3: per-message classes gate what may drive privileged actions (V2/V5/V7 consumption half); corpus scenario provenance-class-gate"

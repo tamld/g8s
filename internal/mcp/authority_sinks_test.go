@@ -210,6 +210,7 @@ func TestAuthoritySinksRegistry_CoversThreatModelSinkTable(t *testing.T) {
 		"worker_capability_grant",
 		"memory_promote_durable",
 		"lane_s_escalation",
+		"triage_grant_receipt",
 	}
 	gotIDs := make([]string, 0, len(reg.Sinks))
 	for _, sink := range reg.Sinks {
