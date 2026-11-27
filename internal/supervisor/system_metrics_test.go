@@ -126,7 +126,7 @@ func TestSystemMetricsCollector_MultiStateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTask t1: %v", err)
 	}
-	if !store.StartTask(c1.TaskID, "worker-1", *c1.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), c1.TaskID, "worker-1", *c1.LeaseToken) {
 		t.Fatal("StartTask t1 failed")
 	}
 	advance(5 * time.Second)
@@ -143,7 +143,7 @@ func TestSystemMetricsCollector_MultiStateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTask t2: %v", err)
 	}
-	if !store.StartTask(c2.TaskID, "worker-1", *c2.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), c2.TaskID, "worker-1", *c2.LeaseToken) {
 		t.Fatal("StartTask t2 failed")
 	}
 	advance(20 * time.Second)
@@ -164,7 +164,7 @@ func TestSystemMetricsCollector_MultiStateLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimTask t4: %v", err)
 	}
-	if !store.StartTask(c4.TaskID, "worker-2", *c4.LeaseToken) {
+	if !store.StartTaskContext(context.Background(), c4.TaskID, "worker-2", *c4.LeaseToken) {
 		t.Fatal("StartTask t4 failed")
 	}
 
