@@ -1,0 +1,131 @@
+schema_version: "authority-sinks.v1"
+# Authority Sink Gate registry (issue #977 PR-2 — audit-trail backbone for PR-3).
+#
+# Enumerates the privileged sinks from the Context Authority Firewall
+# source-to-sink map (docs/security/context-authority-firewall-threat-model.md §2)
+# with their deterministic gate status. PR-3 consumers route sink decisions
+# against this registry; the reality test (internal/mcp/authority_sinks_test.go)
+# mechanically asserts the registry matches the codebase:
+#   - every `ref` file exists;
+#   - every `gate_symbol` is declared in its `ref` (go/parser AST check);
+#   - every MCP `tool` id is registered on the MCP server;
+#   - every status is one of gated | partial | unguarded.
+#
+# Status legend (threat model §2):
+#   gated     deterministic authority check present at the sink
+#   partial   check exists with known defects (see `defects`)
+#   unguarded no deterministic check at the sink (must not exist post-PR-2)
+
+sinks:
+  # --- Receipt minting -----------------------------------------------------
+  - id: receipt_mint_cli
+    surface: "CLI: g8s receipt issue"
+    tool: ""
+    ref: "internal/receipt/receipt.go"
+    gate_symbol: "signingWorkerTierForbidden"
+    gate: "process env stratum (G8S_TIER/G8S_STRATUM) — signing refuses F1/F2-tier callers"
+    status: partial
+    defects:
+      - "B-10: same-user process env can unset the tier before signing"
+    threat_model_ref: "docs/security/context-authority-firewall-threat-model.md#privileged-sinks"
+
+  - id: receipt_mint_mcp
+    surface: "MCP: g8s_receipt_issue"
+    tool: "g8s_receipt_issue"
+    ref: "internal/mcp/server.go"
+    gate_symbol: "workerTierGuard"
+    gate: "tool-tier guard (mirrors mcp/mesh.go) + server-derived issuer identity (mcpReceiptIssuerIdentity)"
+    status: gated
+    defects: []
+    threat_model_ref: "issue #977 PR-2: was UNGUARDED (M) — the founding measured instance"
+
+  # --- Charter issuance ------------------------------------------------------
+  - id: charter_issue_mcp
+    surface: "MCP: g8s_charter_issue"
+    tool: "g8s_charter_issue"
+    ref: "internal/mcp/tools_ext.go"
+    gate_symbol: "workerTierGuard"
+    gate: "tool-tier guard (mirrors mcp/mesh.go) + charter.IssuingStratumFromEnv (client issuer_stratum rejected)"
+    status: gated
+    defects: []
+    threat_model_ref: "issue #977 PR-2: was UNGUARDED at tool layer (B-12, corpus V8)"
+
+  - id: charter_issue_deep
+    surface: "charter.Store.Issue (deep adjacency)"
+    tool: ""
+    ref: "internal/charter/charter.go"
+    gate_symbol: "IssuingStratumFromEnv"
+    gate: "S0/S1-only issuing stratum from server env + VerifyStratumEnv token path + ValidateAdjacency (S0/S1 -> S2)"
+    status: gated
+    defects: []
+    threat_model_ref: "deep layer behind charter_issue_mcp; clamps F1/F2/receipt-bound processes to S3"
+
+  # --- Mesh shared control ---------------------------------------------------
+  - id: mesh_send_mcp
+    surface: "MCP: g8s_coordinator_mesh"
+    tool: "g8s_coordinator_mesh"
+    ref: "internal/mcp/mesh.go"
+    gate_symbol: "workerTierGuard"
+    gate: "worker-tier guard (the reference GATED pattern the other sinks mirror)"
+    status: gated
+    defects: []
+    threat_model_ref: "threat model §2: GATED reference pattern"
+
+  # --- TCB mutation ----------------------------------------------------------
+  - id: tcb_mutation_deliver
+    surface: "TCB mutation (deliver Tier-B)"
+    tool: ""
+    ref: "internal/harness/trust_root.go"
+    gate_symbol: "EvaluateTrustRootMutation"
+    gate: "S0 Ed25519 attestation + nonce + checks/artifact digest binding"
+    status: partial
+    defects:
+      - "B-3: nil nonce store fails open"
+      - "#972: nonce cross-process race"
+      - "#973: TOCTOU between evaluation and write"
+    threat_model_ref: "threat model §2: PARTIAL (B-3)"
+
+  # --- Trust-boundary file writes --------------------------------------------
+  - id: trust_boundary_file_writes
+    surface: "governance file writes (.g8s/**, .git/**)"
+    tool: ""
+    ref: "internal/fsops/fsops.go"
+    gate_symbol: "VerifyWriteScope"
+    gate: "protected-prefix deny check, case-folded (#979), + charter.VerifyMutationAllowed stratum firewall"
+    status: partial
+    defects:
+      - "deny-grant path still allows explicitly granted .g8s/** patterns (by design, audited)"
+    threat_model_ref: "threat model §2: PARTIAL (#979 case-sensitivity bypass — fixed by folded matching on main)"
+
+  # --- Worker capability grant -------------------------------------------------
+  - id: worker_capability_grant
+    surface: "worker capability grant (submit flags)"
+    tool: "g8s_submit"
+    ref: "internal/mcp/server.go"
+    gate_symbol: "submitTool"
+    gate: "mutation permissions blocked on the MCP surface; no_sandbox always rejected; CLI submit + receipt gate"
+    status: gated
+    defects: []
+    threat_model_ref: "threat model §2: GATED — keep; corpus asserts"
+
+  # --- Memory promotion ---------------------------------------------------------
+  - id: memory_promote_durable
+    surface: "memory promotion to durable policy"
+    tool: ""
+    ref: "internal/memory/promotion_gate.go"
+    gate_symbol: "VerifyAndPromoteArtifact"
+    gate: "PromotionGate (fail-closed without Jev L3 sensor) + poisoned-trace rejection + tombstone monotonicity"
+    status: gated
+    defects: []
+    threat_model_ref: "threat model §2: GATED (wired #958/#966); corpus V6 asserts both paths"
+
+  # --- Lane S escalation --------------------------------------------------------
+  - id: lane_s_escalation
+    surface: "Lane S escalation"
+    tool: ""
+    ref: "internal/lane/lane.go"
+    gate_symbol: "Suggest"
+    gate: "deterministic lane router; Lane S never arrives from a suggestion; audited --override-reason path"
+    status: gated
+    defects: []
+    threat_model_ref: "threat model §2: GATED; corpus V2 asserts router determinism"

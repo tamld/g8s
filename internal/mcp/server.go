@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -221,7 +222,7 @@ func (s *Server) RegisterTools() error {
 		{Name: "g8s_edit", Description: "Native pure-Go atomic file editor with exact-match replacement, CAS SHA-256 precondition, CRLF/LF preservation, and mandatory write-receipt validation.", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"if_sha256":{"type":"string"},"scope_root":{"type":"string"},"receipt_id":{"type":"string"}},"required":["path","old_string"]}`)},
 		{Name: "g8s_select", Description: "Native pure-Go JSON dot-path selector (replaces jq; DELTA-23).", InputSchema: json.RawMessage(`{"type":"object","properties":{"input":{"type":"string","description":"Raw JSON string to query"},"selector":{"type":"string","description":"Dot-path selector (e.g. .data.receipt_id or items.0.name)"}},"required":["input","selector"]}`)},
 		{Name: "g8s_llm_call", Description: "Invoke any configured api_call LLM provider/gateway (OpenAI, Anthropic, 9router) from providers.json (DELTA-25).", InputSchema: json.RawMessage(`{"type":"object","properties":{"provider":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"system":{"type":"string"},"effort":{"type":"string"},"max_tokens":{"type":"integer"},"temperature":{"type":"number"},"timeout":{"type":"string"},"scope_root":{"type":"string"},"context_files":{"type":"array","items":{"type":"string"}}},"required":["prompt"]}`)},
-		{Name: "g8s_charter_issue", Description: "Issue an epoch-fenced Stratum Charter (S0/S1 -> S2) with canonical SHA-256 digest and fence token (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"issuer_stratum":{"type":"string"},"holder_stratum":{"type":"string"},"holder_ring":{"type":"string"},"scope_repo":{"type":"string"},"objective":{"type":"string"},"allowed_paths":{"type":"array","items":{"type":"string"}},"forbidden_paths":{"type":"array","items":{"type":"string"}},"required_gate_lane":{"type":"string"},"budget_calls":{"type":"integer"},"duration_sec":{"type":"integer"}},"required":["scope_repo","objective","allowed_paths"]}`)},
+		{Name: "g8s_charter_issue", Description: "Issue an epoch-fenced Stratum Charter (S0/S1 -> S2) with canonical SHA-256 digest and fence token (DELTA-33). The issuing stratum derives from the server process env (G8S_STRATUM); client issuer fields are refused (issue #977).", InputSchema: json.RawMessage(`{"type":"object","properties":{"holder_stratum":{"type":"string"},"holder_ring":{"type":"string"},"scope_repo":{"type":"string"},"objective":{"type":"string"},"allowed_paths":{"type":"array","items":{"type":"string"}},"forbidden_paths":{"type":"array","items":{"type":"string"}},"required_gate_lane":{"type":"string"},"budget_calls":{"type":"integer"},"duration_sec":{"type":"integer"}},"required":["scope_repo","objective","allowed_paths"]}`)},
 		{Name: "g8s_charter_verify", Description: "Verify a Stratum Charter epoch and fence token against the SQLite WAL charter ledger (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{"charter_id":{"type":"string"},"epoch":{"type":"integer"},"fence_token":{"type":"string"}},"required":["charter_id","epoch","fence_token"]}`)},
 		{Name: "g8s_portfolio_status", Description: "O-Plane read-only projection of active/revoked/completed Stratum Charters and domain scope allocations (DELTA-33).", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		{Name: "g8s_skills_list", Description: "List digest-pinned skills (skill://g8s/<tier>/<name>) filtered by F0/F1/F2 containment tier (DELTA-34).", InputSchema: json.RawMessage(`{"type":"object","properties":{"role":{"type":"string"},"tier":{"type":"string"},"bank_dir":{"type":"string"}}}`)},
@@ -453,7 +454,41 @@ func (s *Server) getTool(ctx context.Context, args json.RawMessage) (any, *jsonR
 	return map[string]any{"task_id": task.TaskID, "state": task.State, "attempts": task.Attempts, "cancel_requested": task.CancelRequested}, nil
 }
 
+// mcpReceiptIssuerIdentity derives the write-receipt issuer identity from the
+// SERVER process environment (issue #977 PR-2, threat model V8 — "Receipt
+// mint — MCP g8s_receipt_issue ... issuer hardcode mcp-server", UNGUARDED (M)).
+//
+// The issuer is a fact about the server process, never a client-supplied
+// argument: the tool schema has no issuer field, and the recorded identity now
+// reflects the declared G8S_STRATUM/G8S_TIER of the serving process so minted
+// receipts carry deterministic provenance instead of a constant string. An
+// undeclared env keeps the historical "mcp-server" base identity.
+func mcpReceiptIssuerIdentity() string {
+	stratum := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_STRATUM")))
+	tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER")))
+	switch {
+	case stratum != "" && tier != "":
+		return "mcp-server/" + stratum + "/" + tier
+	case stratum != "":
+		return "mcp-server/" + stratum
+	case tier != "":
+		return "mcp-server/" + tier
+	default:
+		return "mcp-server"
+	}
+}
+
+// receiptIssueTool issues a path-scoped, single-use write receipt.
+//
+// Authority Sink Gate (issue #977 PR-2): the worker-tier guard mirrors
+// coordinatorMeshTool (mcp/mesh.go) — a server process inside F1/F2 refuses to
+// mint receipts, closing the measured founding instance of the threat model
+// (an unauthenticated MCP client minting signed receipts through a shared
+// worker-tier server). The issuer identity is server-derived.
 func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	if rpcErr := workerTierGuard("g8s_receipt_issue"); rpcErr != nil {
+		return nil, rpcErr
+	}
 	var a struct {
 		AllowedPaths []string `json:"allowed_paths"`
 		TTLSeconds   int      `json:"ttl_seconds"`
@@ -465,7 +500,7 @@ func (s *Server) receiptIssueTool(_ context.Context, args json.RawMessage) (any,
 	if ttl <= 0 {
 		ttl = 10 * time.Minute // baseline default when caller omits TTL
 	}
-	rc, err := s.receipts.IssueReceipt("mcp-server", a.AllowedPaths, ttl,
+	rc, err := s.receipts.IssueReceipt(mcpReceiptIssuerIdentity(), a.AllowedPaths, ttl,
 		receipt.WithCanonicalEnvelope(&receipt.CanonicalEnvelope{
 			SchemaURI:      "g8s://envelope/write-receipt/v1",
 			FieldOrder:     []string{"receipt_id", "issuer", "allowed_paths", "expires_at", "consumed", "consumer_task_id", "created_at"},

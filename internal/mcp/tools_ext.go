@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -103,6 +104,21 @@ func blockedStatus(status, message string) *jsonRPCError {
 		Message: message,
 		Data:    map[string]any{"status": status, "reason": message},
 	}
+}
+
+// workerTierGuard is the Authority Sink Gate worker-context guard shared by
+// the privileged authority sinks (issue #977 PR-2, threat model §2 — the mesh
+// tool's inline guard at coordinatorMeshTool is the reference GATED pattern):
+// a server process running inside a worker tier (G8S_TIER=F1|F2) must never
+// mint receipts/charters or mutate shared control state, because a worker
+// would otherwise launder its bounded authority into coordinator-grade
+// artifacts by simply calling the tool. Mirrors mcp/mesh.go.
+func workerTierGuard(surface string) *jsonRPCError {
+	tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER")))
+	if tier == "F1" || tier == "F2" {
+		return blockedStatus("blocked_by_policy", fmt.Sprintf("%s denied for tier %s: no shared control mutation through worker tier", surface, tier))
+	}
+	return nil
 }
 
 // dispatchTool runs the guard chain, then one bounded synchronous dispatch.
@@ -331,6 +347,12 @@ type ReceiptConsumer interface {
 }
 
 // resolveMCPDelegation validates the delegation context and optional receipt_id.
+//
+// Fail-closed posture (issue #977 PR-2, B-7): once a receipt is presented the
+// server MUST be able to verify it. A server whose ReceiptIssuer does not
+// implement the ReceiptVerifier extension (or has none wired at all) refuses
+// receipt-bound delegation instead of silently proceeding unverified — the
+// same posture as the HTTP surface (internal/server resolveFSDelegation).
 func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMutation bool) (string, []string, *jsonRPCError) {
 	receiptID, scopeRoot, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, isMutation)
 	if err != nil {
@@ -339,17 +361,20 @@ func (s *Server) resolveMCPDelegation(flagReceiptID, flagScopeRoot string, isMut
 	if isMutation && receiptID == "" {
 		return "", nil, blockedStatus("blocked_by_policy", "g8s_edit requires an explicit receipt_id or G8S_RECEIPT_ID environment binding")
 	}
-	if receiptID != "" && s.receipts != nil {
-		if v, ok := s.receipts.(ReceiptVerifier); ok {
-			rc, err := v.VerifyReceipt(receiptID)
-			if err != nil {
-				return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("verify receipt %s: %v", receiptID, err))
-			}
-			if rc.Consumed {
-				return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("receipt %s already consumed", receiptID))
-			}
-			return scopeRoot, rc.AllowedPaths, nil
+	if receiptID != "" {
+		v, ok := s.receipts.(ReceiptVerifier)
+		if !ok {
+			return "", nil, blockedStatus("blocked_by_policy",
+				"receipt verification is not configured on this server; refusing receipt-bound delegation (fail-closed, B-7 issue #977)")
 		}
+		rc, err := v.VerifyReceipt(receiptID)
+		if err != nil {
+			return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("verify receipt %s: %v", receiptID, err))
+		}
+		if rc.Consumed {
+			return "", nil, blockedStatus("blocked_by_policy", fmt.Sprintf("receipt %s already consumed", receiptID))
+		}
+		return scopeRoot, rc.AllowedPaths, nil
 	}
 	return scopeRoot, nil, nil
 }
@@ -377,16 +402,25 @@ func preflightMCPEdit(ctx context.Context, path, scopeRoot string, allowedPaths 
 	return nil
 }
 
+// consumeMCPReceipt atomically validates and consumes the single-use receipt
+// bound to an MCP mutation.
+//
+// Fail-closed posture (issue #977 PR-2, B-7): a receipt-bound mutation on a
+// server that cannot atomically consume receipts refuses instead of silently
+// skipping consumption (which would break single-use enforcement).
 func (s *Server) consumeMCPReceipt(flagReceiptID, flagScopeRoot string) *jsonRPCError {
 	receiptID, _, err := fsops.ResolveDelegationContext(flagReceiptID, flagScopeRoot, true)
 	if err != nil {
 		return blockedStatus("blocked_by_policy", err.Error())
 	}
-	if receiptID != "" && s.receipts != nil {
-		if c, ok := s.receipts.(ReceiptConsumer); ok {
-			if _, consumeErr := c.ValidateAndConsume(receiptID, "mcp-fs-edit"); consumeErr != nil {
-				return blockedStatus("blocked_by_policy", fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr))
-			}
+	if receiptID != "" {
+		c, ok := s.receipts.(ReceiptConsumer)
+		if !ok {
+			return blockedStatus("blocked_by_policy",
+				"receipt consumption is not configured on this server; refusing mutation (fail-closed, B-7 issue #977)")
+		}
+		if _, consumeErr := c.ValidateAndConsume(receiptID, "mcp-fs-edit"); consumeErr != nil {
+			return blockedStatus("blocked_by_policy", fmt.Sprintf("consume receipt %s: %v", receiptID, consumeErr))
 		}
 	}
 	return nil
@@ -657,7 +691,23 @@ func (s *Server) llmCallTool(ctx context.Context, args json.RawMessage) (any, *j
 	return out, nil
 }
 
+// charterIssueTool issues an epoch-fenced Stratum Charter (DELTA-33).
+//
+// Authority Sink Gate (issue #977 PR-2, threat model V8 / B-12 — this sink was
+// UNGUARDED at the tool layer and the corpus documents an unauthenticated
+// client minting a signed charter with issuer_stratum=S1):
+//  1. worker-tier guard mirrors coordinatorMeshTool (mcp/mesh.go): a server
+//     process inside F1/F2 refuses to mint;
+//  2. deterministic issuer identity: the issuing stratum is a SERVER-side
+//     fact derived from the process env via charter.IssuingStratumFromEnv
+//     (G8S_STRATUM, clamped for F1/F2 and receipt-bound processes). A
+//     client-supplied issuer_stratum is rejected outright — it is an attack
+//     payload (V8), never an input;
+//  3. charter.Store.Issue keeps the deep S0/S1->S2 adjacency validation.
 func (s *Server) charterIssueTool(_ context.Context, args json.RawMessage) (any, *jsonRPCError) {
+	if rpcErr := workerTierGuard("g8s_charter_issue"); rpcErr != nil {
+		return nil, rpcErr
+	}
 	var a struct {
 		IssuerStratum string   `json:"issuer_stratum"`
 		RepoID        string   `json:"repo_id"`
@@ -670,6 +720,14 @@ func (s *Server) charterIssueTool(_ context.Context, args json.RawMessage) (any,
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return nil, &jsonRPCError{Code: codeInvalidParams, Message: "g8s_charter_issue invalid arguments"}
+	}
+	if strings.TrimSpace(a.IssuerStratum) != "" {
+		return nil, blockedStatus("blocked_by_policy",
+			"issuer_stratum is derived from the server process environment (G8S_STRATUM); client-supplied issuer_stratum is rejected (B-12, issue #977)")
+	}
+	issuer, issuerErr := charter.IssuingStratumFromEnv()
+	if issuerErr != nil {
+		return nil, blockedStatus("blocked_by_policy", issuerErr.Error())
 	}
 	repoID := strings.TrimSpace(a.RepoID)
 	if repoID == "" {
@@ -684,7 +742,7 @@ func (s *Server) charterIssueTool(_ context.Context, args json.RawMessage) (any,
 	}
 	defer store.Close()
 	c, err := store.Issue(charter.IssueRequest{
-		IssuerStratum:  charter.Stratum(a.IssuerStratum),
+		IssuerStratum:  issuer,
 		RepoID:         repoID,
 		ScopeRoot:      a.ScopeRoot,
 		AllowedPaths:   a.AllowedPaths,

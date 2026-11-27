@@ -417,6 +417,29 @@ func VerifyStratumEnv(pub ed25519.PublicKey, now time.Time) (Stratum, error) {
 	return stratum, nil
 }
 
+// IssuingStratumFromEnv resolves the SERVER-side charter issuer stratum for
+// authority-minting surfaces (issue #977 PR-2, threat model V8 / B-12).
+//
+// The issuing stratum is a fact about the SERVER process, derived exclusively
+// from the process environment via CurrentStratum (G8S_STRATUM, clamped to S3
+// for F1/F2-tier and receipt-bound processes to defeat child-env spoofing).
+// Client-supplied issuer identity is never consulted by callers that use this
+// helper — the Authority Sink Gate red tests (internal/mcp) pin that a
+// client-chosen issuer_stratum is rejected outright, never honored.
+//
+// It fails closed with ErrStratumAdjacencyViolation when the process stratum
+// is not an issuing stratum (S0 Principal / S1 FederationCoordinator), so a
+// coordinator surface cannot mint a charter under an assumed identity: an
+// undeclared stratum (S2 default), a worker-tier clamp (S3-M/S3-A), or a
+// receipt-bound process all refuse here before any charter is minted.
+func IssuingStratumFromEnv() (Stratum, error) {
+	cur := CurrentStratum()
+	if cur != StratumS0 && cur != StratumS1 {
+		return cur, fmt.Errorf("%w: server stratum %s cannot issue a domain charter (only S0 or S1)", ErrStratumAdjacencyViolation, cur)
+	}
+	return cur, nil
+}
+
 // Close closes the underlying SQLite connection.
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {

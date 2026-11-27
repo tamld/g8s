@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/tamld/g8s/internal/mesh"
@@ -42,10 +41,12 @@ func coordinatorMeshToolDescriptor() toolDescriptor {
 // coordinatorMeshTool executes coordinator mesh operations against a SQLite mesh ledger.
 func (s *Server) coordinatorMeshTool(ctx context.Context, args json.RawMessage) (any, *jsonRPCError) {
 	// Worker context guard: reject invalid env worker context G8S_TIER=F1|F2.
-	// No shared control mutation through an F1 tool.
-	tier := strings.ToUpper(strings.TrimSpace(os.Getenv("G8S_TIER")))
-	if tier == "F1" || tier == "F2" {
-		return nil, blockedStatus("blocked_by_policy", fmt.Sprintf("coordinator mesh access denied for tier %s: no shared control mutation through worker tier", tier))
+	// No shared control mutation through an F1 tool. The shared guard helper
+	// (workerTierGuard, issue #977 PR-2) reproduces this tool's original inline
+	// check verbatim and is now cited by the Authority Sink Gate registry
+	// (.g8s/authority-sinks.yml) alongside the receipt/charter minting sinks.
+	if rpcErr := workerTierGuard("coordinator mesh access"); rpcErr != nil {
+		return nil, rpcErr
 	}
 
 	if len(bytes.TrimSpace(args)) == 0 {

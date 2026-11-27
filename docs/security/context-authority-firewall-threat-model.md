@@ -1,6 +1,6 @@
 # Context Authority Firewall — Threat Model & Source-to-Sink Map (PR-1, issue #977)
 
-- **Status**: PR-1 staged artifact (threat model + map + corpus plan). Enforcement design is a FOLLOW-UP PR gated on corpus results — no core changes based on hypothesis alone.
+- **Status**: PR-1 staged artifact (threat model + map + corpus plan). PR-2 (#977) landed the enforcement half: tool-tier guards + server-derived issuer identity at the two UNGUARDED minting sinks, fail-closed optional interfaces (B-7) at the MCP mutation paths, per-message provenance labels (internal/provenance, wired into ContextPacket.SourceClasses), and the declarative sink registry (.g8s/authority-sinks.yml with a mechanical reality test). Sink statuses below are updated where PR-2 closed them.
 - **Governance**: ADR-0042 TRUST-G2 (Trust Root outside LLM inference), TRUST-G3 (independent evaluation), TRUST-G6 (universal PASS/FAIL promotion). ADR-0043 (audit-driven intake).
 - **Founding measured instance**: on v0.26.0 an unauthenticated MCP client minted a signed Ed25519 write receipt via `g8s_receipt_issue` with no handshake and no principal check (runtime probe 2026-11-20). The signing protects integrity, not authorization.
 
@@ -43,8 +43,8 @@ Legend: **GATED** = deterministic authority check present · **PARTIAL** = check
 | Sink | Gate today | Status | Defects |
 |---|---|---|---|
 | Receipt mint — CLI (`g8s receipt issue`) | env stratum (`G8S_TIER`/`G8S_STRATUM`) | PARTIAL (B-10: same-user env can unset) | documented boundary |
-| Receipt mint — MCP `g8s_receipt_issue` | NONE — issuer hardcode `mcp-server`, paths from request | **UNGUARDED (M)** | #976 fixes protocol layer; authorization layer is this workstream |
-| Charter issue — MCP `g8s_charter_issue` | env-checked deep inside `charter.Issue`; no tool-tier guard; issuer from client args | **UNGUARDED at tool layer** (B-12) | mirror mesh tool's worker-tier guard |
+| Receipt mint — MCP `g8s_receipt_issue` | tool-tier guard + server-derived issuer (`mcp/server.go` workerTierGuard + mcpReceiptIssuerIdentity) | GATED (PR-2, #977) | was **UNGUARDED (M)** pre-PR-2; paths still client-scoped by design |
+| Charter issue — MCP `g8s_charter_issue` | tool-tier guard + server-env issuer (`charter.IssuingStratumFromEnv`; client `issuer_stratum` rejected) | GATED (PR-2, #977) | was **UNGUARDED at tool layer** (B-12, corpus V8) pre-PR-2; deep `charter.Issue` adjacency retained |
 | Mesh send — MCP `g8s_coordinator_mesh` | worker-tier guard at tool (`mcp/mesh.go:46-49`) | GATED | reference pattern for the two sinks above |
 | TCB mutation (`deliver` Tier-B) | S0 Ed25519 attestation + nonce + digests | PARTIAL | #972 (nonce cross-process race), #973 (TOCTOU), nil-store fail-open (B-3) |
 | Trust-boundary file writes (`.g8s/**`) | fsops deny check | PARTIAL | #979 (case-sensitivity bypass) |
@@ -69,9 +69,9 @@ v0 scenarios (from the vectors above):
 
 ## 4. Follow-up path (post-corpus)
 
-1. PR-2: provenance labels on coordinator input streams (per-message class below the DELTA-42 claim-tier layer — inventory: DELTA-42 premise gate, ContextPacket, lessons citations, PromotionGate are EXISTING mechanisms to compose with, not rebuild).
-2. PR-3: deterministic Authority Sink Gate at the two UNGUARDED sinks (receipt/charter MCP tools — tool-tier guard mirroring mesh) + fail-closed optional-interface defaults (B-7).
-3. Corpus regression-wiring into Quality CI after PR-2.
+1. PR-2 (LANDED, #977): enforcement half — tool-tier guards + server-derived issuer identity at the two UNGUARDED minting sinks; fail-closed ReceiptVerifier/ReceiptConsumer optional interfaces (B-7); per-message provenance labels (internal/provenance six-class enum below the DELTA-42 claim-tier layer, wired additively into ContextPacket.SourceClasses); declarative Authority Sink Gate registry (.g8s/authority-sinks.yml) with a mechanical reality test.
+2. PR-3 (NEXT): deterministic Authority Sink Gate decisions consuming the provenance labels + registry (per-message classes gate what may drive privileged actions), plus the remaining PARTIAL sink defects (B-3/#972/#973).
+3. Corpus regression-wiring into Quality CI after PR-3.
 
 ## 5. What PR-1 does NOT do
 
