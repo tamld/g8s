@@ -51,11 +51,16 @@ func TestAgyWorkerCancelKillsProcessGroup(t *testing.T) {
 	for {
 		data, rerr := os.ReadFile(grandPIDFile)
 		if rerr == nil {
-			grandPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-			break
+			// The shell redirection creates the file BEFORE writing the pid,
+			// so an early read sees an empty file (CI-oracle race: parse of ""
+			// yields 0). Keep polling until a positive pid actually lands.
+			if parsed, perr := strconv.Atoi(strings.TrimSpace(string(data))); perr == nil && parsed > 0 {
+				grandPID = parsed
+				break
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("grandchild pid file never appeared: %v", rerr)
+			t.Fatalf("grandchild pid never materialized (file present but empty until the shell writes $!): last read err=%v", rerr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
