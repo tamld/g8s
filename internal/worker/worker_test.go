@@ -592,7 +592,7 @@ type startFailPlane struct {
 	startCalls atomic.Int32
 }
 
-func (p *startFailPlane) StartTask(string, string, string) bool {
+func (p *startFailPlane) StartTaskContext(ctx context.Context, taskID string, workerID string, leaseToken string) bool {
 	p.startCalls.Add(1)
 	return false
 }
@@ -674,7 +674,7 @@ func TestCollectCompletionAppendsModelOutcomeWithSessionStateDir(t *testing.T) {
 		t.Fatalf("claim: %v %+v", err, claimed)
 	}
 	token := derefString(claimed.LeaseToken)
-	if !store.StartTask(claimed.TaskID, "w-collect", token) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "w-collect", token) {
 		t.Fatal("StartTask returned false")
 	}
 
@@ -1054,7 +1054,7 @@ func TestMaybePause(t *testing.T) {
 			if err != nil || claimed == nil {
 				t.Fatalf("ClaimTask: %v", err)
 			}
-			env.store.StartTask(claimed.TaskID, "w1", *claimed.LeaseToken)
+			env.store.StartTaskContext(context.Background(), claimed.TaskID, "w1", *claimed.LeaseToken)
 
 			token := *claimed.LeaseToken
 			if tc.token == "bad-token" {
