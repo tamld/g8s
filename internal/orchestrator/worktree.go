@@ -23,6 +23,10 @@ import (
 // goroutines within the process via an in-memory sync.Mutex (cross-process
 // file-level locking is handled by the SQLite control-plane task leases).
 // One worktree = one task = one worker.
+//
+// A-7 (#986): the pool mutex guards ONLY the bookkeeping maps — every git
+// subprocess runs outside the lock, bounded by gitCommandTimeout, so a
+// wedged git never blocks other Acquire callers.
 type Pool struct {
 	root   string
 	repo   string // absolute path of the git working tree
@@ -33,6 +37,16 @@ type Pool struct {
 	allocated map[string]Worktree // active leases
 	created   []Worktree          // all worktrees created by this pool
 	preserved map[string]bool     // worktrees intentionally preserved via Release(keep=true)
+	flights   map[string]*acquireFlight
+}
+
+// acquireFlight deduplicates concurrent Acquire calls for the same taskID
+// while the git subprocess runs outside Pool.mu: the first caller creates
+// the worktree, concurrent callers wait on done and share its result.
+type acquireFlight struct {
+	done chan struct{}
+	wt   Worktree
+	err  error
 }
 
 // PoolOptions configures a Pool. Repo is required; Root + Base + Prefix
@@ -83,6 +97,7 @@ func NewPool(opts PoolOptions) (*Pool, error) {
 		prefix:    prefix,
 		allocated: map[string]Worktree{},
 		preserved: map[string]bool{},
+		flights:   map[string]*acquireFlight{},
 	}, nil
 }
 
@@ -92,16 +107,63 @@ func NewPool(opts PoolOptions) (*Pool, error) {
 // The first call also resolves the base SHA so receipts record exactly
 // which commit the worker was anchored to (lets us bisect any post-hoc
 // file change back to the worker that made it).
-func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
+//
+// A-7 (#986): Pool.mu is held only for the bookkeeping maps. The git
+// subprocesses (worktree add, rev-parse) run OUTSIDE the lock — a wedged
+// git fails bounded via gitCommandTimeout instead of serializing every
+// other Acquire caller behind it. Concurrent Acquire calls for the same
+// taskID are deduplicated through a single-flight map: exactly one
+// worktree is created and all callers share its result.
+func (p *Pool) Acquire(ctx context.Context, taskID string) (Worktree, error) {
 	if taskID == "" {
 		return Worktree{}, errors.New("orchestrator: taskID required")
 	}
+
 	p.mu.Lock()
 	if wt, ok := p.allocated[taskID]; ok {
 		p.mu.Unlock()
 		return wt, nil
 	}
+	if p.flights == nil {
+		// struct-literal Pools in tests bypass NewPool — lazy-init (A-7).
+		p.flights = map[string]*acquireFlight{}
+	}
+	if flight, pending := p.flights[taskID]; pending {
+		p.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.wt, flight.err
+		case <-ctx.Done():
+			return Worktree{}, ctx.Err()
+		}
+	}
+	flight := &acquireFlight{done: make(chan struct{})}
+	p.flights[taskID] = flight
+	p.mu.Unlock()
 
+	wt, err := p.createWorktree(ctx, taskID)
+
+	p.mu.Lock()
+	flight.wt, flight.err = wt, err
+	delete(p.flights, taskID)
+	if err == nil {
+		p.allocated[taskID] = wt
+		p.created = append(p.created, wt)
+	}
+	p.mu.Unlock()
+	close(flight.done)
+
+	return wt, err
+}
+
+// createWorktree runs the collision probe and the git subprocesses for a
+// fresh worktree WITHOUT holding Pool.mu (A-7, #986). The immutable pool
+// fields (root/repo/base/prefix) are read-only after NewPool, so they are
+// safe to access outside the lock.
+func (p *Pool) createWorktree(ctx context.Context, taskID string) (Worktree, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	branch := fmt.Sprintf("%s/%s", p.prefix, taskID)
 	_ = os.MkdirAll(p.root, 0o755)
 
@@ -114,7 +176,6 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 		wtPath = filepath.Join(p.root, id)
 		if isLiveWorktree(wtPath) {
 			if attempt == 5 {
-				p.mu.Unlock()
 				return Worktree{}, fmt.Errorf("worktree path collision with a live worktree after 5 attempts: %s", wtPath)
 			}
 			continue
@@ -123,32 +184,29 @@ func (p *Pool) Acquire(_ context.Context, taskID string) (Worktree, error) {
 	}
 
 	_ = os.RemoveAll(wtPath)
-	if err := gitAddWorktree(p.repo, wtPath, branch, p.base); err != nil {
-		p.mu.Unlock()
+	if err := gitAddWorktreeFn(ctx, p.repo, wtPath, branch, p.base); err != nil {
 		return Worktree{}, fmt.Errorf("git worktree add: %w", err)
 	}
-	baseSHA, err := gitRevParse(p.repo, "HEAD")
+	baseSHA, err := gitRevParseFn(ctx, p.repo, "HEAD")
 	if err != nil {
-		_ = p.forceCleanup(wtPath)
-		p.mu.Unlock()
+		_ = p.forceCleanup(ctx, wtPath)
 		return Worktree{}, fmt.Errorf("rev-parse HEAD: %w", err)
 	}
-	wt := Worktree{
+	return Worktree{
 		ID:      id,
 		Path:    wtPath,
 		Branch:  branch,
 		BaseSHA: baseSHA,
-	}
-	p.allocated[taskID] = wt
-	p.created = append(p.created, wt)
-	p.mu.Unlock()
-	return wt, nil
+	}, nil
 }
 
 // Release removes the worktree and prunes its branch. If keep is true,
 // the branch is retained and a dirty worktree (uncommitted deliverables)
 // or one containing receipt-scoped deliverables is preserved instead of being removed (issue #551).
-func (p *Pool) Release(_ context.Context, wt Worktree, keep bool, protected ...string) error {
+//
+// A-7 (#986): ctx bounds every git subprocess invoked here; Pool.mu is
+// released before any git call.
+func (p *Pool) Release(ctx context.Context, wt Worktree, keep bool, protected ...string) error {
 	p.mu.Lock()
 	var taskID string
 	for tid, allocated := range p.allocated {
@@ -168,7 +226,7 @@ func (p *Pool) Release(_ context.Context, wt Worktree, keep bool, protected ...s
 	}
 
 	if keep {
-		if dirty, derr := worktreeDirty(wt.Path); derr == nil && dirty {
+		if dirty, derr := worktreeDirty(ctx, wt.Path); derr == nil && dirty {
 			// preserve: skip removal, keep branch implicitly (it exists)
 			p.mu.Lock()
 			if p.preserved == nil {
@@ -193,15 +251,15 @@ func (p *Pool) Release(_ context.Context, wt Worktree, keep bool, protected ...s
 	}
 
 	if !keep {
-		if err := gitRemoveWorktree(p.repo, wt.Path); err != nil {
+		if err := gitRemoveWorktree(ctx, p.repo, wt.Path); err != nil {
 			safeRemoveWorktreeDir(p.root, wt.Path)
-			_ = gitPruneWorktrees(p.repo)
+			_ = gitPruneWorktrees(ctx, p.repo)
 		}
-		_ = gitDeleteBranch(p.repo, wt.Branch)
+		_ = gitDeleteBranch(ctx, p.repo, wt.Branch)
 		return nil
 	}
 
-	if err := gitRemoveWorktree(p.repo, wt.Path); err != nil {
+	if err := gitRemoveWorktree(ctx, p.repo, wt.Path); err != nil {
 		return fmt.Errorf("git worktree remove: %w", err)
 	}
 	return nil
@@ -237,14 +295,14 @@ func (p *Pool) Close(ctx context.Context) error {
 		}
 		safeRemoveWorktreeDir(p.root, wt.Path)
 	}
-	_ = gitPruneWorktrees(p.repo)
+	_ = gitPruneWorktrees(ctx, p.repo)
 
 	for _, wt := range created {
 		if preserved[wt.ID] {
 			continue
 		}
 		if p.prefix != "" && strings.HasPrefix(wt.Branch, p.prefix+"/") {
-			_ = gitDeleteBranch(p.repo, wt.Branch)
+			_ = gitDeleteBranch(ctx, p.repo, wt.Branch)
 		}
 	}
 	return nil
@@ -366,8 +424,10 @@ func (p *Pool) Active() []Worktree {
 	return out
 }
 
-func (p *Pool) forceCleanup(path string) error {
-	cmd := exec.Command("git", "worktree", "remove", "--force", "--", path)
+func (p *Pool) forceCleanup(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", "--", path)
 	cmd.Dir = p.repo
 	return cmd.Run()
 }
@@ -382,6 +442,18 @@ func shortID() string {
 // shortIDFn is swappable in tests for deterministic collision testing.
 var shortIDFn = shortID
 
+// gitCommandTimeout bounds every git subprocess the Pool spawns (A-7,
+// #986): a wedged git must fail bounded instead of holding Pool.mu — or a
+// caller — hostage indefinitely. Swappable in tests.
+var gitCommandTimeout = 60 * time.Second
+
+// Git subprocess seams, swappable in tests (mirrors shortIDFn). The Pool
+// never runs a git subprocess while holding Pool.mu (A-7, #986).
+var (
+	gitAddWorktreeFn = gitAddWorktree
+	gitRevParseFn    = gitRevParse
+)
+
 // isLiveWorktree reports whether path exists and contains a .git entry (file or dir).
 func isLiveWorktree(path string) bool {
 	if _, err := os.Stat(path); err != nil {
@@ -392,9 +464,13 @@ func isLiveWorktree(path string) bool {
 }
 
 // isGitRepo runs `git rev-parse --git-dir` in dir. Returns true if it
-// exits 0 and emits a path.
+// exits 0 and emits a path. Bounded by gitCommandTimeout (A-7, #986);
+// called from NewPool which carries no caller ctx, so it uses a fresh
+// Background deadline.
 func isGitRepo(dir string) bool {
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -403,28 +479,40 @@ func isGitRepo(dir string) bool {
 	return strings.TrimSpace(string(out)) != ""
 }
 
-func gitAddWorktree(repo, path, branch, base string) error {
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, "--", path, base)
+func gitAddWorktree(ctx context.Context, repo, path, branch, base string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "-b", branch, "--", path, base)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return fmt.Errorf("%w: %s", cause, strings.TrimSpace(string(out)))
+		}
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-func gitRemoveWorktree(repo, path string) error {
-	cmd := exec.Command("git", "worktree", "remove", "--force", "--", path)
+func gitRemoveWorktree(ctx context.Context, repo, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", "--", path)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return fmt.Errorf("%w: %s", cause, strings.TrimSpace(string(out)))
+		}
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-func gitPruneWorktrees(repo string) error {
-	cmd := exec.Command("git", "worktree", "prune")
+func gitPruneWorktrees(ctx context.Context, repo string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = repo
 	return cmd.Run()
 }
@@ -449,26 +537,38 @@ func safeRemoveWorktreeDir(root, path string) {
 	_ = os.RemoveAll(cleanPath)
 }
 
-func gitDeleteBranch(repo, branch string) error {
-	cmd := exec.Command("git", "branch", "-D", "--", branch)
+func gitDeleteBranch(ctx context.Context, repo, branch string) error {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "branch", "-D", "--", branch)
 	cmd.Dir = repo
 	return cmd.Run()
 }
 
-func gitRevParse(repo, ref string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", ref)
+func gitRevParse(ctx context.Context, repo, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", ref)
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return "", cause
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-func worktreeDirty(path string) (bool, error) {
-	cmd := exec.Command("git", "-C", path, "status", "--porcelain")
+func worktreeDirty(ctx context.Context, path string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain")
 	out, err := cmd.Output()
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return false, cause
+		}
 		return false, err
 	}
 	return len(strings.TrimSpace(string(out))) > 0, nil

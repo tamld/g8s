@@ -131,7 +131,7 @@ func TestIsGitRepoInvalid(t *testing.T) {
 
 func TestGitRevParseValid(t *testing.T) {
 	repo := setupGitRepo(t)
-	sha, err := gitRevParse(repo, "HEAD")
+	sha, err := gitRevParse(context.Background(), repo, "HEAD")
 	if err != nil {
 		t.Fatalf("gitRevParse failed: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestGitRevParseValid(t *testing.T) {
 
 func TestGitRevParseInvalid(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, err := gitRevParse(tmpDir, "HEAD")
+	_, err := gitRevParse(context.Background(), tmpDir, "HEAD")
 	if err == nil {
 		t.Error("expected error for gitRevParse in non-git repo")
 	}
@@ -526,7 +526,7 @@ func TestWorktreeDirtyHelper(t *testing.T) {
 	repo := setupGitRepo(t)
 
 	// Clean repo -> not dirty
-	dirty, err := worktreeDirty(repo)
+	dirty, err := worktreeDirty(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("worktreeDirty on clean repo: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestWorktreeDirtyHelper(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	dirty, err = worktreeDirty(repo)
+	dirty, err = worktreeDirty(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("worktreeDirty on untracked repo: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestWorktreeDirtyHelper(t *testing.T) {
 	}
 
 	// Non-existent directory -> returns error
-	_, err = worktreeDirty(filepath.Join(t.TempDir(), "non-existent-dir"))
+	_, err = worktreeDirty(context.Background(), filepath.Join(t.TempDir(), "non-existent-dir"))
 	if err == nil {
 		t.Fatalf("expected error for non-existent path")
 	}
