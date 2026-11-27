@@ -547,6 +547,15 @@ func runVault(args []string) {
 	}
 }
 
+// allowDegradedSandboxRequested resolves the #971 WP1 degraded-sandbox opt-in
+// from the worker --allow-degraded-sandbox flag with the
+// G8S_ALLOW_DEGRADED_SANDBOX=1 env fallback, mirroring the
+// --require-kernel-sandbox / G8S_REQUIRE_KERNEL_SANDBOX wiring. Strict "1"
+// semantics; anything else stays fail-closed.
+func allowDegradedSandboxRequested(flagSet bool) bool {
+	return flagSet || strings.TrimSpace(os.Getenv("G8S_ALLOW_DEGRADED_SANDBOX")) == "1"
+}
+
 // reportError renders a failure through pterm on the provided writer so tests
 // can assert where diagnostics land.
 
@@ -560,6 +569,7 @@ func runWorker(args []string) {
 	concurrency := fs.Int("concurrency", 1, "drain with up to N simultaneous attempts; N>1 requires a git checkout (per-attempt worktree isolation) and --once=false")
 	allowWorkspaceWrite := fs.Bool("allow-workspace-write", false, "temporarily set AGY_MCP_ALLOW_WORKSPACE_WRITE=1 for this invocation")
 	requireKernelSandbox := fs.Bool("require-kernel-sandbox", false, "fail closed unless OS containment achieves mode=kernel_enforced (also G8S_REQUIRE_KERNEL_SANDBOX=1)")
+	allowDegradedSandbox := fs.Bool("allow-degraded-sandbox", false, "explicit operator opt-in (issue #971 WP1): let workspace_write attempts proceed below kernel_enforced containment on hosts without a sandbox backend, recording sandbox_degraded in the envelope instead of refusing (also G8S_ALLOW_DEGRADED_SANDBOX=1)")
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "Usage: g8s worker [flags]")
@@ -692,6 +702,10 @@ func runWorker(args []string) {
 			APICallNames:          apiCallNames,
 		})),
 		worker.WithRequireKernelSandbox(*requireKernelSandbox || strings.TrimSpace(os.Getenv("G8S_REQUIRE_KERNEL_SANDBOX")) == "1"),
+		// #971 WP1: the degraded-sandbox opt-in from --allow-degraded-sandbox or
+		// the G8S_ALLOW_DEGRADED_SANDBOX=1 env fallback — per-task request_json
+		// allow_degraded_sandbox is honored independently by the supervisor.
+		worker.WithAllowDegradedSandbox(allowDegradedSandboxRequested(*allowDegradedSandbox)),
 	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		if pool, poolErr := orchestrator.NewPool(orchestrator.PoolOptions{Repo: cwd, Prefix: "wt"}); poolErr == nil {
