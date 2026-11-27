@@ -611,6 +611,19 @@ func (g *ReflexGate) EvaluatePolicy(signal ReflexSignal, req TriageRequest) Tria
 				"Supervisor policy: low risk mutation rejected due to allowed_paths scope violation")
 		}
 
+		// Authority Sink Gate (#977 PR-3, reflex/provenance_gate.go): consume
+		// the per-message provenance labels on the decision context BEFORE
+		// granting. Content of unestablished origin (EXTERNAL_CONTENT — a
+		// labeled external section, a provenance-stripped section, or a label
+		// that disagrees with its channel) may not drive the receipt-grant
+		// fast-path through the LLM-sensor channel; it escalates to the human
+		// operator instead. The gate is deterministic code below the sensor
+		// (ADR-0042 TRUST-G2) and never consults the signal's claims.
+		if dec := MayDriveSink(TriageGrantReceiptSinkID, req.ContextPacket); !dec.Allowed {
+			return newVerdict(signal, ActionEscalateHITL,
+				fmt.Sprintf("Supervisor policy: authority sink gate refused the grant fast-path (%s: %s)", dec.Code, dec.Reason))
+		}
+
 		return newVerdict(signal, ActionGrantReceipt,
 			"Supervisor policy: certified low-risk mutation within declared scope boundaries")
 	}
