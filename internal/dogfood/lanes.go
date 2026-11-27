@@ -255,14 +255,6 @@ const (
 	SandboxOutcomeUnclassified    SandboxEnforcementOutcome = "unclassified"
 )
 
-// sandboxOutcomeAll is the stable emission order for summaries.
-var sandboxOutcomeAll = []SandboxEnforcementOutcome{
-	SandboxOutcomeKernelEnforced,
-	SandboxOutcomeDegradedAllowed,
-	SandboxOutcomeRefused,
-	SandboxOutcomeUnclassified,
-}
-
 // ClassifySandboxOutcome reads one attempt result envelope (raw JSON) and the
 // task's requested permission, bucketing the sandbox enforcement outcome.
 // Non-workspace_write attempts return SandboxOutcomeUnclassified; callers feed

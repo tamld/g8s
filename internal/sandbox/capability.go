@@ -1,7 +1,5 @@
 package sandbox
 
-import "runtime"
-
 // SandboxCapabilityLevel distinguishes the strongest containment level a host can
 // provide for worker subprocesses (issue #971 WP1 capability-probed preflight).
 type SandboxCapabilityLevel string
@@ -46,4 +44,3 @@ func ProbeCapability() SandboxCapability {
 
 // probeGOOS reports the GOOS the probe targets (kept indirect so tests can
 // stub the whole probe without touching runtime).
-func probeGOOS() string { return runtime.GOOS }

@@ -9,7 +9,6 @@ import (
 func receipt(ref string) Provenance { return Provenance{Kind: "receipt", Ref: ref} }
 func f0direct() Provenance          { return Provenance{Kind: "f0_direct", Ref: "wiring"} }
 func unclassified() Provenance      { return Provenance{Kind: "unclassified"} }
-func classificationErr() Provenance { return Provenance{Kind: "classification_error", Ref: "E_TEST"} }
 
 // TestClassifyCommitLane pins the lane routing used by the ledger (#971 WP2).
 func TestClassifyCommitLane(t *testing.T) {
