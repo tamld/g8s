@@ -36,7 +36,7 @@ type WorkerControlPlane interface {
 	ClaimTask(ctx context.Context, workerID string, leaseDurationSeconds int) (*controlplane.Task, error)
 	ClaimTaskProvider(ctx context.Context, workerID string, leaseDurationSeconds int, provider string) (*controlplane.Task, error)
 	ClaimTaskFiltered(ctx context.Context, workerID string, leaseDurationSeconds int, filter controlplane.ClaimFilter) (*controlplane.Task, error)
-	StartTask(taskID, workerID, leaseToken string) bool
+	StartTaskContext(ctx context.Context, taskID, workerID, leaseToken string) bool
 	RenewHeartbeat(ctx context.Context, taskID, workerID string, extensionSeconds int) error
 	FinishAttempt(taskID, workerID, leaseToken string, params controlplane.FinishAttemptParams) (*controlplane.Task, error)
 	PauseTask(taskID, workerID, leaseToken, pauseState string, result json.RawMessage, reason string) (*controlplane.Task, error)
@@ -515,7 +515,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		// A-4 (#984): a claimed attempt must never drain silently — route
 		// pre-start failures through StartTask + FinishAttempt with a typed
 		// error result, mirroring the read-only refusal path below.
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -538,7 +538,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	}
 	resolvedTaskProvider := s.resolveTaskProvider(req)
 	if err := checkReadOnlyEnforcement(resolvedTaskProvider, req.Permission); err != nil {
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -558,7 +558,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			bindingErr = renewClaimFence(ctx, req.ReceiptID, false)
 		}
 		if err := bindingErr; err != nil {
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 				return s.cp.GetTask(ctx, task.TaskID)
 			}
 			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -574,7 +574,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		hookDir, evidenceLogPath, cleanupHook, hErr := dispatch.SetupToolPolicyNoneWorkspace()
 		if hErr != nil {
 			// A-4 (#984): consume the claimed attempt instead of stranding it.
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 				return s.cp.GetTask(ctx, task.TaskID)
 			}
 			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -592,7 +592,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	hydratedPrompt, hydrateErr := hydrateRoleSkills(req, resolveHydrationRepoDir(s.runRoot, opts, req))
 	if hydrateErr != nil {
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -615,7 +615,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	runDir := filepath.Join(s.runRoot, task.TaskID, fmt.Sprintf("attempt-%d", task.Attempts))
 	if mkErr := os.MkdirAll(runDir, 0o700); mkErr != nil {
 		// A-4 (#984): consume the claimed attempt instead of stranding it.
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.cp.GetTask(ctx, task.TaskID)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -633,7 +633,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 
 	if werr := os.WriteFile(promptPath, []byte(req.Prompt), 0o600); werr != nil {
 		// A-4 (#984): consume the claimed attempt instead of stranding it.
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -649,7 +649,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 	outFile, oerr := os.OpenFile(stdoutPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if oerr != nil {
 		// A-4 (#984): consume the claimed attempt instead of stranding it.
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -666,7 +666,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		// A-4 (#984): consume the claimed attempt instead of stranding it;
 		// the already-open stdout capture must not leak.
 		outFile.Close()
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -686,7 +686,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			outFile.Close()
 			errFile.Close()
 			errMsg := dispatch.SanitizeOutput(err.Error())
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
 			_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -739,7 +739,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			errWriter.Close()
 			outFile.Close()
 			errFile.Close()
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
 			return s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -769,7 +769,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 				errWriter.Close()
 				outFile.Close()
 				errFile.Close()
-				if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+				if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 					return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 				}
 				_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -829,7 +829,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 				errMsg = "worktree isolation unavailable: isolator returned empty worktree directory"
 			}
 			fmt.Fprintf(os.Stderr, "[warn] worker: %s for %s\n", errMsg, task.TaskID)
-			if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+			if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 				return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 			}
 			_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -1006,7 +1006,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 			resMap["error"] = errMsg
 		}
 
-		if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+		if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 			return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 		}
 		_, _ = s.finishAttempt(task.TaskID, opts.WorkerID, token, controlplane.FinishAttemptParams{
@@ -1018,7 +1018,7 @@ func (s *Supervisor) RunOnce(ctx context.Context, opts RunOptions) (*controlplan
 		return s.snapshot(ctx, task.TaskID, runDir, promptPath, stdoutPath, stderrPath)
 	}
 
-	if !s.cp.StartTask(task.TaskID, opts.WorkerID, token) {
+	if !s.cp.StartTaskContext(ctx, task.TaskID, opts.WorkerID, token) {
 		child.Terminate(terminateGrace)
 		outWriter.Close()
 		errWriter.Close()

@@ -50,7 +50,7 @@ func TestCollectClaimRefusedFenceMidRun(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	token := derefString(claimed.LeaseToken)
-	if !store.StartTask(claimed.TaskID, "w-fence", token) {
+	if !store.StartTaskContext(context.Background(), claimed.TaskID, "w-fence", token) {
 		t.Fatal("StartTask returned false")
 	}
 
