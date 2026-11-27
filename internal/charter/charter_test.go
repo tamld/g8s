@@ -570,3 +570,45 @@ func TestCharterStoreValidationAndEdgeCases(t *testing.T) {
 		t.Fatalf("expected ErrCharterInactive on second Complete, got %v", err)
 	}
 }
+
+// TestIssuingStratumFromEnv — issue #977 PR-2 (V8/B-12): the charter issuer
+// for authority-minting surfaces is a SERVER process fact. IssuingStratumFromEnv
+// resolves the declared G8S_STRATUM (S0/S1 pass) and fails closed with
+// ErrStratumAdjacencyViolation for every non-issuing process stratum: the S2
+// default of an undeclared env, the S3 clamp of worker tiers, and the S3 clamp
+// of receipt-bound processes.
+func TestIssuingStratumFromEnv(t *testing.T) {
+	cases := []struct {
+		name              string
+		stratum, tier     string
+		receiptID         string
+		want              Stratum
+		wantAdjacencyFail bool
+	}{
+		{name: "s0_principal_may_issue", stratum: "S0", want: StratumS0},
+		{name: "s1_federation_may_issue", stratum: "S1", want: StratumS1},
+		{name: "undeclared_defaults_s2_refused", stratum: "", want: StratumS2, wantAdjacencyFail: true},
+		{name: "s2_domain_governor_refused", stratum: "S2", want: StratumS2, wantAdjacencyFail: true},
+		{name: "opaque_stratum_defaults_s2_refused", stratum: "BOGUS", want: StratumS2, wantAdjacencyFail: true},
+		{name: "f1_tier_clamped_refused", stratum: "S1", tier: "F1", want: StratumS3Mutator, wantAdjacencyFail: true},
+		{name: "f2_tier_clamped_refused", stratum: "S0", tier: "F2", want: StratumS3Mutator, wantAdjacencyFail: true},
+		{name: "receipt_bound_clamped_refused", stratum: "S1", receiptID: "rc-bound", want: StratumS3Mutator, wantAdjacencyFail: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("G8S_STRATUM", tc.stratum)
+			t.Setenv("G8S_TIER", tc.tier)
+			t.Setenv("G8S_RECEIPT_ID", tc.receiptID)
+			got, err := IssuingStratumFromEnv()
+			if got != tc.want {
+				t.Fatalf("IssuingStratumFromEnv() = %s, want %s", got, tc.want)
+			}
+			if tc.wantAdjacencyFail && !errors.Is(err, ErrStratumAdjacencyViolation) {
+				t.Fatalf("expected ErrStratumAdjacencyViolation, got %v", err)
+			}
+			if !tc.wantAdjacencyFail && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

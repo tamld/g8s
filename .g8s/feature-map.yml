@@ -846,12 +846,14 @@ features:
       - "internal/memory/**"
       - "internal/lessons/**"
       - "internal/context/**"
+      - "internal/provenance/**"
     collision_domain: "knowledge-memory"
     owned_paths:
       - "internal/vault/**"
       - "internal/memory/**"
       - "internal/lessons/**"
       - "internal/context/**"
+      - "internal/provenance/**"
       - "docs/lessons/**"
       - "docs/user-guide/tenancy.md"
       - "docs/DECOUPLED_MEMORY_ARCHITECTURE.md"
@@ -872,6 +874,7 @@ features:
         - "internal/memory"
         - "internal/lessons"
         - "internal/context"
+        - "internal/provenance"
     invariants:
       - "SQLite FTS5 full-text search"
       - "Second-brain promotion"
@@ -880,6 +883,7 @@ features:
       - "internal/vault/vault_test.go"
       - "internal/vault/reach_promote_test.go"
       - "internal/context/broker_test.go"
+      - "internal/provenance/provenance_test.go"
       - "internal/memory/adapter_test.go"
     verifier_class: "test"
     blast_radius:

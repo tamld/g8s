@@ -98,6 +98,25 @@ func (f *fakeIssuer) VerifyReceipt(receiptID string) (*receipt.WriteReceipt, err
 	return f.rc, nil
 }
 
+// ValidateAndConsume mirrors *receipt.Manager: the production receipt manager
+// implements both optional extensions, so the fail-closed Authority Sink Gate
+// (issue #977 PR-2, B-7) requires the fake to carry consumption semantics too
+// — a receipt-bound mutation consumes exactly once.
+func (f *fakeIssuer) ValidateAndConsume(receiptID string, consumerTaskID string) (*receipt.WriteReceipt, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.rc == nil || f.rc.ReceiptID != receiptID {
+		return nil, fmt.Errorf("unknown receipt %s", receiptID)
+	}
+	if f.rc.Consumed {
+		return nil, fmt.Errorf("receipt %s already consumed", receiptID)
+	}
+	f.rc.Consumed = true
+	f.rc.ConsumerTaskID = &consumerTaskID
+	return f.rc, nil
+}
+
 type fakeProviders struct {
 	infos []provider.ProviderInfo
 }
@@ -1264,9 +1283,12 @@ func TestMCPLLMCallTool(t *testing.T) {
 func TestMCPCharterAndPortfolioTools(t *testing.T) {
 	t.Setenv("G8S_STATE_DIR", t.TempDir())
 	s, _, _, _ := newTestServer(t)
+	// Issue #977 PR-2 (deterministic issuer identity): the issuing stratum is a
+	// SERVER process fact derived from G8S_STRATUM (charter.IssuingStratumFromEnv);
+	// the tool schema's issuer_stratum property is refused as a client arg.
+	t.Setenv("G8S_STRATUM", "S1")
 
 	resIssue, rpcErr := callTool(t, s, "g8s_charter_issue", map[string]any{
-		"issuer_stratum":     "S1",
 		"holder_stratum":     "S2",
 		"holder_ring":        "F0",
 		"scope_repo":         "tamld/g8s",
@@ -1278,15 +1300,19 @@ func TestMCPCharterAndPortfolioTools(t *testing.T) {
 		t.Fatalf("g8s_charter_issue failed: %+v", rpcErr)
 	}
 	var issued struct {
-		CharterID string `json:"charter_id"`
-		Epoch     int    `json:"epoch"`
-		Fence     string `json:"fence"`
+		CharterID     string `json:"charter_id"`
+		Epoch         int    `json:"epoch"`
+		Fence         string `json:"fence"`
+		IssuerStratum string `json:"issuer_stratum"`
 	}
 	if err := json.Unmarshal(resIssue, &issued); err != nil {
 		t.Fatalf("decode issued charter: %v", err)
 	}
 	if issued.CharterID == "" || issued.Epoch == 0 || issued.Fence == "" {
 		t.Fatalf("unexpected issued charter: %+v", issued)
+	}
+	if issued.IssuerStratum != "S1" {
+		t.Fatalf("issuer must derive from the server env (G8S_STRATUM=S1), got %q", issued.IssuerStratum)
 	}
 
 	resVerify, rpcErr := callTool(t, s, "g8s_charter_verify", map[string]any{

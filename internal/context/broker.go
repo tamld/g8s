@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tamld/g8s/internal/provenance"
 )
 
 // maxPacketChars is the hard packet budget (mirrors ADR-0023 G6).
@@ -33,6 +35,13 @@ type ContextPacket struct {
 	WorldSnippets  []string `json:"world_snippets,omitempty"`
 	SomPhase       string   `json:"som_phase,omitempty"`
 	Truncated      bool     `json:"truncated,omitempty"`
+	// SourceClasses stamps each contributing section with the provenance class
+	// of its source channel (issue #977 PR-2: per-message provenance BELOW the
+	// DELTA-42 claim-tier layer). Labels ONLY — additive, message strings are
+	// untouched and no consumer branches on them yet; PR-3 wires the Authority
+	// Sink Gate decisions on top. Keys are the section names; a section that
+	// contributed nothing (source broken or unwired) carries no label.
+	SourceClasses map[string]provenance.Class `json:"source_classes,omitempty"`
 }
 
 // Bytes reports the total rendered size of the packet for budget checks.
@@ -149,10 +158,37 @@ func (b *Broker) Assemble(ctx context.Context) *ContextPacket {
 				p.SomPhase = truncateRuneSafe(p.SomPhase, maxPacketChars)
 				p.Truncated = true
 			}
+			p.stampProvenance()
 			return p
 		}
 	}
+	p.stampProvenance()
 	return p
+}
+
+// stampProvenance labels the sections that contributed content (post budget
+// cut, so a dropped section never carries a stale label) with their source
+// channel's provenance class (issue #977 PR-2). Labels only — no behavior
+// change; the classifier defaults unknown channels to EXTERNAL_CONTENT.
+func (p *ContextPacket) stampProvenance() {
+	stamp := func(section string) {
+		if p.SourceClasses == nil {
+			p.SourceClasses = make(map[string]provenance.Class, 4)
+		}
+		p.SourceClasses[section] = provenance.Classify(section)
+	}
+	if len(p.VaultNotes) > 0 {
+		stamp("vault_notes")
+	}
+	if len(p.RecentOutcomes) > 0 {
+		stamp("recent_outcomes")
+	}
+	if len(p.WorldSnippets) > 0 {
+		stamp("world_snippets")
+	}
+	if p.SomPhase != "" {
+		stamp("som_phase")
+	}
 }
 
 func clampSnippets(items []string) []string {

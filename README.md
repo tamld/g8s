@@ -262,6 +262,7 @@ g8s/
 │   ├── pathutil/ — provides cross-platform path resolution for g8s data, configuration, cache, and state files across Windows, Linux, and macOS
 │   ├── premise/ — implements the DELTA-42 Premise Challenge & Sycophancy Gate: it decomposes an operator request or supervisor brief into atomic claims and classifies each claim into an evidence tier
 │   ├── process/ — provides cross-platform process discovery, inspection, and termination primitives for g8s lifecycle management per DEBT-36
+│   ├── provenance/ — implements per-message provenance classification for coordinator input streams (issue #977 PR-2 — the labeling half of the Context Authority Firewall; threat model docs/security/context-authority-firewall-threat-model.md §4 step 1, vector V5 "summary losing provenance")
 │   ├── provider/ — implements native discovery and concurrency governance for external AI worker binaries, per DELTA-05 (spec/openspec/05-provider-and-resource-pool-spec.md)
 │   ├── reach/ — implements read-only platform data acquisition: an in-code channel registry, ordered fallback dispatch, and error classification for external research fetches
 │   ├── receipt/ — implements zero-trust write receipts for delegated workspace mutations
