@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "kind": "scorecard_5axis",
+  "cmd": "scorecard",
+  "sub": "status",
+  "at": "2026-11-28T00:00:00Z",
+  "data": {
+    "mode": "status",
+    "window": 20,
+    "axes": {
+      "compliance_vs_quality": {
+        "issue": "#971 WP2",
+        "min_sample": 20,
+        "lane_ledger": [
+          { "lane": "0", "lane_name": "hotfix", "review_depth": "targeted-gates+retro-gate", "auditable": true, "receipt_backed": 2, "f0_direct": 1, "unclassified": 1, "revert_fixup_commits": 1, "total": 4 },
+          { "lane": "D", "lane_name": "docs", "review_depth": "light (G2,G3,doc-contract)", "auditable": true, "receipt_backed": 10, "f0_direct": 12, "unclassified": 8, "revert_fixup_commits": 2, "total": 30 },
+          { "lane": "R", "lane_name": "refactor", "review_depth": "mechanical (G2,G4,G5)", "auditable": true, "receipt_backed": 8, "f0_direct": 9, "unclassified": 5, "revert_fixup_commits": 1, "total": 22 },
+          { "lane": "F", "lane_name": "feature", "review_depth": "full (G1,G2,G4,G5,G6)", "auditable": true, "receipt_backed": 20, "f0_direct": 25, "unclassified": 15, "revert_fixup_commits": 3, "total": 60 },
+          { "lane": "S", "lane_name": "security", "review_depth": "p0 (G1..G6,doc-contract,redaction-scan,sast-triad,review)", "auditable": true, "receipt_backed": 12, "f0_direct": 8, "unclassified": 4, "revert_fixup_commits": 0, "total": 24 }
+        ],
+        "cohort_metrics": [
+          { "cohort": "receipt_backed", "commits": 52, "revert_fixup_commits": 3, "revert_fixup_rate": 0.05769230769230769, "rate_label": "measured", "min_sample": 20 },
+          { "cohort": "f0_direct", "commits": 55, "revert_fixup_commits": 2, "revert_fixup_rate": 0.03636363636363636, "rate_label": "measured", "min_sample": 20 },
+          { "cohort": "unclassified", "commits": 33, "revert_fixup_commits": 2, "revert_fixup_rate": 0.06060606060606061, "rate_label": "measured", "min_sample": 20 }
+        ],
+        "escape_rate_by_lane": [
+          { "lane": "0", "lane_name": "hotfix", "total": 4, "revert_fixup_commits": 1, "rate_label": "insufficient_sample", "min_sample": 20 },
+          { "lane": "D", "lane_name": "docs", "total": 30, "revert_fixup_commits": 2, "escape_rate": 0.06666666666666667, "rate_label": "measured", "min_sample": 20 },
+          { "lane": "R", "lane_name": "refactor", "total": 22, "revert_fixup_commits": 1, "escape_rate": 0.045454545454545456, "rate_label": "measured", "min_sample": 20 },
+          { "lane": "F", "lane_name": "feature", "total": 60, "revert_fixup_commits": 3, "escape_rate": 0.05, "rate_label": "measured", "min_sample": 20 },
+          { "lane": "S", "lane_name": "security", "total": 24, "revert_fixup_commits": 0, "rate_label": "measured", "min_sample": 20 }
+        ],
+        "sandbox_enforcement": {
+          "workspace_write_attempts": 100,
+          "kernel_enforced": 60,
+          "degraded_allowed": 10,
+          "refused": 5,
+          "unclassified": 25
+        }
+      }
+    }
+  }
+}
