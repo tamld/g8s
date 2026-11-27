@@ -84,6 +84,14 @@ func TestSpawnTimeoutKillsProcessGroup(t *testing.T) {
 // discarded `_ = cancel` previously kept the ctx armed for the full
 // opts.Timeout past early exit (A-13 timer leak).
 func TestSpawnDeadlineReleasedOnEarlyExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Same platform scope as TestSpawnTimeoutKillsProcessGroup: the
+		// fixture spawns /bin/sleep directly (no portable equivalent wired
+		// for a short-lived Windows child). The cancel-release path itself
+		// is platform-agnostic production code; Windows coverage of the
+		// Terminate/grace contract lives in the JobObject suite.
+		t.Skip("POSIX-only fixture: /bin/sleep child (A-13 early-exit release covered on POSIX; Windows Terminate contract covered by JobObject suite)")
+	}
 	child, err := (processRunner{}).Spawn(SpawnOptions{
 		Argv:    []string{"/bin/sleep", "0"},
 		RunDir:  t.TempDir(),
