@@ -354,17 +354,15 @@ func (s *Store) StartTaskContext(ctx context.Context, taskID, workerID, leaseTok
 }
 
 // StartTask is the non-contextual legacy shim over StartTaskContext
-// (A-6, #986): kept so existing worker/orchestrator call sites keep
-// compiling while they migrate.
+// (A-6, #986): kept so existing call sites keep compiling while they
+// migrate.
 //
-// The staticcheck Deprecated marker is deliberately withheld in this
-// slice: the remaining call sites are worker-package TEST fixtures
-// (worker_sweep_collect_test.go, worker_test.go), and migrating them
-// belongs to the #986 batch1 worker slice (DEBT-34 keeps this PR
-// controlplane-only). That slice migrates the call sites and restores
-// the marker. This wrapper runs with context.Background(), so a
-// cancelled caller context cannot abort the promotion and the call may
-// block on the connection.
+// Deprecated: use StartTaskContext instead. The wrapper runs with
+// context.Background(), so a cancelled caller context cannot abort the
+// promotion and the call may block on the connection. Cross-package
+// legacy call sites migrated via #1046/#1049/#1050; the remaining
+// controlplane-internal test call sites are same-package-exempt from
+// SA1019 and burn down with #986.
 func (s *Store) StartTask(taskID, workerID, leaseToken string) bool {
 	return s.StartTaskContext(context.Background(), taskID, workerID, leaseToken)
 }
@@ -547,10 +545,13 @@ func (s *Store) ExecutionSignalContext(ctx context.Context, taskID, workerID, le
 }
 
 // ExecutionSignal is the non-contextual legacy shim over
-// ExecutionSignalContext (A-6, #986): kept so existing worker/orchestrator
-// call sites keep compiling while they migrate. Same withheld-marker
-// rationale as StartTask above — the marker lands with the #986 batch1
-// worker call-site migration.
+// ExecutionSignalContext (A-6, #986): kept so existing call sites keep
+// compiling while they migrate.
+//
+// Deprecated: use ExecutionSignalContext instead. The wrapper runs with
+// context.Background(), so a cancelled caller context cannot abort the
+// poll and the call may block on the connection. Marker restored with
+// the A-6 completion tail (#1046/#1049/#1050).
 func (s *Store) ExecutionSignal(taskID, workerID, leaseToken string) string {
 	return s.ExecutionSignalContext(context.Background(), taskID, workerID, leaseToken)
 }
