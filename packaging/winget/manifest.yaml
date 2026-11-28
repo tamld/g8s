@@ -1,5 +1,5 @@
 PackageIdentifier: TamLD.g8s
-PackageVersion: 0.27.1
+PackageVersion: 0.27.2
 PackageLocale: en-US
 Publisher: TamLD
 PackageName: g8s
@@ -8,5 +8,5 @@ ShortDescription: Zero-CGO multi-agent orchestrator for AI CLI workers
 Installers:
   - Architecture: x64
     InstallerType: zip
-    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.27.1/g8s_0.27.1_windows_amd64.zip
+    InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.27.2/g8s_0.27.2_windows_amd64.zip
     InstallerSha256: b9eaf4c262096125b98c8d69e6af1459115c0343c6ee003440cfe61dd2101547
