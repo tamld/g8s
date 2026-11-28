@@ -7,7 +7,7 @@
   "go_version": "1.26.11",
   "latest_release": {
     "tag": "v0.27.2",
-    "commit": "see-g8s-version-ldflags",
+    "commit": "1e63a78",
     "date": "2026-11-28"
   },
   "license": "MIT",
