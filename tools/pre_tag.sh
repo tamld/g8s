@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Pre-tag validation gate — run before pushing any release tag
 # Exit 0 = ready to tag, Exit 1 = blocked with reasons
+#
+# Fail-closed semantics (D-11 #986):
+#   - gh CLI absence is a HARD failure: the CI-status check is a release gate
+#     and "cannot verify" must block the tag, not skip it.
+#   - Re-pushing an existing remote tag requires BOTH --force AND the explicit
+#     acknowledgment env var G8S_RELEASE_FORCE_TAG=1. Bare --force fails closed.
+#
+# Test seam: tools/pre_tag_test.sh sources this file with
+# G8S_PRE_TAG_SOURCE_ONLY=1 to exercise individual check functions without
+# running the full gate.
 
 set -euo pipefail
 
@@ -121,10 +131,14 @@ check_tag_not_exists() {
         fi
     fi
     if git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null | grep -q "refs/tags/$tag$"; then
-        if [ "$FORCE_TAG" = true ]; then
-            log_warn "Tag $tag already exists on remote (force mode: allowing re-push)"
+        if [ "$FORCE_TAG" = true ] && [ "${G8S_RELEASE_FORCE_TAG:-0}" = "1" ]; then
+            log_warn "FORCED TAG RE-PUSH ACKNOWLEDGED (--force + G8S_RELEASE_FORCE_TAG=1): tag $tag already exists on remote"
+            log_warn "Deleting or moving a published release tag is destructive; the push will fail server-side unless the upstream tag is removed first"
+        elif [ "$FORCE_TAG" = true ]; then
+            log_error "Tag $tag already exists on remote: bare --force is not enough — set G8S_RELEASE_FORCE_TAG=1 to acknowledge the destructive re-push"
+            return 1
         else
-            log_error "Tag $tag already exists on remote (use --force to re-push)"
+            log_error "Tag $tag already exists on remote (use --force with G8S_RELEASE_FORCE_TAG=1 to re-push)"
             return 1
         fi
     fi
@@ -158,6 +172,23 @@ check_go_version() {
     return 0
 }
 
+check_winget_manifest() {
+    # D-9 (#986): the winget InstallerSha256 placeholder (<from checksums.txt>)
+    # must be replaced from the pinned release's checksums.txt before the
+    # manifest is release-bound; mirror of the chocolatey install-time throw.
+    log_info "Checking winget manifest checksum gate (D-09)..."
+    if [ ! -f "tools/winget_manifest_check.sh" ]; then
+        log_error "tools/winget_manifest_check.sh missing — cannot attest the winget installer manifest"
+        return 1
+    fi
+    if ! bash tools/winget_manifest_check.sh; then
+        log_error "winget manifest gate failed — replace the InstallerSha256 placeholder from the pinned release's checksums.txt before tagging (see tools/winget_manifest_check.sh)"
+        return 1
+    fi
+    log_info "Winget manifest gate passed"
+    return 0
+}
+
 check_surface_inventory() {
     log_info "Running fresh surface inventory (D-09 CLOCK: no tag cut without a current docs-claims-vs-wiring receipt)..."
     if [ ! -f "tools/ci_surface_inventory.sh" ]; then
@@ -175,8 +206,12 @@ check_surface_inventory() {
 check_ci_passes() {
     log_info "Checking recent CI status (last completed run per workflow)..."
     if ! command -v gh >/dev/null 2>&1; then
-        log_warn "gh CLI not available, skipping CI check"
-        return 0
+        # D-11 (#986): the CI-status check is a release gate. With gh absent we
+        # cannot verify that the required workflows passed, so this must fail
+        # closed instead of silently skipping the gate.
+        log_error "gh CLI not available — CI status cannot be verified, and the release gate fails closed without it"
+        log_error "Install the GitHub CLI (https://cli.github.com/) and authenticate (gh auth login) before tagging"
+        return 1
     fi
     
     local failed_workflows=0
@@ -214,6 +249,7 @@ main() {
     check_on_main || FAILED=1
     check_tag_not_exists || FAILED=1
     check_go_version || FAILED=1
+    check_winget_manifest || FAILED=1
     check_ci_passes || FAILED=1
     check_surface_inventory || FAILED=1
     
@@ -227,4 +263,8 @@ main() {
     fi
 }
 
-main "$@"
+# Test seam (D-11): source-only mode runs no checks, letting tools/pre_tag_test.sh
+# exercise individual check functions in isolation.
+if [ "${G8S_PRE_TAG_SOURCE_ONLY:-0}" != "1" ]; then
+    main "$@"
+fi

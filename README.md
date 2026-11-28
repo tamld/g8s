@@ -4,11 +4,11 @@
 
 # g8s (The Gatekeepers)
 
-> **A Verifiable Zero-Trust Execution & Evolution Infrastructure for Autonomous AI Agents (<20MB stripped pure-Go release binary per arch) — combining OS sandboxing (Seatbelt / `bwrap`+Landlock / `JobObject`), Ed25519 capability receipts, and Git worktree firewalls.**  
+> **A Verifiable Zero-Trust Execution & Evolution Infrastructure for Autonomous AI Agents (<20 MiB stripped pure-Go release binary per architecture — enforced by tools/binary_size_check.sh) — combining OS sandboxing (Seatbelt / `bwrap`+Landlock / `JobObject`), Ed25519 capability receipts, and Git worktree firewalls.**  
 > *"k8s orchestrates your compute containers; g8s orchestrates your AI subagents."*
 
 <p align="center">
-  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — landing page, 36s product reel, and <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: an interactive 3D containment hall where the laws are the physics.
+  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — landing page, product reel, and <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: an interactive 3D containment hall where the laws are the physics.
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

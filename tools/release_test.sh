@@ -8,6 +8,8 @@
 #       manifest guard & packaging drift checks pass cleanly on both HEAD and detached tag checkout
 #   (3) Idempotency: running again on already-0.13.0 files changes nothing and still exits 0
 #   (4) Missing packaging files (fixture omits one) -> script warns but does not abort, exit 0
+#   (13) D-10 (#986): git fetch failure -> fail-closed abort (typed error), no version bump
+#   (14) D-10 (#986): same broken remote + --allow-offline -> release proceeds with loud warning
 #
 
 set -euo pipefail
@@ -74,6 +76,7 @@ setup_fixture() {
     local target_dir="$1"
     local version="${2:-0.12.0}"
     local omit_file="${3:-}"
+    local omit_pre_tag="${4:-0}"
 
     mkdir -p "$target_dir/cmd/g8s" \
              "$target_dir/tools" \
@@ -199,6 +202,17 @@ EOF
     <title>g8s (The Gatekeepers)</title>
   </metadata>
 </package>
+EOF
+    fi
+
+    # 9. tools/pre_tag.sh stub — a release checkout always carries the gate
+    #    script; release.sh fails closed when it is missing (D-10 #986), so
+    #    fixtures default to a passing stub. Case 8 opts out via omit_pre_tag.
+    if [ "$omit_pre_tag" != "1" ]; then
+        cat > "$target_dir/tools/pre_tag.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "pre-tag gate: all checks pass"
+exit 0
 EOF
     fi
 
@@ -618,32 +632,35 @@ else
     fi
 fi
 
-# Case 8: Pre-tag gate — missing pre_tag.sh warns and proceeds
-echo "Testing: (8) Pre-tag gate: missing pre_tag.sh emits warning and proceeds with release"
+# Case 8: Pre-tag gate — missing pre_tag.sh fails closed (D-10 #986)
+echo "Testing: (8) Pre-tag gate: missing pre_tag.sh aborts the release (fail-closed, D-10)"
 FIXTURE_8="$TEST_TMP/fixture_8"
-setup_fixture "$FIXTURE_8" "0.12.0"
-# Notice: setup_fixture does NOT create tools/pre_tag.sh, so it is missing
+setup_fixture "$FIXTURE_8" "0.12.0" "" "1"
+# Notice: setup_fixture omits tools/pre_tag.sh, so the gate script is missing
 
 output_8=""
 exit_code_8=0
 output_8=$( (cd "$FIXTURE_8" && bash tools/release.sh 0.13.0) 2>&1 ) || exit_code_8=$?
 
-if [ "$exit_code_8" -ne 0 ]; then
-    echo "  FAIL: expected exit code 0 when pre_tag.sh is missing, got $exit_code_8"
+if [ "$exit_code_8" -eq 0 ]; then
+    echo "  FAIL: expected non-zero exit code when pre_tag.sh is missing (fail-closed), got 0"
     echo "$output_8" | sed 's/^/    /'
     FAILURES=$((FAILURES + 1))
-elif ! echo "$output_8" | grep -iq "warning.*pre_tag\.sh.*not found"; then
-    echo "  FAIL: output missing warning about missing pre_tag.sh"
+elif ! echo "$output_8" | grep -iq "pre_tag\.sh not found"; then
+    echo "  FAIL: output missing typed error about missing pre_tag.sh"
     echo "$output_8" | sed 's/^/    /'
     FAILURES=$((FAILURES + 1))
 else
-    # Verify version.go WAS bumped
+    # Verify version.go was NOT bumped and no tag was created
     actual_ver_8=$(grep 'Version' "$FIXTURE_8/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
-    if [ "$actual_ver_8" != "0.13.0" ]; then
-        echo "  FAIL: version.go has '$actual_ver_8', expected '0.13.0'"
+    if [ "$actual_ver_8" != "0.12.0" ]; then
+        echo "  FAIL: version.go has '$actual_ver_8', expected unchanged '0.12.0'"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_8" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1); then
+        echo "  FAIL: tag v0.13.0 was created despite missing pre_tag.sh abort"
         FAILURES=$((FAILURES + 1))
     else
-        echo "  ok (exit 0, warning emitted, release proceeded)"
+        echo "  ok (exit $exit_code_8, missing pre_tag.sh aborted before any mutation)"
     fi
 fi
 
@@ -883,6 +900,79 @@ else
 
     if [ "$FAILURES" -eq 0 ]; then
         echo "  ok (server.go updated in tag, manifest commit/date synced, sync check clean)"
+    fi
+fi
+
+# Case 13: D-10 — git fetch failure fails closed with a typed error, no mutation
+echo "Testing: (13) D-10: git fetch failure aborts fail-closed with typed error, no version bump"
+FIXTURE_13="$TEST_TMP/fixture_13"
+setup_fixture "$FIXTURE_13" "0.12.0"
+
+# Point origin at a path that cannot be fetched
+(
+    cd "$FIXTURE_13"
+    git remote set-url origin "$TEST_TMP/nonexistent-remote-does-not-exist.git"
+)
+
+output_13=""
+exit_code_13=0
+output_13=$( (cd "$FIXTURE_13" && bash tools/release.sh 0.13.0 --no-push) 2>&1 ) || exit_code_13=$?
+
+if [ "$exit_code_13" -eq 0 ]; then
+    echo "  FAIL: expected non-zero exit code when git fetch fails (fail-closed), got 0"
+    echo "$output_13" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_13" | grep -iq "Error: git fetch failed"; then
+    echo "  FAIL: output missing typed 'Error: git fetch failed' gate message"
+    echo "$output_13" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    # Verify version.go was NOT bumped and no tag was created (abort happened at the fetch gate)
+    actual_ver_13=$(grep 'Version' "$FIXTURE_13/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    if [ "$actual_ver_13" != "0.12.0" ]; then
+        echo "  FAIL: version.go has '$actual_ver_13', expected unchanged '0.12.0'"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_13" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1); then
+        echo "  FAIL: tag v0.13.0 was created despite fetch-gate abort"
+        FAILURES=$((FAILURES + 1))
+    elif (cd "$FIXTURE_13" && git status --porcelain | grep -q .); then
+        echo "  FAIL: working tree was mutated despite fetch-gate abort"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit $exit_code_13, fetch failure aborted fail-closed, no mutation)"
+    fi
+fi
+
+# Case 14: D-10 — --allow-offline deliberately proceeds past the fetch gate
+echo "Testing: (14) D-10: --allow-offline proceeds past fetch failure with loud warning, release completes"
+FIXTURE_14="$TEST_TMP/fixture_14"
+setup_fixture "$FIXTURE_14" "0.12.0"
+
+(
+    cd "$FIXTURE_14"
+    git remote set-url origin "$TEST_TMP/nonexistent-remote-does-not-exist.git"
+)
+
+output_14=""
+exit_code_14=0
+output_14=$( (cd "$FIXTURE_14" && bash tools/release.sh 0.13.0 --allow-offline --no-push) 2>&1 ) || exit_code_14=$?
+
+if [ "$exit_code_14" -ne 0 ]; then
+    echo "  FAIL: expected exit code 0 with --allow-offline, got $exit_code_14"
+    echo "$output_14" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+elif ! echo "$output_14" | grep -iq "locally cached origin refs (--allow-offline)"; then
+    echo "  FAIL: output missing loud --allow-offline warning"
+    echo "$output_14" | sed 's/^/    /'
+    FAILURES=$((FAILURES + 1))
+else
+    actual_ver_14=$(grep 'Version' "$FIXTURE_14/cmd/g8s/version.go" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    tag_exists_14=$(cd "$FIXTURE_14" && git rev-parse "refs/tags/v0.13.0" >/dev/null 2>&1 && echo "yes" || echo "no")
+    if [ "$actual_ver_14" != "0.13.0" ] || [ "$tag_exists_14" != "yes" ]; then
+        echo "  FAIL: --allow-offline run did not complete release (version: $actual_ver_14, tag: $tag_exists_14)"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok (exit 0, --allow-offline warning emitted, release completed with --no-push)"
     fi
 fi
 
