@@ -195,6 +195,20 @@ jobs:
         shell: bash
         run: bash tools/safe_merge_test.sh
 
+      # [#986 D-8] scripts/install_test.sh, tools/ci_fetch_test.sh and
+      # scripts/verify-sri.sh were previously wired into NO workflow.
+      # All four are bash-only and lane-independent (no Go, no network:
+      # install_test/ci_fetch shim curl; verify-sri hashes tracked assets;
+      # install_ps1_test greps the Windows installer source because CI has
+      # no PowerShell runner for this gate).
+      - name: Installer & fetch harness self-tests (#986 D-8)
+        shell: bash
+        run: |
+          bash scripts/install_test.sh
+          bash tools/ci_fetch_test.sh
+          bash scripts/verify-sri.sh
+          bash tools/install_ps1_test.sh
+
       - name: AI anti-pattern lint (DEBT-21 + DEBT-49)
         shell: bash
         run: bash tools/ai_lint.sh
