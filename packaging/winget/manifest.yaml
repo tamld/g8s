@@ -9,4 +9,4 @@ Installers:
   - Architecture: x64
     InstallerType: zip
     InstallerUrl: https://github.com/tamld/g8s/releases/download/v0.27.1/g8s_0.27.1_windows_amd64.zip
-    InstallerSha256: <from checksums.txt>
+    InstallerSha256: b9eaf4c262096125b98c8d69e6af1459115c0343c6ee003440cfe61dd2101547

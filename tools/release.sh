@@ -38,9 +38,12 @@ Arguments:
   VERSION   Explicit version (e.g., 0.11.0, 1.0.0-rc.1)
 
 Options:
-  --dry-run    Show what would be done without making changes
-  --no-push    Commit and tag locally but do not push to origin
-  --help       Show this help
+  --dry-run        Show what would be done without making changes
+  --no-push        Commit and tag locally but do not push to origin
+  --allow-offline  Deliberately skip the fail-closed origin fetch (offline release
+                   prep). Default is fail-closed: a failed `git fetch` aborts the
+                   release because the staleness check would degrade to advisory.
+  --help           Show this help
 
 Examples:
   $0 patch
@@ -52,6 +55,7 @@ EOF
 
 DRY_RUN=0
 NO_PUSH="${NO_PUSH:-${G8S_RELEASE_NO_PUSH:-0}}"
+ALLOW_OFFLINE="${ALLOW_OFFLINE:-${G8S_RELEASE_ALLOW_OFFLINE:-0}}"
 VERSION_ARG=""
 
 # Parse arguments
@@ -67,6 +71,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-push|--skip-push)
             NO_PUSH=1
+            shift
+            ;;
+        --allow-offline)
+            ALLOW_OFFLINE=1
             shift
             ;;
         *)
@@ -138,8 +146,21 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     exit 1
 fi
 
-if ! git fetch -q origin 2>/dev/null && ! git fetch -q origin main 2>/dev/null; then
-    echo -e "${YELLOW}Warning: git fetch failed (offline?). Continuing with local check...${NC}" >&2
+# D-10 (#986): the fetch refreshes origin refs so the staleness check below is
+# meaningful. A failed fetch used to degrade that check to advisory-only; it is
+# now fail-closed unless the operator deliberately opts out via --allow-offline.
+FETCH_OK=0
+if git fetch -q origin 2>/dev/null || git fetch -q origin main 2>/dev/null; then
+    FETCH_OK=1
+fi
+if [ "$FETCH_OK" -eq 0 ]; then
+    if [ "$ALLOW_OFFLINE" -eq 1 ]; then
+        echo -e "${YELLOW}Warning: git fetch failed (offline) — continuing with locally cached origin refs (--allow-offline)...${NC}" >&2
+    else
+        echo -e "${RED}Error: git fetch failed. Refusing to cut a release whose staleness check would degrade to advisory-only.${NC}" >&2
+        echo "Fix network/auth and retry, or pass --allow-offline (or set G8S_RELEASE_ALLOW_OFFLINE=1) to deliberately cut from locally cached origin refs." >&2
+        exit 1
+    fi
 fi
 
 if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
@@ -173,7 +194,10 @@ if [ -f "tools/pre_tag.sh" ]; then
         echo -e "${GREEN}✓ Pre-tag gates passed${NC}"
     fi
 else
-    echo -e "${YELLOW}Warning: tools/pre_tag.sh not found, skipping pre-tag gates${NC}" >&2
+    # D-10 (#986): pre-tag gates are a release gate — a missing gate script must
+    # fail closed, not silently skip validation.
+    echo -e "${RED}Error: tools/pre_tag.sh not found — pre-tag gates cannot run. Aborting release (fail-closed).${NC}" >&2
+    exit 1
 fi
 
 # Update version.go
