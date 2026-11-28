@@ -24,6 +24,7 @@ import (
 	"github.com/tamld/g8s/internal/contextpack"
 	"github.com/tamld/g8s/internal/dispatch"
 	"github.com/tamld/g8s/internal/featuremap"
+	"github.com/tamld/g8s/internal/harness"
 	"github.com/tamld/g8s/internal/search"
 	"github.com/tamld/g8s/internal/vault"
 )
@@ -39,6 +40,32 @@ const maxReadFileBytes int64 = 64 << 20
 // ErrFileTooLarge is wrapped in the error returned when a file targeted by
 // Read/Edit/ApplyBatchEdits exceeds maxReadFileBytes; callers detect it via errors.Is.
 var ErrFileTooLarge = errors.New("fsops: file exceeds maximum readable size")
+
+// ErrDeniedPathFragment is wrapped in the error returned when a Read path
+// contains (or resolves through symlinks to) a denied sensitive fragment;
+// callers detect it via errors.Is (#986 B-8).
+var ErrDeniedPathFragment = errors.New("fsops: path matches a denied sensitive fragment")
+
+// denySensitivePath enforces the harness DeniedPathFragments deny-list on the
+// worker-facing fsops Read path (#986 B-8). The fragment list is single-sourced
+// from internal/harness (the same gate that guards add-dirs and supervisor
+// prompt/out files); fsops imports it rather than duplicating the list — this
+// direction is cycle-free (harness does not depend on fsops, and fsops already
+// depends on harness transitively via dispatch). Matching mirrors the harness
+// gates: symlink-resolved canonical paths are checked separately by the
+// caller, fragments compare case-insensitively over forward slashes.
+func denySensitivePath(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	normalized := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	for _, fragment := range harness.DeniedPathFragments {
+		if strings.Contains(normalized, fragment) {
+			return fmt.Errorf("%w: %s contains %q", ErrDeniedPathFragment, path, fragment)
+		}
+	}
+	return nil
+}
 
 // guardReadFileBytes rejects files above maxReadFileBytes before their bytes are
 // buffered (#981): SHA-256, binary sniffing and line slicing operate on the full
@@ -407,10 +434,18 @@ func VerifyWriteScope(filePath, scopeRoot string, allowedPaths []string) (string
 	return relSlash, nil
 }
 
-// Read safely reads and bounds text file content, validating scope, checking for binary
-// content, computing SHA-256, slicing requested line ranges, and applying DLP sanitization.
+// Read safely reads and bounds text file content, validating scope, denying
+// sensitive path fragments, checking for binary content, computing SHA-256,
+// slicing requested line ranges, and applying DLP sanitization.
 func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Denied-fragment gate (#986 B-8): applied to both the supplied path and,
+	// below, the symlink-resolved canonical target, so an in-scope link or a
+	// root-relative reference to .env/.ssh/id_rsa/... cannot be exfiltrated
+	// through the worker-facing read path.
+	if err := denySensitivePath(opts.Path); err != nil {
 		return nil, err
 	}
 	relSlash, err := VerifyScope(opts.Path, opts.ScopeRoot, opts.AllowedPaths)
@@ -419,6 +454,9 @@ func Read(ctx context.Context, opts ReadOptions) (*ReadResult, error) {
 	}
 	canonTarget, err := evalCanonicalPath(opts.Path)
 	if err != nil {
+		return nil, err
+	}
+	if err := denySensitivePath(canonTarget); err != nil {
 		return nil, err
 	}
 	if _, err := VerifyScope(canonTarget, opts.ScopeRoot, opts.AllowedPaths); err != nil {
