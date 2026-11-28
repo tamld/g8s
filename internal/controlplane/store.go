@@ -484,32 +484,65 @@ func applySupervisorSchema(conn *sql.Conn) error {
 	return nil
 }
 
+// supervisorColumnSpec carries one supervisor column and the declared SQLite
+// affinity used when the migration ALTER-adds it (#986 C-13). Affinities
+// mirror the fresh-shape DDL in applySupervisorSchema exactly, so a database
+// upgraded through this migration ends up with the same declared types as a
+// freshly created one.
+//
+// Type-mismatch caveat: SQLite cannot rewrite the declared type of an
+// existing column, so these affinities apply only to columns this migration
+// actually adds (fresh migrations or columns still missing). Databases where
+// an earlier TEXT-only migration run already added a numeric column keep
+// TEXT affinity for it — migrateSupervisorSchema is idempotent and skips
+// present columns rather than rewriting them.
+type supervisorColumnSpec struct {
+	name     string
+	affinity string
+}
+
+var supervisorMigrationColumns = map[string][]supervisorColumnSpec{
+	"supervisor_tasks": {
+		{"id", "TEXT"},
+		{"state", "TEXT"},
+		{"envelope_json", "TEXT"},
+		{"approach_idx", "INTEGER"},
+		{"attempt_idx", "INTEGER"},
+		{"parent_task_id", "TEXT"},
+		{"created_at", "REAL"},
+		{"updated_at", "REAL"},
+		{"session_id", "TEXT"},
+	},
+	"supervisor_decisions": {
+		{"id", "TEXT"},
+		{"task_id", "TEXT"},
+		{"kind", "TEXT"},
+		{"payload_json", "TEXT"},
+		{"created_at", "REAL"},
+	},
+	"supervisor_metrics": {
+		{"supervisor_task_id", "TEXT"},
+		{"envelope_score", "REAL"},
+		{"first_attempt_success", "INTEGER"},
+		{"attempts_to_success", "INTEGER"},
+		{"approaches_to_success", "INTEGER"},
+		{"rca_confidence_avg", "REAL"},
+		{"cycle_duration_seconds", "REAL"},
+		{"escalation_count", "INTEGER"},
+		{"false_escalation_rate", "REAL"},
+	},
+}
+
 // migrateSupervisorSchema is the defensive upgrade for pre-v4 databases. It
 // inspects each supervisor table's column set via PRAGMA table_info and
-// adds any missing column with ALTER TABLE ADD COLUMN. CREATE TABLE IF NOT
-// EXISTS already creates the latest shape on fresh databases, so this path
-// only fires when the table predates the current schema generation.
+// adds any missing column with ALTER TABLE ADD COLUMN using the per-column
+// declared affinity from supervisorMigrationColumns (#986 C-13 — numeric
+// columns no longer default to TEXT). CREATE TABLE IF NOT EXISTS already
+// creates the latest shape on fresh databases, so this path only fires when
+// the table predates the current schema generation (or, for
+// supervisor_tasks.session_id, when the fresh shape predates the column).
 func migrateSupervisorSchema(conn *sql.Conn) error {
-	expected := map[string]map[string]struct{}{
-		"supervisor_tasks": {
-			"id": {}, "state": {}, "envelope_json": {},
-			"approach_idx": {}, "attempt_idx": {},
-			"parent_task_id": {}, "created_at": {}, "updated_at": {},
-			"session_id": {},
-		},
-		"supervisor_decisions": {
-			"id": {}, "task_id": {}, "kind": {},
-			"payload_json": {}, "created_at": {},
-		},
-		"supervisor_metrics": {
-			"supervisor_task_id": {}, "envelope_score": {},
-			"first_attempt_success": {}, "attempts_to_success": {},
-			"approaches_to_success": {}, "rca_confidence_avg": {},
-			"cycle_duration_seconds": {}, "escalation_count": {},
-			"false_escalation_rate": {},
-		},
-	}
-	for table, cols := range expected {
+	for table, cols := range supervisorMigrationColumns {
 		present := map[string]struct{}{}
 		rows, err := conn.QueryContext(context.Background(), "PRAGMA table_info("+table+")")
 		if err != nil {
@@ -532,13 +565,13 @@ func migrateSupervisorSchema(conn *sql.Conn) error {
 			return fmt.Errorf("iterate %s columns: %w", table, err)
 		}
 		rows.Close()
-		for col := range cols {
-			if _, ok := present[col]; ok {
+		for _, spec := range cols {
+			if _, ok := present[spec.name]; ok {
 				continue
 			}
 			if _, err := conn.ExecContext(context.Background(),
-				"ALTER TABLE "+table+" ADD COLUMN "+col+" TEXT"); err != nil {
-				return fmt.Errorf("migrate %s.%s: %w", table, col, err)
+				"ALTER TABLE "+table+" ADD COLUMN "+spec.name+" "+spec.affinity); err != nil {
+				return fmt.Errorf("migrate %s.%s: %w", table, spec.name, err)
 			}
 		}
 	}
