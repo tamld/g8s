@@ -4,11 +4,11 @@
 
 # g8s (The Gatekeepers) — Bản tiếng Việt
 
-> **Hạ tầng Thực thi Zero-Trust & Tự cải tiến Có Kiểm chứng cho AI Agent tự hành (<20MB binary tĩnh thuần Go đã strip theo từng kiến trúc) — kết hợp sandbox nhân OS (`Seatbelt` / `bwrap`+Landlock / `JobObject`), biên nhận mật mã Ed25519, và tường lửa Git worktree.**  
+> **Hạ tầng Thực thi Zero-Trust & Tự cải tiến Có Kiểm chứng cho AI Agent tự hành (<20 MiB binary release thuần Go đã strip theo từng kiến trúc — kiểm chứng bởi tools/binary_size_check.sh) — kết hợp sandbox nhân OS (`Seatbelt` / `bwrap`+Landlock / `JobObject`), biên nhận mật mã Ed25519, và tường lửa Git worktree.**  
 > *"k8s điều phối container tính toán của bạn; g8s điều phối các AI subagent của bạn."*
 
 <p align="center">
-  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — trang giới thiệu, product reel 36s, và <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: sảnh containment 3D tương tác, nơi luật lệ chính là vật lý.
+  🌐 <a href="https://g8s.flowaxon.com"><b>g8s.flowaxon.com</b></a> — trang giới thiệu, product reel, và <a href="https://g8s.flowaxon.com/gate-room.html">The Gate Room</a>: sảnh containment 3D tương tác, nơi luật lệ chính là vật lý.
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -92,7 +92,7 @@ Khi các AI agent tự hành (Claude, GPT, Codex, Gemini) thực thi công việ
 
 ## 4. Cài đặt
 
-`g8s` được phân phối dưới dạng một file binary tĩnh thuần Go (<20MB bản release đã strip theo từng kiến trúc), không cần CGO hay thư viện runtime dùng chung (yêu cầu `git` cho worktree isolation; tùy chọn `bwrap` trên Linux). Chọn một đường dẫn cài đặt dưới đây; các bản phát hành cũng kèm `checksums.txt`, `checksums.txt.sigstore.json`, và file SPDX SBOM cùng với từng gói nén ([GitHub Releases](https://github.com/tamld/g8s/releases)).
+`g8s` được phân phối dưới dạng một file binary tĩnh thuần Go (<20 MiB bản release đã strip theo từng kiến trúc — kiểm chứng bởi tools/binary_size_check.sh), không cần CGO hay thư viện runtime dùng chung (yêu cầu `git` cho worktree isolation; tùy chọn `bwrap` trên Linux). Chọn một đường dẫn cài đặt dưới đây; các bản phát hành cũng kèm `checksums.txt`, `checksums.txt.sigstore.json`, và file SPDX SBOM cùng với từng gói nén ([GitHub Releases](https://github.com/tamld/g8s/releases)).
 
 ### Cài đặt một dòng (khuyên dùng)
 

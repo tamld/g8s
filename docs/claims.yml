@@ -464,3 +464,16 @@
     demo: "bin/g8s eval run --category assurance --json"
     source: spec/constitution.md
 
+unbound:
+  # D-6 (#986): binary-size claim. Not Go-test-bound (proof is a tools/ gate,
+  # which the Go-test-only binding model records as a demo); enforced by
+  # tools/binary_size_check.sh with its own red-first test
+  # tools/binary_size_check_test.sh.
+- id: claim-binary-size-per-arch
+  claim: "Stripped pure-Go release binary (CGO_ENABLED=0, ldflags '-s -w') stays under 20 MiB (20971520 bytes) per release architecture (darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64); the macOS release artifact is a universal fat binary concatenating the two per-arch darwin slices. Enforced by tools/binary_size_check.sh"
+  evidence:
+    test: ""
+    eval: ""
+    demo: "bash tools/binary_size_check.sh --all-targets"
+    source: README.md
+

@@ -206,9 +206,11 @@ run_test_with_output \
     bash "$CHECK_SCRIPT" --file "$FIXTURE_ROOT/unbound_no_demo.yml" --root "$REPO_ROOT"
 
 # (g) committed docs/claims.yml registry passes cleanly
+# D-6 (#986): the tool-bound binary-size claim lives under the unbound section
+# (proof is tools/binary_size_check.sh, recorded as a demo).
 run_test_with_output \
     "(g) committed docs/claims.yml passes cleanly" 0 \
-    "SCORECARD: 59 bound, 0 unbound, 0 broken (total 59 claims)" \
+    "SCORECARD: 59 bound, 1 unbound, 0 broken (total 60 claims)" \
     bash "$CHECK_SCRIPT"
 
 # (h) --test-report with PASS line verifies runtime proof -> exit 0
